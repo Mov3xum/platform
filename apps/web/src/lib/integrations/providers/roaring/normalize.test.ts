@@ -45,8 +45,7 @@ test('overview → bolagskortets registerfält', () => {
   assert.equal(patch.industri, 'Dataprogrammering');
   assert.equal(patch.bolag_status, 'aktiv');
   assert.equal(patch.company_registered_at, '2026-02-17');
-  // Enda noten: grunddatat bär ingen uppgift om börsnotering (§ 51 — bekräftas av bolaget).
-  assert.deepEqual(notes, ['Roaring overview: ingen uppgift om börsnotering i svaret — bekräftas av bolaget.']);
+  assert.deepEqual(notes, []);
 });
 
 test('overview: tomt svar ger notes, inget patch', () => {
@@ -462,64 +461,13 @@ test('verklig huvudman: juridisk person med id i okänt format behålls som bola
   assert.ok(!JSON.stringify(notes).includes('X-123'));
 });
 
-<<<<<<< HEAD
-test('overview: börsnotering tolkas bara när fältet finns — annars en not', () => {
-  const notes: string[] = [];
-  const a = normalizeRoaringOverview({ records: [{ ...overview.records[0], stockExchangeListed: 'false' }] }, notes);
-  assert.equal(a.listed, false);
-  assert.ok(!notes.some((n) => n.includes('börsnotering')));
-  const notes2: string[] = [];
-  const b = normalizeRoaringOverview(overview, notes2);
-  assert.equal(b.listed, undefined);
-  assert.ok(notes2.some((n) => n.includes('börsnotering')));
-  assert.equal(normalizeRoaringCompany('5595728790', { overview }, { isPersonal: false }).listed, undefined);
-});
-
-test('bokslut: utdelning läses när fältet finns (TSEK → SEK), saknat blir aldrig 0', () => {
-=======
 test('bokslut (economy-overview 2.1): balansomslutning läses ur bsTotalEquityAndLiabilities, omsättning ur plSales', () => {
   // Fältnycklar bekräftade mot ett riktigt svar 2026-10-12 (Workify Sverige AB).
->>>>>>> origin/staging
   const notes: string[] = [];
   const rows = normalizeRoaringFinancials(
     {
       records: [
         {
-<<<<<<< HEAD
-          companyAccounts: [
-            { toDate: '2024-12-31', plNetOperatingIncome: 141, bsTotalAssets: 1100, plDividend: 50 },
-            { toDate: '2023-12-31', plNetOperatingIncome: 90, bsTotalAssets: 900 }
-          ]
-        }
-      ]
-    },
-    notes,
-    1000
-  );
-  assert.equal(rows.find((r) => r.year === 2024)?.dividend_sek, 50_000);
-  assert.equal(rows.find((r) => r.year === 2023)?.dividend_sek, undefined);
-  assert.ok(notes.some((n) => n.includes('utdelningsuppgift')));
-});
-
-test('economy-overview 2.1: bsTotalEquityAndLiabilities = balansomslutning (verifierat svar 2026-10-12)', () => {
-  const notes: string[] = [];
-  const rows = normalizeRoaringFinancials(
-    {
-      records: [
-        {
-          companyId: '5595728790',
-          fromDate: '2025-01-01',
-          toDate: '2025-12-31',
-          currency: 'SEK',
-          bsShareCapital: 25,
-          numberOfShares: 500,
-          numberOfEmployees: 3,
-          plNetOperatingIncome: 1200,
-          plSales: 1250,
-          plNetProfitLoss: -300,
-          bsTotalEquity: 900,
-          bsTotalEquityAndLiabilities: 2100
-=======
           companyId: '5591234567',
           fromDate: '2024-01-01',
           toDate: '2024-12-31',
@@ -533,7 +481,6 @@ test('economy-overview 2.1: bsTotalEquityAndLiabilities = balansomslutning (veri
           bsTotalLongTermDebts: 0,
           bsTotalCurrentLiabilities: 190,
           bsTotalEquityAndLiabilities: 500
->>>>>>> origin/staging
         }
       ]
     },
@@ -541,14 +488,6 @@ test('economy-overview 2.1: bsTotalEquityAndLiabilities = balansomslutning (veri
     1000
   );
   assert.equal(rows.length, 1);
-<<<<<<< HEAD
-  assert.equal(rows[0].balance_sheet_sek, 2_100_000);
-  assert.equal(rows[0].revenue_sek, 1_200_000);
-  assert.equal(rows[0].equity_sek, 900_000);
-  assert.equal(rows[0].employees, 3);
-  assert.ok(!notes.some((n) => /balansomslutning saknas/.test(n)), notes.join(' | '));
-});
-=======
   assert.equal(rows[0].balance_sheet_sek, 500_000);
   assert.equal(rows[0].revenue_sek, 1_200_000);
   assert.equal(rows[0].equity_sek, 310_000);
@@ -727,5 +666,3 @@ test('bokslut utan dividend-nyckel (naken /{companyId}) lämnar utdelningen OKÄ
   assert.equal(rows[0].dividend_sek, undefined);
   assert.ok(notes.some((n) => n.includes('utdelningsposten')));
 });
-
->>>>>>> origin/staging

@@ -2,13 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   classifyOwnershipEntry,
-  deriveGroupCompanies,
   deriveRelatedCompanies,
   describeCompanyAge,
   dividendCheck,
   ownershipShareRange,
-  normalizeExcellenceManualReview,
-  sameOwnershipPicture,
   screenExcellence,
   type ExcellenceScreeningInput,
   type GroupCompanyFacts
@@ -286,51 +283,6 @@ test('"inga uppgifter" hos leverantören (tom bokslutslista, hämtade ägardelar
   assert.notEqual(r.standalone.detail, 'Koncernstrukturen hämtades inte.');
 });
 
-<<<<<<< HEAD
-test('manuell komplettering: bara manuella/okända punkter kan kompletteras — systemet vinner alltid', () => {
-  const manual = {
-    checks: {
-      'cond:5595728790:listed': { verdict: 'yes', note: 'Bolagsordning granskad', updated_at: '2026-10-12T10:00:00Z' },
-      // Åldern är ett registersvar — en sparad manuell uppgift ska ignoreras.
-      'cond:5595728790:age': { verdict: 'no', note: 'fel' },
-      innovative: { verdict: 'yes', note: 'Patentsökt sensor' },
-      other_criteria: { verdict: 'unknown', note: 'Agenda 2030 oklar' }
-    }
-  } as const;
-  const res = screenExcellence(
-    input({
-      manual: { checks: { ...manual.checks } },
-      founders: [{ name: 'A', equity_pct: 100 }],
-      deMinimis: { usedEur: 0, capEur: 300_000 }
-    })
-  );
-  const subj = res.companies[0].conditions;
-  const listed = subj.find((c) => c.id === 'listed')!;
-  assert.equal(listed.key, 'cond:5595728790:listed');
-  assert.equal(listed.verdict, 'yes');
-  assert.equal(listed.source, 'manual');
-  assert.equal(listed.editable, true);
-  assert.match(listed.detail, /Manuellt ja \(2026-10-12\): Bolagsordning granskad/);
-  assert.equal(listed.needs, undefined);
-  const age = subj.find((c) => c.id === 'age')!;
-  assert.equal(age.verdict, 'yes');
-  assert.equal(age.source, 'register');
-  assert.equal(age.editable, false);
-  assert.equal(age.manual, undefined);
-  const innovative = res.vinnovaChecks.find((c) => c.id === 'innovative')!;
-  assert.equal(innovative.verdict, 'yes');
-  assert.equal(innovative.source, 'manual');
-  const other = res.vinnovaChecks.find((c) => c.id === 'other_criteria')!;
-  assert.equal(other.verdict, 'unknown');
-  assert.match(other.detail, /Not: Agenda 2030 oklar/);
-  assert.ok(!res.missing.includes('Coachens bedömning av innovationshöjd.'));
-  assert.ok(res.missing.includes('Coachens bedömning av Agenda 2030, skalbarhet och kunskapstillgångar.'));
-  // Punkterna är spårbara i den platta listan med samma nycklar
-  assert.ok(res.checks.some((c) => c.key === 'cond:5595728790:listed' && c.scope === 'Combly AB'));
-});
-
-test('manuell komplettering avgör tröskelvärde och de minimis när underlag saknas', () => {
-=======
 // ─── Vinstutdelning (art. 22: "har inte delat ut vinst") ur årsredovisningen ──
 
 const REG = new Date('2022-03-10T00:00:00Z');
@@ -382,75 +334,10 @@ test('0 kr i varje räkenskapsår sedan registreringen ⇒ JA ur registret, och 
   assert.equal(c.source, 'register');
   assert.match(c.detail, /2023, 2024, 2025/);
 
->>>>>>> origin/staging
   const res = screenExcellence(
     input({
       subject: company({
         orgNr: '5595728790',
-<<<<<<< HEAD
-        financials: [],
-        ownership: [{ direction: 'owner', owner_kind: 'person', pct_min: 75, pct_max: 100, control_basis: 'shares' }]
-      }),
-      manual: {
-        checks: {
-          standalone: { verdict: 'yes', note: 'Aktiebok granskad: två grundare' },
-          thresholds: { verdict: 'yes', note: 'Bolagets egna uppgifter: 2 anställda, ingen omsättning' },
-          de_minimis: { verdict: 'yes', note: 'Intyg 2026-10-01' }
-        }
-      }
-    })
-  );
-  assert.equal(res.thresholds.check.verdict, 'yes');
-  assert.equal(res.thresholds.check.source, 'manual');
-  assert.equal(res.standalone.verdict, 'yes');
-  assert.equal(res.standalone.source, 'manual');
-  assert.equal(res.deMinimis.verdict, 'yes');
-  assert.equal(res.stateAid.outcome, 'art22_possible');
-});
-
-test('grundardrivet: engagemang + mognadsfas prövas deterministiskt', () => {
-  const base = { founders: [{ name: 'Anna', equity_pct: 50 }, { name: 'Bo', equity_pct: 50 }] };
-  const noEng = screenExcellence(input(base));
-  const fd = noEng.vinnovaChecks.find((c) => c.id === 'founder_driven')!;
-  assert.equal(fd.verdict, 'unknown');
-  assert.match(fd.hint ?? '', /Anna, Bo/);
-
-  const psf = screenExcellence(
-    input({
-      ...base,
-      manual: { checks: {}, engagement: { phase: 'problem_solution_fit', founders: [{ name: 'Anna', pct: 30 }, { name: 'Bo', pct: 15 }] } }
-    })
-  ).vinnovaChecks.find((c) => c.id === 'founder_driven')!;
-  assert.equal(psf.verdict, 'yes');
-  assert.match(psf.detail, /sammantaget 45 %, högst 30 %/);
-
-  const pmf = screenExcellence(
-    input({
-      ...base,
-      manual: { checks: {}, engagement: { phase: 'product_market_fit', founders: [{ name: 'Anna', pct: 30 }, { name: 'Bo', pct: 15 }] } }
-    })
-  ).vinnovaChecks.find((c) => c.id === 'founder_driven')!;
-  assert.equal(pmf.verdict, 'no');
-
-  const formation = screenExcellence(input({ ...base, manual: { checks: {}, engagement: { phase: 'formation', founders: [] } } }));
-  assert.equal(formation.vinnovaChecks.find((c) => c.id === 'founder_driven')!.verdict, 'yes');
-
-  // En manuell uppgift på punkten vinner över engagemangsberäkningen (research spinoff → manuellt ja)
-  const spin = screenExcellence(
-    input({
-      ...base,
-      manual: {
-        checks: { founder_driven: { verdict: 'yes', note: 'Forskarnas engagemang kompletteras av VD' } },
-        engagement: { phase: 'research_spinoff', founders: [{ name: 'Anna', pct: 10 }] }
-      }
-    })
-  ).vinnovaChecks.find((c) => c.id === 'founder_driven')!;
-  assert.equal(spin.verdict, 'yes');
-  assert.match(spin.detail, /Manuellt ja: Forskarnas/);
-});
-
-test('börsnotering och utdelning avgörs av registret när uppgiften finns', () => {
-=======
         basic: { registeredAt: '2022-03-10', bolagStatus: 'aktiv', bolagsform: 'AB' },
         financials: [
           { year: 2023, dividend_reported: true, dividend_sek: 0, employees: 1, revenue_sek: 10_000, balance_sheet_sek: 50_000 },
@@ -658,255 +545,10 @@ test('IRL: manuella nivåer används bara utan readiness-rad; motivering följer
 });
 
 test('Vinnova-utfallet blir "ingår sannolikt" utan förbehåll när alla punkter är JA', () => {
->>>>>>> origin/staging
   const res = screenExcellence(
     input({
       subject: company({
         orgNr: '5595728790',
-<<<<<<< HEAD
-        basic: { registeredAt: '2025-01-01', bolagStatus: 'aktiv', listed: false },
-        financials: [
-          { year: 2024, employees: 1, revenue_sek: 100, balance_sheet_sek: 100, dividend_sek: 0 },
-          { year: 2025, employees: 1, revenue_sek: 100, balance_sheet_sek: 100, dividend_sek: 50_000 }
-        ]
-      })
-    })
-  );
-  const cond = res.companies[0].conditions;
-  assert.equal(cond.find((c) => c.id === 'listed')!.verdict, 'yes');
-  assert.equal(cond.find((c) => c.id === 'listed')!.source, 'register');
-  const div = cond.find((c) => c.id === 'dividend')!;
-  assert.equal(div.verdict, 'no');
-  assert.equal(div.source, 'register');
-  assert.match(div.detail, /2025 50\s000 kr/);
-
-  const zero = screenExcellence(
-    input({
-      subject: company({
-        orgNr: '5595728790',
-        financials: [{ year: 2025, employees: 1, revenue_sek: 100, balance_sheet_sek: 100, dividend_sek: 0 }]
-      })
-    })
-  ).companies[0].conditions.find((c) => c.id === 'dividend')!;
-  assert.equal(zero.verdict, 'unknown');
-  assert.equal(zero.source, 'manual');
-  assert.match(zero.hint ?? '', /0 kr i utdelning/);
-});
-
-test('plattformens statsstödsgrund och flaggor visas som förifyllning, inte som svar', () => {
-  const res = screenExcellence(
-    input({
-      founders: [],
-      irl: { level: 4, srl: 3, tmrl: 5 },
-      platformHints: { isDeeptech: true, approvedDeMinimis: true, stateAidBasis: { basis: 'art22', validFrom: '2025-01-01' } }
-    })
-  );
-  assert.match(res.stateAid.platformNote ?? '', /art\. 22 GBER sedan 2025-01-01/);
-  assert.match(res.deMinimis.hint ?? '', /godkänd de minimis/);
-  assert.equal(res.deMinimis.verdict, 'unknown');
-  assert.match(res.vinnovaChecks.find((c) => c.id === 'innovative')!.hint ?? '', /deeptech.*TMRL 5/);
-  assert.match(res.vinnovaChecks.find((c) => c.id === 'other_criteria')!.hint ?? '', /IRL-nivå 4, SRL 3/);
-});
-
-test('normalizeExcellenceManualReview: tolerant, cappad och PII-säker form', () => {
-  const r = normalizeExcellenceManualReview({
-    checks: {
-      innovative: { verdict: 'yes', note: '  bra   idé  ', updated_at: '2026-10-12T10:00:00Z' },
-      'bad key!': { verdict: 'yes' },
-      empty: { verdict: 'unknown' },
-      note_only: { verdict: 'nope', note: 'kolla' },
-      long: { verdict: 'no', note: 'x'.repeat(2000) }
-    },
-    engagement: { phase: 'product_market_fit', founders: [{ name: 'Anna', pct: '35,5' }, { name: '', pct: 10 }, { name: 'Bo', pct: 150 }] }
-  });
-  assert.deepEqual(r.checks.innovative, { verdict: 'yes', note: 'bra idé', updated_at: '2026-10-12T10:00:00Z' });
-  assert.equal(r.checks['bad key!'], undefined);
-  assert.equal(r.checks.empty, undefined);
-  assert.deepEqual(r.checks.note_only, { verdict: 'unknown', note: 'kolla' });
-  assert.equal(r.checks.long?.note?.length, 600);
-  assert.deepEqual(r.engagement, { phase: 'product_market_fit', founders: [{ name: 'Anna', pct: 35.5 }, { name: 'Bo', pct: undefined }] });
-  assert.deepEqual(normalizeExcellenceManualReview(null), { checks: {} });
-  assert.deepEqual(normalizeExcellenceManualReview({ engagement: { phase: 'x', founders: [] } }), { checks: {} });
-});
-
-test('deriveGroupCompanies: ägarkedjan följs genom holdingbolaget — vem som äger holdingbolaget avgör', () => {
-  const subject = company({
-    orgNr: '5595728790',
-    name: 'Workify AB',
-    ownership: [{ direction: 'owner', owner_kind: 'company', org_nr: '5592581416', name: 'Holding AB', capital_pct: 100 }]
-  });
-  const holding = company({
-    orgNr: '5592581416',
-    name: 'Holding AB',
-    ownership: [
-      // Holdingbolagets egen ägarbild: startup-bolaget som innehav (hoppas över),
-      // ett bolag med majoritet (anknutet till hela koncernen), en VC med 30 %
-      // (undantagen — visas, räknas inte) och grundare som fysiska personer.
-      { direction: 'holding', owner_kind: 'company', org_nr: '5595728790', name: 'Workify AB', capital_pct: 100 },
-      { direction: 'owner', owner_kind: 'company', org_nr: '5560000002', name: 'Topp AB', capital_pct: 55 },
-      { direction: 'owner', owner_kind: 'investor', name: 'VC Fond', capital_pct: 30 },
-      { direction: 'owner', owner_kind: 'person', pct_min: 0, pct_max: 25 }
-    ]
-  });
-  const refs = deriveGroupCompanies(subject, [holding]);
-  assert.deepEqual(
-    refs.map((r) => [r.org_nr ?? r.name, r.relation, r.level, r.via]),
-    [
-      ['5592581416', 'linked', 1, undefined],
-      ['5560000002', 'linked', 2, 'Holding AB'],
-      ['VC Fond', 'exempt', 2, 'Holding AB']
-    ]
-  );
-  // Partner: bara företag ANKNUTNA till partnern räknas — med partnerns andel.
-  const subject2 = company({
-    orgNr: '5595728790',
-    ownership: [{ direction: 'owner', owner_kind: 'company', org_nr: '5560000010', name: 'Partner AB', capital_pct: 40 }]
-  });
-  const partner = company({
-    orgNr: '5560000010',
-    name: 'Partner AB',
-    ownership: [
-      { direction: 'owner', owner_kind: 'company', org_nr: '5560000011', name: 'Partnermor AB', capital_pct: 90 },
-      { direction: 'owner', owner_kind: 'company', org_nr: '5560000012', name: 'Minoritet AB', capital_pct: 30 }
-    ]
-  });
-  const refs2 = deriveGroupCompanies(subject2, [partner]);
-  assert.deepEqual(
-    refs2.map((r) => [r.org_nr, r.relation, r.sharePct, r.level]),
-    [
-      ['5560000010', 'partner', 40, 1],
-      ['5560000011', 'partner', 40, 2]
-    ]
-  );
-  // Utan hämtad ägarbild för holdingbolaget stannar kedjan vid nivå 1.
-  assert.equal(deriveGroupCompanies(subject, []).length, 1);
-});
-
-test('"Vem äger holdingbolaget": okänt tills ägarbilden hämtats och täcker > 75 % — investerare med 25–50 % syns inte i registret', () => {
-  const ownerRow = { direction: 'owner' as const, owner_kind: 'company' as const, org_nr: '5592581416', name: 'Holding AB', capital_pct: 100 };
-  // 1. Holdingbolaget slogs upp utan ägardelarna.
-  const noParts = screenExcellence(
-    input({
-      subject: company({ orgNr: '5595728790', name: 'Workify AB', ownership: [ownerRow] }),
-      related: [company({ orgNr: '5592581416', name: 'Holding AB', groupStructureFetched: false, beneficialOwnersFetched: false })]
-    })
-  );
-  const holding = noParts.companies[1];
-  assert.equal(holding.ownerChain?.verdict, 'unknown');
-  assert.match(holding.ownerChain?.needs ?? '', /koncernstruktur \+ verklig huvudman för Holding AB/);
-  assert.match(noParts.standalone.detail, /Ägarkedjan är ännu inte följd för: Holding AB/);
-  assert.ok(noParts.missing.some((m) => /Holding AB/.test(m)));
-  // 2. Hämtad ägarbild med två grundare om 25–50 % var: täcker bara 50 % ⇒
-  //    investerare kan äga resten — manuell kontroll mot aktieboken.
-  const persons = screenExcellence(
-    input({
-      subject: company({ orgNr: '5595728790', name: 'Workify AB', ownership: [ownerRow] }),
-      related: [
-        company({
-          orgNr: '5592581416',
-          name: 'Holding AB',
-          ownership: [
-            { direction: 'owner', owner_kind: 'person', pct_min: 25, pct_max: 50 },
-            { direction: 'owner', owner_kind: 'person', pct_min: 25, pct_max: 50 }
-          ]
-        })
-      ]
-    })
-  );
-  const chain = persons.companies[1].ownerChain;
-  assert.equal(chain?.verdict, 'unknown');
-  assert.equal(chain?.source, 'manual');
-  assert.match(chain?.detail ?? '', /investerare\/bolag med 25–50 % av Holding AB syns inte/);
-  assert.equal(chain?.editable, true);
-  // 3. Kända ägare täcker > 75 % ⇒ kedjan är avgjord.
-  const covered = screenExcellence(
-    input({
-      subject: company({ orgNr: '5595728790', name: 'Workify AB', ownership: [ownerRow] }),
-      related: [
-        company({
-          orgNr: '5592581416',
-          name: 'Holding AB',
-          ownership: [
-            { direction: 'owner', owner_kind: 'person', capital_pct: 40 },
-            { direction: 'owner', owner_kind: 'person', capital_pct: 40 }
-          ]
-        })
-      ]
-    })
-  );
-  assert.equal(covered.companies[1].ownerChain?.verdict, 'yes');
-  assert.match(covered.standalone.detail, /Vem som äger det anknutna bolaget avgör/);
-  assert.doesNotMatch(covered.standalone.detail, /ännu inte följd/);
-  // 4. Ett bolag som äger holdingbolaget med majoritet blir ett eget koncernbolag (nivå 2, genom Holding AB).
-  const topped = screenExcellence(
-    input({
-      subject: company({ orgNr: '5595728790', name: 'Workify AB', ownership: [ownerRow] }),
-      related: [
-        company({
-          orgNr: '5592581416',
-          name: 'Holding AB',
-          ownership: [{ direction: 'owner', owner_kind: 'company', org_nr: '5560000002', name: 'Topp AB', capital_pct: 80 }]
-        }),
-        company({ orgNr: '5560000002', name: 'Topp AB', basic: { registeredAt: '2006-05-10', bolagStatus: 'aktiv', bolagsform: 'AB' } })
-      ]
-    })
-  );
-  const topp = topped.companies.find((c) => c.orgNr === '5560000002');
-  assert.equal(topp?.role, 'linked');
-  assert.equal(topp?.via, 'Holding AB');
-  assert.equal(topp?.level, 2);
-  assert.match(topped.standalone.detail, /Topp AB \(äger 80 % av Holding AB, genom Holding AB\)/);
-  // Topp AB (2006) fäller art. 22 för hela koncernen — det var Combly-fallet, nu en nivå ned.
-  assert.equal(topped.stateAid.outcome, 'de_minimis');
-});
-
-test('sameOwnershipPicture: grundarholding = samma personer och andelar; investerare eller andra personer = olika', () => {
-  const subject = company({
-    orgNr: '5595728790',
-    name: 'Workify AB',
-    ownership: [
-      { direction: 'owner', owner_kind: 'company', org_nr: '5592581416', name: 'Holding AB', capital_pct: 100, part: 'group_structure' },
-      { direction: 'owner', owner_kind: 'person', pct_min: 25, pct_max: 50, indirect: true, part: 'beneficial_owners' },
-      { direction: 'owner', owner_kind: 'person', pct_min: 50, pct_max: 75, indirect: true, part: 'beneficial_owners' }
-    ]
-  });
-  const sameHolding = company({
-    orgNr: '5592581416',
-    name: 'Holding AB',
-    ownership: [
-      { direction: 'holding', owner_kind: 'company', org_nr: '5595728790', name: 'Workify AB', capital_pct: 100 },
-      { direction: 'owner', owner_kind: 'person', pct_min: 50, pct_max: 75 },
-      { direction: 'owner', owner_kind: 'person', pct_min: 25, pct_max: 50 }
-    ]
-  });
-  assert.equal(sameOwnershipPicture(subject, sameHolding).same, true);
-  const investorHolding = company({
-    orgNr: '5592581416',
-    name: 'Holding AB',
-    ownership: [
-      { direction: 'owner', owner_kind: 'investor', name: 'VC Fond', capital_pct: 30 },
-      { direction: 'owner', owner_kind: 'person', pct_min: 25, pct_max: 50 },
-      { direction: 'owner', owner_kind: 'person', pct_min: 25, pct_max: 50 }
-    ]
-  });
-  const inv = sameOwnershipPicture(subject, investorHolding);
-  assert.equal(inv.same, false);
-  assert.match(inv.reason, /VC Fond/);
-  const otherPersons = company({
-    orgNr: '5592581416',
-    name: 'Holding AB',
-    ownership: [{ direction: 'owner', owner_kind: 'person', capital_pct: 100 }]
-  });
-  assert.equal(sameOwnershipPicture(subject, otherPersons).same, false);
-  // Inte hämtad verklig huvudman ⇒ kan inte jämföras.
-  assert.equal(sameOwnershipPicture(subject, company({ orgNr: '5592581416', beneficialOwnersFetched: false })).same, null);
-  // Syns i bedömningen på ägarbolaget.
-  const res = screenExcellence(input({ subject, related: [investorHolding] }));
-  assert.equal(res.companies[1].ownersMatchSubject?.same, false);
-  // Nivå 2-referenser bär viaOrgNr så servern kan stoppa expansion genom bolaget.
-  const refs = deriveGroupCompanies(subject, [investorHolding]);
-  assert.equal(refs.find((r) => r.name === 'VC Fond')?.viaOrgNr, '5592581416');
-=======
         name: 'Combly AB',
         basic: { registeredAt: '2024-03-10', bolagStatus: 'aktiv' },
         financials: [{ year: 2025, employees: 2, revenue_sek: 100_000, balance_sheet_sek: 400_000, equity_sek: 50_000, net_result_sek: -300_000 }],
@@ -929,5 +571,4 @@ test('sameOwnershipPicture: grundarholding = samma personer och andelar; investe
   assert.match(res.vinnova.text, /uppfyllda enligt underlaget/);
   assert.equal(res.excellence.verdict, 'yes');
   assert.equal(res.excellence.source, 'manual');
->>>>>>> origin/staging
 });

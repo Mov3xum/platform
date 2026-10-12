@@ -1456,25 +1456,6 @@ försvann Wellgo Health AB ur Combly-screeningen); ett personnummer-derivat
 anonymiseras alltid, oavsett namn. Samma regel för juridisk person i
 `beneficialOwners[]`.
 Verklig huvudmans intervall/kontrollgrund tolkas även som objekt
-<<<<<<< HEAD
-(`{ from, to }`) respektive kodlista (`controlTypes[]`). **Fältnycklar
-verifierade mot riktiga svar 2026-10-12** (ur förhandsgranskningens
-PII-fria notering): grunddata `companyRegistrationDate`/`statusTextHigh`/
-`legalGroupText`/`commune`/`industryCode` — ingen uppgift om börsnotering;
-bokslut (economy-overview 2.1) `toDate`/`numberOfEmployees`/
-`plNetOperatingIncome`/`bsTotalEquity`/`plNetProfitLoss` och
-**`bsTotalEquityAndLiabilities` = balansomslutning** (skuldsidan — identiskt
-belopp; `bsTotalAssets` finns inte i svaret, så noten "balansomslutning
-saknas" kom av att nyckeln inte låg i kandidatlistan — rättat, enhetstestat)
-— ingen utdelningsuppgift (`dividend_sek` stannar manuell); koncernstruktur
-`groupCompanies[companyId, companyLevel, companyName, motherCompanyId,
-ownedPercentage]`; verklig huvudman `beneficialOwners[person,
-extentOfControl, controlTypes]` — **bara fysiska personer** (`legalEntity`
-är det uppslagna bolaget självt). Konsekvens för § 51: ett bolag/en
-investerare med 25–50 % av ett holdingbolag syns i INGEN av delarna
-(koncernstruktur = majoritet, verklig huvudman = personer) — aktieboken
-krävs, vilket bedömningen säger rakt ut. **Sandbox = samma värd** (`api.roaring.io`): det
-=======
 (`{ from, to }`) respektive kodlista (`controlTypes[]`). **Fältnamn
 bekräftade mot riktiga svar 2026-10-12** (Workify Sverige AB / WFYAPP
 HOLDING AB): economy-overview 2.1 ger en post per räkenskapsår med
@@ -1508,7 +1489,6 @@ noteras med sin FORM (nycklar, aldrig värden). Fältnyckel-noten
 visar numera formen två nivåer ned (`extentOfControl{code,text}`), så
 nästa avvikelse syns i förhandsgranskningen utan rå JSON. Runbooken har
 detaljerna. **Sandbox = samma värd** (`api.roaring.io`): det
->>>>>>> origin/staging
 är nyckelparet från utvecklarportalen som avgör om svaren är testdata, så
 `base_url` lämnas tom. Förhandsgranskningen noterar per API vilken sökväg som
 svarade och vilka **fältnycklar** (aldrig värden) svaret bar, så mappningen kan
@@ -8325,8 +8305,8 @@ minimis i stället för art. 22).
 
 Två lägen: **"Hämta från Roaring och bedöm"** (färska uppslag för startup-
 bolaget OCH varje anknutet/partnerbolag med de datadelar personalen kryssat
-i, § 11.8 — det hämtade sparas på bolagskortet för bolag som finns i
-plattformen, § 51.4) eller **"Bedöm sparade data"** (det som redan finns på bolagskortet, inget leverantörsanrop).
+i, § 11.8 — inget sparas; synka bolagskortet separat) eller **"Bedöm sparade
+data"** (det som redan finns på bolagskortet, inget leverantörsanrop).
 Valfritt org-nr fungerar (bolaget behöver inte finnas i plattformen); för ett
 portföljbolag tas grundarägande (`startup_team_members`), registrerat de
 minimis (§ 20), IRL/readiness (`startup_readiness_assessments`) och
@@ -8335,7 +8315,7 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
 
 | Fil | Syfte |
 |-----|-------|
-| `packages/shared/src/excellence-screening.ts` (+ `.test.ts`) | REN regelmotor: `classifyOwnershipEntry` (bilaga I: > 50 % / styrelse / avtal = anknutet, 25–50 % = partner, undantagna investerare, intervall som korsar tröskel = oklart), `deriveRelatedCompanies`, `deriveGroupCompanies` (hela ägarkedjan genom holding-/koncernbolag, § 51.6), `screenExcellence` (grundförutsättningar per bolag, "vem äger" per koncernbolag, fristående, viktade tröskelvärden 100 %/andel, de minimis, utfall, Vinnova-punkter, excellens, saknat underlag). Combly-fallet är enhetstestat. |
+| `packages/shared/src/excellence-screening.ts` (+ `.test.ts`) | REN regelmotor: `classifyOwnershipEntry` (bilaga I: > 50 % / styrelse / avtal = anknutet, 25–50 % = partner, undantagna investerare, intervall som korsar tröskel = oklart), `deriveRelatedCompanies`, `screenExcellence` (grundförutsättningar per bolag, fristående, viktade tröskelvärden 100 %/andel, de minimis, utfall, Vinnova-punkter, excellens, saknat underlag). Combly-fallet är enhetstestat. |
 | `apps/web/src/lib/integrations/company-registry/lookup.server.ts` | Delad uppslagskärna (validering, rate-limit 20/10 min, credentials, PII-fri audit, kostnad per uppslag) — används av BÅDE "Testa mot org-nr" (§ 11.8) och bedömningen; `parts` kan ges explicit för koncernbolagen |
 | `apps/web/src/lib/integrations/company-registry/pricing.ts` (+ `.test.ts`) / `pricing.server.ts` | Kostnad per anrop (credits + kr/credit, § 11.8): ren uppskattning + formatering, IO-läsning av `tenant_integrations.pricing` + env |
 | `apps/web/src/lib/excellence/data.server.ts` | Läsvägar med användarens token (RLS § 21): portföljbolag, sparad ägarbild/bokslut/grundare/de minimis/IRL, anslutna providers, `findStartupByOrgNr` (anknutet bolag som själv är portföljbolag) |
@@ -8346,8 +8326,6 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
 | `apps/web/src/lib/excellence/assessment-file.ts` (+ `.test.ts`) | REN: filnamn (`Bedömning excellens – <bolag> – <svensk tid>.pdf`), ämne i Filer |
 | `apps/web/src/lib/excellence/assessment-store.server.ts` | `storeExcellenceAssessmentPdf` — sparar PDF:en i `user_files` (bolagets mapp) via `createUserFileRecord`, fail-soft |
 | `backend/pocketbase-schema/migrations/1700000187_backfill_enabled_modules_bedomning_excellens.js` | Backfill av `users.enabled_modules` (§ 36.3-läxan) |
-| `apps/web/src/app/bedomning-excellens/ManualReviewForm.tsx` | Manuell komplettering (§ 51.5): bara punkter systemet inte kan avgöra, förifyllda från plattformen, sparade per bolag |
-| `backend/pocketbase-schema/migrations/1700000189_extend_excellence_review_and_dividend.js` | `startups.excellence_review` (json, manuella uppgifter) + `startup_financials.dividend_sek` (utdelning ur bokslut) |
 
 ### 51.2 Regler (bindande)
 
@@ -8413,9 +8391,8 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
   § 11.8); grundarnamn + andel visas ur `startup_team_members` ENBART i
   denna staff-vy (samma data som bolagskortet) och når aldrig AI-kontexten
   (§ 9.3 oförändrad). Audit-raderna (`activities`, `integration_sync`) är
-  PII-fria (leverantör + antal, aldrig org-nr). Registerdata som hämtas
-  för ett portföljbolag skrivs till bolagskortet (§ 51.4); själva
-  bedömningen arkiveras som PDF (§ 51.3).
+  PII-fria (leverantör + antal, aldrig org-nr). Registerdata persisteras
+  inte på bolagskortet; själva bedömningen arkiveras som PDF (§ 51.3).
 - **RBAC/RLS:** modulgrind `canAccessModuleForUser` + roll i actionen;
   färska uppslag kräver admin/incubator_lead (coach bedömer sparade data);
   alla läsningar via användarens token. Ingen ny kollektion, inga nya fält,
@@ -8534,213 +8511,3 @@ dela eller bifoga. Nu arkiveras **varje körning** automatiskt:
   e-post). `user_files` är fortsatt denylistad för `query_collection`
   (§ 27); loggar bär status, aldrig filnamn (bolagsnamn). Ingen ny
   kollektion, inga nya fält, ingen migration; riskklass n/a (ingen AI).
-
-### 51.4 Registerdata sparas på bolagskortet — aldrig samma uppslag två gånger (2026-10-12)
-
-**Incident:** "Hämta från Roaring och bedöm" läste grunddata, bokslut,
-koncernstruktur och verklig huvudman (fyra debiterade anrop per bolag) men
-kastade allt efter bedömningen — bolagskortet var oförändrat och nästa
-bedömning, eller en kollega som ville se ägarbilden, fick slå igen. Nu:
-- `runRegistryLookup` (`company-registry/lookup.server.ts`) tar
-  `persistToStartupId`. Är det satt skrivs det hämtade bolaget via **exakt
-  samma writer som "Synka från <leverantör>"** (`applyRegistryCompany`,
-  § 11.8: whitelistade startup-fält, upsert per bokslutsår, ägarbilden
-  ersatt per hämtad del med `source_part`, fysiska personer utan namn) —
-  ingen ny skrivväg. Innan något skrivs verifieras att bolaget tillhör
-  användarens tenant OCH att kortets org-nr är det som slogs upp (superuser-
-  klienten används som i synken). Gav ingen vald del data skrivs inget.
-  Handlern exponerar nu `source` (`CompanyRegistryHandler.source`) så
-  writern märker raderna rätt. Svaret bär `saved` (delar, antal årsrader/
-  ägarrader, PII-fria skrivfel) och audit-raden i `activities` säger
-  "sparat på bolagskortet: Grunddata, Bokslut …" (knuten till bolaget via
-  `startup`) i stället för "(inget sparat)". "Testa mot org-nr" skickar
-  inget `persistToStartupId` och sparar oförändrat inget.
-- `assessExcellenceAction` (registerläget) sätter `persistToStartupId` för
-  **portföljbolaget** och för varje **koncernbolag som själv finns i
-  plattformen** (`findStartupByOrgNr`); bolag utanför plattformen har inget
-  kort och slås bara upp. Bedömningen bär `savedToCards` → vyn visar
-  "Sparat på bolagskortet för <bolag>: Grunddata, Bokslut (N årsrader, M
-  ägarrader)" med länk, eller felet per bolag (fail-soft — bedömningen och
-  PDF:en görs ändå), och PDF:en får samma rad i huvudet. Korten
-  revalideras (`revalidatePath('/startups/<id>')`) så Ägarbild/Finansiell
-  historik/grunddata är uppdaterade direkt. "Bedöm sparade data" ger därmed
-  samma underlag som registerläget nästa gång, utan kostnad.
-- **Kostnad/transparens:** antalet anrop är oförändrat (uppslaget gjordes
-  redan); skillnaden är att det bevaras. Kryssrutornas hint och sidans
-  ingress säger att det hämtade sparas på bolagskortet.
-- **GDPR § 5 / § 11.8:** samma data som "Synka från Roaring" skriver, med
-  samma anonymisering (verklig huvudman utan namn/personnummer), samma RLS
-  på läsvägen (§ 21) och samma DPIA-förutsättningar (§ 11.3). Enskild firma
-  får aldrig ägarbild (writern/fabriken strippar). Inga nya fält, ingen
-  migration; riskklass n/a (ingen AI).
-
-### 51.5 Varje punkt får ett svar: registret först, sedan plattformen, sist människan (2026-10-12)
-
-**Incident:** bedömningen visade "Okänt" även där svaret fanns att hämta,
-och det som bara en människa kan avgöra (börsnotering, utdelningsbeslut,
-företagskoncentration, grundarnas engagemang, innovationshöjd …) hade ingen
-plats att fyllas i — varje ny körning började om från noll. Nu gäller en fast
-ordning per punkt, och **systemet vinner alltid**:
-
-1. **Bolagsregistret** (Roaring) besvarar det det kan, i BÅDA lägena: status,
-   ålder, tröskelvärden, ägarbild/fristående, "inte marknadsredo" (eget
-   kapital mot kostnader) — och nu även **utdelning** och **börsnotering**
-   när svaret bär uppgiften. `normalizeRoaringFinancials` läser utdelning ur
-   kandidatfält (`plDividend`, `dividend`, `proposedDividend` …) till
-   `RegistryFinancialsYear.dividend_sek` (persisteras i
-   `startup_financials.dividend_sek`, migration **1700000189**, skrivs av
-   samma writer som övriga bokslutsposter); en utdelning i något bokslut
-   avgör "har inte delat ut vinst" = NEJ, nollrader blir stöd ("Förifyllt:
-   boksluten … visar 0 kr") men inget bevis (beslut kan ha tagits efter
-   senaste bokslutet). Börsnotering läses ur grunddata (`stockExchangeListed`,
-   `isListed` …) till den transienta `RegistryCompany.listed` (lagras inte —
-   sparade data får den via den manuella uppgiften). Saknas fältet i svaret
-   noteras det PII-fritt ("ingen uppgift om börsnotering i svaret") så
-   controllern ser VARFÖR punkten är öppen. Fältnamnen är obekräftade
-   (roaring.io nås inte från byggmiljön) — samma kandidat-/not-mönster som
-   § 11.8; ett saknat fält blir aldrig 0 kr eller "inte noterat".
-2. **Plattformen** förifyller det den vet, märkt **"Förifyllt från
-   systemet"** (`ScreeningCheck.hint`) — aldrig ett svar: grundarna ur
-   teamet (engagemanget), `is_deeptech` + TMRL (innovationshöjd), IRL-nivå
-   och SRL (övriga villkor/Agenda 2030), `approved_de_minimis`/
-   `approved_state_aid_art22` och den **pågående statsstödsgrunden** i
-   `startup_state_aid_periods` (visas under GBER-sammanfattningen som
-   jämförelse — `stateAid.platformNote` — bedömningen ändrar aldrig
-   registreringen), bolagsform/registreringsdatum (övertagen verksamhet),
-   eget kapital när kostnadsberäkningen saknar omsättning/resultat.
-   `ScreeningPlatformHints` fylls av `loadPlatformStartupFacts`.
-3. **Människan kompletterar resten** i formuläret **Manuell komplettering**
-   under resultatet (`ManualReviewForm`, bara portföljbolag). Det visar
-   ENBART punkter med `editable` (källa manuell eller utfall okänt) — Ja /
-   Nej / Okänt + en PII-fri not — grupperade per bolag (grundförutsättningar
-   för startup OCH varje anknutet bolag, nyckel `cond:<org-nr>:<id>`) och
-   steg. **Grundardrivet** fylls inte i som Ja/Nej utan som **mognadsfas +
-   engagemang i % av heltid per grundare** (förifyllt med teamets grundare);
-   `evaluateFounderEngagement` (ren, enhetstestad) prövar tröskeln
-   deterministiskt (formation: inget krav; PSF ≥ 40 % sammantaget och en
-   grundare ≥ 20 %; PMF ≥ 60 %/40 %; forskningsavknoppning: manuell Ja/Nej)
-   och skriver ut att referensbedömningen anger strängare nivåer (50/30,
-   80/40) tills Vinnovas metodbeskrivning låsts. Sparas som
-   `startups.excellence_review` (json, migration **1700000189**; form
-   `{ checks: { <nyckel>: { verdict, note, updated_at } }, engagement:
-   { phase, founders: [{ name, pct }] } }`, tolkad tolerant av
-   `normalizeExcellenceManualReview` i `@platform/shared` — okända nycklar/
-   utfall och överlånga texter släpps, tak 60 punkter/12 grundare/600 tecken)
-   via `saveExcellenceReviewAction`: modulgrind + roll (admin/incubator_lead/
-   coach), bolaget läses med användarens token och tenant-verifieras, noter
-   och namn personnummer-saneras, `updated_at` stämplas bara på ändrade
-   uppgifter, skrivning via `writeWithFallback` (§ 21.3), posten läses
-   tillbaka och ett schema utan fältet ger ett tydligt fel (§ 24.4 — aldrig
-   en tyst no-op; formuläret visar det redan vid sidladdning via
-   `manualEditable`). Auditeras PII-fritt i `agent_actions` (nycklar +
-   utfall, aldrig noter) → "manuella uppgifter i Bedömning excellens" i
-   Bolagsnytt/`/aktivitet`. Sparandet ger direkt en ny bedömning på sparade
-   data (inget leverantörsanrop) + ny PDF i Filer (§ 51.3) — formuläret
-   gäller bara portföljbolag, eftersom uppgifterna lagras på bolaget.
-4. **Regelträdet** (`applyManual` i `excellence-screening.ts`) tillämpar den
-   sparade uppgiften BARA på punkter som är manuella/okända; har registret
-   eller plattformen numera ett svar ignoreras uppgiften (den ligger kvar
-   men visas inte som svar). En manuell uppgift väger i sammanfattningarna
-   precis som ett registersvar (fristående/tröskel/de minimis kan ge "art. 22
-   möjlig"; grundarägande kan ge Vinnova-målgrupp) och märks i detalj-
-   texten "Manuellt ja (datum): not. Systemet: …" med källa *Manuell
-   kontroll* i vyn och PDF:n. "Saknat underlag" listar bara det som
-   fortfarande är öppet.
-
-**GDPR § 5:** noterna är controllerns arbetsanteckningar om BOLAGET (källa
-+ datum); UI:t säger uttryckligen "inga personuppgifter" och allt
-personnummer-saneras på skrivvägen. Grundarnamn i engagemangsblocket är
-samma namn som redan finns i teamet på bolagskortet (staff-krets) och når
-aldrig AI-kontexten (`lib/ai/context.ts` whitelistar inte
-`excellence_review`; `startups` är läsbar för `query_collection` under RLS
-+ fältmaskning som förut). Utdelning är publik årsredovisningsdata.
-Chatt-agenten kan inte skriva fältet (`update_startup_field`-whitelisten är
-oförändrad). Speglat i `setup-via-api.mjs` (patch av `startups` +
-`startup_financials`), asserterat i `verify-baseline.mjs`
-(`REQUIRED_APP_FIELDS`). Riskklass n/a (ingen AI — deterministiska regler
-och mänskliga uppgifter).
-
-### 51.6 Ägarkedjan följs genom holdingbolag — "vem äger holdingbolaget" (2026-10-12)
-
-**Incident:** Workify ägs till 100 % av WFYAPP HOLDING AB och bedömningen
-stannade där ("Fristående: Nej — finns anknutet företag") fast bolaget tagit
-in investerare: holdingbolagets EGNA ägare följdes aldrig, och en tom
-ägartabell såg likadan ut oavsett om ägarbilden inte hämtats eller om
-registret inte visade någon. Nu:
-
-- **Regelmotorn följer kedjan (`deriveGroupCompanies`, ren + enhetstestad).**
-  BFS från startup-bolaget genom varje anknutet bolag vars ägarbild finns i
-  underlaget (och genom partnerbolagens majoritetsrelationer): bilaga I
-  art. 3.3 — anknutet till ett anknutet bolag är anknutet till koncernen;
-  art. 6.3 — partner till ett anknutet bolag räknas proportionellt, bolag
-  anknutna till en partner räknas med partnerns andel. Fysiska personer
-  stoppar kedjan; undantagna investerare (25–50 %) visas men räknas inte;
-  startup-bolaget självt och redan expanderade bolag hoppas över (inga
-  cykler). Varje `RelatedCompanyRef`/`CompanyAssessment` bär `via` ("genom
-  Holding AB") och `level`, så ett moderbolag bakom holdingbolaget prövas som
-  eget koncernbolag med grundförutsättningar + tröskelrad (Combly-fallet en
-  nivå ned är enhetstestat: Topp AB från 2006 bakom holdingbolaget ⇒ de
-  minimis).
-- **Punkten "Vem äger <bolag>"** (`ownerChain`, nyckel
-  `cond:<org-nr>:owner_chain`) per anknutet bolag och per ägande
-  partnerbolag: OKÄNT "inget uppslag" / "ägarbilden hämtades inte (välj
-  koncernstruktur + verklig huvudman)" / "registret visar inga ägare —
-  aktiebok"; **JA först när de kända direkta ägarnas andelar tillsammans
-  överstiger 75 %** (då ryms ingen bolagsägare ≥ 25 %); annars OKÄNT med
-  källa *Manuell kontroll* (fylls i under Manuell komplettering) och
-  förklaringen att registret bara visar majoritetsrelationer och fysiska
-  personer med ≥ 25 % — investerare/bolag med 25–50 % av holdingbolaget syns
-  inte (§ 11.8). "Fristående företag: Nej" säger nu att vem som äger det
-  anknutna bolaget avgör kontrollen och listar bolag vars kedja ännu inte är
-  följd; "Saknat underlag" tar upp dem.
-- **Servern slår upp nivå för nivå** (`assessExcellenceAction`, registerläget):
-  arbetslista på `deriveGroupCompanies(subject, related)` som räknas om efter
-  varje uppslag — holdingbolagets hämtade ägarbild kan peka på nästa bolag,
-  som slås upp med samma datadelar (och sparas på bolagskortet när det är ett
-  portföljbolag, § 51.4) tills `MAX_RELATED_COMPANIES` nås; de som inte hann
-  slås upp namnges i varningen. Sparat-läget gör samma sak med
-  `findStartupByOrgNr` per nivå. Kostnadstexten vid kryssrutorna säger att
-  kedjan följs.
-- **Ägartabellen heter "Vem äger <bolag>"** för koncernbolag (UI + PDF) och
-  skiljer tre tomma lägen: inget uppslag / ägarbilden hämtades inte (vilka
-  delar) / registret visar inga ägare — kontrollera aktieboken.
-- Ingen ny dataväg, inga nya fält eller kollektioner (samma uppslag, samma
-  writer, samma RLS); riskklass n/a (ingen AI).
-
-### 51.7 Ekonomiska uppslag — Vinnova-grind och ägarbilden först (2026-10-12)
-
-Varje koncernbolag kostar egna anrop hos Roaring (§ 11.8 "Kostnad per
-anrop"), så `assessExcellenceAction` (registerläget) gräver bara så långt
-bedömningen behöver. Två regler, prövade i koden — inte i UI:t:
-
-1. **Vinnova-grinden.** Efter startup-bolagets uppslag (och efter varje
-   koncernbolag) körs regelträdet på det som finns. Är
-   `vinnova.outcome === 'not_in_target'` (grundarteamet < 75 %, eller
-   förbrukat de minimis-utrymme ⇒ inget företagsstöd) slås inga (fler)
-   koncernbolag upp; varningen "Bolaget faller ur Vinnovas målgrupp … slogs
-   inte upp (sparar anrop)" visas i resultatet. Kompletteras grunden
-   manuellt (§ 51.5) körs bedömningen om och grinden öppnas.
-2. **Ägarbilden först.** Ett koncernbolag slås upp i **två steg**: först
-   ENBART de valda ägardelarna (koncernstruktur + verklig huvudman), sedan
-   `sameOwnershipPicture(subject, bolaget)` (ren, enhetstestad): samma
-   FYSISKA personer med samma andelsintervall i verklig huvudman (namn
-   jämförs aldrig — de lagras inte, § 11.8), och inget bolag/ingen
-   investerare med ≥ 25 % av ägarbolaget ⇒ **samma** (ett rent
-   grundarholdingbolag) ⇒ steg 2 hämtar grunddata/bokslut (dess ålder och
-   tal räknas i koncernen). **Andra ägare** (investerare, andra personer)
-   eller **ej jämförbart** (verklig huvudman inte vald/hämtad) ⇒ inga fler
-   anrop för bolaget, och ägarkedjan följs inte vidare genom det
-   (`RelatedCompanyRef.viaOrgNr` + `stopped`-mängden i arbetslistan);
-   varningen säger varför. Utan valda ägardelar görs ett uppslag med de
-   valda delarna som förut (ingen jämförelse möjlig). Partnerbolag som är
-   innehav (`direction = holding`) jämförs inte — de hämtas med resten
-   direkt.
-- **Visas** per ägarbolag som chip "Samma ägare som <startup>" / "Andra
-  ägare än <startup> — bolaget grävs inte vidare" / "Ägarbilden kunde inte
-  jämföras" med skälet (`CompanyAssessment.ownersMatchSubject`, UI + PDF).
-- **Kostnaden summeras per faktiskt anrop** (`sumRegistryCosts`, ren +
-  enhetstestad): "N bolag, K anrop = …" i resultat, PDF och audit — inte
-  längre bolag × valda delar, eftersom koncernbolag kan ha hämtats med färre
-  delar. Kryssrutornas kostnadstext beskriver sparläget.
-- **Sparat-läget** (inga anrop) följer kedjan som förut men visar samma
-  ägarjämförelse. Ingen ny dataväg, inga nya fält; riskklass n/a.
