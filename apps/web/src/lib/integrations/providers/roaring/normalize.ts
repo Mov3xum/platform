@@ -601,45 +601,127 @@ export function normalizeRoaringGroupStructure(
   return out;
 }
 
-const BO_LIST_KEYS = ['beneficialOwners', 'owners', 'alternativeBeneficialOwners', 'persons'];
-const BO_CAPITAL_PATHS = ['ownershipPercentInterval', 'extentOfControl', 'extentOfOwnership', 'ownershipInterval', 'ownership', 'extent', 'capital', 'shareOfCapital', 'capitalInterval', 'ownedPercentage'];
-const BO_VOTES_PATHS = ['votesPercentInterval', 'extentOfVotes', 'votesInterval', 'votes', 'shareOfVotes', 'votingInterval'];
-const BO_CONTROL_PATHS = ['controlTypes', 'controlType', 'controlTypeCodes', 'natureOfControl', 'typeOfControl', 'controlBasis', 'control', 'role'];
+const BO_LIST_KEYS = ['beneficialOwners', 'owners', 'alternativeBeneficialOwners', 'persons', 'beneficialOwnerList'];
+const BO_CAPITAL_PATHS = [
+  'ownershipPercentInterval',
+  'extentOfControl',
+  'extentOfOwnership',
+  'scopeOfControl',
+  'controlExtent',
+  'ownershipInterval',
+  'ownershipShare',
+  'ownership',
+  'extent',
+  'capital',
+  'shareOfCapital',
+  'capitalInterval',
+  'ownedPercentage',
+  'percentage',
+  'share'
+];
+const BO_VOTES_PATHS = [
+  'votesPercentInterval',
+  'extentOfVotes',
+  'extentOfVotingRights',
+  'votingRights',
+  'votesInterval',
+  'votes',
+  'shareOfVotes',
+  'votingInterval'
+];
+const BO_CONTROL_PATHS = [
+  'controlTypes',
+  'controlType',
+  'controlTypeCodes',
+  'typesOfControl',
+  'natureOfControl',
+  'typeOfControl',
+  'controlBasis',
+  'control',
+  'role'
+];
+
+const INTERVAL_LO_KEYS = ['from', 'min', 'lower', 'low', 'start', 'minimum', 'lowerLimit', 'fromPercent', 'minPercent', 'percentFrom', 'gte', 'gt'];
+const INTERVAL_HI_KEYS = ['to', 'max', 'upper', 'high', 'end', 'maximum', 'upperLimit', 'toPercent', 'maxPercent', 'percentTo', 'lte', 'lt'];
+const INTERVAL_TEXT_KEYS = ['text', 'description', 'desc', 'label', 'name', 'value', 'code', 'key', 'id', 'extent', 'interval', 'range', 'percent', 'percentage', 'share', 'ownership', 'control', 'type'];
 
 /**
- * Intervall kan komma som text ("25-50", ">75") eller som objekt
- * ({ from, to } / { min, max } / { lower, upper }, ev. med en text) —
- * normaliseras till text som `parsePctInterval` förstår.
+ * Tolkar ett kontrollintervall ur VILKEN rimlig form som helst: text ("25-50",
+ * ">75", "Mer än 25 men inte mer än 50 procent"), kod ("MORE_THAN_75",
+ * "MER_AN_25_MEN_INTE_MER_AN_50"), tal, objekt med gränser ({ from, to },
+ * { percentFrom, percentTo }, { low, high } …), objekt med text/kod
+ * ({ code, description }) eller ett nästlat objekt ({ interval: { … } }).
+ * Kända nycklar provas först, därefter varje primitivt värde i objektet
+ * (datum/id:n avvisas av parsern). Första tolkbara värdet vinner. Värden
+ * lämnar aldrig funktionen — bara det tolkade intervallet.
  */
-function intervalText(v: unknown): unknown {
-  if (!v || typeof v !== 'object' || Array.isArray(v)) return v;
-  const o = v as Record<string, unknown>;
-  const lo = asNumber(pickFirst(o, ['from', 'min', 'lower', 'fromPercent', 'minPercent']));
-  const hi = asNumber(pickFirst(o, ['to', 'max', 'upper', 'toPercent', 'maxPercent']));
-  if (lo !== undefined && hi !== undefined) return `${lo}-${hi}`;
-  if (lo !== undefined) return `>${lo}`;
-  if (hi !== undefined) return `<${hi}`;
-  return pickFirst(o, ['text', 'description', 'code']);
-}
-
-/**
- * Kontrollgrund kan vara text, ett objekt eller en lista av koder/objekt
- * (flera grunder). Första igenkännbara texten används — den mappas ändå till
- * fast vokabulär av `controlBasisCategory`.
- */
-function controlText(v: unknown): unknown {
-  const one = (x: unknown): unknown =>
-    x && typeof x === 'object' && !Array.isArray(x)
-      ? pickFirst(x, ['text', 'description', 'controlTypeText', 'code', 'controlTypeCode'])
-      : x;
+export function parseControlInterval(v: unknown, depth = 0): { min: number; max: number } | undefined {
+  if (v === undefined || v === null || depth > 3) return undefined;
   if (Array.isArray(v)) {
     for (const x of v) {
-      const t = one(x);
-      if (asString(t)) return t;
+      const r = parseControlInterval(x, depth + 1);
+      if (r) return r;
     }
     return undefined;
   }
-  return one(v);
+  if (typeof v !== 'object') return parsePctInterval(v);
+  const o = v as Record<string, unknown>;
+  const lo = asNumber(pickFirst(o, INTERVAL_LO_KEYS));
+  const hi = asNumber(pickFirst(o, INTERVAL_HI_KEYS));
+  if (lo !== undefined && hi !== undefined) return parsePctInterval(`${lo}-${hi}`);
+  if (lo !== undefined) return parsePctInterval(`>${lo}`);
+  if (hi !== undefined) return parsePctInterval(`<${hi}`);
+  for (const key of INTERVAL_TEXT_KEYS) {
+    const r = parseControlInterval(o[key], depth + 1);
+    if (r) return r;
+  }
+  for (const key of Object.keys(o)) {
+    if (INTERVAL_TEXT_KEYS.includes(key)) continue;
+    const r = parseControlInterval(o[key], depth + 1);
+    if (r) return r;
+  }
+  return undefined;
+}
+
+/**
+ * Kontrollgrund kan vara text, kod, ett objekt ({ code, description }), en
+ * lista av koder/objekt (flera grunder) eller ett objekt som bär listan
+ * ({ types: [ … ] }). Första texten som ger en känd kategori vinner, annars
+ * första text alls — den mappas ändå till fast vokabulär av
+ * `controlBasisCategory` (leverantörens fritext når aldrig databasen).
+ */
+function controlText(v: unknown, depth = 0): unknown {
+  if (v === undefined || v === null || depth > 3) return undefined;
+  if (Array.isArray(v)) {
+    let fallback: unknown;
+    for (const x of v) {
+      const t = controlText(x, depth + 1);
+      if (!asString(t)) continue;
+      if (controlBasisCategory(t) !== 'other') return t;
+      fallback ??= t;
+    }
+    return fallback;
+  }
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    let fallback: unknown;
+    for (const key of ['text', 'description', 'desc', 'label', 'name', 'controlTypeText', 'code', 'controlTypeCode', 'type', 'value', 'key']) {
+      const t = controlText(o[key], depth + 1);
+      if (!asString(t)) continue;
+      if (controlBasisCategory(t) !== 'other') return t;
+      fallback ??= t;
+    }
+    // Objekt som bär listan under en okänd nyckel ({ types: [ … ] }).
+    for (const key of Object.keys(o)) {
+      if (Array.isArray(o[key]) || (o[key] && typeof o[key] === 'object')) {
+        const t = controlText(o[key], depth + 1);
+        if (asString(t) && controlBasisCategory(t) !== 'other') return t;
+        fallback ??= t;
+      }
+    }
+    return fallback;
+  }
+  return v;
 }
 
 /**
@@ -696,8 +778,8 @@ export function normalizeRoaringBeneficialOwners(raw: unknown, notes: string[]):
     }
     const capitalRaw = pickFirst(o, BO_CAPITAL_PATHS);
     const votesRaw = pickFirst(o, BO_VOTES_PATHS);
-    const capital = parsePctInterval(intervalText(capitalRaw));
-    const votes = parsePctInterval(intervalText(votesRaw));
+    const capital = parseControlInterval(capitalRaw);
+    const votes = parseControlInterval(votesRaw);
     // Kontrollgrund mappas till fast vokabulär — leverantörens fritext når
     // aldrig databasen (kan bära namn).
     const controlRaw = pickFirst(o, BO_CONTROL_PATHS);

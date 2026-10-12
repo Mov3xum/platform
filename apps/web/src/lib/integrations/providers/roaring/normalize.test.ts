@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   describeRecordKeys,
   describeShape,
+  parseControlInterval,
   normalizeRoaringBeneficialOwners,
   normalizeRoaringCompany,
   normalizeRoaringFinancials,
@@ -582,4 +583,53 @@ test('describeRecordKeys visar formen två nivåer ned i listor', () => {
   assert.ok(!JSON.stringify(keys).includes('Anna'));
   assert.equal(describeShape('x', [{ a: { b: { c: 1 } } }], 2), 'x[a{b{…}}]');
   assert.equal(describeShape('x', 'str', 2), 'x');
+});
+
+test('parseControlInterval garderar mot alla rimliga former av extentOfControl', () => {
+  const cases: [unknown, { min: number; max: number } | undefined][] = [
+    ['Mer än 25 men inte mer än 50 procent', { min: 25, max: 50 }],
+    ['MER_AN_75', { min: 75, max: 100 }],
+    ['MER_AN_25_MEN_INTE_MER_AN_50', { min: 25, max: 50 }],
+    ['OVER_75', { min: 75, max: 100 }],
+    ['GT75', { min: 75, max: 100 }],
+    ['LT25', { min: 0, max: 25 }],
+    ['GTE_25_LTE_50', { min: 25, max: 50 }],
+    ['MORE_THAN_50_LESS_THAN_75', { min: 50, max: 75 }],
+    [75, { min: 75, max: 75 }],
+    [{ code: 'MORE_THAN_75' }, { min: 75, max: 100 }],
+    [{ code: 'X9', description: 'Mer än 50 % men inte mer än 75 %' }, { min: 50, max: 75 }],
+    [{ code: '3', text: 'Over 75 percent' }, { min: 75, max: 100 }],
+    [{ percentFrom: 25, percentTo: 50 }, { min: 25, max: 50 }],
+    [{ low: 50, high: 75 }, { min: 50, max: 75 }],
+    [{ minimum: 75 }, { min: 75, max: 100 }],
+    [{ interval: { from: 25, to: 50 } }, { min: 25, max: 50 }],
+    [{ ownership: { code: 'MORE_THAN_25_LESS_THAN_50' } }, { min: 25, max: 50 }],
+    [{ extentOfControlCode: 'MER_AN_75', changeDate: '2024-01-15' }, { min: 75, max: 100 }],
+    [[{ code: 'MORE_THAN_75' }], { min: 75, max: 100 }],
+    [{ changeDate: '2024-01-15', caseId: '20240115001' }, undefined],
+    ['Okänd omfattning', undefined],
+    [null, undefined]
+  ];
+  for (const [input, expected] of cases) {
+    assert.deepEqual(parseControlInterval(input), expected, JSON.stringify(input));
+  }
+});
+
+test('verklig huvudman: kontrollgrund ur { code, description }, kodlista och objekt som bär listan', () => {
+  const run = (controlTypes: unknown) => {
+    const notes: string[] = [];
+    const rows = normalizeRoaringBeneficialOwners(
+      { records: [{ beneficialOwners: [{ person: { firstName: 'Anna' }, extentOfControl: 'MORE_THAN_75', controlTypes }] }] },
+      notes
+    );
+    return rows[0]?.control_basis;
+  };
+  assert.equal(run([{ code: '1', description: 'Äger aktier i bolaget' }]), 'shares');
+  assert.equal(run([{ code: 'VOTES' }]), 'votes');
+  assert.equal(run(['BOARD_APPOINTMENT']), 'board');
+  assert.equal(run('Kontroll genom avtal'), 'agreement');
+  assert.equal(run({ types: [{ code: 'OWNS_SHARES' }] }), 'shares');
+  // Flera grunder: en okänd först får inte skugga en känd.
+  assert.equal(run([{ code: 'Z' }, { code: 'OWNS_SHARES' }]), 'shares');
+  assert.equal(run([{ code: 'Z' }]), 'other');
 });

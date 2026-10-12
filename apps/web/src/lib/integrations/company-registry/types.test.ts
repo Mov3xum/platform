@@ -61,6 +61,10 @@ test('parsePctInterval tolkar Bolagsverkets ordalydelser och leverantörskoder',
   assert.deepEqual(parsePctInterval('över 75 %'), { min: 75, max: 100 });
   assert.deepEqual(parsePctInterval('mindre än 25 procent'), { min: 0, max: 25 });
   assert.equal(parsePctInterval('Äger aktier'), undefined);
+  assert.equal(parsePctInterval('2024-01-15'), undefined);
+  assert.equal(parsePctInterval('20240115001'), undefined);
+  assert.deepEqual(parsePctInterval('MER_AN_75'), { min: 75, max: 100 });
+  assert.deepEqual(parsePctInterval('OVER 75'), { min: 75, max: 100 });
 });
 
 test('mapBolagStatus mappar leverantörsord till enumet', () => {

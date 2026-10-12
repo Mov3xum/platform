@@ -1470,10 +1470,16 @@ avviker `plNetOperatingIncome` noteras det så valet kan stämmas av mot ett
 facit. Personalkostnad och bolagsskatt finns INTE i economy-overview (bara
 i det dyrare financial-record-API:t) och lämnas tomma. Verklig huvudman
 2.1 svarar `beneficialOwners[person,extentOfControl,controlTypes]` —
-`person` läses aldrig; `extentOfControl` tolkas som text, objekt eller kod,
-även i Bolagsverkets ordalydelser ("Mer än 25 men inte mer än 50 procent",
-`MORE_THAN_75`) via `parsePctInterval`, och ett intervall som ändå inte
-kan tolkas noteras med sin FORM (nycklar, aldrig värden). Fältnyckel-noten
+`person` läses aldrig; `extentOfControl` tolkas av `parseControlInterval`
+ur VILKEN rimlig form som helst — text eller kod (Bolagsverkets ordalydelser
+"Mer än 25 men inte mer än 50 procent", `MORE_THAN_75`, `MER_AN_75`,
+`GT75`), tal, objekt med gränser (`{ from, to }`, `{ percentFrom,
+percentTo }`, `{ low, high }` …), objekt med text/kod (`{ code,
+description }`) eller nästlat objekt; kända nycklar först, därefter varje
+primitivt värde (datum/id:n avvisas). `controlTypes` tolkas som text, kod,
+`{ code, description }`, lista eller objekt som bär listan, och en känd
+grund skuggas aldrig av en okänd. Ett intervall som ändå inte kan tolkas
+noteras med sin FORM (nycklar, aldrig värden). Fältnyckel-noten
 visar numera formen två nivåer ned (`extentOfControl{code,text}`), så
 nästa avvikelse syns i förhandsgranskningen utan rå JSON. Runbooken har
 detaljerna. **Sandbox = samma värd** (`api.roaring.io`): det
