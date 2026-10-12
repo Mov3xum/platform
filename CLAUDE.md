@@ -1442,7 +1442,19 @@ står på bolagets EGEN post) och tar bara bolag vars `motherCompanyId` är
 bolaget som innehav — moderbolag och syskon i listan klassas aldrig som
 innehav (tidigare tolkades listan som ett träd och allt blev innehav). Ett
 HTTP 200-svar vars kuvert säger "records not found" behandlas som 404
-(`roaringReportsNoRecords`) så det aldrig räknas som en lyckad hämtning.
+(`roaringReportsNoRecords`) så det aldrig räknas som en lyckad hämtning —
+men delen bokförs i **`RegistryCompany.noRecordParts`** ("inga uppgifter"
+är ett svar: nystartat bolag utan bokslut, bolag utanför varje koncern), som
+bedömningen (§ 51) skiljer från "hämtades inte". **Id i okänt format
+(2026-10-12):** moder-kedjan i den platta listan följs på en grafnyckel
+(org-nr när id:t går att tolka, annars leverantörens råa id) — tidigare
+kastades hela strukturen när `motherCompanyId` inte var ett org-nr. En nod
+med **bolagsnamn** (AB/HB/Ltd/GmbH …, `looksLikeCompanyName`) men id i
+okänt format behålls som bolag UTAN org-nr + en not om id:ts FORM (aldrig
+värdet) i stället för att tyst anonymiseras till "fysisk person" (så
+försvann Wellgo Health AB ur Combly-screeningen); ett personnummer-derivat
+anonymiseras alltid, oavsett namn. Samma regel för juridisk person i
+`beneficialOwners[]`.
 Verklig huvudmans intervall/kontrollgrund tolkas även som objekt
 (`{ from, to }`) respektive kodlista (`controlTypes[]`); fältnamnen inuti
 `beneficialOwners[]` och bokslutets fält är fortsatt obekräftade — se
@@ -1532,6 +1544,39 @@ Regler:
 - Senaste val sparas per leverantör i `localStorage`
   (`movexum-registry-parts-<slug>`, bekvämlighet — ingen datakälla).
 Ingen ny dataväg, ingen PII i det nya fältet; riskklass oförändrad.
+
+**Kostnad per anrop — credits och kronor (2026-10-12, migration
+1700000188).** Leverantörerna debiterar per API-anrop i **credits**, och vad
+en credit kostar i kronor följer tenantens avtal/paket. Plattformen kan inte
+läsa prislistan (roaring.io nås inte från byggmiljön) och **gissar aldrig**:
+ledningen anger priserna under **Inställningar → Integrationer →
+<leverantör> → Kostnad per anrop** (`RegistryPricingForm`, action
+`saveRegistryPricingAction`; credits per datadel + kr/credit + PII-fri
+notering), lagrat i `tenant_integrations.pricing` (json, ingen hemlighet —
+stripas inte av `strip_integration_config.pb.js`). Env-default på web-appen:
+`<SLUG>_CREDITS_<DEL>` (`ROARING_CREDITS_BASIC`, `…_FINANCIALS`,
+`…_GROUP_STRUCTURE`, `…_BENEFICIAL_OWNERS`) + `<SLUG>_SEK_PER_CREDIT`;
+tenantens värde vinner per fält (`mergeRegistryPricing`). Källa av sanning:
+den rena, enhetstestade `company-registry/pricing.ts`
+(`estimateRegistryCost` = valda delar × bolag, `formatRegistryCost`,
+`registryPartCostLabel`, `validateRegistryPricingInput`); IO i
+`pricing.server.ts` (`loadRegistryPricing`/`resolveRegistryPricing`).
+Visas **före** varje hämtning i kryssrutorna (`RegistryPartsPicker`: pris per
+del + "Vald hämtning: N bolag × M delar = K anrop · ≈ credits · ≈ kr") på
+"Testa mot org-nr" (1 bolag), portföljsynk (alla bolag med org-nr),
+bolagskortet (1 bolag) och Bedömning excellens (per bolag + att varje
+koncernbolag kostar lika mycket till, högst 1 + `MAX_RELATED_COMPANIES`), och
+**efter** hämtningen i knappens svar, i synkloggen (`last_sync_summary`,
+"Kostnad: …"), i audit-raden (`activities`, PII-fri) och i bedömningens
+resultat ("Denna bedömning kostade … × uppslagna bolag"). Kostnaden räknas på
+det som BEGÄRS (varje valt API anropas och debiteras oavsett om svaret blir
+tomt) — en uppskattning; leverantörens faktura är facit. Saknas pris för en
+del sägs det ("pris ej angivet", summan märks "minst") med länk till
+inställningen — aldrig 0 kr. `SyncResult.companiesFetched` bär antalet bolag
+en synk anropade leverantören för. Speglat i `setup-via-api.mjs`
+(`patchCollection`), asserterat i `verify-baseline.mjs`
+(`REQUIRED_APP_FIELDS`); sparningen läser tillbaka raden och varnar vid
+schema-drift (§ 24.4). Ingen ny dataväg, ingen PII; riskklass oförändrad.
 
 **GDPR § 5 / § 9.3.** Fysiska personer i ägarbilden lagras UTAN namn,
 personnummer och födelsedatum — bara `owner_kind='person'` + andel/intervall
@@ -8200,10 +8245,15 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
 | Fil | Syfte |
 |-----|-------|
 | `packages/shared/src/excellence-screening.ts` (+ `.test.ts`) | REN regelmotor: `classifyOwnershipEntry` (bilaga I: > 50 % / styrelse / avtal = anknutet, 25–50 % = partner, undantagna investerare, intervall som korsar tröskel = oklart), `deriveRelatedCompanies`, `screenExcellence` (grundförutsättningar per bolag, fristående, viktade tröskelvärden 100 %/andel, de minimis, utfall, Vinnova-punkter, excellens, saknat underlag). Combly-fallet är enhetstestat. |
-| `apps/web/src/lib/integrations/company-registry/lookup.server.ts` | Delad uppslagskärna (validering, rate-limit 20/10 min, credentials, PII-fri audit) — används av BÅDE "Testa mot org-nr" (§ 11.8) och bedömningen; `parts` kan ges explicit för koncernbolagen |
+| `apps/web/src/lib/integrations/company-registry/lookup.server.ts` | Delad uppslagskärna (validering, rate-limit 20/10 min, credentials, PII-fri audit, kostnad per uppslag) — används av BÅDE "Testa mot org-nr" (§ 11.8) och bedömningen; `parts` kan ges explicit för koncernbolagen |
+| `apps/web/src/lib/integrations/company-registry/pricing.ts` (+ `.test.ts`) / `pricing.server.ts` | Kostnad per anrop (credits + kr/credit, § 11.8): ren uppskattning + formatering, IO-läsning av `tenant_integrations.pricing` + env |
 | `apps/web/src/lib/excellence/data.server.ts` | Läsvägar med användarens token (RLS § 21): portföljbolag, sparad ägarbild/bokslut/grundare/de minimis/IRL, anslutna providers, `findStartupByOrgNr` (anknutet bolag som själv är portföljbolag) |
 | `apps/web/src/lib/actions/excellence.ts` | `assessExcellenceAction` — modulgrind, färska uppslag bara admin/incubator_lead, koncernuppslag (tak `MAX_RELATED_COMPANIES` = 6), kör motorn |
-| `apps/web/src/app/bedomning-excellens/{page,ExcellenceWorkspace}.tsx` | Sidan + Combly-strukturerad vy |
+| `apps/web/src/app/bedomning-excellens/{page,ExcellenceWorkspace}.tsx` | Sidan + Combly-strukturerad vy; "Ladda ned PDF" + länk till bolagsmappen i Filer |
+| `apps/web/src/lib/excellence/types.ts` | `ExcellenceAssessment` (ren typmodul — delas av action, PDF och vy) |
+| `apps/web/src/lib/excellence/assessment-pdf.ts` | `buildExcellenceAssessmentPdf` — pdf-lib, samma avsnittsordning som vyn (§ 51.3) |
+| `apps/web/src/lib/excellence/assessment-file.ts` (+ `.test.ts`) | REN: filnamn (`Bedömning excellens – <bolag> – <svensk tid>.pdf`), ämne i Filer |
+| `apps/web/src/lib/excellence/assessment-store.server.ts` | `storeExcellenceAssessmentPdf` — sparar PDF:en i `user_files` (bolagets mapp) via `createUserFileRecord`, fail-soft |
 | `backend/pocketbase-schema/migrations/1700000187_backfill_enabled_modules_bedomning_excellens.js` | Backfill av `users.enabled_modules` (§ 36.3-läxan) |
 
 ### 51.2 Regler (bindande)
@@ -8231,11 +8281,33 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
 - **Kostnad:** varje koncernbolag är egna leverantörsanrop (de valda
   datadelarna × bolag) — kryssrutorna och taket på 6 bolag begränsar;
   samma rate-limit som "Testa mot org-nr". Enskild firma slås aldrig upp.
+  **Priset syns (2026-10-12):** kryssrutorna visar credits/kr per del och
+  "Vald hämtning" per bolag med noten att varje koncernbolag kostar lika
+  mycket till; resultatet visar "Denna bedömning kostade: N bolag × M delar
+  = …" summerat över startup + faktiskt uppslagna koncernbolag
+  (`ExcellenceAssessment.cost`, § 11.8 "Kostnad per anrop"). Priserna anges
+  av ledningen per leverantör — saknas de visas "pris ej angivet", aldrig en
+  gissad siffra.
+- **"Okänt" ska gå att förklara (2026-10-12).** I registerläget visas
+  leverantörens svar per bolag SYNLIGT överst (inte hopfällt): vilken
+  sökväg som svarade, 404 = inga uppgifter, 403 = inte i paketet, vilka
+  fältnycklar svaret bar. `noRecordParts` (§ 11.8) gör att ett nystartat
+  bolag utan bokslut får "Inget bokslut i registret (nystartat?)" i
+  tröskelraden och att fristående-frågan inte fastnar på "koncernstrukturen
+  hämtades inte" när registret svarat "inga rader". Ägartabellen har
+  kolumnen **Källa** (Koncernstruktur / Verklig huvudman, `part`) så man ser
+  vilket API en rad kom ur. Ett moderbolag med bolagsnamn men okänt
+  id-format visas som bolag utan org-nr (kan då inte slås upp vidare —
+  varnas i "Uppslag som inte kunde göras") i stället för som "fysisk
+  person". Det som registret ändå inte svarar på (börsnotering, utdelning,
+  grundarengagemang, innovationshöjd …) är OKÄNT med anvisning om manuell
+  kontroll — det är avsett.
 - **GDPR § 5:** fysiska personer i ägarbilden visas utan namn (som i
   § 11.8); grundarnamn + andel visas ur `startup_team_members` ENBART i
   denna staff-vy (samma data som bolagskortet) och når aldrig AI-kontexten
   (§ 9.3 oförändrad). Audit-raderna (`activities`, `integration_sync`) är
-  PII-fria (leverantör + antal, aldrig org-nr). Inget persisteras.
+  PII-fria (leverantör + antal, aldrig org-nr). Registerdata persisteras
+  inte på bolagskortet; själva bedömningen arkiveras som PDF (§ 51.3).
 - **RBAC/RLS:** modulgrind `canAccessModuleForUser` + roll i actionen;
   färska uppslag kräver admin/incubator_lead (coach bedömer sparade data);
   alla läsningar via användarens token. Ingen ny kollektion, inga nya fält,
@@ -8244,3 +8316,45 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
   60/40 enligt PPT:n — Combly-dokumentet anger 50/30 resp. 80/40) skrivs
   ut i punkten "Grundardrivet" som text; den avgörs manuellt tills Vinnovas
   metodbeskrivning låsts (docs/ai/vinnova-statsstod-screening-agent.md § 2.1).
+
+### 51.3 Var en bedömning lagras — PDF i Filer, i bolagets mapp (2026-10-12)
+
+**Incident:** en bedömning (som kostar credits hos Roaring) fanns bara på
+skärmen — stängde controllern fliken var den borta, och det fanns inget att
+dela eller bifoga. Nu arkiveras **varje körning** automatiskt:
+- `assessExcellenceAction` renderar bedömningen som PDF
+  (`buildExcellenceAssessmentPdf`: pdf-lib + Sora/Nunito, Combly-ordningen:
+  review-rad → steg 1 med grundförutsättningar per bolag, ägarbild med
+  källa, fristående, tröskelvärden, de minimis, GBER-bedömning → steg 2 med
+  grundarteam, Vinnova-punkter, IRL → steg 3 → saknat underlag → bilaga
+  med bokslut och leverantörens noteringar; kostnaden för uppslagen och
+  vem som utförde bedömningen står i huvudet) och sparar den via den
+  delade `createUserFileRecord` (§ 24.4) i **den inloggades Filer**
+  (`user_files`): `doc_kind = pdf`, `source = upload` (deterministisk
+  rendering — ingen AI, därför ingen "genererad"-märkning och ingen
+  AI-klassning), `topic = rapporter_uppfoljning`, `topic_status =
+  confirmed` och **`startup` = bolaget** när bedömningen gällde ett
+  portföljbolag → filen ligger under **Filer → Bolag → <bolag>**
+  (`/filer?vy=bolag&bolag=<id>` är nu en djuplänk dit). Ett valfritt org-nr
+  som inte finns i plattformen sparas utan bolagsmapp (sägs i vyn).
+  Resultatvyn har **"Ladda ned PDF"** (`/api/files/<id>`, samma-origin-proxy
+  § 17) och raden "Sparad som PDF i Filer → Bolag → …" med filnamnet.
+- **Fail-soft:** kan PDF:en inte renderas eller sparas visas bedömningen
+  ändå med `fileError` (orange banner) — en betald körning försvinner
+  aldrig för att arkiveringen föll. Indexering för `search_my_files` (§ 27)
+  görs best-effort efter sparandet, så chatten kan svara på "vad kom vi
+  fram till om Comblys koncern?".
+- **Åtkomst (§ 17.2 / § 21):** `user_files` är **strikt ägaren-bara** —
+  PDF:en syns för den som körde bedömningen, inte för kollegor eller på
+  bolagskortet. Det är en medveten avgränsning: ett delat bolagsdokument
+  (synligt för all staff på bolagskortet) kräver en egen kollektion med
+  staff/observer-RLS och är inte byggt. Dela genom att ladda ned PDF:en.
+  `owner`/`tenant` sätts server-side från den inloggade; nedladdningsproxyn
+  verifierar ägare + tenant.
+- **GDPR § 5:** PDF:en innehåller exakt det vyn redan visar — fysiska
+  personer i ägarbilden utan namn, grundarnamn + andel ur
+  `startup_team_members` (samma staff-krets som bolagskortet), aldrig
+  e-post (`assessedBy` utelämnas när visningsnamnet faller tillbaka på
+  e-post). `user_files` är fortsatt denylistad för `query_collection`
+  (§ 27); loggar bär status, aldrig filnamn (bolagsnamn). Ingen ny
+  kollektion, inga nya fält, ingen migration; riskklass n/a (ingen AI).

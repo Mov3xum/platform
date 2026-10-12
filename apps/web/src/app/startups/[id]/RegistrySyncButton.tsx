@@ -10,6 +10,7 @@ import {
   useRegistryPartSelection
 } from '@/components/integrations/RegistryPartsPicker';
 import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
+import { formatRegistryCost, type RegistryPricing } from '@/lib/integrations/company-registry/pricing';
 
 const initialState: IntegrationSyncState = {};
 
@@ -20,6 +21,9 @@ interface Props {
   /** Datadelar providern kan hämta (§ 11.8). Fler än en ⇒ val före hämtning. */
   registryParts: RegistryPartId[];
   partEndpoints?: Partial<Record<RegistryPartId, string>>;
+  /** Prislista (§ 11.8) — kostnaden visas innan hämtningen bekräftas. */
+  pricing?: RegistryPricing;
+  pricingHref?: string;
 }
 
 // Per-bolag-synk från en ansluten bolagsregister-provider (§ 11.8). Renderas
@@ -31,7 +35,9 @@ export function RegistrySyncButton({
   providerSlug,
   providerName,
   registryParts,
-  partEndpoints
+  partEndpoints,
+  pricing,
+  pricingHref
 }: Props) {
   const [state, formAction, pending] = useActionState(
     syncStartupFromRegistryAction,
@@ -49,7 +55,12 @@ export function RegistrySyncButton({
   const result = state.error ? (
     <span className="text-xs text-movexum-morkorange dark:text-movexum-pastell-orange">{state.error}</span>
   ) : state.summary ? (
-    <span className="text-xs text-foreground-muted">{state.summary}</span>
+    <span className="text-xs text-foreground-muted">
+      {state.summary}
+      {state.cost ? (
+        <span className="mx-tnum block font-semibold text-foreground">Kostnad: {formatRegistryCost(state.cost)}</span>
+      ) : null}
+    </span>
   ) : null;
 
   if (!choosable) {
@@ -98,6 +109,10 @@ export function RegistrySyncButton({
             providerName={providerName}
             hint="Det du inte väljer anropas inte, och befintliga värden på bolagskortet lämnas orörda."
             disabled={pending}
+            pricing={pricing}
+            companies={1}
+            costContext="Ett bolag — detta bolagskort."
+            pricingHref={pricingHref}
           />
           <div className="flex flex-wrap items-center gap-2">
             <button

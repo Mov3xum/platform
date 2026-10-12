@@ -116,6 +116,7 @@ export const roaringHandler: CompanyRegistryHandler = createCompanyRegistryHandl
 
     const bundle: RoaringRawBundle = {};
     const fetchedParts: RegistryPartId[] = [];
+    const noRecordParts: RegistryPartId[] = [];
     const softNotes: string[] = [];
     const take = (
       part: RegistryPartId,
@@ -125,7 +126,12 @@ export const roaringHandler: CompanyRegistryHandler = createCompanyRegistryHandl
     ) => {
       if (!outcome) return;
       softNotes.push(responseNote(label, outcome));
-      if (!outcome.ok) return;
+      if (!outcome.ok) {
+        // 404 = Roaring har inga uppgifter i det API:t (nystartat bolag utan
+        // bokslut, bolag utanför varje koncern, inga registrerade huvudmän).
+        if (outcome.status === 404) noRecordParts.push(part);
+        return;
+      }
       assign(outcome.data);
       fetchedParts.push(part);
     };
@@ -140,6 +146,7 @@ export const roaringHandler: CompanyRegistryHandler = createCompanyRegistryHandl
     });
     company.notes.push(...softNotes);
     company.fetchedParts = fetchedParts;
+    company.noRecordParts = noRecordParts;
     return company;
   }
 });

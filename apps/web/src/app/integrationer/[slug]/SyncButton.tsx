@@ -10,6 +10,7 @@ import {
   useRegistryPartSelection
 } from '@/components/integrations/RegistryPartsPicker';
 import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
+import { formatRegistryCost, type RegistryPricing } from '@/lib/integrations/company-registry/pricing';
 
 interface Props {
   tenantIntegrationId: string;
@@ -18,6 +19,10 @@ interface Props {
   registryParts?: RegistryPartId[];
   partEndpoints?: Partial<Record<RegistryPartId, string>>;
   providerName?: string;
+  /** Prislista + antal bolag med org-nr → kostnad för hela portföljsynken (§ 11.8). */
+  pricing?: RegistryPricing;
+  companies?: number;
+  pricingHref?: string;
 }
 
 const initialState: IntegrationSyncState = {};
@@ -27,7 +32,10 @@ export function SyncButton({
   providerSlug,
   registryParts,
   partEndpoints,
-  providerName
+  providerName,
+  pricing,
+  companies,
+  pricingHref
 }: Props) {
   const [state, formAction, pending] = useActionState(
     syncIntegrationAction,
@@ -51,6 +59,10 @@ export function SyncButton({
           providerName={providerName || providerSlug}
           hint="Gäller alla bolag med org-nr. Det du inte väljer anropas inte, och befintliga värden lämnas orörda."
           disabled={pending}
+          pricing={pricing}
+          companies={companies ?? 0}
+          costContext="Hela portföljen: alla bolag med org-nr hämtas i en körning."
+          pricingHref={pricingHref}
         />
       )}
       <button
@@ -69,6 +81,12 @@ export function SyncButton({
       {state.summary && !state.error && (
         <p className="rounded-xl bg-movexum-pastell-gron px-3 py-2 text-xs text-movexum-morkgron dark:bg-movexum-morkgron/30 dark:text-movexum-pastell-gron">
           {state.summary}
+        </p>
+      )}
+      {state.cost && !state.error && (
+        <p className="text-[12px] text-foreground-muted mx-tnum">
+          <span className="font-semibold text-foreground">Denna synk kostade:</span> {state.cost.companies} bolag ×{' '}
+          {state.cost.parts.length} delar = {formatRegistryCost(state.cost)} (uppskattning enligt angivna priser).
         </p>
       )}
     </form>

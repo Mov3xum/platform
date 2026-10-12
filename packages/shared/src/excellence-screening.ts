@@ -32,6 +32,8 @@ export interface ScreeningOwnershipEntry {
   /** Fast vokabulär: shares | votes | board | agreement | other. */
   control_basis?: string;
   indirect?: boolean;
+  /** Vilken datadel raden kom ur (koncernstruktur / verklig huvudman), när känt. */
+  part?: 'group_structure' | 'beneficial_owners';
 }
 
 export interface ScreeningFinancialsYear {

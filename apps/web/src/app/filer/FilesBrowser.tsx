@@ -37,14 +37,19 @@ function topicIcon(topic: FileTopic): string {
 
 export default function FilesBrowser({
   initialFiles,
-  startups
+  startups,
+  initialView = 'amnen',
+  initialOpenKey = null
 }: {
   initialFiles: UserFileListItem[];
   startups: StartupOption[];
+  /** Djuplänk (`/filer?vy=bolag&bolag=<id>`, t.ex. från Bedömning excellens § 51.3). */
+  initialView?: View;
+  initialOpenKey?: string | null;
 }) {
   const [files, setFiles] = useState<UserFileListItem[]>(initialFiles);
-  const [view, setView] = useState<View>('amnen');
-  const [openKey, setOpenKey] = useState<string | null>(null);
+  const [view, setView] = useState<View>(initialView);
+  const [openKey, setOpenKey] = useState<string | null>(initialOpenKey);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();

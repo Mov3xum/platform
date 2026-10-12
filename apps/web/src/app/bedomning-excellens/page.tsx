@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 // Bedömning excellens (CLAUDE.md § 51): förscreening av ett bolag och dess
 // koncern mot art. 22 GBER / de minimis och Vinnovas målgrupp, med färsk data
 // från bolagsregistret (Roaring) eller det som redan är sparat. Deterministiskt
-// underlag — ingen AI, inget beslut, inget sparas.
+// underlag — ingen AI, inget beslut; bedömningen arkiveras som PDF i Filer (§ 51.3).
 export default async function BedomningExcellensPage({
   searchParams
 }: {
@@ -42,8 +42,9 @@ export default async function BedomningExcellensPage({
           Följer tankemodellen för SMF-stöd och excellens: steg 1 utreder ägande, grundförutsättningar
           och tröskelvärden för startup-bolaget och dess anknutna/partnerföretag, steg 2 Vinnovas
           målgrupp och steg 3 excellensvillkoren. Varje punkt får Ja / Nej / Okänt med källa — inget
-          gissas och inget beslut fattas här. Registerdata från Roaring hämtas utan att sparas;
-          synka bolagskortet separat när du vill behålla den.
+          gissas och inget beslut fattas här. Registerdata från Roaring sparas inte på bolagskortet
+          (synka det separat när du vill behålla den) — men varje bedömning sparas som PDF i dina
+          Filer, i bolagets mapp, och kan laddas ned direkt.
         </p>
         <ExcellenceWorkspace
           startups={startups}

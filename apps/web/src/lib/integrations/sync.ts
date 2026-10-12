@@ -193,6 +193,7 @@ async function runRegistrySync(
   skipped: number;
   fetchError: string | null;
   skipSummary: string;
+  startupsTotal: number;
 }> {
   try {
     const result = await handler.syncRegistry(creds, ctx);
@@ -211,7 +212,8 @@ async function runRegistrySync(
       ownershipWritten: result.ownershipWritten ?? 0,
       skipped: result.skipped,
       fetchError: null,
-      skipSummary
+      skipSummary,
+      startupsTotal: result.startupsTotal ?? result.startupsUpdated + result.skipped
     };
   } catch (err) {
     return {
@@ -220,7 +222,8 @@ async function runRegistrySync(
       ownershipWritten: 0,
       skipped: 0,
       fetchError: toError(err),
-      skipSummary: ''
+      skipSummary: '',
+      startupsTotal: 0
     };
   }
 }
@@ -416,7 +419,8 @@ export async function runRegistrySyncForStartup(
     recordsUpdated: result.startupsUpdated,
     recordsSkipped: result.skipped,
     errorMessage: fetchError || startupError || undefined,
-    durationMs
+    durationMs,
+    companiesFetched: 1
   };
 }
 
@@ -543,6 +547,7 @@ export async function runSync(
   let ownershipWritten = 0;
   let fetchError: string | null = null;
   let skipSummary = '';
+  let companiesFetched: number | undefined;
 
   const kind = handler.kind ?? 'records';
   if (kind === 'company_registry') {
@@ -557,6 +562,7 @@ export async function runSync(
     skipped = result.skipped;
     ownershipWritten = result.ownershipWritten;
     skipSummary = result.skipSummary;
+    companiesFetched = result.startupsTotal;
   } else {
     const result = await runRecordsSync(
       adminPb,
@@ -632,6 +638,7 @@ export async function runSync(
     recordsUpdated: updated,
     recordsSkipped: skipped,
     errorMessage: fetchError || skipSummary || undefined,
+    companiesFetched,
     durationMs
   };
 }

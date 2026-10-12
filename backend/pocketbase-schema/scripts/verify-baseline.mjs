@@ -1123,6 +1123,9 @@ const REQUIRED_APP_FIELDS = [
   // Teamtak (§ 29.7, migration 1700000181): utan fältet "sparas" ledningens
   // tak tyst bort och alla får default 3.
   { collection: 'tenants', fields: ['max_active_teams_per_person'] },
+  // Bolagsregister (§ 11.8): kostnad per API-anrop (migration 1700000188) —
+  // utan fältet "sparas" ledningens priser tyst som no-op.
+  { collection: 'tenant_integrations', fields: ['pricing'] },
   // Notifikationssystemet (§ 50, migration 1700000186): utan fälten tappas
   // gruppering, tystning och "sedd"-markering tyst.
   {

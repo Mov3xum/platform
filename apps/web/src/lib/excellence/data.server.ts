@@ -17,6 +17,8 @@ import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { getHandler, listCompanyRegistrySlugs } from '@/lib/integrations/registry';
 import { isPersonalOrgNr, normalizeOrgNr } from '@/lib/integrations/company-registry/orgnr';
 import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
+import { resolveRegistryPricing } from '@/lib/integrations/company-registry/pricing.server';
+import type { RegistryPricing } from '@/lib/integrations/company-registry/pricing';
 import type { RegistryCompany } from '@/lib/integrations/company-registry/types';
 
 // Läsvägar för "Bedömning excellens" (CLAUDE.md § 51). Allt läses med
@@ -35,6 +37,8 @@ export interface ConnectedRegistry {
   name: string;
   parts: RegistryPartId[];
   partEndpoints?: Partial<Record<RegistryPartId, string>>;
+  /** Prislista (§ 11.8) — kostnaden visas innan uppslagen görs. */
+  pricing: RegistryPricing;
 }
 
 export interface PlatformStartupFacts {
@@ -104,19 +108,25 @@ export async function listConnectedRegistries(pb: PocketBase, tenantId: string):
     const registrySlugs = new Set(listCompanyRegistrySlugs());
     const res = await pb
       .collection('tenant_integrations')
-      .getList<{ expand?: { provider?: { slug: string; name: string } } }>(1, 50, {
+      .getList<{ pricing?: unknown; expand?: { provider?: { slug: string; name: string } } }>(1, 50, {
         filter: pb.filter('tenant = {:tenant} && status = "connected"', { tenant: tenantId }),
         expand: 'provider',
-        fields: 'id,expand.provider.slug,expand.provider.name'
+        fields: 'id,pricing,expand.provider.slug,expand.provider.name'
       });
     return res.items
-      .map((r) => r.expand?.provider)
-      .filter((p): p is { slug: string; name: string } => !!p && registrySlugs.has(p.slug))
-      .map((p): ConnectedRegistry | null => {
+      .map((r) => ({ provider: r.expand?.provider, pricing: r.pricing }))
+      .filter((x): x is { provider: { slug: string; name: string }; pricing: unknown } => !!x.provider && registrySlugs.has(x.provider.slug))
+      .map(({ provider: p, pricing }): ConnectedRegistry | null => {
         const h = getHandler(p.slug);
         const registry = h?.kind === 'company_registry' && h.lookup ? h : undefined;
         return registry
-          ? { slug: p.slug, name: p.name, parts: registry.parts, partEndpoints: registry.partEndpoints?.() }
+          ? {
+              slug: p.slug,
+              name: p.name,
+              parts: registry.parts,
+              partEndpoints: registry.partEndpoints?.(),
+              pricing: resolveRegistryPricing(p.slug, pricing)
+            }
           : null;
       })
       .filter((p): p is ConnectedRegistry => p !== null)
@@ -145,6 +155,8 @@ function mapOwnershipRow(r: Record<string, unknown>): ScreeningOwnershipEntry {
   const basis = str(r.control_basis);
   if (basis && /^[a-z_]{1,20}$/.test(basis)) entry.control_basis = basis;
   if (r.indirect === true) entry.indirect = true;
+  const part = str(r.source_part);
+  if (part === 'group_structure' || part === 'beneficial_owners') entry.part = part;
   return entry;
 }
 
@@ -289,6 +301,7 @@ export function groupFactsFromSaved(f: PlatformStartupFacts): GroupCompanyFacts 
 /** Koncernbolag ur ett färskt registeruppslag. */
 export function groupFactsFromRegistry(company: RegistryCompany, fallbackName?: string): GroupCompanyFacts {
   const fetched = company.fetchedParts ?? [];
+  const noRecord = company.noRecordParts ?? [];
   return {
     orgNr: company.org_nr,
     name: company.name ?? fallbackName,
@@ -301,7 +314,10 @@ export function groupFactsFromRegistry(company: RegistryCompany, fallbackName?: 
           isPersonal: company.isPersonal
         }
       : undefined,
-    financials: fetched.includes('financials') ? company.financials : undefined,
+    // "Inga uppgifter" (404 hos leverantören — nystartat bolag utan bokslut)
+    // är ett SVAR, inte ett uteblivet uppslag: tom lista i stället för
+    // undefined så tröskelraden säger "inget bokslut i registret".
+    financials: fetched.includes('financials') ? company.financials : noRecord.includes('financials') ? [] : undefined,
     ownership: company.ownership.map((o) => ({
       direction: o.direction,
       owner_kind: o.owner_kind,
@@ -312,10 +328,14 @@ export function groupFactsFromRegistry(company: RegistryCompany, fallbackName?: 
       pct_min: o.pct_min,
       pct_max: o.pct_max,
       control_basis: o.control_basis,
-      indirect: o.indirect
+      indirect: o.indirect,
+      part: o.part === 'group_structure' || o.part === 'beneficial_owners' ? o.part : undefined
     })),
-    groupStructureFetched: fetched.includes('group_structure'),
-    beneficialOwnersFetched: fetched.includes('beneficial_owners')
+    // Ett bolag utanför varje koncern / utan registrerade huvudmän får 404 —
+    // delen ÄR hämtad (svaret är "inga rader"), annars ser varje fristående
+    // bolag ut som ett ohämtat.
+    groupStructureFetched: fetched.includes('group_structure') || noRecord.includes('group_structure'),
+    beneficialOwnersFetched: fetched.includes('beneficial_owners') || noRecord.includes('beneficial_owners')
   };
 }
 

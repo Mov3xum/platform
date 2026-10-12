@@ -9,7 +9,8 @@ import {
   type ScreeningCheck,
   type ScreeningOwnershipEntry,
   type ScreeningSource,
-  type ScreeningVerdict
+  type ScreeningVerdict,
+  MAX_RELATED_COMPANIES
 } from '@platform/shared';
 import {
   assessExcellenceAction,
@@ -21,6 +22,7 @@ import {
   useRegistryPartSelection
 } from '@/components/integrations/RegistryPartsPicker';
 import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
+import { formatRegistryCost, type RegistryPricing } from '@/lib/integrations/company-registry/pricing';
 
 interface StartupOption {
   id: string;
@@ -33,6 +35,8 @@ interface RegistryOption {
   name: string;
   parts: RegistryPartId[];
   partEndpoints?: Partial<Record<RegistryPartId, string>>;
+  /** Prislista (§ 11.8) — kostnaden visas innan uppslagen görs. */
+  pricing: RegistryPricing;
 }
 
 interface Props {
@@ -58,6 +62,10 @@ const SOURCE_LABEL: Record<ScreeningSource, string> = {
   register: 'Bolagsregister',
   platform: 'Plattformen',
   manual: 'Manuell kontroll'
+};
+const PART_LABEL: Record<'group_structure' | 'beneficial_owners', string> = {
+  group_structure: 'Koncernstruktur',
+  beneficial_owners: 'Verklig huvudman'
 };
 const OWNER_KIND_LABEL: Record<string, string> = {
   company: 'Bolag',
@@ -125,12 +133,13 @@ function OwnershipTable({ rows, caption }: { rows: ScreeningOwnershipEntry[]; ca
             <th className="px-3 py-1.5 font-medium">Typ</th>
             <th className="px-3 py-1.5 font-medium">% kapital</th>
             <th className="px-3 py-1.5 font-medium">% röster</th>
+            <th className="px-3 py-1.5 font-medium">Källa</th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 ? (
             <tr className="border-t border-default">
-              <td colSpan={4} className="px-3 py-2 text-foreground-muted">Inga rader i underlaget.</td>
+              <td colSpan={5} className="px-3 py-2 text-foreground-muted">Inga rader i underlaget.</td>
             </tr>
           ) : (
             rows.map((o, i) => {
@@ -147,6 +156,7 @@ function OwnershipTable({ rows, caption }: { rows: ScreeningOwnershipEntry[]; ca
                   <td className="px-3 py-1.5 text-foreground-muted">{OWNER_KIND_LABEL[o.owner_kind] ?? o.owner_kind}</td>
                   <td className="px-3 py-1.5 text-foreground-muted mx-tnum">{range ?? pctText(o.capital_pct)}</td>
                   <td className="px-3 py-1.5 text-foreground-muted mx-tnum">{range ? '' : pctText(o.voting_pct)}</td>
+                  <td className="px-3 py-1.5 text-[11.5px] text-foreground-subtle">{o.part ? PART_LABEL[o.part] : '–'}</td>
                 </tr>
               );
             })
@@ -275,6 +285,10 @@ export function ExcellenceWorkspace({ startups, registries, canLookup, initialSt
                   providerName={provider.name}
                   hint="Bara de valda API:erna anropas — för startup-bolaget OCH varje anknutet/partnerbolag — och varje anrop debiteras. Inget sparas. Koncernstruktur krävs för att hitta anknutna bolag; grunddata för deras ålder; bokslut för tröskelvärdet."
                   disabled={pending}
+                  pricing={provider.pricing}
+                  companies={1}
+                  costContext={`Per bolag. Varje anknutet/partnerbolag i ägarbilden slås upp med samma delar (högst ${MAX_RELATED_COMPANIES} till) — kostnaden kan bli upp till ${1 + MAX_RELATED_COMPANIES} × detta. Den faktiska summan visas i resultatet.`}
+                  pricingHref={`/integrationer/${provider.slug}#kostnad`}
                 />
               )}
             </>
@@ -397,7 +411,7 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
     <section className="space-y-6">
       <header className="border-b border-default pb-3">
         <p className="text-[10.5px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
-          {assessment.mode === 'register' ? `Färskt från ${assessment.providerName} · inget sparat` : 'Sparade data i plattformen'}
+          {assessment.mode === 'register' ? `Färskt från ${assessment.providerName} · registerdata sparas inte på bolagskortet` : 'Sparade data i plattformen'}
           {' · '}
           {new Date(assessment.assessedAt).toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm' })}
         </p>
@@ -411,13 +425,58 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
               {subject.industri ? ` · ${subject.industri}` : ''}
             </p>
           </div>
-          {subject.startupId && (
-            <Link href={`/startups/${subject.startupId}`} className="text-[12.5px] font-semibold text-link hover:underline">
-              Öppna bolagskortet →
-            </Link>
-          )}
+          <div className="flex flex-wrap items-center gap-3">
+            {assessment.file && (
+              <a
+                href={assessment.file.href}
+                className="inline-flex items-center rounded-full bg-brand px-3.5 py-1.5 text-[12.5px] font-semibold text-brand-foreground hover:bg-brand-hover"
+              >
+                Ladda ned PDF
+              </a>
+            )}
+            {subject.startupId && (
+              <Link href={`/startups/${subject.startupId}`} className="text-[12.5px] font-semibold text-link hover:underline">
+                Öppna bolagskortet →
+              </Link>
+            )}
+          </div>
         </div>
+        {/* Var bedömningen ligger (§ 51.3): PDF i den inloggades Filer, i
+            bolagets mapp när det är ett portföljbolag. Fail-soft: ett
+            lagringsfel visas, bedömningen visas ändå. */}
+        {assessment.file ? (
+          <p className="mt-2 text-[12.5px] text-foreground-muted">
+            Sparad som PDF i{' '}
+            <Link
+              href={assessment.file.startupId ? `/filer?vy=bolag&bolag=${assessment.file.startupId}` : '/filer'}
+              className="font-semibold text-link hover:underline"
+            >
+              Filer{assessment.file.startupId ? ` → Bolag → ${subjectName}` : ' → Rapporter & uppföljning'}
+            </Link>{' '}
+            (<span className="mx-tnum">{assessment.file.filename}</span>)
+            {!assessment.file.startupId && ' — bolaget finns inte i plattformen, så filen ligger utan bolagsmapp.'}
+          </p>
+        ) : assessment.fileError ? (
+          <p className={`mt-2 inline-block rounded-xl px-3 py-1.5 text-[12.5px] ${WARN_TONE}`}>{assessment.fileError}</p>
+        ) : null}
       </header>
+
+      {assessment.cost && (
+        <p
+          className={`rounded-xl border px-3 py-2 text-[12.5px] mx-tnum ${
+            assessment.cost.complete
+              ? 'border-default bg-canvas-subtle text-foreground'
+              : 'border-movexum-morkgul/40 bg-movexum-pastell-gul text-movexum-morkgul dark:bg-movexum-morkgul/30 dark:text-movexum-pastell-gul'
+          }`}
+        >
+          <span className="font-semibold">Denna bedömning kostade hos {assessment.providerName}:</span>{' '}
+          {assessment.cost.companies} {assessment.cost.companies === 1 ? 'bolag' : 'bolag'} × {assessment.cost.parts.length}{' '}
+          {assessment.cost.parts.length === 1 ? 'del' : 'delar'} = {formatRegistryCost(assessment.cost)}.{' '}
+          <span className="font-normal opacity-90">
+            Uppskattning enligt angivna priser (valda delar × uppslagna bolag) — {assessment.providerName}s faktura är facit.
+          </span>
+        </p>
+      )}
 
       {assessment.lookupWarnings.length > 0 && (
         <ul className={`rounded-xl px-3 py-2 text-[12.5px] ${WARN_TONE}`}>
@@ -425,6 +484,32 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
             <li key={i}>{w}</li>
           ))}
         </ul>
+      )}
+
+      {/* Vad leverantören faktiskt svarade — synligt direkt, inte hopfällt:
+          det är här man ser varför en del blev "okänt" (404 = inga uppgifter,
+          403 = inte i paketet, fält som saknades i svaret). PII-fritt. */}
+      {assessment.mode === 'register' && assessment.notes.some((n) => n.notes.length > 0) && (
+        <div className="rounded-2xl border border-default bg-canvas-subtle px-4 py-3">
+          <p className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
+            Svar från {assessment.providerName ?? 'bolagsregistret'} per bolag
+          </p>
+          <div className="mt-2 space-y-3">
+            {assessment.notes.map((n) => (
+              <div key={n.orgNr}>
+                <p className="text-[12px] font-semibold text-foreground">
+                  {n.name || formatOrgNr(n.orgNr)}
+                  <span className="ml-2 font-normal text-foreground-subtle mx-tnum">{formatOrgNr(n.orgNr)}</span>
+                </p>
+                <ul className="mt-1 list-disc space-y-0.5 pl-5 text-[12px] text-foreground-muted">
+                  {n.notes.map((t, i) => (
+                    <li key={i}>{t}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {/* Review-raden — som i Combly-dokumentet: datum, GBER, Vinnova, kommentar. */}
