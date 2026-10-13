@@ -352,6 +352,7 @@ export function groupFactsFromRegistry(company: RegistryCompany, fallbackName?: 
       owner_kind: o.owner_kind,
       name: o.owner_kind === 'person' ? undefined : o.name,
       org_nr: o.owner_kind === 'person' ? undefined : (normalizeOrgNr(o.org_nr) ?? undefined),
+      person_name: o.owner_kind === 'person' ? o.person_name : undefined,
       capital_pct: o.capital_pct,
       voting_pct: o.voting_pct,
       pct_min: o.pct_min,

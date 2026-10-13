@@ -73,6 +73,14 @@ export interface RegistryOwnershipEntry {
   owner_kind: OwnerKind;
   /** Bolagsnamn. Tomt för fysiska personer (dataminimering). */
   name?: string;
+  /**
+   * TRANSIENT: en fysisk persons namn (för- och efternamn) ur verklig
+   * huvudman — visas bara på skärmen direkt efter hämtningen så personalen
+   * vet VEM huvudmannen är (§ 51.7). Skrivs ALDRIG till databasen
+   * (`writer.ts` bygger raden utan fältet), aldrig till PDF/historik, aldrig
+   * till AI. Personnummer, födelsedatum och adress läses aldrig.
+   */
+  person_name?: string;
   /** Org-nr (10 siffror) för juridiska personer. Tomt för fysiska personer. */
   org_nr?: string;
   /** Exakt kapitalandel i procent när källan ger den. */

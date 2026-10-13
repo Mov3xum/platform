@@ -3,6 +3,7 @@ import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import { PageShell } from '@/components/PageShell';
 import { listConnectedRegistries, listScreenableStartups } from '@/lib/excellence/data.server';
+import { listAssignableResourcesForTenant } from '@/lib/assignments/collaboration';
 import { ExcellenceWorkspace } from './ExcellenceWorkspace';
 
 export const dynamic = 'force-dynamic';
@@ -23,10 +24,13 @@ export default async function BedomningExcellensPage({
   // Färska uppslag debiteras per anrop — samma krets som "Testa mot org-nr".
   const canLookup = hasRole(user.roles, ['admin', 'incubator_lead']);
   const pb = await getServerPb();
-  const [startups, registries] = await Promise.all([
+  const [startups, registries, coaches] = await Promise.all([
     listScreenableStartups(pb, user.tenant),
-    canLookup ? listConnectedRegistries(pb, user.tenant) : Promise.resolve([])
+    canLookup ? listConnectedRegistries(pb, user.tenant) : Promise.resolve([]),
+    // Kollegor en begäran om komplettering kan gå till (§ 51.6) — aldrig den inloggade själv.
+    listAssignableResourcesForTenant(pb, user.tenant).then((rows) => rows.filter((r) => r.id !== user.id))
   ]);
+  const senderName = user.name && !user.name.includes('@') ? user.name : undefined;
 
   return (
     <PageShell
@@ -51,6 +55,8 @@ export default async function BedomningExcellensPage({
           registries={registries}
           canLookup={canLookup}
           initialStartupId={initialStartupId}
+          coaches={coaches}
+          senderName={senderName}
         />
       </div>
     </PageShell>

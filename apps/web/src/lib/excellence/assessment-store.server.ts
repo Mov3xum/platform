@@ -21,23 +21,33 @@ import type { ExcellenceAssessment } from './types';
  * (fysiska personer i ägarbilden utan namn; grundarnamn ur teamet på
  * bolagskortet, samma staff-krets som bolagskortet).
  */
+export async function renderExcellenceAssessmentPdf(
+  assessment: ExcellenceAssessment
+): Promise<{ buffer: Buffer; filename: string } | null> {
+  try {
+    const buffer = await buildExcellenceAssessmentPdf(assessment);
+    return {
+      buffer,
+      filename: excellenceAssessmentFilename({
+        subjectName: assessment.subject.name,
+        orgNr: assessment.subject.orgNr,
+        assessedAt: assessment.assessedAt
+      })
+    };
+  } catch (err) {
+    console.error('[excellence] pdf render failed', { message: err instanceof Error ? err.message : String(err) });
+    return null;
+  }
+}
+
 export async function storeExcellenceAssessmentPdf(
   pb: PocketBase,
   user: { id: string; tenant: string },
-  assessment: ExcellenceAssessment
+  assessment: ExcellenceAssessment,
+  pdf: { buffer: Buffer; filename: string } | null
 ): Promise<ExcellenceAssessment> {
-  let buffer: Buffer;
-  try {
-    buffer = await buildExcellenceAssessmentPdf(assessment);
-  } catch (err) {
-    console.error('[excellence] pdf render failed', { message: err instanceof Error ? err.message : String(err) });
-    return { ...assessment, fileError: 'Bedömningen kunde inte renderas som PDF. Den visas ändå nedan.' };
-  }
-  const filename = excellenceAssessmentFilename({
-    subjectName: assessment.subject.name,
-    orgNr: assessment.subject.orgNr,
-    assessedAt: assessment.assessedAt
-  });
+  if (!pdf) return { ...assessment, fileError: 'Bedömningen kunde inte renderas som PDF. Den visas ändå nedan.' };
+  const { buffer, filename } = pdf;
   try {
     const rec = await createUserFileRecord(
       pb,

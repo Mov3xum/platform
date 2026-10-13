@@ -4365,6 +4365,84 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
 });
 
+// Migration 1700000191 (§ 51.6): Bedömning excellens på bolagskortet +
+// begäran om komplettering. `startup_screenings` = en rad per körning
+// (utfall + PII-fri sammanfattning + PDF, protected fil via proxy) —
+// list/view staff/observer; create pinnad (tenant + assessed_by); update/
+// delete ledning. `screening_requests` = controllerns begäran till coachen
+// eller bolaget; bolagsmedlem ser/svarar bara när förfrågan är ställd till
+// bolaget (recipient_kind = "startup") och får inte röra identitets-/
+// avsändarfälten (body-låst). Båda denylistade för AI (lib/ai/redaction.ts).
+await ensureCollection({
+  id: 'startup_screenings_collection',
+  name: 'startup_screenings',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'org_nr', type: 'text', required: false, max: 20 },
+    { name: 'subject_name', type: 'text', required: false, max: 200 },
+    { name: 'mode', type: 'select', required: true, maxSelect: 1, values: ['register', 'saved'] },
+    { name: 'provider', type: 'text', required: false, max: 60 },
+    { name: 'state_aid_outcome', type: 'select', required: true, maxSelect: 1, values: ['art22_possible', 'de_minimis', 'not_eligible', 'undetermined'] },
+    { name: 'vinnova_outcome', type: 'select', required: true, maxSelect: 1, values: ['in_target_possible', 'not_in_target', 'undetermined'] },
+    { name: 'excellence_verdict', type: 'select', required: true, maxSelect: 1, values: ['yes', 'no', 'unknown'] },
+    { name: 'summary', type: 'json', required: false, maxSize: 200000 },
+    { name: 'assessed_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'assessed_at', type: 'date', required: false },
+    { name: 'file', type: 'file', required: false, maxSelect: 1, maxSize: 15000000, mimeTypes: ['application/pdf'], protected: true },
+    { name: 'filename', type: 'text', required: false, max: 200 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_startup_screenings_tenant ON startup_screenings (tenant)',
+    'CREATE INDEX idx_startup_screenings_startup_at ON startup_screenings (startup, assessed_at)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  createRule: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.assessed_by = @request.auth.id`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+});
+
+const SCREENING_REQUEST_MEMBER = '(@request.auth.roles:each ?= "startup_member" && @request.auth.linked_startups:each ?= startup)';
+const SCREENING_REQUEST_MEMBER_LOCKED = ['tenant', 'startup', 'screening', 'requested_by', 'recipient_kind', 'recipient', 'message', 'due_at', 'closed_by', 'closed_at']
+  .map((f) => `@request.body.${f}:isset = false`)
+  .join(' && ');
+await ensureCollection({
+  id: 'screening_requests_collection',
+  name: 'screening_requests',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'screening', type: 'relation', required: false, collectionId: 'startup_screenings_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'requested_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'recipient_kind', type: 'select', required: true, maxSelect: 1, values: ['coach', 'startup'] },
+    { name: 'recipient', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'message', type: 'text', required: false, max: 2000 },
+    { name: 'items', type: 'json', required: false, maxSize: 100000 },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['open', 'partially_answered', 'answered', 'closed'] },
+    { name: 'due_at', type: 'date', required: false },
+    { name: 'answered_at', type: 'date', required: false },
+    { name: 'closed_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'closed_at', type: 'date', required: false }
+  ],
+  indexes: [
+    'CREATE INDEX idx_screening_requests_tenant_status ON screening_requests (tenant, status)',
+    'CREATE INDEX idx_screening_requests_startup ON screening_requests (startup)',
+    'CREATE INDEX idx_screening_requests_recipient ON screening_requests (recipient)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || (${SCREENING_REQUEST_MEMBER} && recipient_kind = "startup"))`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || (${SCREENING_REQUEST_MEMBER} && recipient_kind = "startup"))`,
+  createRule: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.requested_by = @request.auth.id`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_EACH} || (${SCREENING_REQUEST_MEMBER} && recipient_kind = "startup" && ${SCREENING_REQUEST_MEMBER_LOCKED}))`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_LEAD_EACH} || @request.auth.id = requested_by)`
+});
+
 // Migration 1700000186 (§ 50): notifications.kind blir TEXT — ersätter de
 // tidigare select-unionerna (1700000158/1700000169). Kan REST inte byta typ
 // (validation_field_type_change) unionas select-värdena i stället, så nya
@@ -5223,6 +5301,9 @@ const FORCE_CREATE_RULES = {
   // Önskemål & buggar (§ 49, migration 1700000176) — roll-enforcement i server-actionen.
   feedback_items: `${ANY_AUTH} && @request.auth.tenant != ""`,
   competence_tags: `${ANY_AUTH} && @request.auth.tenant != "" && @request.body.created_by = @request.auth.id && @request.body.status = "suggested" && @request.body.tenant = @request.auth.tenant`,
+  // Bedömning excellens (§ 51.6, migration 1700000191) — pinnade skapare.
+  startup_screenings: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.assessed_by = @request.auth.id`,
+  screening_requests: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.requested_by = @request.auth.id`,
   // Stödcheckar & finansieringsprojekt (§ 46, migrationer 1700000161–167) —
   // roll-/medlemskontroll i skrivlagret och route-handlers.
   funding_projects: `${ANY_AUTH} && @request.auth.tenant != ""`,

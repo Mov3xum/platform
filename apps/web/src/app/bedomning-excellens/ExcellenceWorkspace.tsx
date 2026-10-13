@@ -17,6 +17,7 @@ import {
 } from '@platform/shared';
 import {
   assessExcellenceAction,
+  fetchGroupCompanyAction,
   type ExcellenceAssessment,
   type ExcellenceAssessmentState
 } from '@/lib/actions/excellence';
@@ -24,9 +25,10 @@ import {
   RegistryPartsPicker,
   useRegistryPartSelection
 } from '@/components/integrations/RegistryPartsPicker';
-import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
-import { formatRegistryCost, type RegistryPricing } from '@/lib/integrations/company-registry/pricing';
+import { REGISTRY_PART_META, type RegistryPartId } from '@/lib/integrations/company-registry/parts';
+import { estimateRegistryCost, formatRegistryCost, registryPartCostLabel, type RegistryPricing } from '@/lib/integrations/company-registry/pricing';
 import { ManualFactsPanel } from './ManualFactsPanel';
+import { ScreeningRequestComposer } from './ScreeningRequestComposer';
 
 interface StartupOption {
   id: string;
@@ -43,11 +45,24 @@ interface RegistryOption {
   pricing: RegistryPricing;
 }
 
+/** Leverantören som fler uppslag ur koncernkartan görs mot (§ 51.7). */
+interface FetchMoreConfig {
+  providerSlug: string;
+  providerName: string;
+  parts: RegistryPartId[];
+  endpoints?: Partial<Record<RegistryPartId, string>>;
+  pricing: RegistryPricing;
+}
+
 interface Props {
   startups: StartupOption[];
   registries: RegistryOption[];
   canLookup: boolean;
   initialStartupId?: string;
+  /** Kollegor en begäran om komplettering kan gå till (§ 51.6). */
+  coaches: Array<{ id: string; name: string }>;
+  /** Den inloggades visningsnamn (avsändare i den kopierade texten). */
+  senderName?: string;
 }
 
 const initialState: ExcellenceAssessmentState = {};
@@ -151,7 +166,18 @@ function OwnershipTable({ rows, caption }: { rows: ScreeningOwnershipEntry[]; ca
               return (
                 <tr key={i} className="border-t border-default">
                   <td className="px-3 py-1.5 text-foreground">
-                    {o.owner_kind === 'person' ? 'Fysisk person (namn lagras inte)' : o.name || '–'}
+                    {o.owner_kind === 'person' ? (
+                      o.person_name ? (
+                        <>
+                          {o.person_name}
+                          <span className="ml-2 text-[11px] text-foreground-subtle">fysisk person · visas bara här, lagras inte</span>
+                        </>
+                      ) : (
+                        'Fysisk person (namn lagras inte)'
+                      )
+                    ) : (
+                      o.name || '–'
+                    )}
                     {o.org_nr && o.owner_kind !== 'person' ? (
                       <span className="ml-2 text-[11.5px] text-foreground-subtle mx-tnum">{formatOrgNr(o.org_nr)}</span>
                     ) : null}
@@ -175,7 +201,7 @@ function OwnershipTable({ rows, caption }: { rows: ScreeningOwnershipEntry[]; ca
 // bolagsregistret för hela koncernen (inget sparas) eller bedöm det som redan
 // är sparat → ett underlag i samma ordning som referensbedömningen
 // "Bedömning Vinnova Combly".
-export function ExcellenceWorkspace({ startups, registries, canLookup, initialStartupId }: Props) {
+export function ExcellenceWorkspace({ startups, registries, canLookup, initialStartupId, coaches, senderName }: Props) {
   const [state, formAction, pending] = useActionState(assessExcellenceAction, initialState);
   const canFetch = canLookup && registries.length > 0;
   const [target, setTarget] = useState<'portfolio' | 'orgnr'>(
@@ -354,9 +380,153 @@ export function ExcellenceWorkspace({ startups, registries, canLookup, initialSt
       </section>
 
       <div ref={resultRef} className="space-y-6">
-        {current && <AssessmentView assessment={current} />}
+        {current && (
+          <AssessmentView
+            assessment={current}
+            onUpdated={onUpdated}
+            fetchMore={
+              current.mode === 'register' && canFetch && provider && current.subject.orgNr
+                ? { providerSlug: provider.slug, providerName: provider.name, parts: provider.parts, endpoints: provider.partEndpoints, pricing: provider.pricing }
+                : undefined
+            }
+          />
+        )}
         {current && <ManualFactsPanel assessment={current} onUpdated={onUpdated} />}
+        {current && <ScreeningRequestComposer assessment={current} coaches={coaches} senderName={senderName} />}
       </div>
+    </div>
+  );
+}
+
+/**
+ * "Hämta mer" för ett koncernbolag (§ 51.7): kryssa i delar, se kostnaden
+ * INNAN anropet, hämta — bedömningen räknas om på samma manuella svar och
+ * kostnaden summeras på bedömningens total. Ingen del är förvald (varje
+ * anrop debiteras).
+ */
+function GroupCompanyFetch({
+  company,
+  assessment,
+  config,
+  onUpdated
+}: {
+  company: CompanyAssessment;
+  assessment: ExcellenceAssessment;
+  config: FetchMoreConfig;
+  onUpdated: (a: ExcellenceAssessment) => void;
+}) {
+  const [state, formAction, pending] = useActionState(fetchGroupCompanyAction, initialState);
+  const [open, setOpen] = useState(false);
+  const [parts, setParts] = useState<RegistryPartId[]>([]);
+  useEffect(() => {
+    if (state.assessment) {
+      onUpdated(state.assessment);
+      setOpen(false);
+      setParts([]);
+    }
+  }, [state.assessment, onUpdated]);
+  const estimate = estimateRegistryCost(config.pricing, parts, 1);
+  const already: string[] = [];
+  if (company.basic) already.push('grunddata');
+  if (company.conditions.some((x) => x.id === 'dividend' && x.source === 'register')) already.push('bokslut');
+  if (!open) {
+    return (
+      <button type="button" onClick={() => setOpen(true)} className="rounded-full border border-strong px-2.5 py-1 text-[11.5px] font-semibold text-foreground hover:bg-canvas-subtle">
+        Hämta mer…
+      </button>
+    );
+  }
+  return (
+    <form action={formAction} className="min-w-[240px] space-y-1.5 rounded-xl border border-default bg-canvas-subtle px-2.5 py-2">
+      <input type="hidden" name="context" value={assessment.context} />
+      <input type="hidden" name="facts" value={JSON.stringify(assessment.facts)} />
+      <input type="hidden" name="org_nr" value={company.orgNr} />
+      <input type="hidden" name="parts_present" value="1" />
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-foreground-muted">
+        {company.name || formatOrgNr(company.orgNr)} — från {config.providerName}
+      </p>
+      {already.length > 0 && <p className="text-[11px] text-foreground-subtle">Redan hämtat: {already.join(', ')}.</p>}
+      {config.parts.map((id) => (
+        <label key={id} className="flex cursor-pointer items-start gap-2 text-[12px] text-foreground">
+          <input
+            type="checkbox"
+            name="parts"
+            value={id}
+            checked={parts.includes(id)}
+            onChange={(e) => setParts((prev) => (e.target.checked ? [...prev, id] : prev.filter((p) => p !== id)))}
+            className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-brand"
+          />
+          <span>
+            {REGISTRY_PART_META[id].label}
+            <span className="block text-[11px] text-foreground-subtle mx-tnum">{registryPartCostLabel(config.pricing, id)}</span>
+          </span>
+        </label>
+      ))}
+      <p className="text-[11.5px] font-semibold text-foreground mx-tnum">
+        {parts.length === 0 ? 'Välj minst en del.' : `Kostar: ${formatRegistryCost(estimate)}`}
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="submit"
+          disabled={pending || parts.length === 0}
+          className="rounded-full bg-brand px-3 py-1 text-[12px] font-semibold text-brand-foreground hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {pending ? 'Hämtar…' : 'Hämta och räkna om'}
+        </button>
+        <button type="button" onClick={() => setOpen(false)} className="text-[12px] font-semibold text-foreground-subtle hover:text-foreground">
+          Avbryt
+        </button>
+      </div>
+      {state.error && <p className="text-[11.5px] text-movexum-morkorange dark:text-movexum-pastell-orange">{state.error}</p>}
+    </form>
+  );
+}
+
+const CHANGE_TONE: Record<'better' | 'worse' | 'neutral', string> = {
+  better: 'text-movexum-morkgron dark:text-movexum-pastell-gron',
+  worse: 'text-movexum-morkorange dark:text-movexum-pastell-orange',
+  neutral: 'text-foreground-muted'
+};
+
+function HistoryNote({ history, startupId }: { history: NonNullable<ExcellenceAssessment['history']>; startupId?: string }) {
+  if (history.error) {
+    return <p className={`rounded-xl px-3 py-2 text-[12.5px] ${WARN_TONE}`}>{history.error}</p>;
+  }
+  const cardHref = startupId ? `/startups/${startupId}#statsstod` : undefined;
+  return (
+    <div className="rounded-2xl border border-default bg-canvas-subtle px-4 py-3">
+      <p className="text-[12.5px] text-foreground">
+        <span className="font-semibold">Sparad på bolagskortet</span> under Statsstöd & Vinnova — kollegor ser samma utfall, PDF och historik.
+        {cardHref && (
+          <>
+            {' '}
+            <Link href={cardHref} className="font-semibold text-link hover:underline">
+              Öppna →
+            </Link>
+          </>
+        )}
+      </p>
+      {history.previous ? (
+        <div className="mt-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-foreground-subtle">
+            Sedan senaste bedömningen ({new Date(history.previous.assessedAt).toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm' })}
+            {history.previous.assessedBy ? `, ${history.previous.assessedBy}` : ''})
+          </p>
+          {!history.diff || history.diff.changes.length === 0 ? (
+            <p className="text-[12.5px] text-foreground-muted">Inga ändringar i utfall eller punkter.</p>
+          ) : (
+            <ul className="mt-1 space-y-0.5 text-[12.5px]">
+              {history.diff.changes.map((c, i) => (
+                <li key={i} className={CHANGE_TONE[c.tone]}>
+                  {c.text}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : (
+        <p className="mt-1 text-[12px] text-foreground-muted">Första bedömningen av bolaget — nästa körning visar vad som ändrats.</p>
+      )}
     </div>
   );
 }
@@ -409,12 +579,18 @@ function GroupMap({
   companies,
   subjectName,
   mode,
-  assessedAt
+  assessedAt,
+  assessment,
+  fetchMore,
+  onUpdated
 }: {
   companies: CompanyAssessment[];
   subjectName: string;
   mode: 'register' | 'saved';
   assessedAt: string;
+  assessment: ExcellenceAssessment;
+  fetchMore?: FetchMoreConfig;
+  onUpdated: (a: ExcellenceAssessment) => void;
 }) {
   const ref = new Date(assessedAt);
   const ageOf = (c: CompanyAssessment) => {
@@ -439,7 +615,7 @@ function GroupMap({
       <h4 className="text-[13.5px] font-semibold text-foreground">Koncernkarta — bolag som räknas in för {subjectName}</h4>
       <p className="mt-0.5 text-[12px] text-foreground-muted">
         {mode === 'register'
-          ? 'Ur koncernregistrets lista (hela koncernen: moder-, syster- och dotterbolag är alla anknutna, bilaga I art. 3.3) plus bolag ur verklig huvudman och andra ledet ur de uppslagna bolagen.'
+          ? `Ur koncernregistrets lista (hela koncernen: moder-, syster- och dotterbolag är alla anknutna, bilaga I art. 3.3) plus bolag ur verklig huvudman och andra ledet ur de uppslagna bolagen.${fetchMore ? ' Hämta mer om ett bolag direkt i tabellen — kryssa i delarna, se kostnaden, hämta; bedömningen räknas om och kostnaden läggs på totalen.' : ''}`
           : 'Ur sparad ägarbild på bolagskortet — bara ägarkedjan och direkta innehav. Systerbolag under samma moder syns först vid en färsk hämtning med Koncernstruktur.'}
       </p>
       <div className="mt-2 overflow-x-auto rounded-xl border border-default">
@@ -453,6 +629,7 @@ function GroupMap({
               <th className="px-3 py-2 font-medium">Registrerat · ålder</th>
               <th className="px-3 py-2 font-medium">Status</th>
               <th className="px-3 py-2 font-medium">Underlag</th>
+              {fetchMore && <th className="px-3 py-2 font-medium">Hämta mer</th>}
             </tr>
           </thead>
           <tbody>
@@ -482,6 +659,17 @@ function GroupMap({
                     <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${WARN_TONE}`}>Inget uppslag</span>
                   )}
                 </td>
+                {fetchMore && (
+                  <td className="px-3 py-1.5">
+                    {c.role === 'subject' ? (
+                      <span className="text-[11.5px] text-foreground-subtle">Ny bedömning hämtar om startup-bolaget.</span>
+                    ) : c.orgNr ? (
+                      <GroupCompanyFetch company={c} assessment={assessment} config={fetchMore} onUpdated={onUpdated} />
+                    ) : (
+                      <span className="text-[11.5px] text-foreground-subtle">Saknar org-nr — kan inte slås upp.</span>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -491,7 +679,15 @@ function GroupMap({
   );
 }
 
-function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
+function AssessmentView({
+  assessment,
+  fetchMore,
+  onUpdated
+}: {
+  assessment: ExcellenceAssessment;
+  fetchMore?: FetchMoreConfig;
+  onUpdated: (a: ExcellenceAssessment) => void;
+}) {
   const { subject, result } = assessment;
   const subjectName = subject.name || 'Startup-bolaget';
   const counts = useMemo(() => {
@@ -579,13 +775,16 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
               : 'border-movexum-morkgul/40 bg-movexum-pastell-gul text-movexum-morkgul dark:bg-movexum-morkgul/30 dark:text-movexum-pastell-gul'
           }`}
         >
-          <span className="font-semibold">Denna bedömning kostade hos {assessment.providerName}:</span>{' '}
+          <span className="font-semibold">Denna bedömning har hittills kostat hos {assessment.providerName}:</span>{' '}
           {assessment.cost.companies} uppslagna {assessment.cost.companies === 1 ? 'bolag' : 'bolag'} = {formatRegistryCost(assessment.cost)}.{' '}
           <span className="font-normal opacity-90">
             Uppskattning enligt angivna priser, summerad per uppslag (koncernbolag hämtas med färre delar än startup-bolaget) — {assessment.providerName}s faktura är facit.
           </span>
         </p>
       )}
+
+      {/* § 51.6 — körningen på bolagskortet + vad som ändrades sedan senast */}
+      {assessment.history && <HistoryNote history={assessment.history} startupId={subject.startupId} />}
 
       {assessment.lookupWarnings.length > 0 && (
         <ul className={`rounded-xl px-3 py-2 text-[12.5px] ${WARN_TONE}`}>
@@ -663,7 +862,15 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
         <h3 className="text-[14px] font-semibold text-foreground">Steg 1 — Företagsstöd enligt art. 22 GBER eller de minimis</h3>
         <CompanyBlock c={result.companies[0]} subjectName={subjectName} />
 
-        <GroupMap companies={result.companies} subjectName={subjectName} mode={assessment.mode} assessedAt={assessment.assessedAt} />
+        <GroupMap
+          companies={result.companies}
+          subjectName={subjectName}
+          mode={assessment.mode}
+          assessedAt={assessment.assessedAt}
+          assessment={assessment}
+          fetchMore={fetchMore}
+          onUpdated={onUpdated}
+        />
 
         <div>
           <h4 className="text-[13.5px] font-semibold text-foreground">Fristående företag?</h4>

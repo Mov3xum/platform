@@ -211,7 +211,7 @@ export function RegistryLookupForm({ providerSlug, providerName, registryParts, 
                         <span className="mr-2 rounded-md bg-canvas-muted px-1.5 py-0.5 text-[10.5px] font-medium text-foreground-muted">
                           {o.direction === 'owner' ? 'Ägare' : 'Innehav'}
                         </span>
-                        {o.owner_kind === 'person' ? 'Fysisk person' : o.name || o.org_nr || 'Okänd'}
+                        {o.owner_kind === 'person' ? (o.person_name ? `${o.person_name} (visas bara här — lagras inte)` : 'Fysisk person') : o.name || o.org_nr || 'Okänd'}
                         <span className="ml-2 text-foreground-subtle">
                           {OWNER_KIND_LABEL[o.owner_kind] || o.owner_kind}
                           {o.indirect ? ' · indirekt' : ''}

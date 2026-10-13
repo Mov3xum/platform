@@ -33,6 +33,8 @@ export interface ScreeningOwnershipEntry {
   owner_kind: ScreeningOwnerKind;
   name?: string;
   org_nr?: string;
+  /** TRANSIENT: fysisk persons namn ur verklig huvudman — bara skärmen, aldrig PDF/historik/DB (§ 51.7). */
+  person_name?: string;
   capital_pct?: number;
   voting_pct?: number;
   pct_min?: number;

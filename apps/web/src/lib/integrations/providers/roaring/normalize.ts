@@ -802,9 +802,26 @@ function controlText(v: unknown, depth = 0): unknown {
   return v;
 }
 
+/** Namnfält för en fysisk huvudman (2.1: `person{firstName,lastName}`; äldre: toppnivå). ALDRIG personnummer/födelsedatum. */
+const BO_FIRST_NAME_PATHS = ['person.firstName', 'person.givenName', 'firstName', 'givenName', 'firstNames'];
+const BO_LAST_NAME_PATHS = ['person.lastName', 'person.surName', 'person.surname', 'person.familyName', 'lastName', 'surName', 'surname', 'familyName'];
+const BO_FULL_NAME_PATHS = ['person.name', 'person.fullName', 'fullName', 'name'];
+
+/** För- och efternamn ur huvudmannens post — bara namnet, cappat, utan siffror (ett personnummer i namnfältet strippas). */
+export function beneficialOwnerName(o: Record<string, unknown>): string | undefined {
+  const first = asString(pickFirst(o, BO_FIRST_NAME_PATHS));
+  const last = asString(pickFirst(o, BO_LAST_NAME_PATHS));
+  const full = first || last ? [first, last].filter(Boolean).join(' ') : asString(pickFirst(o, BO_FULL_NAME_PATHS));
+  if (!full) return undefined;
+  const cleaned = full.replace(/\d[\d\s-]*\d/g, '').replace(/\s+/g, ' ').trim();
+  return cleaned ? cleaned.slice(0, 120) : undefined;
+}
+
 /**
- * Verklig huvudman → anonyma person-rader. Läser INTE namn, personnummer,
- * födelsedatum eller adress — bara andel/intervall och kontrollgrund.
+ * Verklig huvudman → person-rader med andel/intervall och kontrollgrund.
+ * Namnet (för-/efternamn) följer med TRANSIENT i `person_name` för visning
+ * på skärmen (§ 51.7) — aldrig till databasen/PDF/AI; personnummer,
+ * födelsedatum och adress läses aldrig.
  */
 export function normalizeRoaringBeneficialOwners(raw: unknown, notes: string[]): RegistryOwnershipEntry[] {
   const rec = firstRecord(raw);
@@ -880,6 +897,9 @@ export function normalizeRoaringBeneficialOwners(raw: unknown, notes: string[]):
       entry.name = companyName;
     } else if (namedCompany) {
       entry.name = companyName;
+    } else {
+      const personName = beneficialOwnerName(o);
+      if (personName) entry.person_name = personName;
     }
     if (capital) {
       if (capital.min === capital.max) entry.capital_pct = capital.min;

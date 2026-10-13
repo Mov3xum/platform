@@ -119,7 +119,10 @@ export const NOTIFICATION_KINDS = [
   'support_check_comment',
   // Plattformen (§ 49)
   'feedback_answered',
-  'feedback_done'
+  'feedback_done',
+  // Bedömning excellens (§ 51.6)
+  'screening_request',
+  'screening_answered'
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
@@ -338,6 +341,26 @@ export const NOTIFICATION_CATALOG: Record<NotificationKind, NotificationKindMeta
     category: 'plattform',
     priority: 'normal',
     audience: 'staff',
+    defaults: NORMAL_DEFAULTS
+  },
+  screening_request: {
+    label: 'Begäran om komplettering',
+    description: 'När controllern ber dig komplettera underlaget inför en statsstödsbedömning (Bedömning excellens).',
+    icon: 'shield',
+    category: 'stodcheckar',
+    priority: 'high',
+    audience: 'all',
+    mandatory: true,
+    defaults: HIGH_DEFAULTS
+  },
+  screening_answered: {
+    label: 'Komplettering besvarad',
+    description: 'När coachen eller bolaget besvarat en begäran om komplettering du skickat.',
+    icon: 'check',
+    category: 'stodcheckar',
+    priority: 'normal',
+    audience: 'staff',
+    groupable: true,
     defaults: NORMAL_DEFAULTS
   }
 };

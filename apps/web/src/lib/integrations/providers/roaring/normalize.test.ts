@@ -140,7 +140,7 @@ test('koncernstruktur: fristående bolag ger inga rader men en not', () => {
   assert.ok(notes.some((n) => n.includes('fristående')));
 });
 
-test('verklig huvudman: anonyma person-rader — aldrig namn eller personnummer', () => {
+test('verklig huvudman: person-rader med transient namn — aldrig personnummer eller name/org_nr', () => {
   const notes: string[] = [];
   const rows = normalizeRoaringBeneficialOwners(
     {
@@ -162,9 +162,12 @@ test('verklig huvudman: anonyma person-rader — aldrig namn eller personnummer'
     assert.equal(r.name, undefined);
     assert.equal(r.org_nr, undefined);
     const json = JSON.stringify(r);
-    assert.ok(!json.includes('Testsson'));
     assert.ok(!json.includes('19800101'));
+    assert.ok(!json.includes('19820202'));
   }
+  // Namnet visas transient (§ 51.7) — bara för-/efternamn.
+  assert.equal(rows[0].person_name, 'Johan Testsson');
+  assert.equal(rows[1].person_name, 'Cecilia Testsson');
   assert.equal(rows[0].pct_min, 25);
   assert.equal(rows[0].pct_max, 50);
   assert.equal(rows[0].control_basis, 'shares');
@@ -381,7 +384,7 @@ test('verklig huvudman: intervall som objekt och kontrollgrund som kodlista', ()
   assert.equal(rows[0].pct_min, 25);
   assert.equal(rows[0].pct_max, 50);
   assert.equal(rows[0].control_basis, 'shares');
-  assert.ok(!JSON.stringify(rows[0]).includes('Johan'));
+  // Namnet följer med transient (§ 51.7); personnumret aldrig.
   assert.ok(!JSON.stringify(rows[0]).includes('198001011234'));
 });
 
@@ -458,7 +461,8 @@ test('verklig huvudman: juridisk person med id i okänt format behålls som bola
   assert.equal(rows[0].pct_min, 75);
   assert.equal(rows[1].owner_kind, 'person');
   assert.equal(rows[1].name, undefined);
-  assert.ok(!JSON.stringify(rows).includes('Testsson'));
+  assert.equal(rows[1].person_name, 'Johan Testsson');
+  assert.ok(!JSON.stringify(rows).includes('198001011234'));
   assert.ok(!JSON.stringify(notes).includes('X-123'));
 });
 
@@ -508,7 +512,7 @@ test('bokslut: ingen avvikelse-not när plSales och plNetOperatingIncome är lik
   assert.ok(!notes.some((n) => n.includes('avvek')));
 });
 
-test('verklig huvudman (2.1): extentOfControl i ord och controlTypes som kodlista — person-objektet läses aldrig', () => {
+test('verklig huvudman (2.1): extentOfControl i ord och controlTypes som kodlista — ur person-objektet läses BARA namnet', () => {
   // Formen bekräftad 2026-10-12: beneficialOwners[person,extentOfControl,controlTypes].
   const notes: string[] = [];
   const rows = normalizeRoaringBeneficialOwners(
@@ -543,8 +547,12 @@ test('verklig huvudman (2.1): extentOfControl i ord och controlTypes som kodlist
   assert.equal(rows[1].pct_min, 25);
   assert.equal(rows[1].pct_max, 50);
   assert.equal(rows[1].control_basis, 'board');
+  // Namnet visas transient på skärmen (§ 51.7); personnummer/födelsedatum läses aldrig.
+  assert.equal(rows[0].person_name, 'Anna Testsson');
+  assert.equal(rows[1].person_name, 'Bo Testsson');
   const json = JSON.stringify({ rows, notes });
-  for (const pii of ['Anna', 'Testsson', '198001011234', '1980-01-01']) assert.ok(!json.includes(pii), pii);
+  for (const pii of ['198001011234', '1980-01-01']) assert.ok(!json.includes(pii), pii);
+  assert.ok(!JSON.stringify(notes).includes('Testsson'));
   assert.ok(!notes.some((n) => n.includes('kunde inte tolkas')));
 });
 

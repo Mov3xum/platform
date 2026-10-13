@@ -6,6 +6,7 @@ import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import {
   MAX_RELATED_COMPANIES,
   deriveGroupCompanies,
+  deriveScreeningRequestItems,
   normalizeScreeningFacts,
   screenExcellence,
   type GroupCompanyFacts,
@@ -31,7 +32,9 @@ import {
   type AssessmentContext
 } from '@/lib/excellence/context';
 import type { ExcellenceAssessment } from '@/lib/excellence/types';
-import { storeExcellenceAssessmentPdf } from '@/lib/excellence/assessment-store.server';
+import { upsertGroupCompany } from '@/lib/excellence/merge';
+import { renderExcellenceAssessmentPdf, storeExcellenceAssessmentPdf } from '@/lib/excellence/assessment-store.server';
+import { storeScreeningRun } from '@/lib/excellence/history.server';
 import { saveStartupScreeningFacts } from '@/lib/core/write/startups';
 import type { Actor } from '@/lib/core/write/types';
 
@@ -136,9 +139,23 @@ async function finishAssessment(
     lookupWarnings: ctx.lookupWarnings,
     cost: ctx.cost,
     assessedAt: context.assessedAt,
-    assessedBy: displayName(user)
+    assessedBy: displayName(user),
+    requestItems: deriveScreeningRequestItems(result, {
+      subjectName: context.subject.name,
+      deMinimisFromPlatform: ctx.input.related.filter((r) => r.deMinimis?.source === 'platform').map((r) => r.orgNr)
+    })
   };
-  return storeExcellenceAssessmentPdf(pb, user, assessment);
+  // PDF:en renderas EN gång och arkiveras på två ställen: i den inloggades
+  // Filer (§ 51.3) och — för ett portföljbolag — som körning på bolagskortet
+  // (§ 51.6) så kollegor och revisorer ser samma bild. Båda fail-soft.
+  const pdf = await renderExcellenceAssessmentPdf(assessment);
+  const withFile = await storeExcellenceAssessmentPdf(pb, user, assessment, pdf);
+  if (!startupId) return withFile;
+  const stored = await storeScreeningRun(pb, actorOf(user), withFile, pdf);
+  return {
+    ...withFile,
+    history: stored.ok ? { runId: stored.value.id, previous: stored.value.previous, diff: stored.value.diff } : { error: stored.error }
+  };
 }
 
 export async function assessExcellenceAction(
@@ -305,6 +322,7 @@ export async function assessExcellenceAction(
   const ctx: AssessmentContext = {
     mode: 'register',
     providerName: providerSlug.charAt(0).toUpperCase() + providerSlug.slice(1),
+    providerSlug,
     subject: {
       name: c.name ?? platform?.name,
       orgNr: lookup.orgNr,
@@ -366,6 +384,73 @@ export async function applyExcellenceFactsAction(
     // Tomma svar sparas också (nollställer tidigare svar på bolagskortet).
     assessment: await finishAssessment(pb, user, ctx, facts, { saveFacts: !!ctx.subject.startupId })
   };
+}
+
+/**
+ * "Hämta mer" för ETT bolag i koncernkartan (§ 51.7): slår upp bolaget hos
+ * leverantören med de delar personalen kryssat i (kostnaden visades innan),
+ * slår ihop svaret med underlaget (bara hämtade delar ersätter —
+ * `mergeGroupCompanyFacts`) och räknar om bedömningen med samma manuella
+ * svar. Kostnaden summeras på bedömningens löpande total. Inga nya
+ * datavägar: samma uppslagskärna, samma rate-limit och audit som § 11.8.
+ */
+export async function fetchGroupCompanyAction(
+  _prev: ExcellenceAssessmentState,
+  formData: FormData
+): Promise<ExcellenceAssessmentState> {
+  const user = await requireUser();
+  if (!canAccessModuleForUser(user.roles, 'bedomning_excellens', user.enabledModules)) {
+    return { error: 'Du har inte tillgång till Bedömning excellens.' };
+  }
+  if (!hasRole(user.roles, [...LOOKUP_ROLES])) {
+    return { error: 'Endast inkubatorledning kan hämta från bolagsregistret.' };
+  }
+  const ctx = parseAssessmentContext(String(formData.get('context') || ''));
+  if (!ctx) return { error: 'Underlaget kunde inte läsas — kör bedömningen igen.' };
+  if (ctx.mode !== 'register' || !ctx.providerSlug) {
+    return { error: 'Fler uppslag går bara i registerläget — kör "Hämta från bolagsregistret och bedöm" först.' };
+  }
+  let rawFacts: unknown = null;
+  try {
+    rawFacts = JSON.parse(String(formData.get('facts') || 'null'));
+  } catch {
+    return { error: 'De manuella svaren kunde inte läsas.' };
+  }
+  const facts = normalizeScreeningFacts(rawFacts);
+  const orgNrRaw = String(formData.get('org_nr') || '');
+  const lookup = await runRegistryLookup(user, {
+    providerSlug: ctx.providerSlug,
+    orgNrRaw,
+    formData,
+    auditLabel: 'koncernbolag (hämta mer) för bedömning excellens'
+  });
+  if (!lookup.ok) return { error: lookup.error };
+  if (lookup.orgNr === ctx.input.subject.orgNr) {
+    return { error: 'Det är startup-bolaget självt — kör en ny bedömning för att hämta om det.' };
+  }
+  const pb = await getServerPb();
+  const prevName = ctx.input.related.find((r) => r.orgNr === lookup.orgNr)?.name;
+  const fresh = await attachPlatformDeMinimis(pb, user.tenant, groupFactsFromRegistry(lookup.company, prevName));
+  const related = upsertGroupCompany(ctx.input.related, fresh);
+  const financialsByOrg = { ...ctx.financialsByOrg };
+  if (lookup.company.fetchedParts?.includes('financials') || lookup.company.noRecordParts?.includes('financials')) {
+    financialsByOrg[fresh.orgNr] = lookup.company.financials;
+  }
+  const notes = ctx.notes.filter((n) => n.orgNr !== fresh.orgNr);
+  if (lookup.company.notes.length > 0) notes.push({ orgNr: fresh.orgNr, name: fresh.name, notes: lookup.company.notes });
+  const next: AssessmentContext = {
+    ...ctx,
+    input: { ...ctx.input, related },
+    financialsByOrg,
+    notes,
+    // Varningar om just det här bolaget ("kunde inte slås upp") är inaktuella nu.
+    lookupWarnings: ctx.lookupWarnings.filter((w) => !(fresh.name && w.startsWith(`${fresh.name}:`)) && !w.startsWith(`${fresh.orgNr}:`)),
+    cost: sumRegistryCosts([...(ctx.cost ? [ctx.cost] : []), lookup.cost])
+  };
+  if (ctx.subject.startupId && !(await loadPlatformStartupFacts(pb, user.tenant, ctx.subject.startupId))) {
+    next.subject = { ...next.subject, startupId: undefined };
+  }
+  return { assessment: await finishAssessment(pb, user, next, facts, { saveFacts: false }) };
 }
 
 /**

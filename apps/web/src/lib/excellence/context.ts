@@ -31,6 +31,8 @@ export const ASSESSMENT_CONTEXT_MAX_BYTES = 800_000;
 export interface AssessmentContext {
   mode: 'register' | 'saved';
   providerName?: string;
+  /** Leverantörens slug (register-läget) — för fler uppslag ur koncernkartan (§ 51.7). */
+  providerSlug?: string;
   subject: ExcellenceAssessmentSubject;
   /** Motorns input utan referensdag (sätts vid omräkning) och utan manuella svar (kommer separat). */
   input: Omit<ExcellenceScreeningInput, 'refDate' | 'manual' | 'founders' | 'foundersSource'>;
@@ -127,11 +129,16 @@ function ownership(v: unknown): ScreeningOwnershipEntry[] {
     const kind = typeof o.owner_kind === 'string' && OWNER_KINDS.has(o.owner_kind) ? (o.owner_kind as ScreeningOwnerKind) : 'other';
     const entry: ScreeningOwnershipEntry = { direction: o.direction === 'holding' ? 'holding' : 'owner', owner_kind: kind };
     // Fysiska personer bär aldrig namn/org-nr (§ 11.8 GDPR) — tvingas här igen.
+    // Huvudmannens namn följer bara med TRANSIENT (`person_name`, § 51.7):
+    // samma session, samma skärm — aldrig PDF/historik/DB.
     if (kind !== 'person') {
       const name = str(o.name, 200);
       if (name) entry.name = name;
       const nr = orgNr(o.org_nr);
       if (nr) entry.org_nr = nr;
+    } else {
+      const pn = str(o.person_name, 120);
+      if (pn) entry.person_name = pn;
     }
     const cap = pct(o.capital_pct);
     if (cap !== undefined) entry.capital_pct = cap;
@@ -335,6 +342,10 @@ export function parseAssessmentContext(json: string): AssessmentContext | null {
   return {
     mode: o.mode === 'register' ? 'register' : 'saved',
     providerName: str(o.providerName, 60),
+    ...(() => {
+      const v = str(o.providerSlug, 40);
+      return v && /^[a-z0-9_-]+$/.test(v) ? { providerSlug: v } : {};
+    })(),
     subject,
     input: {
       subject: subjectFacts,

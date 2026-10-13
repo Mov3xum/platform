@@ -16,6 +16,7 @@ import type { StartupStatus } from '@/lib/labels';
 import { canManageStartupDeMinimis } from '@/lib/de-minimis/data';
 import { DeMinimisSection } from '@/app/startups/[id]/DeMinimisSection';
 import { SharedContactsCard } from './SharedContactsCard';
+import { ScreeningRequestsCard } from './ScreeningRequestsCard';
 import { StartupSupportChecksSection } from '@/app/startups/[id]/StartupSupportChecksSection';
 import { DocumentCompleteButton } from '@/app/education/documents/DocumentCompleteButton';
 import { OrgPostList, type BoardPost } from '@/components/home/OrgPostList';
@@ -359,6 +360,9 @@ export default async function MinOversiktPage() {
             canManage={canManageDeMinimis}
           />
         </Card>
+
+        {/* § 51.6 — begäran om komplettering inför statsstödsbedömning */}
+        <ScreeningRequestsCard pb={pb} tenantId={user.tenant} startupId={linkedId} isStaff={isStaff} />
 
         {/* § 45.4 — kontakter Movexum delat med bolaget via kontaktboken */}
         <SharedContactsCard tenantId={user.tenant} startupId={linkedId} />

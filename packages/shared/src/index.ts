@@ -1707,6 +1707,8 @@ export * from './education-documents';
 export * from './de-minimis';
 export * from './excellence-screening';
 export * from './excellence-facts';
+export * from './excellence-requests';
+export * from './excellence-history';
 // ─── Årshjul (ren domän-/geometrilogik, enhetstestad) ────────────────────────
 export * from './annual-wheel';
 export * from './agreements';

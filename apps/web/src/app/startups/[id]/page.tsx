@@ -71,6 +71,7 @@ import { DeMinimisSection } from './DeMinimisSection';
 import { FollowUpSurveys } from '@/components/surveys/FollowUpSurveys';
 import { StartupProcurementsSection } from './StartupProcurementsSection';
 import { StartupSupportChecksSection } from './StartupSupportChecksSection';
+import { StartupScreeningSection } from './StartupScreeningSection';
 import { StartupContactsSection } from './StartupContactsSection';
 import { StartupMissionsSection } from './StartupMissionsSection';
 
@@ -761,6 +762,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           ['#kunskap', 'Kunskap'],
           ['#de-minimis', 'De minimis'],
           ['#stodcheckar', 'Stöd & checkar'],
+          ['#statsstod', 'Statsstöd & Vinnova'],
           ['#notes', `Anteckningar (${notes.totalItems})`],
           ['#activities', `Aktiviteter (${activities.totalItems})`],
           ['#documents', 'Dokument'],
@@ -1090,6 +1092,17 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
           isStaff={hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'])}
           canApply={hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']) || user.linkedStartups.includes(id)}
         />
+
+        {/* § 51.6 — Bedömning excellens: alla körningar + begäran om komplettering */}
+        {hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor', 'observer']) && (
+          <StartupScreeningSection
+            pb={pb}
+            tenantId={user.tenant}
+            startupId={id}
+            canAssess={canAccessModuleForUser(user.roles, 'bedomning_excellens', user.enabledModules)}
+            canRequest={hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])}
+          />
+        )}
 
         {hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor', 'observer']) && (
           <StartupProcurementsSection pb={pb} tenantId={user.tenant} startupId={id} />
