@@ -1353,6 +1353,18 @@ denna princip.
   koppling" utan formulär och varje synk föll på "saknas eller kunde inte
   dekrypteras". Nyckeln måste vara satt på **web-appen** i Coolify; GitHub-
   secrets med samma namn läses inte av någon workflow.
+- **Avvisad token = leverantörens svar, inte plattformens (2026-10-13).**
+  "Klient-id/klienthemlighet avvisades av leverantören" kommer ur
+  `company-registry/oauth.ts` när leverantörens `/token` svarar 401 (eller
+  400 med `invalid_client`) på det SPARADE nyckelparet — samma kod som
+  "Testa mot org-nr", Bedömning excellens och portföljsynken delar
+  (`runRegistryLookup`). Meddelandet bär nu HTTP-status + OAuth-felkoden
+  (`oauth-errors.ts`, ren + enhetstestad; aldrig `error_description`, som kan
+  bära klient-id) och skiljer "nycklarna avvisades" från "begäran avvisades"
+  (400 med annan kod: grant/scope). Åtgärd: Inställningar → Integrationer →
+  leverantören → **Byt nycklar** (connect-flödet testar token innan det
+  sparar); en secret som regenererats i leverantörens portal gör den sparade
+  ogiltig.
 
 ### 11.6 Sync-cadence
 
