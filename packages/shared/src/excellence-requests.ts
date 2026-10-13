@@ -18,7 +18,8 @@ import {
   type IrlAxis,
   type ManualAnswer,
   type ScreeningFounderFact,
-  type ScreeningManualFacts
+  type ScreeningManualFacts,
+  type ManualGroupCompanyFact
 } from './excellence-facts';
 import type { ExcellenceScreeningResult, ScreeningCheck } from './excellence-screening';
 
@@ -135,7 +136,8 @@ export const SCREENING_REQUEST_ITEM_KINDS = [
   'vinnova',
   'irl',
   'excellence',
-  'document'
+  'document',
+  'group'
 ] as const;
 export type ScreeningRequestItemKind = (typeof SCREENING_REQUEST_ITEM_KINDS)[number];
 
@@ -148,7 +150,8 @@ export const SCREENING_REQUEST_ITEM_AUDIENCE: Record<ScreeningRequestItemKind, S
   vinnova: ['coach'],
   irl: ['coach'],
   excellence: ['coach'],
-  document: ['coach', 'startup']
+  document: ['coach', 'startup'],
+  group: ['coach', 'startup']
 };
 
 export interface ScreeningRequestAnswer {
@@ -169,6 +172,10 @@ export interface ScreeningRequestAnswer {
   /** irl */
   levels?: Partial<Record<IrlAxis, number>>;
   notes?: Partial<Record<IrlAxis, string>>;
+  /** group: inga bolag äger 25 % eller mer och bolaget äger inget sådant (aktieboken). */
+  none?: boolean;
+  /** group: ägarbolag/innehav ur aktieboken (juridiska personer, org-nr). */
+  companies?: ManualGroupCompanyFact[];
 }
 
 export interface ScreeningRequestItem {
@@ -258,7 +265,15 @@ export const SCREENING_REQUEST_KIND_LABEL: Record<ScreeningRequestItemKind, stri
   vinnova: 'Vinnovas målgrupp',
   irl: 'IRL-nivåer',
   excellence: 'Excellent inkubation',
-  document: 'Underlag'
+  document: 'Underlag',
+  group: 'Ägarbolag (aktieboken)'
+};
+
+export const SCREENING_GROUP_QUESTION: ScreeningQuestionMeta = {
+  question: 'Äger något företag 25 % eller mer av bolaget, eller äger bolaget 25 % eller mer i något annat företag? (aktieboken)',
+  fulfilled: 'Nej — inga sådana bolag (fristående)',
+  failed: 'Ja — ange bolagen nedan',
+  hint: 'Bolagsregistrets koncernstruktur bygger på årsredovisningar och saknar ofta nystartade bolag. Ange org-nr, namn och andel för varje bolag (även holdingbolag). Fysiska personer anges inte här.'
 };
 
 // ─── Härledning ur en bedömning ──────────────────────────────────────────
@@ -318,10 +333,10 @@ export function deriveScreeningRequestItems(result: ExcellenceScreeningResult, o
   // Fristående? / ägarbild — underlag (aktiebok) när registret inte räcker.
   if (result.standalone.verdict === 'unknown') {
     items.push({
-      key: 'document:aktiebok',
-      kind: 'document',
-      label: `Aktiebok för ${subjectName || 'bolaget'} — ägare med andel, inkl. ägande via holdingbolag`,
-      hint: result.standalone.needs,
+      key: 'group',
+      kind: 'group',
+      label: `${subjectName || 'Bolaget'} — ${SCREENING_GROUP_QUESTION.question}`,
+      hint: result.standalone.needs ?? SCREENING_GROUP_QUESTION.hint,
       status: 'open'
     });
   }
@@ -507,6 +522,17 @@ function normalizeAnswer(kind: ScreeningRequestItemKind, raw: unknown): Screenin
       a.note = note;
       return a;
     }
+    case 'group': {
+      // Samma normalisering som de manuella svaren (org-nr, relation, andel, not).
+      const companies = normalizeScreeningFacts({ group_companies: o.companies }).group_companies;
+      const none = o.none === true;
+      if (!none && companies.length === 0) return undefined;
+      if (none) a.none = true;
+      else a.companies = companies;
+      const note = cleanText(o.note, SCREENING_NOTE_MAX);
+      if (note) a.note = note;
+      return a;
+    }
   }
 }
 
@@ -544,6 +570,8 @@ export function screeningAnswerLabel(item: Pick<ScreeningRequestItem, 'kind' | '
     }
     case 'document':
       return 'Underlag lämnat';
+    case 'group':
+      return a.none ? SCREENING_GROUP_QUESTION.fulfilled : `${a.companies?.length ?? 0} ${(a.companies?.length ?? 0) === 1 ? 'bolag angivet' : 'bolag angivna'}`;
   }
 }
 
@@ -674,7 +702,8 @@ export function mergeScreeningRequestAnswersIntoFacts(
     ...facts,
     companies: { ...facts.companies },
     de_minimis_related: { ...facts.de_minimis_related },
-    estimates: { ...facts.estimates }
+    estimates: { ...facts.estimates },
+    group_companies: [...facts.group_companies]
   };
   const wanted = onlyKeys ? new Set(onlyKeys) : null;
   for (const item of items) {
@@ -730,6 +759,20 @@ export function mergeScreeningRequestAnswersIntoFacts(
       }
       case 'document':
         break;
+      case 'group': {
+        if (a.none) {
+          next.standalone = a.note ? { verdict: 'yes', note: a.note } : { verdict: 'yes', note: 'aktieboken (förfrågan)' };
+          break;
+        }
+        if (a.companies && a.companies.length > 0) {
+          const byOrg = new Map(next.group_companies.map((g) => [g.org_nr, g]));
+          for (const g of a.companies) byOrg.set(g.org_nr, g);
+          next.group_companies = [...byOrg.values()];
+          // Ett angivet ägarbolag motsäger ett tidigare "fristående: ja".
+          if (next.standalone?.verdict === 'yes') delete next.standalone;
+        }
+        break;
+      }
     }
   }
   return normalizeScreeningFacts(next);

@@ -324,8 +324,16 @@ interface ToolRunRecord {
   };
 }
 
-export default async function StartupDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function StartupDetailPage({
+  params,
+  searchParams
+}: {
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { id } = await params;
+  const sp = (await searchParams) ?? {};
+  const screeningFeedback = typeof sp.bedomning === 'string' && /^[a-z]{1,20}$/.test(sp.bedomning) ? sp.bedomning : undefined;
   const user = await requireUser();
   if (!canAccessModule(user.roles, 'startups')) notFound();
   const canEdit = hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
@@ -1101,6 +1109,7 @@ export default async function StartupDetailPage({ params }: { params: Promise<{ 
             startupId={id}
             canAssess={canAccessModuleForUser(user.roles, 'bedomning_excellens', user.enabledModules)}
             canRequest={hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])}
+            feedback={screeningFeedback}
           />
         )}
 

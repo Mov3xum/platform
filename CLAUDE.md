@@ -8735,3 +8735,70 @@ kollega) eller till **bolaget**, som båda svarar direkt i systemet:
   körning i historiken på bolagskortet och i PDF:ns huvud. Saknas pris sägs
   "pris ej angivet" — aldrig en gissning (§ 11.8).
 
+### 51.8 Koncern ur aktieboken, ett klick till coach/bolag & omräkning till ny PDF (2026-10-13)
+
+**Incident.** Koncernkartan för ett nyregistrerat bolag visade bara startup-
+bolaget fast den manuella bedömningen kände till moder (registrerat 2023) och
+moderns moder (2006) — det som fäller art. 22. Orsak: Roarings koncernstruktur
+bygger på **årsredovisningar** och bär sällan ett bolag som registrerats de
+senaste ~två åren, och motorn hade ingen väg för en människa att säga "det här
+bolaget äger startup-bolaget". Allt nedan gäller **vilket svenskt org-nr som
+helst** — inga bolagsspecifika regler.
+
+- **Registret bevisar aldrig "fristående" för ett nytt bolag.**
+  `GROUP_REGISTER_LAG_MS` (2 år): är startup-bolaget registrerat senare än så
+  och koncernlistan tom blir "Fristående företag" **OKÄNT** med aktieboken
+  som nästa steg — aldrig JA ur en tom lista. Ett äldre bolag bevisas som
+  förut (ingen koncern i registret + fysiska personer direkt > 75 %).
+- **Manuellt angivna koncernbolag** (`screening_facts.group_companies`,
+  `ManualGroupCompanyFact`: org-nr för juridisk person, relation
+  `linked`/`partner`, riktning `owner`/`holding`, andel, PII-fri källa;
+  normaliseras i `excellence-facts.ts` — enskild firma avvisas, tak 20).
+  `deriveGroupCompanies(subject, related, manual)` lägger dem som lager 0,
+  med `manualDeclared` på referensen/`CompanyAssessment` ("Angivet manuellt"
+  i kartan och PDF:n); ett angivet bolag utan koncernplats slås upp med HELA
+  valet, så dess egen koncern följs som andra ledet (moderns moder kommer
+  med av sig själv). **Manuellt "fristående"** (`screening_facts.standalone`,
+  `ManualAnswer`) prövas med `applyManualAnswer` — Nej väger alltid tyngst,
+  Ja fyller bara OKÄNT. Panelen Manuella svar har sektionen "Fristående
+  företag — aktieboken"; koncernkartan har **"Lägg till koncernbolag"**
+  (`addGroupCompanyAction`): sparas i de manuella svaren, i registerläget
+  valfritt uppslag med valda delar (kostnad visas innan) och "följ koncernen
+  vidare" (andra ledet: grunddata + bokslut av det valda, tak
+  `MAX_RELATED_COMPANIES`, `followGroupLookups` — samma loop som den
+  ursprungliga bedömningen, ingen divergerande kopia); "Ta bort" per rad.
+  Kartan visar dessutom **vad registret svarade** (koncernstruktur hämtad/
+  tom/inte hämtad, verklig huvudman, bolag i ägarbilden) så en karta med
+  ett enda bolag aldrig läses som fristående.
+- **Tolerant koncernlista** (`roaringGroupList`): listan, bolags-id och
+  moder-id läses ur kandidatlistor (`groupCompanies|companies|groupMembers|…`,
+  `companyId|organisationNumber|…`, `motherCompanyId|parentCompanyId|…`,
+  även ett steg ned under `groupStructure{…}`) — roaring.io nås inte från
+  byggmiljön, så ett avvikande fältnamn får aldrig tyst ge "ingen koncern".
+- **Begäran med ett klick.** Förfrågans punkt för aktieboken är nu sorten
+  **`group`** ("Äger något företag 25 % eller mer …?"): svaret är "inga"
+  (⇒ `standalone: ja`) eller en lista bolag (⇒ `group_companies`; ett
+  tidigare "fristående: ja" tas bort) — `mergeScreeningRequestAnswersIntoFacts`.
+  Composern har knapparna **"Skicka allt till coachen (N)"** / **"Skicka allt
+  till bolaget"** med standardtext; detaljformuläret finns kvar. Svarsformuläret
+  (`/komplettering/<id>`, coach och bolag) har en enkel radlista
+  (org-nr/namn/andel/riktning/relation) eller kryssrutan "inga sådana bolag".
+- **Omräkning till ny PDF med ett klick.** Migration **1700000192**:
+  `startup_screenings.context` (json 2 MB) = körningens underlag (samma
+  format som vyn, `stripTransientNames` tar bort verklig huvudmans namn
+  innan lagring; speglat i `setup-via-api.mjs`, asserterat i
+  `verify-baseline.mjs`). `recomputeLatestScreeningAction` (formuläraction;
+  admin/incubator_lead/coach) tar senaste underlaget + bolagskortets manuella
+  svar (dit kompletteringarna redan slagits ihop), räknar om UTAN nya
+  leverantörsanrop (kostnad 0, "Omräknat på sparade registeruppslag" i
+  PDF:n) och sparar en ny körning: PDF på bolagskortet (§ 51.6) + i den
+  inloggades Filer. Knappen **"Räkna om med svaren"** finns på bolagskortets
+  sektion Statsstöd & Vinnova och på svarssidan; utfallet visas via
+  `?bedomning=ok|underlag|behorighet|fel`. PDF:n har sektionen
+  **Kompletteringar** (`ExcellenceAssessment.requests`): varje förfrågan med
+  mottagare, status och per punkt status/PII-fri svarsetikett/datum.
+- **GDPR/RLS oförändrat:** `group_companies` bär bara juridiska personer;
+  `context` ligger i den staff/observer-scopade, AI-denylistade
+  `startup_screenings` (grundarnamn ur teamet — samma krets som bolagskortet);
+  `screening_facts` är fortsatt fältmaskat för AI. Riskklass n/a (ingen AI).
+

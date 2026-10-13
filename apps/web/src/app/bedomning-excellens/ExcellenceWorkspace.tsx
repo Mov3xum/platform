@@ -16,6 +16,7 @@ import {
   MAX_RELATED_COMPANIES
 } from '@platform/shared';
 import {
+  addGroupCompanyAction,
   assessExcellenceAction,
   fetchGroupCompanyAction,
   type ExcellenceAssessment,
@@ -604,7 +605,8 @@ function GroupMap({
   const placeOf = (c: CompanyAssessment) => {
     if (c.role === 'subject') return 'Startup-bolaget';
     const parts: string[] = [];
-    if (c.groupRole) parts.push(GROUP_ROLE_LABEL[c.groupRole] + (typeof c.level === 'number' ? ` (nivå ${c.level})` : ''));
+    if (c.manualDeclared) parts.push('Angivet manuellt (aktiebok/avtal)');
+    else if (c.groupRole) parts.push(GROUP_ROLE_LABEL[c.groupRole] + (typeof c.level === 'number' ? ` (nivå ${c.level})` : ''));
     else if (c.transitive) parts.push('Andra ledet');
     else parts.push(c.indirect ? 'Indirekt ägare/innehav' : 'Direkt ägare/innehav');
     if (c.via) parts.push(`via ${c.via}`);
@@ -675,6 +677,193 @@ function GroupMap({
           </tbody>
         </table>
       </div>
+      <GroupCoverageNote assessment={assessment} />
+      <AddGroupCompanyForm assessment={assessment} fetchMore={fetchMore} onUpdated={onUpdated} />
+    </div>
+  );
+}
+
+/**
+ * Vad registret faktiskt svarade om koncernen (§ 51.8) — så en koncernkarta
+ * med bara startup-bolaget aldrig läses som "fristående": koncernstruktur
+ * hämtad/tom/inte hämtad, verklig huvudman, och varför ett nystartat bolag
+ * ofta saknas (årsredovisningarnas eftersläpning).
+ */
+function GroupCoverageNote({ assessment }: { assessment: ExcellenceAssessment }) {
+  const info = useMemo(() => {
+    try {
+      const ctx = JSON.parse(assessment.context) as {
+        input?: {
+          subject?: { groupStructureFetched?: boolean; beneficialOwnersFetched?: boolean; groupMembers?: unknown[]; ownership?: Array<{ direction?: string; owner_kind?: string }> };
+        };
+      };
+      const sub = ctx.input?.subject;
+      if (!sub) return null;
+      const owners = sub.ownership?.filter((o) => o.direction === 'owner') ?? [];
+      return {
+        groupFetched: sub.groupStructureFetched === true,
+        groupMembers: Array.isArray(sub.groupMembers) ? sub.groupMembers.length : undefined,
+        boFetched: sub.beneficialOwnersFetched === true,
+        companyOwners: owners.filter((o) => o.owner_kind !== 'person').length,
+        personOwners: owners.filter((o) => o.owner_kind === 'person').length
+      };
+    } catch {
+      return null;
+    }
+  }, [assessment.context]);
+  if (!info) return null;
+  const standalone = assessment.result.standalone;
+  const groupText = !info.groupFetched
+    ? 'inte hämtad'
+    : info.groupMembers === undefined
+      ? 'hämtad (sparad ägarkedja — systerbolag syns inte)'
+      : info.groupMembers === 0
+        ? 'hämtad — registret bär ingen koncern för bolaget'
+        : `hämtad — ${info.groupMembers} bolag i registrets lista`;
+  const boText = !info.boFetched ? 'inte hämtad' : `hämtad — ${info.personOwners} fysisk${info.personOwners === 1 ? '' : 'a'} person${info.personOwners === 1 ? '' : 'er'}`;
+  return (
+    <div className="mt-2 rounded-xl border border-default bg-canvas-subtle px-3 py-2 text-[12px] text-foreground-muted">
+      <span className="font-semibold text-foreground">Vad registret svarade:</span> koncernstruktur {groupText} · verklig huvudman {boText}
+      {info.companyOwners > 0 ? ` · ${info.companyOwners} bolag i ägarbilden` : ''}.
+      {standalone.verdict === 'unknown' && (
+        <span className="block">
+          Fristående kan inte avgöras ur registret — koncernregistret bygger på årsredovisningar och bär sällan ett nyregistrerat bolag. Aktieboken avgör:
+          lägg till ägarbolag nedan, eller bekräfta "fristående" under Manuella svar, eller skicka frågan till coach/bolag med ett klick längre ned.
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * "Lägg till koncernbolag" (§ 51.8): ett bolag registret inte bar (aktieboken)
+ * — läggs i bolagets manuella svar, slås upp i registerläget med valda delar
+ * (kostnaden visas innan) och koncernen följs vidare. Manuellt angivna rader
+ * i kartan kan tas bort här.
+ */
+function AddGroupCompanyForm({
+  assessment,
+  fetchMore,
+  onUpdated
+}: {
+  assessment: ExcellenceAssessment;
+  fetchMore?: FetchMoreConfig;
+  onUpdated: (a: ExcellenceAssessment) => void;
+}) {
+  const [state, formAction, pending] = useActionState(addGroupCompanyAction, initialState);
+  const [open, setOpen] = useState(false);
+  const [parts, setParts] = useState<RegistryPartId[]>([]);
+  const [follow, setFollow] = useState(true);
+  useEffect(() => {
+    if (state.assessment) {
+      onUpdated(state.assessment);
+      setOpen(false);
+      setParts([]);
+    }
+  }, [state.assessment, onUpdated]);
+  const manual = assessment.facts.group_companies;
+  const canLookup = !!fetchMore && assessment.mode === 'register';
+  const estimate = fetchMore ? estimateRegistryCost(fetchMore.pricing, parts, 1) : null;
+  const followParts = parts.filter((p) => p === 'basic' || p === 'financials');
+  const followEstimate = fetchMore && followParts.length > 0 ? estimateRegistryCost(fetchMore.pricing, followParts, 1) : null;
+  return (
+    <div className="mt-3">
+      {manual.length > 0 && (
+        <ul className="mb-2 space-y-1 text-[12px] text-foreground-muted">
+          {manual.map((g) => (
+            <li key={g.org_nr} className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-canvas-muted px-2 py-0.5 text-[11px] font-semibold text-foreground-muted">Angivet manuellt</span>
+              <span className="font-medium text-foreground">{g.name || formatOrgNr(g.org_nr)}</span>
+              <span>
+                {g.direction === 'owner' ? 'äger startup-bolaget' : 'ägs av startup-bolaget'}
+                {typeof g.share_pct === 'number' ? ` ${pctText(g.share_pct)}` : ''} · {g.relation === 'linked' ? 'anknutet' : 'partner'}
+                {g.note ? ` · ${g.note}` : ''}
+              </span>
+              <form action={formAction}>
+                <input type="hidden" name="context" value={assessment.context} />
+                <input type="hidden" name="facts" value={JSON.stringify(assessment.facts)} />
+                <input type="hidden" name="org_nr" value={g.org_nr} />
+                <input type="hidden" name="remove" value="1" />
+                <button type="submit" disabled={pending} className="text-[11.5px] font-semibold text-foreground-subtle hover:text-foreground">
+                  Ta bort
+                </button>
+              </form>
+            </li>
+          ))}
+        </ul>
+      )}
+      {!open ? (
+        <button type="button" onClick={() => setOpen(true)} className="rounded-full border border-strong px-3 py-1 text-[12px] font-semibold text-foreground hover:bg-canvas-subtle">
+          + Lägg till koncernbolag (aktieboken)
+        </button>
+      ) : (
+        <form action={formAction} className="space-y-2 rounded-xl border border-default bg-canvas-subtle px-3 py-3">
+          <input type="hidden" name="context" value={assessment.context} />
+          <input type="hidden" name="facts" value={JSON.stringify(assessment.facts)} />
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-foreground-muted">Lägg till koncernbolag — ett bolag registret inte bar</p>
+          <div className="grid gap-2 sm:grid-cols-[140px_minmax(0,1fr)_90px_160px_150px]">
+            <input name="org_nr" required placeholder="Org-nr" inputMode="numeric" className={`${inputCls} mt-0 mx-tnum`} aria-label="Org-nr" />
+            <input name="name" placeholder="Bolagsnamn (fylls i från registret om tomt)" maxLength={160} className={`${inputCls} mt-0`} aria-label="Bolagsnamn" />
+            <input name="share_pct" placeholder="Andel %" inputMode="decimal" className={`${inputCls} mt-0 mx-tnum`} aria-label="Andel i procent" />
+            <select name="direction" defaultValue="owner" className={`${inputCls} mt-0`} aria-label="Riktning">
+              <option value="owner">Äger startup-bolaget</option>
+              <option value="holding">Ägs av startup-bolaget</option>
+            </select>
+            <select name="relation" defaultValue="linked" className={`${inputCls} mt-0`} aria-label="Relation">
+              <option value="linked">Anknutet (&gt; 50 % / kontroll)</option>
+              <option value="partner">Partner (25–50 %)</option>
+            </select>
+          </div>
+          <input name="note" placeholder="Källa, t.ex. aktieboken 2026-10 (inga personuppgifter)" maxLength={600} className={`${inputCls} mt-0`} aria-label="Källa" />
+          {canLookup && fetchMore && (
+            <div className="rounded-xl border border-default bg-canvas px-2.5 py-2">
+              <p className="text-[11.5px] font-semibold text-foreground">Slå upp bolaget hos {fetchMore.providerName} direkt (valfritt — kostar credits)</p>
+              <input type="hidden" name="parts_present" value={parts.length > 0 ? '1' : ''} disabled={parts.length === 0} />
+              <div className="mt-1 grid gap-1 sm:grid-cols-2">
+                {fetchMore.parts.map((id) => (
+                  <label key={id} className="flex cursor-pointer items-start gap-2 text-[12px] text-foreground">
+                    <input
+                      type="checkbox"
+                      name="parts"
+                      value={id}
+                      checked={parts.includes(id)}
+                      onChange={(e) => setParts((prev) => (e.target.checked ? [...prev, id] : prev.filter((p) => p !== id)))}
+                      className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-brand"
+                    />
+                    <span>
+                      {REGISTRY_PART_META[id].label}
+                      <span className="block text-[11px] text-foreground-subtle mx-tnum">{registryPartCostLabel(fetchMore.pricing, id)}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <label className="mt-1.5 flex cursor-pointer items-start gap-2 text-[12px] text-foreground">
+                <input type="checkbox" name="follow" value="1" checked={follow} onChange={(e) => setFollow(e.target.checked)} disabled={parts.length === 0} className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-brand" />
+                <span>
+                  Följ koncernen vidare: bolag som dyker upp i dess koncern/ägarbild slås också upp (grunddata och bokslut av det valda, högst {MAX_RELATED_COMPANIES} bolag totalt)
+                  {followEstimate ? <span className="block text-[11px] text-foreground-subtle mx-tnum">≈ {formatRegistryCost(followEstimate)} per ytterligare bolag</span> : null}
+                </span>
+              </label>
+              <p className="mt-1 text-[11.5px] font-semibold text-foreground mx-tnum">
+                {parts.length === 0 ? 'Inga delar valda — bolaget läggs till utan uppslag (slås upp vid nästa bedömning).' : `Detta bolag kostar: ${estimate ? formatRegistryCost(estimate) : '–'}`}
+              </p>
+            </div>
+          )}
+          {!canLookup && (
+            <p className="text-[11.5px] text-foreground-subtle">Bolaget läggs till i de manuella svaren och räknas som koncernbolag; det slås upp vid nästa bedömning med färska uppslag.</p>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="submit" disabled={pending} className="rounded-full bg-brand px-3 py-1 text-[12px] font-semibold text-brand-foreground hover:bg-brand-hover disabled:opacity-60">
+              {pending ? 'Lägger till…' : 'Lägg till och räkna om'}
+            </button>
+            <button type="button" onClick={() => setOpen(false)} className="text-[12px] font-semibold text-foreground-subtle hover:text-foreground">
+              Avbryt
+            </button>
+          </div>
+          {state.error && <p className="text-[11.5px] text-movexum-morkorange dark:text-movexum-pastell-orange">{state.error}</p>}
+        </form>
+      )}
+      {state.error && !open && <p className="mt-1 text-[11.5px] text-movexum-morkorange dark:text-movexum-pastell-orange">{state.error}</p>}
     </div>
   );
 }

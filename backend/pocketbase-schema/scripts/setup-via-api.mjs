@@ -4393,7 +4393,9 @@ await ensureCollection({
     { name: 'assessed_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'assessed_at', type: 'date', required: false },
     { name: 'file', type: 'file', required: false, maxSelect: 1, maxSize: 15000000, mimeTypes: ['application/pdf'], protected: true },
-    { name: 'filename', type: 'text', required: false, max: 200 }
+    { name: 'filename', type: 'text', required: false, max: 200 },
+    // Från 1700000192 — underlaget för omräkning utan nya anrop (§ 51.8)
+    { name: 'context', type: 'json', required: false, maxSize: 2000000 }
   ],
   indexes: [
     'CREATE INDEX idx_startup_screenings_tenant ON startup_screenings (tenant)',

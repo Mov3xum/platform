@@ -265,6 +265,24 @@ export function serializeAssessmentContext(ctx: AssessmentContext): string {
 }
 
 /**
+ * Underlaget för LAGRING på bolagskortet (`startup_screenings.context`,
+ * § 51.8): verklig huvudmans namn är transient (visas bara på skärmen,
+ * § 51.7) och strippas ur varje ägarrad innan något persisteras.
+ */
+export function stripTransientNames(ctx: AssessmentContext): AssessmentContext {
+  const strip = (c: GroupCompanyFacts): GroupCompanyFacts => ({
+    ...c,
+    ownership: c.ownership.map((o) => {
+      if (!('person_name' in o)) return o;
+      const { person_name: _n, ...rest } = o;
+      void _n;
+      return rest;
+    })
+  });
+  return { ...ctx, input: { ...ctx.input, subject: strip(ctx.input.subject), related: ctx.input.related.map(strip) } };
+}
+
+/**
  * Tolkar underlaget från klienten. `null` ⇒ ogiltigt/för stort — bedömningen
  * måste köras om (inget räknas på ett underlag som inte kunde verifieras).
  */

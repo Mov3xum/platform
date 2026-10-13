@@ -15,6 +15,7 @@ import { logAgentAction } from '@/lib/core/write/audit';
 import type { Actor } from '@/lib/core/write/types';
 import { pbStatus } from '@/lib/pb-error';
 import type { ExcellenceAssessment } from './types';
+import { parseAssessmentContext, serializeAssessmentContext, stripTransientNames, type AssessmentContext } from './context';
 
 // Historik för Bedömning excellens på bolagskortet (CLAUDE.md § 51.6).
 // Varje körning för ett PORTFÖLJBOLAG sparas som en rad i
@@ -138,6 +139,40 @@ export async function getScreeningRun(pb: PocketBase, tenantId: string, id: stri
   }
 }
 
+/** Serialiserat underlag utan verklig huvudmans namn; null om det inte kan tolkas. */
+function storableContext(json: string): string | null {
+  const ctx = parseAssessmentContext(json);
+  if (!ctx) return null;
+  const out = serializeAssessmentContext(stripTransientNames(ctx));
+  return out.length <= 1_900_000 ? out : null;
+}
+
+/**
+ * Senaste körningens underlag för ett bolag (§ 51.8) — det som "Räkna om
+ * med svaren" utgår från. Null när ingen körning finns, när fältet saknas i
+ * schemat (migration 1700000192) eller när underlaget inte kan tolkas.
+ */
+export async function loadLatestScreeningContext(
+  pb: PocketBase,
+  tenantId: string,
+  startupId: string
+): Promise<{ runId: string; assessedAt: string; mode: 'register' | 'saved'; context: AssessmentContext } | null> {
+  try {
+    const res = await pb.collection(SCREENINGS).getList<{ id: string; tenant?: string; assessed_at?: string; created?: string; mode?: string; context?: unknown }>(1, 1, {
+      filter: pb.filter('tenant = {:t} && startup = {:s}', { t: tenantId, s: startupId }),
+      sort: '-assessed_at,-created',
+      fields: 'id,tenant,assessed_at,created,mode,context'
+    });
+    const r = res.items[0];
+    if (!r || r.tenant !== tenantId || !r.context) return null;
+    const ctx = parseAssessmentContext(typeof r.context === 'string' ? r.context : JSON.stringify(r.context));
+    if (!ctx) return null;
+    return { runId: r.id, assessedAt: r.assessed_at || r.created || '', mode: r.mode === 'saved' ? 'saved' : 'register', context: ctx };
+  } catch {
+    return null;
+  }
+}
+
 export interface StoredScreeningRun {
   id: string;
   /** Föregående körning (om någon) och vad som ändrades sedan dess. */
@@ -165,6 +200,7 @@ export async function storeScreeningRun(
   const before = await listScreeningRuns(pb, actor.tenant, startupId, 1);
   const prev = before.runs[0];
 
+  const context = storableContext(assessment.context);
   const summary = summarizeScreeningRun(assessment.result, {
     cost: assessment.cost ? { credits: assessment.cost.credits, sek: assessment.cost.sek, complete: assessment.cost.complete } : undefined
   });
@@ -182,6 +218,8 @@ export async function storeScreeningRun(
     fd.append('summary', JSON.stringify(summary));
     fd.append('assessed_by', actor.id);
     fd.append('assessed_at', assessment.assessedAt);
+    // Underlaget (utan transienta personnamn) — för omräkning utan nya anrop (§ 51.8).
+    if (context) fd.append('context', context);
     if (pdf) {
       fd.append('file', new Blob([new Uint8Array(pdf.buffer)], { type: 'application/pdf' }), pdf.filename);
       fd.append('filename', pdf.filename.slice(0, 200));

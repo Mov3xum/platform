@@ -29,6 +29,8 @@ const inputCls =
 const OK_TONE = 'bg-movexum-pastell-gron text-movexum-morkgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron';
 const WARN_TONE = 'bg-movexum-pastell-gul text-movexum-morkgul dark:bg-movexum-morkgul/40 dark:text-movexum-pastell-gul';
 const initialState: CreateScreeningRequestState = {};
+const QUICK_MESSAGE =
+  'Inför bedömningen av statsstöd (art. 22 GBER / de minimis) och Vinnovas målgrupp behöver vi uppgifterna nedan. Svara direkt i systemet — det går att spara delvis. Inga personnummer.';
 
 export function ScreeningRequestComposer({ assessment, coaches, senderName }: Props) {
   const [state, formAction, pending] = useActionState(createScreeningRequestAction, initialState);
@@ -87,6 +89,38 @@ export function ScreeningRequestComposer({ assessment, coaches, senderName }: Pr
         Båda fyller i svaren i systemet; svaren hamnar i bolagets manuella svar och vägs in nästa gång bedömningen räknas om.
         {!startupId && ' Bolaget finns inte i plattformen — då går det bara att kopiera listan som text.'}
       </p>
+
+      {/* Ett klick: alla punkter mottagaren kan svara på, med standardtext. */}
+      {startupId && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {coaches[0] && screeningRequestItemsFor(all, 'coach').length > 0 && (
+            <form action={formAction}>
+              <input type="hidden" name="startup_id" value={startupId} />
+              <input type="hidden" name="screening_id" value={assessment.history?.runId ?? ''} />
+              <input type="hidden" name="recipient" value="coach" />
+              <input type="hidden" name="recipient_user" value={coachId || coaches[0].id} />
+              <input type="hidden" name="items" value={JSON.stringify(screeningRequestItemsFor(all, 'coach'))} />
+              <input type="hidden" name="message" value={QUICK_MESSAGE} />
+              <button type="submit" disabled={pending} className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground hover:bg-brand-hover disabled:opacity-60">
+                Skicka allt till coachen ({coaches.find((c) => c.id === coachId)?.name ?? coaches[0].name}) — {screeningRequestItemsFor(all, 'coach').length} punkter
+              </button>
+            </form>
+          )}
+          {screeningRequestItemsFor(all, 'startup').length > 0 && (
+            <form action={formAction}>
+              <input type="hidden" name="startup_id" value={startupId} />
+              <input type="hidden" name="screening_id" value={assessment.history?.runId ?? ''} />
+              <input type="hidden" name="recipient" value="startup" />
+              <input type="hidden" name="items" value={JSON.stringify(screeningRequestItemsFor(all, 'startup'))} />
+              <input type="hidden" name="message" value={QUICK_MESSAGE} />
+              <button type="submit" disabled={pending} className="rounded-full border border-strong px-4 py-2 text-sm font-semibold text-foreground hover:bg-canvas-subtle disabled:opacity-60">
+                Skicka allt till bolaget — {screeningRequestItemsFor(all, 'startup').length} punkter
+              </button>
+            </form>
+          )}
+          <span className="text-[12px] text-foreground-subtle">Vill du välja punkter, kollega eller datum — använd formuläret nedan.</span>
+        </div>
+      )}
 
       <form action={formAction} className="mt-3 space-y-3">
         <input type="hidden" name="startup_id" value={startupId ?? ''} />

@@ -18,7 +18,8 @@ import {
   MATURITY_PHASE_LABEL,
   type CompanyManualAnswers,
   type ManualAnswer,
-  type ScreeningManualFacts
+  type ScreeningManualFacts,
+  type ManualGroupCompanyFact
 } from './excellence-facts';
 
 export type ScreeningVerdict = 'yes' | 'no' | 'unknown';
@@ -118,6 +119,8 @@ export interface RelatedCompanyRef {
   level?: number;
   /** Sant när bolaget kom från ett ANNAT bolags ägarbild/koncern (andra ledet), inte startup-bolagets egen. */
   transitive?: boolean;
+  /** Sant när controllern själv angett bolaget (aktiebok/avtal) — registret bar det inte (§ 51.8). */
+  manualDeclared?: boolean;
 }
 
 /** Ett bolag i koncernen med den data som hämtats för det. */
@@ -229,6 +232,8 @@ export interface CompanyAssessment {
   via?: string;
   level?: number;
   transitive?: boolean;
+  /** Angivet manuellt av controllern (aktiebok/avtal), inte ur registret. */
+  manualDeclared?: boolean;
   dataFetched: boolean;
   basic?: ScreeningBasic;
   /** Grundförutsättningarna i Comblys ordning: ekonomisk verksamhet, < 5 år, börsnoterat, utdelning, koncentration, övertagit verksamhet. */
@@ -276,6 +281,8 @@ export const FOUNDER_OWNERSHIP_MIN_PCT = 75;
 export const MAX_RELATED_COMPANIES = 8;
 /** Tak för hur många bolag regelträdet listar (koncernkartan) — skydd mot explosion i stora koncerner. */
 export const MAX_GROUP_COMPANIES = 30;
+/** Koncernregistrets eftersläpning (årsredovisningar): yngre bolag än så bevisas aldrig fristående ur registret. */
+export const GROUP_REGISTER_LAG_MS = 2 * 365 * 24 * 3600 * 1000;
 
 export const STATE_AID_OUTCOME_LABEL: Record<StateAidOutcome, string> = {
   art22_possible: 'Art. 22 GBER möjlig',
@@ -466,7 +473,11 @@ export function deriveRelatedCompanies(ownership: ScreeningOwnershipEntry[]): Re
  * En rad per org-nr; starkaste relationen vinner; aldrig startup-bolaget
  * självt. Capat till `MAX_GROUP_COMPANIES`.
  */
-export function deriveGroupCompanies(subject: GroupCompanyFacts, related: GroupCompanyFacts[]): RelatedCompanyRef[] {
+export function deriveGroupCompanies(
+  subject: GroupCompanyFacts,
+  related: GroupCompanyFacts[],
+  manual: readonly ManualGroupCompanyFact[] = []
+): RelatedCompanyRef[] {
   const rank: Record<ScreeningRelation, number> = { linked: 3, partner: 2, uncertain: 1, exempt: 0 };
   const out = new Map<string, RelatedCompanyRef>();
   const keyOf = (orgNr: string | undefined, name: string | undefined, fallback: string) => orgNr || (name ? `name:${name.trim().toLowerCase()}` : fallback);
@@ -489,9 +500,33 @@ export function deriveGroupCompanies(subject: GroupCompanyFacts, related: GroupC
       groupRole: prev.groupRole ?? ref.groupRole,
       via: prev.via ?? ref.via,
       level: prev.level ?? ref.level,
-      transitive: prev.transitive && ref.transitive
+      transitive: prev.transitive && ref.transitive,
+      manualDeclared: prev.manualDeclared || ref.manualDeclared || undefined
     });
   };
+
+  // 0. Manuellt angivna koncernbolag (aktiebok/avtal) — registret bygger
+  // koncernstrukturen ur årsredovisningar, så ett nystartat bolag saknas ofta
+  // där. Angivna bolag räknas som anknutna/partner och slås upp som vilket
+  // koncernbolag som helst; deras egen koncern (andra ledet) följs vidare.
+  for (const m of manual) {
+    const share = typeof m.share_pct === 'number' ? m.share_pct : undefined;
+    add(
+      {
+        name: m.name,
+        org_nr: m.org_nr,
+        direction: m.direction,
+        relation: m.relation,
+        sharePct: share,
+        shareLabel: share !== undefined ? formatPct(share) : 'andel okänd',
+        reason: `Angivet manuellt av controllern${m.note ? ` (${m.note})` : ''}: ${m.direction === 'owner' ? 'äger startup-bolaget' : 'ägs av startup-bolaget'}${share !== undefined ? ` ${formatPct(share)}` : ''} — ${m.relation === 'linked' ? 'anknutet företag' : 'partnerföretag'} enligt bilaga I.`,
+        indirect: false,
+        transitive: false,
+        manualDeclared: true
+      },
+      keyOf(m.org_nr, m.name, m.org_nr)
+    );
+  }
 
   // 1. Egen ägarbild.
   let anon = 0;
@@ -937,7 +972,7 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
 
   // Anknutna / partner / oklara — hela koncernen (egen ägarbild +
   // koncernregistrets lista + andra ledet ur uppslagna bolag).
-  const refs = subject.basic?.isPersonal ? [] : deriveGroupCompanies(subject, input.related);
+  const refs = subject.basic?.isPersonal ? [] : deriveGroupCompanies(subject, input.related, manual?.group_companies ?? []);
   const factsByOrg = new Map(input.related.map((r) => [r.orgNr, r]));
   const linkedRefs = refs.filter((r) => r.relation === 'linked');
   const partnerRefs = refs.filter((r) => r.relation === 'partner');
@@ -968,6 +1003,7 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
       via: r.via,
       level: r.level,
       transitive: r.transitive,
+      manualDeclared: r.manualDeclared,
       dataFetched: base.dataFetched,
       basic: base.basic,
       conditions,
@@ -984,6 +1020,7 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
         if (r.groupRole === 'subsidiary') return `${name} (dotterbolag, ${r.shareLabel})`;
         if (r.groupRole === 'sibling') return `${name} (systerbolag${r.via ? ` under ${r.via}` : ''})`;
         if (r.transitive) return `${name} (via ${r.via ?? 'annat bolag'})`;
+        if (r.manualDeclared) return `${name} (angivet manuellt, ${r.direction === 'owner' ? 'äger' : 'ägs'} ${r.shareLabel})`;
         return `${name} (${r.direction === 'owner' ? 'äger' : 'ägs'} ${r.shareLabel})`;
       })
       .join(', ');
@@ -1001,6 +1038,7 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
     };
   } else if (linkedRefs.length > 0) {
     const fromGroup = linkedRefs.filter((r) => r.groupRole).length;
+    const onlyManual = linkedRefs.every((r) => r.manualDeclared);
     standalone = {
       id: 'standalone',
       label: 'Fristående företag',
@@ -1011,8 +1049,8 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
           : subject.groupMembers === undefined && subject.groupStructureFetched
             ? ' Systerbolag under samma moder syns bara när koncernstrukturen hämtas färskt från registret (sparade data bär bara ägarkedjan).'
             : ''
-      }`,
-      source: 'register'
+      }${onlyManual ? ' Koncernregistret bar inte bolaget — uppgiften är controllerns (aktiebok/avtal).' : ''}`,
+      source: onlyManual ? 'manual' : 'register'
     };
   } else if (partnerRefs.length > 0) {
     standalone = {
@@ -1052,8 +1090,23 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
           (e.control_basis === undefined || e.control_basis === 'shares')
       )
       .reduce((sum, e) => sum + (ownershipShareRange(e)?.min ?? 0), 0);
+    // Koncernregistret byggs ur årsredovisningar: ett bolag som registrerats
+    // de senaste två åren hinner ofta inte in i moderns koncernredovisning,
+    // så en tom koncernlista bevisar inget för det — aktieboken avgör.
+    const registeredAt = subject.basic?.registeredAt ? new Date(`${subject.basic.registeredAt.slice(0, 10)}T00:00:00Z`) : null;
+    const tooYoungForGroupRegister =
+      !!registeredAt && !Number.isNaN(registeredAt.getTime()) && ref.getTime() - registeredAt.getTime() < GROUP_REGISTER_LAG_MS;
     standalone =
-      subject.beneficialOwnersFetched && directPersonMin > 100 - PARTNER_THRESHOLD_PCT
+      tooYoungForGroupRegister
+        ? {
+            id: 'standalone',
+            label: 'Fristående företag',
+            verdict: 'unknown',
+            detail: `Koncernregistret visar ingen koncern, men det bygger på årsredovisningar och bolaget registrerades ${subject.basic?.registeredAt?.slice(0, 10)} — ett så nytt bolag finns sällan i moderns koncernredovisning ännu. Ägs bolaget av ett annat bolag (aktieboken) anges det under "Lägg till koncernbolag" i koncernkartan, så hämtas det bolagets koncern.`,
+            source: 'manual',
+            needs: 'Aktiebok: äger något bolag 25 % eller mer? Ange det som koncernbolag.'
+          }
+        : subject.beneficialOwnersFetched && directPersonMin > 100 - PARTNER_THRESHOLD_PCT
         ? {
             id: 'standalone',
             label: 'Fristående företag',
@@ -1071,6 +1124,9 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
             needs: 'Aktiebok (ägare med 25–50 %) och bolagets egna innehav i andra bolag.'
           };
   }
+  // Aktieboken är den enda säkra källan för 25 %-gränsen: ett manuellt Nej
+  // väger alltid tyngst, ett manuellt Ja fyller bara en OKÄNT-punkt.
+  standalone = applyManualAnswer(standalone, manual?.standalone);
   push(standalone);
 
   // Tröskelvärden — startup + 100 % anknutna + partnerns andel

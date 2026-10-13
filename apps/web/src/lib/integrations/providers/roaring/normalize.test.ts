@@ -725,3 +725,37 @@ test('koncernstruktur (platt): moder med bolagsnamn men okänt id-format blir me
   assert.equal(members[1].mother_name, 'Wellgo Health AB');
   assert.equal(members[1].mother_org_nr, undefined);
 });
+
+test('koncernstruktur (platt): avvikande nycklar (nästlad lista, parentCompanyId, organisationNumber) ger ändå hela koncernen', () => {
+  const raw = {
+    records: [
+      {
+        organisationNumber: '5595728790',
+        companyName: 'Combly AB',
+        groupStructure: {
+          companies: [
+            { organisationNumber: '5567036271', name: 'Ewell AB', level: 0 },
+            { organisationNumber: '5594427808', name: 'Wellgo Health AB', level: 1, parentCompanyId: '5567036271', ownedPercentage: 90 },
+            { organisationNumber: '5595728790', name: 'Combly AB', level: 2, parentCompanyId: '5594427808', ownedPercentage: 100 }
+          ]
+        }
+      }
+    ]
+  };
+  const members = normalizeRoaringGroupMembers(raw, '5595728790');
+  assert.ok(members);
+  assert.deepEqual(
+    members.map((m) => [m.org_nr, m.mother_org_nr, m.owned_pct]),
+    [
+      ['5567036271', undefined, undefined],
+      ['5594427808', '5567036271', 90],
+      ['5595728790', '5594427808', 100]
+    ]
+  );
+  const notes: string[] = [];
+  const rows = normalizeRoaringGroupStructure(raw, '5595728790', notes);
+  assert.deepEqual(rows.filter((r) => r.direction === 'owner').map((r) => [r.org_nr, r.capital_pct, r.indirect]), [
+    ['5594427808', 100, undefined],
+    ['5567036271', undefined, true]
+  ]);
+});

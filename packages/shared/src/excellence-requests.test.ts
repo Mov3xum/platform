@@ -222,3 +222,51 @@ test('screeningRequestText: numrerad checklista med länk och frist', () => {
   assert.ok(text.includes('Skriv inga personnummer'));
   assert.ok(text.trim().endsWith('Controllern'));
 });
+
+test('group-punkten: aktiebokens ägarbolag går in i de manuella svaren, "inga" bekräftar fristående', () => {
+  const items = normalizeScreeningRequestItems([{ key: 'group', kind: 'group', label: 'Ägarbolag?', status: 'open' }]);
+  const applied = applyScreeningRequestAnswers(items, {
+    answers: { group: { companies: [{ org_nr: '559442-7808', name: 'Wellgo Health AB', share_pct: 100, direction: 'owner' }, { org_nr: '19800101-1234', name: 'person' }] } },
+    answeredAt: '2026-10-13T10:00:00Z',
+    answeredBy: 'u1'
+  });
+  assert.deepEqual(applied.answeredKeys, ['group']);
+  assert.equal(applied.items[0].answer_label, '1 bolag angivet');
+  assert.ok(!JSON.stringify(applied.items[0].answer).includes('19800101'), 'enskild firma/personnummer släpps');
+  const facts = mergeScreeningRequestAnswersIntoFacts(normalizeScreeningFacts({ standalone: { verdict: 'yes' } }), applied.items);
+  assert.equal(facts.group_companies.length, 1);
+  assert.equal(facts.group_companies[0].org_nr, '5594427808');
+  assert.equal(facts.group_companies[0].relation, 'linked');
+  assert.equal(facts.standalone, undefined, 'ett ägarbolag motsäger "fristående: ja"');
+
+  const none = applyScreeningRequestAnswers(items, { answers: { group: { none: true, note: 'aktiebok 2026-10' } }, answeredAt: '2026-10-13T10:00:00Z', answeredBy: 'u1' });
+  assert.equal(none.items[0].answer_label, 'Nej — inga sådana bolag (fristående)');
+  const f2 = mergeScreeningRequestAnswersIntoFacts(normalizeScreeningFacts(null), none.items);
+  assert.deepEqual(f2.standalone, { verdict: 'yes', note: 'aktiebok 2026-10' });
+
+  const empty = applyScreeningRequestAnswers(items, { answers: { group: { companies: [] } }, answeredAt: 'x', answeredBy: 'u1' });
+  assert.deepEqual(empty.rejectedKeys, ['group']);
+});
+
+test('deriveScreeningRequestItems: okänt "fristående" ger en group-punkt som både coach och bolag kan svara på', () => {
+  const subject: GroupCompanyFacts = {
+    orgNr: '5595728790',
+    name: 'Ny AB',
+    dataFetched: true,
+    basic: { registeredAt: '2026-02-17', bolagStatus: 'aktiv', bolagsform: 'AB' },
+    financials: [],
+    ownership: [],
+    groupStructureFetched: true,
+    beneficialOwnersFetched: true,
+    groupMembers: []
+  };
+  const input: ExcellenceScreeningInput = { refDate: new Date('2026-10-12T00:00:00Z'), subject, related: [], sekPerEur: 11.3 };
+  const res = screenExcellence(input);
+  assert.equal(res.standalone.verdict, 'unknown');
+  const items = deriveScreeningRequestItems(res, { subjectName: 'Ny AB' });
+  const group = items.find((i) => i.kind === 'group');
+  assert.ok(group);
+  assert.ok(!items.some((i) => i.key === 'document:aktiebok'));
+  assert.ok(screeningRequestItemsFor(items, 'startup').some((i) => i.kind === 'group'));
+  assert.ok(screeningRequestItemsFor(items, 'coach').some((i) => i.kind === 'group'));
+});

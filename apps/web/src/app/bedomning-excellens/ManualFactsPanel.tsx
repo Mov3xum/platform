@@ -73,6 +73,13 @@ const CONDITION_QUESTION: Record<CompanyManualCondition, QuestionMeta> = {
   }
 };
 
+const STANDALONE_QUESTION: QuestionMeta = {
+  question: 'Är bolaget fristående enligt aktieboken — inget företag äger 25 % eller mer, och bolaget äger inget sådant?',
+  fulfilled: 'Ja — fristående (aktieboken kontrollerad)',
+  failed: 'Nej — det finns ägare/innehav på 25 % eller mer',
+  hint: 'Ett Nej gör bolaget anknutet/partner: lägg till bolagen i koncernkartan så prövas deras grundförutsättningar och tröskelvärden.'
+};
+
 const VINNOVA_MANUAL: Array<{ id: 'not_market_ready' | 'innovative' | 'other_criteria'; meta: QuestionMeta }> = [
   {
     id: 'not_market_ready',
@@ -269,6 +276,45 @@ export function ManualFactsPanel({ assessment, onUpdated }: Props) {
           </div>
         </section>
       ))}
+
+      {/* Fristående företag — aktieboken (§ 51.8) */}
+      <section className="mt-4">
+        <p className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">Fristående företag — aktieboken</p>
+        <p className="text-[11.5px] text-foreground-subtle">
+          Koncernregistret bygger på årsredovisningar och bevisar aldrig att ett nyregistrerat bolag är fristående. Ange ägarbolag/innehav på 25 % eller mer i
+          koncernkartan ("Lägg till koncernbolag") — eller bekräfta här att aktieboken inte visar några.
+        </p>
+        <div className="mt-1">
+          <AnswerRow
+            meta={STANDALONE_QUESTION}
+            current={assessment.result.standalone}
+            value={facts.standalone}
+            onChange={(a) => setFacts((f) => ({ ...f, standalone: a }))}
+          />
+          {facts.group_companies.length > 0 && (
+            <ul className="mt-2 space-y-1 text-[12px] text-foreground-muted">
+              {facts.group_companies.map((g) => (
+                <li key={g.org_nr} className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium text-foreground">{g.name || g.org_nr}</span>
+                  <span className="mx-tnum">{g.org_nr}</span>
+                  <span>
+                    {g.direction === 'owner' ? 'äger startup-bolaget' : 'ägs av startup-bolaget'}
+                    {typeof g.share_pct === 'number' ? ` ${g.share_pct} %` : ''} · {g.relation === 'linked' ? 'anknutet' : 'partner'}
+                    {g.note ? ` · ${g.note}` : ''}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setFacts((f) => ({ ...f, group_companies: f.group_companies.filter((x) => x.org_nr !== g.org_nr) }))}
+                    className="text-[11.5px] font-semibold text-foreground-subtle hover:text-foreground"
+                  >
+                    Ta bort
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
 
       {/* De minimis-intyg för anknutna bolag */}
       {linked.length > 0 && (
