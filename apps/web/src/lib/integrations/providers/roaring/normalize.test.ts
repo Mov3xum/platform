@@ -7,6 +7,7 @@ import {
   normalizeRoaringBeneficialOwners,
   normalizeRoaringCompany,
   normalizeRoaringFinancials,
+  normalizeRoaringGroupMembers,
   normalizeRoaringGroupStructure,
   normalizeRoaringOverview,
   parseRoaringPathList,
@@ -667,3 +668,52 @@ test('bokslut utan dividend-nyckel (naken /{companyId}) lämnar utdelningen OKÄ
   assert.ok(notes.some((n) => n.includes('utdelningsposten')));
 });
 
+
+test('koncernstruktur (platt): hela koncernen exporteras — moder, syskon och dotter med moder/andel/nivå', () => {
+  const members = normalizeRoaringGroupMembers(
+    {
+      companyId: '5595728790',
+      companyName: 'Combly AB',
+      groupCompanies: [
+        { companyId: '5567036271', companyName: 'Ewell AB', companyLevel: 0 },
+        { companyId: '5594427808', companyName: 'Wellgo Health AB', companyLevel: 1, motherCompanyId: '5567036271', ownedPercentage: 90 },
+        { companyId: '5595728790', companyName: 'Combly AB', companyLevel: 2, motherCompanyId: '5594427808', ownedPercentage: 100 },
+        { companyId: '5566778899', companyName: 'Syskon AB', companyLevel: 2, motherCompanyId: '5594427808', ownedPercentage: 100 },
+        { companyId: '195001011234', companyName: 'Enskild firma', companyLevel: 2, motherCompanyId: '5594427808', ownedPercentage: 100 },
+        { companyId: '5594429630', companyName: 'Dotter AB', companyLevel: 3, motherCompanyId: '5595728790', ownedPercentage: 51 }
+      ]
+    },
+    '559572-8790'
+  );
+  assert.ok(members);
+  assert.deepEqual(
+    members.map((m) => [m.org_nr, m.level, m.mother_org_nr, m.mother_name, m.owned_pct]),
+    [
+      ['5567036271', 0, undefined, undefined, undefined],
+      ['5594427808', 1, '5567036271', 'Ewell AB', 90],
+      ['5595728790', 2, '5594427808', 'Wellgo Health AB', 100],
+      ['5566778899', 2, '5594427808', 'Wellgo Health AB', 100],
+      ['5594429630', 3, '5595728790', 'Combly AB', 51]
+    ]
+  );
+  assert.ok(!JSON.stringify(members).includes('195001011234'), 'personnummer-derivat lämnar aldrig normaliseraren');
+  // Hela kedjan följer med in i RegistryCompany.group bara när koncernstrukturen hämtats.
+  const company = normalizeRoaringCompany('5595728790', { groupStructure: { companyId: '5595728790', groupCompanies: [{ companyId: '5594427808', companyName: 'Wellgo Health AB', companyLevel: 0 }, { companyId: '5595728790', companyName: 'Combly AB', companyLevel: 1, motherCompanyId: '5594427808', ownedPercentage: 100 }] } }, { isPersonal: false });
+  assert.equal(company.group?.length, 2);
+  assert.equal(normalizeRoaringCompany('5595728790', {}, { isPersonal: false }).group, undefined);
+  assert.equal(normalizeRoaringGroupMembers({ companyId: '5595728790', owners: [] }, '5595728790'), undefined);
+});
+
+test('koncernstruktur (platt): moder med bolagsnamn men okänt id-format blir medlem utan org-nr, och barnets mother_name sätts', () => {
+  const members = normalizeRoaringGroupMembers(
+    { records: [{ groupCompanies: [
+      { companyId: 'SE-WELLGO-001', companyName: 'Wellgo Health AB', companyLevel: 0 },
+      { companyId: '5595728790', companyName: 'Combly AB', motherCompanyId: 'SE-WELLGO-001', ownedPercentage: 100, companyLevel: 1 }
+    ] }] },
+    '5595728790'
+  );
+  assert.ok(members);
+  assert.deepEqual(members[0], { name: 'Wellgo Health AB', level: 0 });
+  assert.equal(members[1].mother_name, 'Wellgo Health AB');
+  assert.equal(members[1].mother_org_nr, undefined);
+});

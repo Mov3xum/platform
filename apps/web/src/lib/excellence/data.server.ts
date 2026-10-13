@@ -364,7 +364,21 @@ export function groupFactsFromRegistry(company: RegistryCompany, fallbackName?: 
     // delen ÄR hämtad (svaret är "inga rader"), annars ser varje fristående
     // bolag ut som ett ohämtat.
     groupStructureFetched: fetched.includes('group_structure') || noRecord.includes('group_structure'),
-    beneficialOwnersFetched: fetched.includes('beneficial_owners') || noRecord.includes('beneficial_owners')
+    beneficialOwnersFetched: fetched.includes('beneficial_owners') || noRecord.includes('beneficial_owners'),
+    // Hela koncernen ur den platta listan (moder, syskon, dotter) — bara när
+    // koncernstrukturen faktiskt hämtades; "inga uppgifter" = tom koncern.
+    groupMembers: fetched.includes('group_structure')
+      ? (company.group ?? []).map((m) => ({
+          org_nr: m.org_nr ? (normalizeOrgNr(m.org_nr) ?? undefined) : undefined,
+          name: m.name,
+          level: m.level,
+          mother_org_nr: m.mother_org_nr ? (normalizeOrgNr(m.mother_org_nr) ?? undefined) : undefined,
+          mother_name: m.mother_name,
+          owned_pct: m.owned_pct
+        }))
+      : noRecord.includes('group_structure')
+        ? []
+        : undefined
   };
 }
 

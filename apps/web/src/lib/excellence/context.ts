@@ -1,10 +1,12 @@
 import {
+  MAX_GROUP_COMPANIES,
   MAX_RELATED_COMPANIES,
   type ExcellenceScreeningInput,
   type GroupCompanyFacts,
   type ScreeningBasic,
   type ScreeningFinancialsYear,
   type ScreeningFounderRow,
+  type ScreeningGroupMember,
   type ScreeningIrl,
   type ScreeningOwnerKind,
   type ScreeningOwnershipEntry
@@ -148,6 +150,31 @@ function ownership(v: unknown): ScreeningOwnershipEntry[] {
   return out;
 }
 
+function groupMembers(v: unknown): ScreeningGroupMember[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out: ScreeningGroupMember[] = [];
+  for (const m of v.slice(0, MAX_GROUP_COMPANIES * 2)) {
+    const o = obj(m);
+    if (!o) continue;
+    const member: ScreeningGroupMember = {};
+    const nr = orgNr(o.org_nr);
+    if (nr) member.org_nr = nr;
+    const name = str(o.name, 200);
+    if (name) member.name = name;
+    if (!member.org_nr && !member.name) continue;
+    const level = num(o.level);
+    if (level !== undefined && Number.isInteger(level) && level >= 0 && level <= 20) member.level = level;
+    const mother = orgNr(o.mother_org_nr);
+    if (mother) member.mother_org_nr = mother;
+    const motherName = str(o.mother_name, 200);
+    if (motherName) member.mother_name = motherName;
+    const owned = pct(o.owned_pct);
+    if (owned !== undefined) member.owned_pct = owned;
+    out.push(member);
+  }
+  return out;
+}
+
 function groupFacts(v: unknown): GroupCompanyFacts | null {
   const o = obj(v);
   if (!o) return null;
@@ -163,6 +190,8 @@ function groupFacts(v: unknown): GroupCompanyFacts | null {
     groupStructureFetched: o.groupStructureFetched === true,
     beneficialOwnersFetched: o.beneficialOwnersFetched === true
   };
+  const members = groupMembers(o.groupMembers);
+  if (members) facts.groupMembers = members;
   const dm = obj(o.deMinimis);
   const used = num(dm?.usedEur);
   if (dm && used !== undefined && used >= 0 && (dm.source === 'platform' || dm.source === 'certificate')) {
@@ -256,7 +285,7 @@ export function parseAssessmentContext(json: string): AssessmentContext | null {
 
   const related: GroupCompanyFacts[] = [];
   if (Array.isArray(inputRaw.related)) {
-    for (const r of inputRaw.related.slice(0, MAX_RELATED_COMPANIES)) {
+    for (const r of inputRaw.related.slice(0, MAX_RELATED_COMPANIES * 2)) {
       const g = groupFacts(r);
       if (g) related.push(g);
     }
@@ -270,7 +299,7 @@ export function parseAssessmentContext(json: string): AssessmentContext | null {
   const financialsByOrg: Record<string, ScreeningFinancialsYear[]> = {};
   const fbo = obj(o.financialsByOrg);
   if (fbo) {
-    for (const [k, v] of Object.entries(fbo).slice(0, MAX_RELATED_COMPANIES + 1)) {
+    for (const [k, v] of Object.entries(fbo).slice(0, MAX_RELATED_COMPANIES * 2 + 1)) {
       const nr = orgNr(k) ?? (k === '' ? '' : undefined);
       if (nr === undefined) continue;
       financialsByOrg[nr] = financialsRows(v) ?? [];
@@ -279,7 +308,7 @@ export function parseAssessmentContext(json: string): AssessmentContext | null {
 
   const notes: AssessmentContext['notes'] = [];
   if (Array.isArray(o.notes)) {
-    for (const n of o.notes.slice(0, MAX_RELATED_COMPANIES + 1)) {
+    for (const n of o.notes.slice(0, MAX_RELATED_COMPANIES * 2 + 1)) {
       const no = obj(n);
       const nr = orgNr(no?.orgNr) ?? (no?.orgNr === '' ? '' : undefined);
       if (!no || nr === undefined) continue;

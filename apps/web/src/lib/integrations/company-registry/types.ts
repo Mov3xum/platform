@@ -94,6 +94,24 @@ export interface RegistryOwnershipEntry {
   part?: RegistryPartId;
 }
 
+/**
+ * Ett bolag i koncernregistrets PLATTA lista (Roaring group-structure 1.0:
+ * `groupCompanies[]`). Hela koncernen — moderbolag, syskon, dotterbolag —
+ * inte bara startup-bolagets egen ägarkedja. Bara juridiska personer; ett id
+ * som är ett personnummer-derivat utelämnas. Skrivs inte till databasen
+ * (`startup_ownership` bär bara ägare/innehav); används av bedömningen (§ 51)
+ * för att pröva grundförutsättningarna för VARJE anknutet bolag.
+ */
+export interface RegistryGroupMember {
+  org_nr?: string;
+  name?: string;
+  level?: number;
+  mother_org_nr?: string;
+  mother_name?: string;
+  /** Moderns andel av bolaget i procent. */
+  owned_pct?: number;
+}
+
 export interface RegistryCompany {
   /** Normaliserat org-nr (10 siffror). */
   org_nr: string;
@@ -104,6 +122,8 @@ export interface RegistryCompany {
   startup: RegistryStartupPatch;
   financials: RegistryFinancialsYear[];
   ownership: RegistryOwnershipEntry[];
+  /** Hela koncernen ur koncernregistret (bara när datadelen `group_structure` hämtades och svaret var en koncernlista). */
+  group?: RegistryGroupMember[];
   /**
    * Datadelar som hämtades MED LYCKAT RESULTAT. Bara dessa skrivs; en del som
    * inte valdes, eller vars anrop föll, lämnar befintliga värden orörda.

@@ -1591,8 +1591,20 @@ Regler:
   Konsumering efter första uppslaget.
 - **Audit:** valda delar står i synkens sammanfattning (`last_sync_summary`)
   och i aktivitetsraden ("Hämtade: Grunddata, Bokslut") — PII-fritt.
-- Senaste val sparas per leverantör i `localStorage`
-  (`movexum-registry-parts-<slug>`, bekvämlighet — ingen datakälla).
+- **Ingen del är förvald (2026-10-13)** — varje anrop debiteras, så personalen
+  bockar aktivt i det som ska begäras ut (`useRegistryPartSelection` startar
+  tomt; "Markera alla" finns kvar). Senaste val sparas per leverantör i
+  `localStorage` (`movexum-registry-parts-<slug>`, bekvämlighet — ingen
+  datakälla).
+- **Hela koncernen ur koncernstrukturen (2026-10-13).** Roarings platta
+  `groupCompanies[]` bär HELA koncernen (moder, moderns moder, syskon,
+  dotterbolag). Utöver ägare/innehav (`ownership`) exporterar normaliseraren
+  listan som `RegistryCompany.group` (`RegistryGroupMember[]`:
+  org-nr/namn/nivå/moder/andel; personnummer-derivat utelämnas) — bara när
+  datadelen `group_structure` hämtades (`restrictToParts`). Fältet skrivs
+  aldrig till databasen (`startup_ownership` är oförändrad); det används av
+  Bedömning excellens (§ 51.5) för att pröva grundförutsättningarna för varje
+  anknutet bolag.
 Ingen ny dataväg, ingen PII i det nya fältet; riskklass oförändrad.
 
 **Kostnad per anrop — credits och kronor (2026-10-12, migration
@@ -8332,8 +8344,9 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
 - **Deterministiskt, inget beslut.** Ingen AI-inferens; varje punkt får
   JA / NEJ / OKÄNT med motivering och källa (bolagsregister / plattformen /
   manuell kontroll). OKÄNT när underlaget saknas — motorn gissar aldrig
-  (börsnotering, företagskoncentration, övertagen verksamhet,
-  grundarengagemang, innovationshöjd är alltid manuella).
+  (företagskoncentration, övertagen verksamhet, grundarengagemang,
+  innovationshöjd är alltid manuella; börsnotering avgörs ur registret för
+  privata AB, § 51.5).
 - **Vinstutdelning avgörs ur bokslutet (2026-10-12).** Punkten "har
   inte beslutat om eller delat ut vinst" läser `dividend_reported`/
   `dividend_sek` (fältet `dividend` i Roarings economy-overview 2.1
@@ -8469,6 +8482,87 @@ svaren. Nu finns panelen **Manuella svar** under varje bedömning:
   och inte whitelistat i `lib/ai/context.ts`. Panelen uppmanar att inte
   skriva personuppgifter; personnummer saneras på skrivvägen. Riskklass n/a
   (ingen AI). Ingen ny kollektion.
+
+### 51.5 Hela koncernen, börsnotering ur registret & frågor som inte kan inverteras (2026-10-13)
+
+**Incident.** Bedömningen av Wellgo Health AB sade "Wellgo Health AB är
+börsnoterat; bildat genom företagskoncentration; har övertagit annat
+företags verksamhet" och landade på de minimis. Orsak: panelen Manuella svar
+visade villkoret ("Inte börsnoterat") med ett nakent Ja/Nej, controllern
+svarade "Nej" (= inte noterat) och svaret lagrades i villkorets riktning som
+NEJ (= ÄR noterat). Dessutom prövades bara ägarkedjan uppåt och de direkta
+innehaven — systerbolag under samma holdingbolag (ofta det äldsta i gruppen)
+föll bort ur både grundförutsättningarna och tröskelvärdet, och "andra
+analysen" av ett holdingbolags egna ägare/innehav stannade vid visning.
+
+- **Börsnotering avgörs ur registret** (`listedCheck`, ren + enhetstestad):
+  bara ett PUBLIKT aktiebolag kan ta upp aktier till handel, och ett publikt
+  bolags namn ska följas av "(publ)" (ABL 28 kap. 7 §). Privat AB (namn utan
+  "(publ)", bolagsform utan "publik"), handels-/kommanditbolag, ekonomisk
+  förening och enskild firma ⇒ JA ur registret. "(publ)"/"Publikt aktiebolag"
+  ⇒ OKÄNT med manuell kontroll (är aktierna upptagna till handel?). Namnet
+  räcker för ett bolag i koncernlistan utan eget uppslag. **Undantag från
+  "manuellt NEJ vinner":** ett register-JA är ett rättsligt faktum — ett
+  manuellt "börsnoterat" på ett privat AB bortses från med en not i
+  bedömningen (det räddar redan sparade inverterade svar).
+- **Frågorna i Manuella svar är naturliga frågor med uttydda alternativ**
+  (`CONDITION_QUESTION`/`VINNOVA_MANUAL` i `ManualFactsPanel.tsx`): "Är
+  bolaget börsnoterat?" → "Nej — inte börsnoterat" / "Ja — aktierna är
+  upptagna till handel". Lagrat `verdict` är oförändrat i VILLKORETS riktning
+  (`yes` = uppfyllt); bara presentationen ändrades. En punkt registret redan
+  avgjort visar "Avgjort ur registret: …" och alternativet "Inget eget svar
+  (registret gäller)". Aldrig mer ett nakent Ja/Nej mot en negerad etikett.
+- **Hela koncernen** (`deriveGroupCompanies`, ren + enhetstestad, ersätter
+  `deriveRelatedCompanies` som ensam källa; `GroupCompanyFacts.groupMembers`
+  bär koncernlistan § 11.8). Tre lager: (1) startup-bolagets egen ägarbild,
+  (2) VARJE bolag i koncernregistrets lista — moder, moderns moder,
+  **systerbolag** och dotterbolag — är anknutet (koncern = majoritetskontroll
+  i varje led; bilaga I art. 3.3: anknutna via ett eller flera andra företag),
+  med `groupRole` parent/subsidiary/sibling, `via` (modern) och nivå; (3)
+  andra ledet ur de bolag som slagits upp: ett anknutet bolags egna anknutna
+  (ägarbild + dess koncern) är anknutna, ett partnerföretags anknutna räknas
+  med partnerns andel (art. 6.3). En rad per org-nr, starkaste relationen
+  vinner, tak `MAX_GROUP_COMPANIES` = 30. Alla anknutna får
+  grundförutsättningar (ålder/status/börsnotering/utdelning …) och en
+  100 %-rad i tröskelvärdet; "Fristående?" beskriver rollerna. Sparade data
+  (bolagskortet) bär bara ägarkedjan — vyn säger att systerbolag kräver en
+  färsk hämtning med Koncernstruktur.
+- **Uppslagen** (`assessExcellenceAction`): två rundor, varje bolag en gång,
+  högst `MAX_RELATED_COMPANIES` = 8 (överskott listas i koncernkartan utan
+  uppslag + varning). Ett bolag UR koncernlistan hämtas BARA med grunddata +
+  bokslut av det valda (koncernen är redan känd — inte 150 credits
+  koncernstruktur per bolag igen); verklig huvudman bara för moderbolagen
+  (indirekt grundarägande); ett bolag ur ägarbilden som inte ligger i listan
+  (partner/oklart ur verklig huvudman) hämtas med hela valet så dess egen
+  koncern blir känd (`partsForRelated`). Kostnaden summeras per uppslag
+  (`sumRegistryCosts`, enhetstestad) i stället för "delar × bolag". Rate-
+  limiten för uppslag är 60/10 min per användare (en koncernbedömning är upp
+  till 9 uppslag). Väljs bara Koncernstruktur slås koncernbolagen inte upp —
+  varningen säger att Grunddata/Bokslut behövs.
+- **Koncernkarta** i vyn och PDF:n (efter startup-bolagets block): bolag ·
+  plats i koncernen (moder/dotter/syster + nivå, "via X", andra ledet) ·
+  relation · andel · registrerat/ålder (med "över 5 år") · status · uppslag
+  gjort/inte. Det är tabellen som visar VARFÖR ett bolag räknas in och var
+  underlaget slutar.
+- **Indirekt grundarägande** (`indirectPersonOwnership`, ren + enhetstestad):
+  via ägarkedjan (Combly ← Wellgo 100 % ← Ewell 90 % ← personer) räknas
+  fysiska personers minsta andel av startup-bolaget ur verklig huvudman för
+  ägarbolagen. Punkten "grundarteamet äger ≥ 75 % (direkt eller indirekt)"
+  får det som LEDTRÅD ("via Wellgo → Ewell äger fysiska personer minst
+  67,5 %") — aldrig ett JA av sig självt, registret vet inte att personerna
+  är grundarna; controllern anger andelen inkl. indirekt under Manuella svar.
+  Ägs startup-bolaget till ≥ 25 % av bolag utan att huvudmännen hämtats sägs
+  det uttryckligen.
+- **Uppskattning för bolag utan bokslut** (bilaga I art. 4.3): nystartade
+  bolag saknar bokslut och gjorde tröskelvärdet OKÄNT ⇒ art. 22 "kan inte
+  avgöras". `ScreeningManualFacts.estimates[orgNr]` (anställda, omsättning,
+  balansomslutning, källa — normaliseras i `excellence-facts.ts`) fyller
+  raden med not "Bolagets egen uppskattning", källa manuell; ett bokslut
+  vinner alltid. Panelen visar inmatningen bara för bolag utan årsrader.
+- Riskklass/PII: oförändrat n/a — inga nya kollektioner eller fält i PB
+  (`screening_facts` bär uppskattningarna, redan fältmaskat för AI); koncern-
+  listan bär bara juridiska personer; namn på fysiska personer når aldrig
+  motorn.
 
 ### 51.3 Var en bedömning lagras — PDF i Filer, i bolagets mapp (2026-10-12)
 

@@ -18,7 +18,12 @@ const ctx: AssessmentContext = {
         { direction: 'owner', owner_kind: 'person', pct_min: 25, pct_max: 50, control_basis: 'shares' }
       ],
       groupStructureFetched: true,
-      beneficialOwnersFetched: true
+      beneficialOwnersFetched: true,
+      groupMembers: [
+        { org_nr: '5594427808', name: 'Wellgo Health AB', level: 0 },
+        { org_nr: '5595728790', name: 'Combly AB', level: 1, mother_org_nr: '5594427808', mother_name: 'Wellgo Health AB', owned_pct: 100 },
+        { org_nr: '5566778899', name: 'Syskon AB', level: 1, mother_org_nr: '5594427808', mother_name: 'Wellgo Health AB', owned_pct: 100 }
+      ]
     },
     related: [
       {
@@ -63,8 +68,14 @@ test('klientdata byggs om fält för fält: okända nycklar, personnamn på fysi
   raw.input.sekPerEur = 11.3;
   raw.cost.parts = ['basic', 'nonsense'];
   raw.notes[0].notes.push(42, 'ok');
+  raw.input.subject.groupMembers.push({ org_nr: '195001011234', name: 'Person' }, { level: 3 }, { name: 'Namnlöst AB', owned_pct: 250, level: 99 });
   const parsed = parseAssessmentContext(JSON.stringify(raw));
   assert.ok(parsed);
+  // Koncernlistan: personnummer-derivat blir namnrad utan org-nr, tomma rader släpps, ogiltiga tal släpps.
+  const members = parsed!.input.subject.groupMembers!;
+  assert.equal(members.length, 5);
+  assert.deepEqual(members[3], { name: 'Person' });
+  assert.deepEqual(members[4], { name: 'Namnlöst AB' });
   assert.equal(parsed!.subject.startupId, undefined);
   assert.equal((parsed!.subject as unknown as Record<string, unknown>).evil, undefined);
   const person = parsed!.input.subject.ownership[1];

@@ -6,6 +6,8 @@ import {
   estimateRegistryCost,
   REGISTRY_PROVIDER_PRICING,
   registryPricingFromProvider,
+  sumRegistryCosts,
+  type RegistryPricing,
   formatRegistryCost,
   isRegistryPricingComplete,
   mergeRegistryPricing,
@@ -170,4 +172,21 @@ test('composeRegistryPricing: listpris → env → tenant, högre nivå vinner p
   // Artikelns exempel: 4 400 credits × 0,20 kr = 880 kr.
   const example = composeRegistryPricing('roaring', { ROARING_CREDITS_BASIC: '4400' }, EMPTY_REGISTRY_PRICING);
   assert.equal(estimateRegistryCost(example, ['basic'], 1).sek, 880);
+});
+
+test('sumRegistryCosts: olika delar per bolag summeras per uppslag; en opristt del gör summan till nedre gräns', () => {
+  const pricing = { creditsPerPart: { basic: 10, financials: 35, group_structure: 150, beneficial_owners: 50 }, sekPerCredit: 0.2, source: 'tenant' } as unknown as RegistryPricing;
+  const full = estimateRegistryCost(pricing, ['basic', 'financials', 'group_structure', 'beneficial_owners'], 1);
+  const light = estimateRegistryCost(pricing, ['basic', 'financials'], 1);
+  const sum = sumRegistryCosts([full, light, light]);
+  assert.equal(sum.companies, 3);
+  assert.equal(sum.calls, 8);
+  assert.equal(sum.credits, 245 + 45 + 45);
+  assert.equal(sum.sek, (245 + 90) * 0.2);
+  assert.deepEqual(sum.parts, ['basic', 'financials', 'group_structure', 'beneficial_owners']);
+  assert.equal(sum.complete, true);
+  const partial = sumRegistryCosts([full, estimateRegistryCost({ ...pricing, creditsPerPart: { basic: 10 } } as RegistryPricing, ['basic', 'financials'], 1)]);
+  assert.equal(partial.complete, false);
+  assert.deepEqual(partial.unpricedParts, ['financials']);
+  assert.equal(sumRegistryCosts([]).complete, false);
 });

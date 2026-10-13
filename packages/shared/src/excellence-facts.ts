@@ -71,6 +71,19 @@ export interface RelatedDeMinimisFact {
   note?: string;
 }
 
+/**
+ * Bolagets egen uppskattning av tröskelvärdets tal när det saknar bokslut
+ * (nystartat — bilaga I art. 4.3: "uppskattning i god tro under
+ * räkenskapsåret"). Nyckel = org-nr. Används BARA när registret saknar
+ * årsrader för bolaget; ett bokslut vinner alltid.
+ */
+export interface CompanyEstimateFact {
+  employees?: number;
+  revenue_sek?: number;
+  balance_sheet_sek?: number;
+  note?: string;
+}
+
 export interface ScreeningManualFacts {
   /** Controllerns kommentar — review-radens kolumn "Kommentar". */
   comment?: string;
@@ -89,6 +102,8 @@ export interface ScreeningManualFacts {
   excellence?: ManualAnswer;
   /** Intyg om de minimis-stöd per anknutet bolag (nyckel = org-nr). */
   de_minimis_related: Record<string, RelatedDeMinimisFact>;
+  /** Egen uppskattning av anställda/omsättning/balansomslutning per bolag utan bokslut (nyckel = org-nr). */
+  estimates: Record<string, CompanyEstimateFact>;
   irl?: ScreeningIrlFacts;
 }
 
@@ -158,8 +173,20 @@ function cleanIrlLevel(v: unknown): number | undefined {
  * fel typer, ogiltiga procent och personnummer försvinner tyst. Aldrig ett
  * undantag: ett trasigt lagrat json ger bara tomma svar.
  */
+function cleanSek(v: unknown): number | undefined {
+  const n = typeof v === 'string' ? Number(v.replace(',', '.').replace(/\s/g, '')) : v;
+  if (typeof n !== 'number' || !Number.isFinite(n) || n < 0) return undefined;
+  return Math.round(n);
+}
+
+function cleanCount(v: unknown): number | undefined {
+  const n = typeof v === 'string' ? Number(v.replace(',', '.').replace(/\s/g, '')) : v;
+  if (typeof n !== 'number' || !Number.isFinite(n) || n < 0 || n > 100_000) return undefined;
+  return Math.round(n * 10) / 10;
+}
+
 export function normalizeScreeningFacts(raw: unknown): ScreeningManualFacts {
-  const out: ScreeningManualFacts = { companies: {}, de_minimis_related: {} };
+  const out: ScreeningManualFacts = { companies: {}, de_minimis_related: {}, estimates: {} };
   if (!raw || typeof raw !== 'object') return out;
   const r = raw as Record<string, unknown>;
 
@@ -223,6 +250,27 @@ export function normalizeScreeningFacts(raw: unknown): ScreeningManualFacts {
     }
   }
 
+  if (r.estimates && typeof r.estimates === 'object') {
+    let n = 0;
+    for (const [key, val] of Object.entries(r.estimates as Record<string, unknown>)) {
+      const org = cleanOrgNr(key);
+      if (!org || !val || typeof val !== 'object') continue;
+      const o = val as Record<string, unknown>;
+      const est: CompanyEstimateFact = {};
+      const employees = cleanCount(o.employees);
+      const revenue = cleanSek(o.revenue_sek);
+      const balance = cleanSek(o.balance_sheet_sek);
+      if (employees !== undefined) est.employees = employees;
+      if (revenue !== undefined) est.revenue_sek = revenue;
+      if (balance !== undefined) est.balance_sheet_sek = balance;
+      if (Object.keys(est).length === 0) continue;
+      const note = cleanText(o.note, SCREENING_NOTE_MAX);
+      if (note) est.note = note;
+      out.estimates[org] = est;
+      if (++n >= SCREENING_MAX_COMPANIES) break;
+    }
+  }
+
   if (r.irl && typeof r.irl === 'object') {
     const i = r.irl as Record<string, unknown>;
     const levels: Partial<Record<IrlAxis, number>> = {};
@@ -261,6 +309,7 @@ export function isEmptyScreeningFacts(f: ScreeningManualFacts): boolean {
     !f.other_criteria &&
     !f.excellence &&
     Object.keys(f.de_minimis_related).length === 0 &&
+    Object.keys(f.estimates).length === 0 &&
     !f.irl
   );
 }
@@ -275,6 +324,7 @@ export function summarizeScreeningFacts(f: ScreeningManualFacts): Record<string,
     vinnova_answers: ['not_market_ready', 'innovative', 'other_criteria'].filter((k) => !!f[k as keyof ScreeningManualFacts]).length,
     has_excellence: !!f.excellence,
     de_minimis_related: Object.keys(f.de_minimis_related).length,
+    estimates: Object.keys(f.estimates).length,
     irl_notes: Object.keys(f.irl?.notes ?? {}).length,
     has_comment: !!f.comment
   };

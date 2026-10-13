@@ -116,6 +116,7 @@ function restrictToParts(company: RegistryCompany, requested: RegistryPartId[]):
     startup: fetched.includes('basic') ? company.startup : {},
     financials: financialsParts(fetched).length > 0 ? company.financials : [],
     ownership: company.ownership.filter((e) => (e.part ? own.includes(e.part) : own.length > 0)),
+    group: fetched.includes('group_structure') ? company.group : undefined,
     fetchedParts: fetched
   };
 }

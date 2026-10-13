@@ -82,9 +82,9 @@ export async function runRegistryLookup(
   if (isPersonalOrgNr(orgNr)) {
     return { ok: false, error: 'Uppslag stöds bara för juridiska personer (inte enskild firma).' };
   }
-  // Rate-limit per användare (20 uppslag / 10 min) — delad mellan ytorna.
+  // Rate-limit per användare (60 uppslag / 10 min — en koncernbedömning är upp till 1 + MAX_RELATED_COMPANIES uppslag) — delad mellan ytorna.
   const rateKey = `registry-lookup:${user.id}`;
-  const limited = await checkRateLimit(rateKey, 20);
+  const limited = await checkRateLimit(rateKey, 60);
   if (limited.blocked) {
     return { ok: false, error: `För många uppslag — försök igen om ${limited.retryAfterSec} s.` };
   }

@@ -5,16 +5,18 @@ import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import {
   MAX_RELATED_COMPANIES,
-  deriveRelatedCompanies,
+  deriveGroupCompanies,
   normalizeScreeningFacts,
   screenExcellence,
   type GroupCompanyFacts,
+  type RelatedCompanyRef,
   type ScreeningFinancialsYear,
   type ScreeningManualFacts
 } from '@platform/shared';
 import { runRegistryLookup } from '@/lib/integrations/company-registry/lookup.server';
 import { isPersonalOrgNr } from '@/lib/integrations/company-registry/orgnr';
-import { estimateRegistryCost } from '@/lib/integrations/company-registry/pricing';
+import { sumRegistryCosts } from '@/lib/integrations/company-registry/pricing';
+import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
 import {
   attachPlatformDeMinimis,
   findStartupByOrgNr,
@@ -164,7 +166,7 @@ export async function assessExcellenceAction(
     // Anknutna bolag som själva är portföljbolag får sina sparade fakta.
     const related: GroupCompanyFacts[] = [];
     const financialsByOrg: Record<string, ScreeningFinancialsYear[]> = { [platform.orgNr]: platform.financials };
-    for (const ref of deriveRelatedCompanies(subject.ownership).slice(0, MAX_RELATED_COMPANIES)) {
+    for (const ref of deriveGroupCompanies(subject, []).slice(0, MAX_RELATED_COMPANIES)) {
       if (!ref.org_nr || ref.relation === 'exempt') continue;
       const id = await findStartupByOrgNr(pb, user.tenant, ref.org_nr);
       const f = id ? await loadPlatformStartupFacts(pb, user.tenant, id) : null;
@@ -223,47 +225,81 @@ export async function assessExcellenceAction(
   const financialsByOrg: Record<string, ScreeningFinancialsYear[]> = { [subject.orgNr]: c.financials };
   const notes: AssessmentContext['notes'] = [{ orgNr: subject.orgNr, name: subject.name, notes: c.notes }];
   const lookupWarnings: string[] = [];
-  // Kostnad: varje uppslag (startup + varje koncernbolag) är egna debiterade
-  // anrop med samma valda delar — summeras till en rad i resultatet.
-  let companiesLookedUp = 1;
+  // Kostnad: varje uppslag är egna debiterade anrop — koncernbolagen hämtas
+  // med FÄRRE delar än startup-bolaget (koncernen är redan känd ur dess
+  // koncernlista), så summan räknas per uppslag (§ 11.8).
+  const costs = [lookup.cost];
 
-  // Koncernen: slå upp anknutna/partner-/oklara bolag med samma datadelar som
-  // valdes för startup-bolaget (ägardelarna behövs för deras egen ägarbild,
-  // grunddata för åldern, bokslut för tröskelvärdet).
+  // Koncernen i två led: (1) startup-bolagets ägarbild + koncernregistrets
+  // HELA lista (moder, moderns moder, syskon, dotter — alla anknutna, bilaga
+  // I art. 3.3), (2) det som de uppslagna bolagen i sin tur visar (ett
+  // anknutet bolags anknutna; ett partnerföretags koncern). Varje bolag slås
+  // upp EN gång, högst MAX_RELATED_COMPANIES totalt.
   const related: GroupCompanyFacts[] = [];
-  const refs = subject.basic?.isPersonal ? [] : deriveRelatedCompanies(subject.ownership).filter((r) => r.relation !== 'exempt');
-  if (refs.length > MAX_RELATED_COMPANIES) {
+  const lookedUp = new Set<string>([subject.orgNr]);
+  const skipped = new Set<string>();
+  let overflow = 0;
+  let partsHint = false;
+  for (let round = 0; round < 2; round++) {
+    const refs = subject.basic?.isPersonal ? [] : deriveGroupCompanies(subject, related).filter((r) => r.relation !== 'exempt');
+    const pending = refs.filter((r) => {
+      const key = r.org_nr ?? `name:${r.name ?? ''}`;
+      return !lookedUp.has(key) && !skipped.has(key);
+    });
+    if (pending.length === 0) break;
+    for (const ref of pending) {
+      const key = ref.org_nr ?? `name:${ref.name ?? ''}`;
+      const label = ref.name || ref.org_nr || 'okänt bolag';
+      if (related.length >= MAX_RELATED_COMPANIES) {
+        overflow++;
+        skipped.add(key);
+        continue;
+      }
+      if (!ref.org_nr) {
+        lookupWarnings.push(`${label}: saknar org-nr i registret — kunde inte slås upp.`);
+        skipped.add(key);
+        continue;
+      }
+      if (isPersonalOrgNr(ref.org_nr)) {
+        lookupWarnings.push(`${label}: enskild firma — slås inte upp (org-nr = personnummer).`);
+        skipped.add(key);
+        continue;
+      }
+      const parts = partsForRelated(ref, lookup.requestedParts);
+      if (parts.length === 0) {
+        partsHint = true;
+        skipped.add(key);
+        continue;
+      }
+      const r = await runRegistryLookup(user, {
+        providerSlug,
+        orgNrRaw: ref.org_nr,
+        parts,
+        auditLabel: 'koncernbolag för bedömning excellens'
+      });
+      lookedUp.add(key);
+      if (!r.ok) {
+        lookupWarnings.push(`${label}: ${r.error}`);
+        continue;
+      }
+      costs.push(r.cost);
+      // Ett anknutet bolag som själv är portföljbolag får sitt registrerade
+      // de minimis-stöd ur plattformen (annars intyg via Manuella svar).
+      const f = await attachPlatformDeMinimis(pb, user.tenant, groupFactsFromRegistry(r.company, ref.name));
+      related.push(f);
+      financialsByOrg[f.orgNr] = r.company.financials;
+      if (r.company.notes.length > 0) notes.push({ orgNr: f.orgNr, name: f.name, notes: r.company.notes });
+    }
+  }
+  if (overflow > 0) {
     lookupWarnings.push(
-      `Koncernen har ${refs.length} anknutna/partnerbolag — bara de ${MAX_RELATED_COMPANIES} första slogs upp.`
+      `Koncernen har fler bolag än som slås upp per bedömning — ${overflow} bolag slogs inte upp (tak ${MAX_RELATED_COMPANIES}). De visas ändå i koncernkartan utan grundförutsättningar.`
     );
   }
-  for (const ref of refs.slice(0, MAX_RELATED_COMPANIES)) {
-    const label = ref.name || ref.org_nr || 'okänt bolag';
-    if (!ref.org_nr) {
-      lookupWarnings.push(`${label}: saknar org-nr i registret — kunde inte slås upp.`);
-      continue;
-    }
-    if (isPersonalOrgNr(ref.org_nr)) {
-      lookupWarnings.push(`${label}: enskild firma — slås inte upp (org-nr = personnummer).`);
-      continue;
-    }
-    const r = await runRegistryLookup(user, {
-      providerSlug,
-      orgNrRaw: ref.org_nr,
-      parts: lookup.requestedParts,
-      auditLabel: 'koncernbolag för bedömning excellens'
-    });
-    if (!r.ok) {
-      lookupWarnings.push(`${label}: ${r.error}`);
-      continue;
-    }
-    companiesLookedUp++;
-    // Ett anknutet bolag som själv är portföljbolag får sitt registrerade
-    // de minimis-stöd ur plattformen (annars intyg via Manuella svar).
-    const f = await attachPlatformDeMinimis(pb, user.tenant, groupFactsFromRegistry(r.company, ref.name));
-    related.push(f);
-    financialsByOrg[f.orgNr] = r.company.financials;
-    if (r.company.notes.length > 0) notes.push({ orgNr: f.orgNr, name: f.name, notes: r.company.notes });
+  if (partsHint) {
+    lookupWarnings.push(
+      'Koncernbolagen slogs inte upp: välj Grunddata (ålder/status) och Bokslut (tröskelvärde) så prövas grundförutsättningarna även för dem.'
+    );
   }
 
   const ctx: AssessmentContext = {
@@ -291,7 +327,7 @@ export async function assessExcellenceAction(
     financialsByOrg,
     notes,
     lookupWarnings,
-    cost: estimateRegistryCost(lookup.pricing, lookup.requestedParts, companiesLookedUp),
+    cost: sumRegistryCosts(costs),
     assessedAt: now.toISOString()
   };
   return { assessment: await finishAssessment(pb, user, ctx, facts, { saveFacts: false }) };
@@ -330,6 +366,20 @@ export async function applyExcellenceFactsAction(
     // Tomma svar sparas också (nollställer tidigare svar på bolagskortet).
     assessment: await finishAssessment(pb, user, ctx, facts, { saveFacts: !!ctx.subject.startupId })
   };
+}
+
+/**
+ * Vilka datadelar ett koncern-/partnerbolag slås upp med. Startup-bolagets
+ * koncernlista bär redan hela koncernen, så ett bolag UR listan hämtar inte
+ * koncernstrukturen igen (150 credits/bolag) — bara grunddata (ålder/status)
+ * och bokslut (tröskelvärde) av det som valdes; verklig huvudman bara för
+ * moderbolagen (indirekt grundarägande). Ett bolag ur ägarbilden som INTE
+ * ligger i koncernlistan (partner/oklart ur verklig huvudman) hämtas med
+ * hela valet, så dess egen koncern (andra ledet) blir känd.
+ */
+function partsForRelated(ref: RelatedCompanyRef, requested: RegistryPartId[]): RegistryPartId[] {
+  if (!ref.groupRole && !ref.transitive) return requested;
+  return requested.filter((p) => p !== 'group_structure' && (p !== 'beneficial_owners' || ref.groupRole === 'parent'));
 }
 
 /** Visningsnamn för PDF:en — aldrig e-post (SessionUser.name faller tillbaka på e-post). */

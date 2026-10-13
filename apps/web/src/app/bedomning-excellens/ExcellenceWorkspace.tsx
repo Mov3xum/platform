@@ -3,9 +3,11 @@
 import Link from 'next/link';
 import { useActionState, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  GROUP_ROLE_LABEL,
   MATURITY_PHASE_LABEL,
   STATE_AID_OUTCOME_LABEL,
   VINNOVA_OUTCOME_LABEL,
+  describeCompanyAge,
   type CompanyAssessment,
   type ScreeningCheck,
   type ScreeningOwnershipEntry,
@@ -291,11 +293,11 @@ export function ExcellenceWorkspace({ startups, registries, canLookup, initialSt
                   onSetAll={selection.setAll}
                   endpoints={provider.partEndpoints}
                   providerName={provider.name}
-                  hint="Bara de valda API:erna anropas — för startup-bolaget OCH varje anknutet/partnerbolag — och varje anrop debiteras. Inget sparas. Koncernstruktur krävs för att hitta anknutna bolag; grunddata för deras ålder; bokslut för tröskelvärdet."
+                  hint="Ingen del är förvald — bocka i det som ska begäras ut; varje anrop debiteras och inget sparas. För en komplett bedömning: Koncernstruktur (hittar HELA koncernen: moder-, syster- och dotterbolag), Grunddata (ålder/status/bolagsform — avgör även börsnotering), Bokslut (tröskelvärde, utdelning) och Verklig huvudman (fristående?, indirekt grundarägande)."
                   disabled={pending}
                   pricing={provider.pricing}
                   companies={1}
-                  costContext={`Per bolag. Varje anknutet/partnerbolag i ägarbilden slås upp med samma delar, högst ${MAX_RELATED_COMPANIES} till — kostnaden kan bli upp till ${1 + MAX_RELATED_COMPANIES} × detta. Den faktiska summan visas i resultatet.`}
+                  costContext={`För startup-bolaget. Varje bolag i koncernen slås därefter upp med BARA grunddata + bokslut av ditt val (koncernen är redan känd; verklig huvudman bara för moderbolagen), högst ${MAX_RELATED_COMPANIES} bolag. Den faktiska summan visas i resultatet.`}
                   pricingHref={`/integrationer/${provider.slug}#kostnad`}
                 />
               )}
@@ -373,8 +375,13 @@ function CompanyBlock({ c, subjectName }: { c: CompanyAssessment; subjectName: s
             <span className={`mr-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ${c.relation === 'linked' ? VERDICT_TONE.no : WARN_TONE}`}>
               {c.relationLabel}
             </span>
+            {c.groupRole ? <span className="mr-1.5 rounded-full bg-canvas-muted px-2 py-0.5 text-[11px] font-semibold text-foreground-muted">{GROUP_ROLE_LABEL[c.groupRole]}</span> : null}
             {c.shareLabel} {c.indirect ? '(indirekt) ' : ''}— {c.reason}
-            {c.relation === 'linked' ? ` ${title} kontrollerar mer än 50 % och är därmed ett anknutet företag till ${subjectName}.` : ''}
+            {c.relation === 'linked' && !c.groupRole && !c.transitive
+              ? ` ${title} kontrollerar mer än 50 % och är därmed ett anknutet företag till ${subjectName}.`
+              : c.relation === 'linked'
+                ? ` Anknutet företag till ${subjectName} — 100 % av uppgifterna räknas in och grundförutsättningarna prövas.`
+                : ''}
           </p>
         )}
         {!c.dataFetched && c.role !== 'subject' && (
@@ -388,6 +395,98 @@ function CompanyBlock({ c, subjectName }: { c: CompanyAssessment; subjectName: s
         <OwnershipTable rows={c.owners} caption={c.role === 'subject' ? `Ägarbild: ${title}` : `Ägande: ${title}`} />
       )}
       {c.holdings.length > 0 && <OwnershipTable rows={c.holdings} caption={`${title} äger`} />}
+    </div>
+  );
+}
+
+/**
+ * Koncernkartan — alla bolag regelträdet räknar med (startup-bolaget, moder-,
+ * syster-, dotterbolag, partnerföretag, andra ledet) med plats i koncernen,
+ * andel, ålder, status och om ett uppslag gjordes. Det är den här tabellen
+ * som visar VARFÖR ett bolag räknas in och var underlaget slutar.
+ */
+function GroupMap({
+  companies,
+  subjectName,
+  mode,
+  assessedAt
+}: {
+  companies: CompanyAssessment[];
+  subjectName: string;
+  mode: 'register' | 'saved';
+  assessedAt: string;
+}) {
+  const ref = new Date(assessedAt);
+  const ageOf = (c: CompanyAssessment) => {
+    const reg = c.basic?.registeredAt;
+    if (!reg) return '–';
+    const d = new Date(`${reg.slice(0, 10)}T00:00:00Z`);
+    if (Number.isNaN(d.getTime())) return '–';
+    const age = c.conditions.find((x) => x.id === 'age');
+    return `${reg.slice(0, 10)} · ${describeCompanyAge(d, ref)}${age?.verdict === 'no' ? ' — över 5 år' : ''}`;
+  };
+  const placeOf = (c: CompanyAssessment) => {
+    if (c.role === 'subject') return 'Startup-bolaget';
+    const parts: string[] = [];
+    if (c.groupRole) parts.push(GROUP_ROLE_LABEL[c.groupRole] + (typeof c.level === 'number' ? ` (nivå ${c.level})` : ''));
+    else if (c.transitive) parts.push('Andra ledet');
+    else parts.push(c.indirect ? 'Indirekt ägare/innehav' : 'Direkt ägare/innehav');
+    if (c.via) parts.push(`via ${c.via}`);
+    return parts.join(' · ');
+  };
+  return (
+    <div>
+      <h4 className="text-[13.5px] font-semibold text-foreground">Koncernkarta — bolag som räknas in för {subjectName}</h4>
+      <p className="mt-0.5 text-[12px] text-foreground-muted">
+        {mode === 'register'
+          ? 'Ur koncernregistrets lista (hela koncernen: moder-, syster- och dotterbolag är alla anknutna, bilaga I art. 3.3) plus bolag ur verklig huvudman och andra ledet ur de uppslagna bolagen.'
+          : 'Ur sparad ägarbild på bolagskortet — bara ägarkedjan och direkta innehav. Systerbolag under samma moder syns först vid en färsk hämtning med Koncernstruktur.'}
+      </p>
+      <div className="mt-2 overflow-x-auto rounded-xl border border-default">
+        <table className="w-full text-[12.5px]">
+          <thead className="bg-canvas-subtle text-left text-[11px] uppercase tracking-wider text-foreground-subtle">
+            <tr>
+              <th className="px-3 py-2 font-medium">Bolag</th>
+              <th className="px-3 py-2 font-medium">Plats i koncernen</th>
+              <th className="px-3 py-2 font-medium">Relation</th>
+              <th className="px-3 py-2 font-medium">Andel</th>
+              <th className="px-3 py-2 font-medium">Registrerat · ålder</th>
+              <th className="px-3 py-2 font-medium">Status</th>
+              <th className="px-3 py-2 font-medium">Underlag</th>
+            </tr>
+          </thead>
+          <tbody>
+            {companies.map((c) => (
+              <tr key={c.orgNr || c.name} className="border-t border-default align-top">
+                <td className="px-3 py-1.5 text-foreground">
+                  {c.name || '–'}
+                  {c.orgNr ? <span className="ml-2 text-[11.5px] text-foreground-subtle mx-tnum">{formatOrgNr(c.orgNr)}</span> : null}
+                </td>
+                <td className="px-3 py-1.5 text-foreground-muted">{placeOf(c)}</td>
+                <td className="px-3 py-1.5">
+                  {c.role === 'subject' ? (
+                    <span className="text-foreground-muted">—</span>
+                  ) : (
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${c.relation === 'linked' ? VERDICT_TONE.no : WARN_TONE}`}>
+                      {c.relationLabel}
+                    </span>
+                  )}
+                </td>
+                <td className="px-3 py-1.5 text-foreground-muted mx-tnum">{c.role === 'subject' ? '' : c.shareLabel}</td>
+                <td className="px-3 py-1.5 text-foreground-muted mx-tnum">{ageOf(c)}</td>
+                <td className="px-3 py-1.5 text-foreground-muted">{c.basic?.bolagStatus ?? '–'}</td>
+                <td className="px-3 py-1.5">
+                  {c.dataFetched ? (
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${VERDICT_TONE.yes}`}>Uppslag gjort</span>
+                  ) : (
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${WARN_TONE}`}>Inget uppslag</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -481,10 +580,9 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
           }`}
         >
           <span className="font-semibold">Denna bedömning kostade hos {assessment.providerName}:</span>{' '}
-          {assessment.cost.companies} {assessment.cost.companies === 1 ? 'bolag' : 'bolag'} × {assessment.cost.parts.length}{' '}
-          {assessment.cost.parts.length === 1 ? 'del' : 'delar'} = {formatRegistryCost(assessment.cost)}.{' '}
+          {assessment.cost.companies} uppslagna {assessment.cost.companies === 1 ? 'bolag' : 'bolag'} = {formatRegistryCost(assessment.cost)}.{' '}
           <span className="font-normal opacity-90">
-            Uppskattning enligt angivna priser (valda delar × uppslagna bolag) — {assessment.providerName}s faktura är facit.
+            Uppskattning enligt angivna priser, summerad per uppslag (koncernbolag hämtas med färre delar än startup-bolaget) — {assessment.providerName}s faktura är facit.
           </span>
         </p>
       )}
@@ -565,6 +663,8 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
         <h3 className="text-[14px] font-semibold text-foreground">Steg 1 — Företagsstöd enligt art. 22 GBER eller de minimis</h3>
         <CompanyBlock c={result.companies[0]} subjectName={subjectName} />
 
+        <GroupMap companies={result.companies} subjectName={subjectName} mode={assessment.mode} assessedAt={assessment.assessedAt} />
+
         <div>
           <h4 className="text-[13.5px] font-semibold text-foreground">Fristående företag?</h4>
           <div className="mt-2">
@@ -600,7 +700,7 @@ function AssessmentView({ assessment }: { assessment: ExcellenceAssessment }) {
                     <td className="px-3 py-1.5 text-foreground-muted mx-tnum">
                       {r.role === 'subject' ? 'Startup' : r.role === 'linked' ? '100 % (anknutet)' : `${Math.round(r.weight * 100)} % (partner)`}
                     </td>
-                    <td className="px-3 py-1.5 text-foreground-muted mx-tnum">{r.year ?? '–'}</td>
+                    <td className="px-3 py-1.5 text-foreground-muted mx-tnum">{r.estimated ? 'uppskattning' : (r.year ?? '–')}</td>
                     <td className="px-3 py-1.5 text-foreground-muted mx-tnum">{r.employees ?? '–'}</td>
                     <td className="px-3 py-1.5 text-foreground-muted mx-tnum">{sek(r.revenue_sek)}</td>
                     <td className="px-3 py-1.5 text-foreground-muted mx-tnum">{sek(r.balance_sheet_sek)}</td>

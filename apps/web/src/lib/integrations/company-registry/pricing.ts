@@ -333,6 +333,31 @@ export function estimateRegistryCost(
   };
 }
 
+/**
+ * Summerar flera uppskattningar till EN rad (bedömningen slår upp olika
+ * delar för olika bolag — hela paketet för startup-bolaget, bara grunddata +
+ * bokslut för koncernbolagen). `companies` = antal uppskattningar, `parts` =
+ * unionen av delar, `calls`/`credits`/`sek` = summor; summan är komplett bara
+ * när varje del i varje uppslag hade pris.
+ */
+export function sumRegistryCosts(estimates: readonly RegistryCostEstimate[]): RegistryCostEstimate {
+  const parts: RegistryPartId[] = [];
+  const unpriced: RegistryPartId[] = [];
+  let calls = 0;
+  let credits: number | null = null;
+  let sek: number | null = null;
+  let complete = estimates.length > 0;
+  for (const e of estimates) {
+    for (const p of e.parts) if (!parts.includes(p)) parts.push(p);
+    for (const p of e.unpricedParts) if (!unpriced.includes(p)) unpriced.push(p);
+    calls += e.calls;
+    if (e.credits !== null) credits = (credits ?? 0) + e.credits;
+    if (e.sek !== null) sek = (sek ?? 0) + e.sek;
+    if (!e.complete) complete = false;
+  }
+  return { companies: estimates.length, parts, calls, credits, sek, unpricedParts: unpriced, complete };
+}
+
 export function formatCredits(n: number): string {
   const v = Math.round(n * 100) / 100;
   return `${v.toLocaleString('sv-SE', { maximumFractionDigits: 2 })} ${v === 1 ? 'credit' : 'credits'}`;
