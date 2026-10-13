@@ -30,6 +30,7 @@ import {
   pickFirst,
   type RegistryCompany,
   type RegistryFinancialsYear,
+  type RegistryGroupMember,
   type RegistryOwnershipEntry,
   type RegistryStartupPatch
 } from '../../company-registry/types';
@@ -558,6 +559,61 @@ function normalizeFlatGroupStructure(
 }
 
 /**
+ * HELA koncernen ur den platta listan — varje bolag med moder och andel —
+ * för bedömningen (§ 51): anknutna företag enligt bilaga I är alla bolag i
+ * koncernen (moder, moderns moder, syskon, dotter), inte bara ägarkedjan.
+ * Fysiska personer (personnummer-derivat) utelämnas; ett bolag med namn men
+ * id i okänt format behålls utan org-nr (kan inte slås upp vidare).
+ * `undefined` när svaret inte är i platt form.
+ */
+export function normalizeRoaringGroupMembers(raw: unknown, startupOrgNr: string): RegistryGroupMember[] | undefined {
+  const root = firstRecord(raw);
+  if (!root) return undefined;
+  const list = pickFirst(root, ['groupCompanies']);
+  if (!Array.isArray(list)) return undefined;
+  const items = list.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object');
+  const ID_KEYS = ['companyId', 'orgNr', 'organisationNumber', 'organizationNumber'];
+  const idOf = (rec: Record<string, unknown>) => asString(pickFirst(rec, ID_KEYS));
+  const nameOf = (rec: Record<string, unknown>) => asString(pickFirst(rec, ['companyName', 'name', 'legalName']));
+  const nameByRawId = new Map<string, string>();
+  for (const rec of [root, ...items]) {
+    const id = idOf(rec)?.trim();
+    const name = nameOf(rec);
+    if (id && name) nameByRawId.set(id, name);
+  }
+  const target = normalizeOrgNr(startupOrgNr) || startupOrgNr;
+  const out: RegistryGroupMember[] = [];
+  const seen = new Set<string>();
+  // Kuvertet är det frågade bolaget — det får sin moder från listans post.
+  const all = [...items];
+  if (!items.some((r) => (normalizeOrgNr(idOf(r)) || idOf(r)) === target)) all.unshift(root);
+  for (const rec of all) {
+    const rawId = idOf(rec)?.trim();
+    const orgNr = normalizeOrgNr(rawId) || undefined;
+    if (orgNr && isPersonalOrgNr(orgNr)) continue;
+    const name = nameOf(rec);
+    if (!orgNr && !looksLikeCompanyName(name)) continue;
+    const key = orgNr || `name:${(name || '').toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const motherRaw = asString(pickFirst(rec, ['motherCompanyId', 'parentCompanyId', 'motherId', 'parentId']))?.trim();
+    const motherOrg = normalizeOrgNr(motherRaw) || undefined;
+    const member: RegistryGroupMember = {};
+    if (isLegalEntityOrgNr(orgNr)) member.org_nr = orgNr;
+    if (name) member.name = name;
+    const level = asNumber(pickFirst(rec, ['companyLevel', 'level']));
+    if (level !== undefined && Number.isInteger(level) && level >= 0 && level <= 20) member.level = level;
+    if (motherOrg && isLegalEntityOrgNr(motherOrg) && !isPersonalOrgNr(motherOrg)) member.mother_org_nr = motherOrg;
+    const motherName = motherRaw ? nameByRawId.get(motherRaw) : undefined;
+    if (motherName && (!motherOrg || !isPersonalOrgNr(motherOrg))) member.mother_name = motherName;
+    const pct = asPct(pickFirst(rec, PCT_PATHS));
+    if (pct !== undefined) member.owned_pct = pct;
+    out.push(member);
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+/**
  * Koncernträdet → ägare (över startup-bolaget) och innehav (under). Hittas
  * bolaget i trädet är dess direkta förälder direkt ägare, högre led indirekta;
  * bolagets barn är innehav. Hittas det inte används rotens `owners`/`children`.
@@ -746,9 +802,26 @@ function controlText(v: unknown, depth = 0): unknown {
   return v;
 }
 
+/** Namnfält för en fysisk huvudman (2.1: `person{firstName,lastName}`; äldre: toppnivå). ALDRIG personnummer/födelsedatum. */
+const BO_FIRST_NAME_PATHS = ['person.firstName', 'person.givenName', 'firstName', 'givenName', 'firstNames'];
+const BO_LAST_NAME_PATHS = ['person.lastName', 'person.surName', 'person.surname', 'person.familyName', 'lastName', 'surName', 'surname', 'familyName'];
+const BO_FULL_NAME_PATHS = ['person.name', 'person.fullName', 'fullName', 'name'];
+
+/** För- och efternamn ur huvudmannens post — bara namnet, cappat, utan siffror (ett personnummer i namnfältet strippas). */
+export function beneficialOwnerName(o: Record<string, unknown>): string | undefined {
+  const first = asString(pickFirst(o, BO_FIRST_NAME_PATHS));
+  const last = asString(pickFirst(o, BO_LAST_NAME_PATHS));
+  const full = first || last ? [first, last].filter(Boolean).join(' ') : asString(pickFirst(o, BO_FULL_NAME_PATHS));
+  if (!full) return undefined;
+  const cleaned = full.replace(/\d[\d\s-]*\d/g, '').replace(/\s+/g, ' ').trim();
+  return cleaned ? cleaned.slice(0, 120) : undefined;
+}
+
 /**
- * Verklig huvudman → anonyma person-rader. Läser INTE namn, personnummer,
- * födelsedatum eller adress — bara andel/intervall och kontrollgrund.
+ * Verklig huvudman → person-rader med andel/intervall och kontrollgrund.
+ * Namnet (för-/efternamn) följer med TRANSIENT i `person_name` för visning
+ * på skärmen (§ 51.7) — aldrig till databasen/PDF/AI; personnummer,
+ * födelsedatum och adress läses aldrig.
  */
 export function normalizeRoaringBeneficialOwners(raw: unknown, notes: string[]): RegistryOwnershipEntry[] {
   const rec = firstRecord(raw);
@@ -824,6 +897,9 @@ export function normalizeRoaringBeneficialOwners(raw: unknown, notes: string[]):
       entry.name = companyName;
     } else if (namedCompany) {
       entry.name = companyName;
+    } else {
+      const personName = beneficialOwnerName(o);
+      if (personName) entry.person_name = personName;
     }
     if (capital) {
       if (capital.min === capital.max) entry.capital_pct = capital.min;
@@ -877,6 +953,7 @@ export function normalizeRoaringCompany(
             }))
           : [])
       ]);
+  const group = !opts.isPersonal && bundle.groupStructure ? normalizeRoaringGroupMembers(bundle.groupStructure, orgNr) : undefined;
   return {
     org_nr: orgNr,
     isPersonal: opts.isPersonal,
@@ -884,6 +961,7 @@ export function normalizeRoaringCompany(
     startup: patch,
     financials,
     ownership,
+    group,
     notes
   };
 }

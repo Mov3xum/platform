@@ -94,6 +94,11 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   // läsas rad för rad av modellen — målstyrningen får bara det k-anonyma
   // aggregatet via /mal. (Fältet var oanvänt före enkätmotorn.)
   'compass_responses',
+  // Bedömning excellens (§ 51.6): körningar (sammanfattning kan bära grundar-
+  // uppgifter via etiketter) och kompletteringsförfrågningar (svar med
+  // grundarnamn/andel/engagemang + fri text) — når AI aldrig rått.
+  'startup_screenings',
+  'screening_requests',
   'agent_memory' // agentens tvärsessions-scratchpad (1700000079)
 ]);
 

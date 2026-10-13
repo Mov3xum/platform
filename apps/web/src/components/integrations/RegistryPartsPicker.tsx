@@ -35,9 +35,13 @@ function readStored(slug: string, supported: RegistryPartId[]): RegistryPartId[]
   }
 }
 
-/** Valet av delar för en leverantör — alla delar förvalda, senaste val återställs. */
+/**
+ * Valet av delar för en leverantör. INGEN del är förvald (varje API-anrop
+ * debiteras — personalen bockar aktivt i det som ska begäras ut); senaste
+ * val i webbläsaren återställs som bekvämlighet.
+ */
 export function useRegistryPartSelection(providerSlug: string, supported: RegistryPartId[]) {
-  const [selected, setSelected] = useState<RegistryPartId[]>(supported);
+  const [selected, setSelected] = useState<RegistryPartId[]>([]);
   const key = supported.join(',');
 
   useEffect(() => {

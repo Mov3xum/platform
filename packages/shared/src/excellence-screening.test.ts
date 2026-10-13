@@ -2,9 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   classifyOwnershipEntry,
+  deriveGroupCompanies,
   deriveRelatedCompanies,
   describeCompanyAge,
   dividendCheck,
+  indirectPersonOwnership,
+  listedCheck,
   ownershipShareRange,
   screenExcellence,
   type ExcellenceScreeningInput,
@@ -422,15 +425,20 @@ test('manuella JA fyller okända grundförutsättningar och gör art. 22-texten 
           }
         },
         de_minimis_related: {},
+        estimates: {},
         comment: 'Granskad av controller.'
       }
     })
   );
   const subj = res.companies[0];
   const listed = subj.conditions.find((c) => c.id === 'listed');
+  // "Combly AB" är ett privat aktiebolag (ingen (publ)-beteckning) ⇒ registret
+  // svarar redan JA; det manuella JA:t behövs inte och ändrar inte källan.
   assert.equal(listed?.verdict, 'yes');
-  assert.equal(listed?.source, 'manual');
-  assert.match(listed?.detail ?? '', /bolagsordning/);
+  assert.equal(listed?.source, 'register');
+  const concentration = subj.conditions.find((c) => c.id === 'concentration');
+  assert.equal(concentration?.verdict, 'yes');
+  assert.equal(concentration?.source, 'manual');
   assert.equal(res.stateAid.outcome, 'art22_possible');
   assert.match(res.stateAid.text, /alla grundförutsättningar är besvarade/);
   assert.doesNotMatch(res.stateAid.text, /förutsatt/);
@@ -449,7 +457,8 @@ test('manuellt NEJ vinner alltid; manuellt JA kan inte skriva över ett register
       }),
       manual: {
         companies: { '5595728790': { dividend: { verdict: 'yes', note: 'intyg' }, takeover: { verdict: 'no', note: 'köpte inkråm 2023' } } },
-        de_minimis_related: {}
+        de_minimis_related: {},
+        estimates: {}
       }
     })
   );
@@ -471,14 +480,14 @@ test('grundardrivet räknas mot fasens trösklar; formation har inget krav', () 
     { name: 'B', equity_pct: 30, engagement_pct: 15 }
   ];
   const base = { subject: company({ orgNr: '5595728790', name: 'Combly AB', ownership: [...STANDALONE_OWNERS] }), founders, foundersSource: 'manual' as const };
-  const psf = screenExcellence(input({ ...base, manual: { companies: {}, de_minimis_related: {}, maturity_phase: 'problem_solution_fit' } }));
+  const psf = screenExcellence(input({ ...base, manual: { companies: {}, de_minimis_related: {}, estimates: {}, maturity_phase: 'problem_solution_fit' } }));
   const fd = psf.vinnovaChecks.find((c) => c.id === 'founder_driven');
   assert.equal(fd?.verdict, 'yes');
   assert.match(fd?.detail ?? '', /sammantaget 45 %/);
-  const pmf = screenExcellence(input({ ...base, manual: { companies: {}, de_minimis_related: {}, maturity_phase: 'product_market_fit' } }));
+  const pmf = screenExcellence(input({ ...base, manual: { companies: {}, de_minimis_related: {}, estimates: {}, maturity_phase: 'product_market_fit' } }));
   assert.equal(pmf.vinnovaChecks.find((c) => c.id === 'founder_driven')?.verdict, 'no');
   assert.equal(pmf.vinnova.outcome, 'not_in_target');
-  const form = screenExcellence(input({ ...base, manual: { companies: {}, de_minimis_related: {}, maturity_phase: 'formation' } }));
+  const form = screenExcellence(input({ ...base, manual: { companies: {}, de_minimis_related: {}, estimates: {}, maturity_phase: 'formation' } }));
   assert.equal(form.vinnovaChecks.find((c) => c.id === 'founder_driven')?.verdict, 'yes');
   const none = screenExcellence(input({ ...base }));
   assert.equal(none.vinnovaChecks.find((c) => c.id === 'founder_driven')?.verdict, 'unknown');
@@ -531,13 +540,13 @@ test('de minimis räknar anknutna bolag: plattformen eller intyg, annars OKÄNT 
 test('IRL: manuella nivåer används bara utan readiness-rad; motivering följer alltid med', () => {
   const base = { subject: company({ orgNr: '5595728790', name: 'Combly AB' }) };
   const manualIrl = screenExcellence(
-    input({ ...base, irl: { level: 4 }, manual: { companies: {}, de_minimis_related: {}, irl: { levels: { crl: 3, brl: 2 }, notes: { crl: 'LOI med två kunder' } } } })
+    input({ ...base, irl: { level: 4 }, manual: { companies: {}, de_minimis_related: {}, estimates: {}, irl: { levels: { crl: 3, brl: 2 }, notes: { crl: 'LOI med två kunder' } } } })
   );
   assert.equal(manualIrl.irl?.crl, 3);
   assert.equal(manualIrl.irl?.manualLevels, true);
   assert.equal(manualIrl.irl?.notes?.crl, 'LOI med två kunder');
   const platformIrl = screenExcellence(
-    input({ ...base, irl: { level: 4, crl: 5, brl: 4, tmrl: 3, srl: 2 }, manual: { companies: {}, de_minimis_related: {}, irl: { levels: { crl: 9 }, notes: { srl: 'Agenda 2030 mål 3' } } } })
+    input({ ...base, irl: { level: 4, crl: 5, brl: 4, tmrl: 3, srl: 2 }, manual: { companies: {}, de_minimis_related: {}, estimates: {}, irl: { levels: { crl: 9 }, notes: { srl: 'Agenda 2030 mål 3' } } } })
   );
   assert.equal(platformIrl.irl?.crl, 5);
   assert.notEqual(platformIrl.irl?.manualLevels, true);
@@ -560,6 +569,7 @@ test('Vinnova-utfallet blir "ingår sannolikt" utan förbehåll när alla punkte
       manual: {
         companies: {},
         de_minimis_related: {},
+        estimates: {},
         maturity_phase: 'problem_solution_fit',
         innovative: { verdict: 'yes', note: 'patentsökt sensor' },
         other_criteria: { verdict: 'yes' },
@@ -571,4 +581,224 @@ test('Vinnova-utfallet blir "ingår sannolikt" utan förbehåll när alla punkte
   assert.match(res.vinnova.text, /uppfyllda enligt underlaget/);
   assert.equal(res.excellence.verdict, 'yes');
   assert.equal(res.excellence.source, 'manual');
+});
+
+// ─── Börsnotering ur registret (ABL 28 kap. 7 §) ──────────────────────────────
+
+test('listedCheck: privat aktiebolag ⇒ JA ur registret; (publ) ⇒ OKÄNT; andra bolagsformer ⇒ JA', () => {
+  const priv = listedCheck(company({ orgNr: '5594427808', name: 'Wellgo Health AB', basic: { bolagsform: 'Aktiebolag', registeredAt: '2023-07-01' } }));
+  assert.equal(priv.verdict, 'yes');
+  assert.equal(priv.source, 'register');
+  assert.match(priv.detail, /\(publ\)/);
+  // Bara namnet känt (bolag i koncernlistan utan uppslag) räcker för ett AB.
+  const nameOnly = listedCheck({ orgNr: '5566778899', name: 'Syskon AB', dataFetched: false, ownership: [], groupStructureFetched: false, beneficialOwnersFetched: false });
+  assert.equal(nameOnly.verdict, 'yes');
+  const publ = listedCheck(company({ orgNr: '5560160680', name: 'Storbolaget AB (publ)', basic: { bolagsform: 'Aktiebolag' } }));
+  assert.equal(publ.verdict, 'unknown');
+  assert.equal(publ.source, 'manual');
+  const publForm = listedCheck(company({ orgNr: '5560160680', name: 'Storbolaget AB', basic: { bolagsform: 'Publikt aktiebolag' } }));
+  assert.equal(publForm.verdict, 'unknown');
+  const hb = listedCheck(company({ orgNr: '9696969695', name: 'Firman', basic: { bolagsform: 'Handelsbolag' } }));
+  assert.equal(hb.verdict, 'yes');
+  const ef = listedCheck(company({ orgNr: '1901010001', name: 'Firman', basic: { isPersonal: true } }));
+  assert.equal(ef.verdict, 'yes');
+  const unknown = listedCheck({ orgNr: '5560000001', dataFetched: false, ownership: [], groupStructureFetched: false, beneficialOwnersFetched: false });
+  assert.equal(unknown.verdict, 'unknown');
+});
+
+test('Wellgo-fallet: ett privat AB utan manuella svar är INTE börsnoterat enligt registret', () => {
+  // Incident 2026-10-13: bedömningen sade "Wellgo Health AB är börsnoterat"
+  // (ett inverterat manuellt svar). Nu avgörs punkten ur registret.
+  const res = screenExcellence(
+    input({ subject: company({ orgNr: '5594427808', name: 'Wellgo Health AB', basic: { registeredAt: '2023-07-01', bolagStatus: 'aktiv', bolagsform: 'Aktiebolag' } }) })
+  );
+  assert.equal(res.companies[0].conditions.find((c) => c.id === 'listed')?.verdict, 'yes');
+  assert.doesNotMatch(res.stateAid.text, /börsnoterat/);
+  // Ett (inverterat) manuellt "börsnoterat" kan inte skriva över registret för ett privat AB.
+  const withBadAnswer = screenExcellence(
+    input({
+      subject: company({ orgNr: '5594427808', name: 'Wellgo Health AB', basic: { registeredAt: '2023-07-01', bolagStatus: 'aktiv', bolagsform: 'Aktiebolag' } }),
+      manual: { companies: { '5594427808': { listed: { verdict: 'no' } } }, de_minimis_related: {}, estimates: {} }
+    })
+  );
+  const l = withBadAnswer.companies[0].conditions.find((c) => c.id === 'listed');
+  assert.equal(l?.verdict, 'yes');
+  assert.match(l?.detail ?? '', /bortses från/);
+  // Ett publikt bolag däremot: manuellt NEJ gäller.
+  const publ = screenExcellence(
+    input({
+      subject: company({ orgNr: '5560160680', name: 'Noterat AB (publ)', basic: { registeredAt: '2023-07-01', bolagStatus: 'aktiv', bolagsform: 'Aktiebolag' } }),
+      manual: { companies: { '5560160680': { listed: { verdict: 'no', note: 'First North' } } }, de_minimis_related: {}, estimates: {} }
+    })
+  );
+  assert.equal(publ.companies[0].conditions.find((c) => c.id === 'listed')?.verdict, 'no');
+  assert.match(publ.stateAid.text, /är börsnoterat/);
+});
+
+// ─── Hela koncernen ur koncernregistrets platta lista ─────────────────────────
+
+const GROUP = [
+  { org_nr: '5567036271', name: 'Ewell AB', level: 0 },
+  { org_nr: '5594427808', name: 'Wellgo Health AB', level: 1, mother_org_nr: '5567036271', mother_name: 'Ewell AB', owned_pct: 90 },
+  { org_nr: '5595728790', name: 'Combly AB', level: 2, mother_org_nr: '5594427808', mother_name: 'Wellgo Health AB', owned_pct: 100 },
+  { org_nr: '5566778899', name: 'Syskon AB', level: 2, mother_org_nr: '5594427808', mother_name: 'Wellgo Health AB', owned_pct: 100 },
+  { org_nr: '5594429630', name: 'Dotter AB', level: 3, mother_org_nr: '5595728790', mother_name: 'Combly AB', owned_pct: 51 }
+];
+
+test('deriveGroupCompanies: moder, moderns moder, systerbolag och dotterbolag är alla anknutna', () => {
+  const subject = company({
+    orgNr: '5595728790',
+    name: 'Combly AB',
+    ownership: [{ direction: 'owner', owner_kind: 'company', org_nr: '5594427808', name: 'Wellgo Health AB', capital_pct: 100 }],
+    groupMembers: GROUP
+  });
+  const refs = deriveGroupCompanies(subject, []);
+  const byOrg = Object.fromEntries(refs.map((r) => [r.org_nr, r]));
+  assert.equal(refs.length, 4);
+  assert.equal(byOrg['5594427808'].relation, 'linked');
+  assert.equal(byOrg['5594427808'].groupRole, 'parent');
+  assert.ok(!byOrg['5594427808'].indirect, 'direkt moder (ur ägarbilden) förblir direkt');
+  assert.equal(byOrg['5594427808'].sharePct, 100, 'moderns andel = dess andel av startup-bolaget');
+  assert.equal(byOrg['5567036271'].sharePct, 90, 'moderns moder: dess andel av modern');
+  assert.equal(byOrg['5567036271'].groupRole, 'parent');
+  assert.equal(byOrg['5567036271'].indirect, true);
+  assert.equal(byOrg['5566778899'].groupRole, 'sibling');
+  assert.equal(byOrg['5566778899'].relation, 'linked');
+  assert.equal(byOrg['5566778899'].via, 'Wellgo Health AB');
+  assert.equal(byOrg['5594429630'].groupRole, 'subsidiary');
+  assert.ok(!refs.some((r) => r.org_nr === '5595728790'), 'aldrig startup-bolaget självt');
+});
+
+test('koncern: ett systerbolag äldre än 5 år fäller art. 22 även när moder och startup är unga', () => {
+  const subject = company({
+    orgNr: '5595728790',
+    name: 'Combly AB',
+    basic: { registeredAt: '2026-02-17', bolagStatus: 'aktiv', bolagsform: 'Aktiebolag' },
+    groupMembers: [
+      { org_nr: '5594427808', name: 'Wellgo Health AB', level: 0 },
+      { org_nr: '5595728790', name: 'Combly AB', level: 1, mother_org_nr: '5594427808', owned_pct: 100 },
+      { org_nr: '5566778899', name: 'Gammalt Syskon AB', level: 1, mother_org_nr: '5594427808', owned_pct: 100 }
+    ]
+  });
+  const res = screenExcellence(
+    input({
+      subject,
+      related: [
+        company({ orgNr: '5594427808', name: 'Wellgo Health AB', basic: { registeredAt: '2025-01-01', bolagStatus: 'aktiv', bolagsform: 'Aktiebolag' } }),
+        company({ orgNr: '5566778899', name: 'Gammalt Syskon AB', basic: { registeredAt: '2010-01-01', bolagStatus: 'aktiv', bolagsform: 'Aktiebolag' }, financials: [{ year: 2025, employees: 4, revenue_sek: 2_000_000, balance_sheet_sek: 900_000 }] })
+      ],
+      deMinimis: { usedEur: 0, capEur: 300_000 }
+    })
+  );
+  assert.deepEqual(
+    res.companies.map((c) => [c.name, c.role, c.groupRole]),
+    [
+      ['Combly AB', 'subject', undefined],
+      ['Wellgo Health AB', 'linked', 'parent'],
+      ['Gammalt Syskon AB', 'linked', 'sibling']
+    ]
+  );
+  assert.equal(res.standalone.verdict, 'no');
+  assert.match(res.standalone.detail, /systerbolag under Wellgo Health AB/);
+  assert.equal(res.stateAid.outcome, 'de_minimis');
+  assert.match(res.stateAid.text, /Gammalt Syskon AB är äldre än 5 år/);
+  // Tröskelvärdet räknar systerbolaget till 100 %.
+  assert.equal(res.thresholds.rows.find((r) => r.orgNr === '5566778899')?.weight, 1);
+  assert.equal(res.thresholds.combined.employees, 4);
+});
+
+test('andra ledet: ett uppslaget anknutet bolags egna anknutna läggs till; partnerns anknutna får partnerns andel', () => {
+  const subject = company({
+    orgNr: '5595728790',
+    name: 'S AB',
+    ownership: [
+      { direction: 'owner', owner_kind: 'company', org_nr: '5594427808', name: 'Mor AB', capital_pct: 100 },
+      { direction: 'owner', owner_kind: 'company', org_nr: '5560000001', name: 'P AB', capital_pct: 40 }
+    ]
+  });
+  const refs = deriveGroupCompanies(subject, [
+    company({ orgNr: '5594427808', name: 'Mor AB', ownership: [{ direction: 'holding', owner_kind: 'company', org_nr: '5566778899', name: 'Kusin AB', capital_pct: 100 }] }),
+    company({ orgNr: '5560000001', name: 'P AB', groupMembers: [{ org_nr: '5560000001', name: 'P AB', level: 0 }, { org_nr: '5560000002', name: 'P Dotter AB', level: 1, mother_org_nr: '5560000001', owned_pct: 100 }] })
+  ]);
+  const byOrg = Object.fromEntries(refs.map((r) => [r.org_nr, r]));
+  assert.equal(byOrg['5566778899'].relation, 'linked');
+  assert.equal(byOrg['5566778899'].transitive, true);
+  assert.equal(byOrg['5566778899'].via, 'Mor AB');
+  assert.equal(byOrg['5560000002'].relation, 'partner');
+  assert.equal(byOrg['5560000002'].sharePct, 40);
+  assert.match(byOrg['5560000002'].reason, /partnerföretaget P AB/);
+  assert.ok(!('5560000001' in byOrg && byOrg['5560000001'].transitive));
+});
+
+// ─── Indirekt grundarägande via holdingbolag ─────────────────────────────────
+
+test('indirectPersonOwnership räknar personers andel genom ägarkedjan och ger en ledtråd i 75 %-punkten', () => {
+  const subject = company({
+    orgNr: '5595728790',
+    name: 'Combly AB',
+    ownership: [{ direction: 'owner', owner_kind: 'company', org_nr: '5594427808', name: 'Wellgo Health AB', capital_pct: 100 }]
+  });
+  const wellgo = company({
+    orgNr: '5594427808',
+    name: 'Wellgo Health AB',
+    ownership: [
+      { direction: 'owner', owner_kind: 'company', org_nr: '5567036271', name: 'Ewell AB', capital_pct: 90 },
+      { direction: 'owner', owner_kind: 'person', pct_min: 0, pct_max: 25, control_basis: 'shares' }
+    ]
+  });
+  const ewell = company({
+    orgNr: '5567036271',
+    name: 'Ewell AB',
+    ownership: [
+      { direction: 'owner', owner_kind: 'person', pct_min: 50, pct_max: 75, control_basis: 'shares' },
+      { direction: 'owner', owner_kind: 'person', pct_min: 25, pct_max: 50, control_basis: 'shares' }
+    ]
+  });
+  const byOrg = new Map([[wellgo.orgNr, wellgo], [ewell.orgNr, ewell]]);
+  const ind = indirectPersonOwnership(subject, byOrg);
+  assert.ok(ind);
+  // 100 % × (0 + 90 % × (50 + 25)) = 67,5 %
+  assert.equal(ind.minPct, 67.5);
+  assert.deepEqual(ind.via, ['Wellgo Health AB', 'Ewell AB']);
+
+  const res = screenExcellence(input({ subject, related: [wellgo, ewell], founders: [] }));
+  const f75 = res.vinnovaChecks[0];
+  assert.equal(f75.verdict, 'unknown');
+  assert.match(f75.detail, /Indirekt ägande: via Wellgo Health AB → Ewell AB äger fysiska personer minst 67,5 %/);
+});
+
+test('ledtråd när startup-bolaget ägs av bolag men huvudmännen inte hämtats', () => {
+  const subject = company({
+    orgNr: '5595728790',
+    name: 'Combly AB',
+    ownership: [{ direction: 'owner', owner_kind: 'company', org_nr: '5594427808', name: 'Wellgo Health AB', capital_pct: 100 }]
+  });
+  const res = screenExcellence(input({ subject, founders: [{ name: 'A', equity_pct: 0 }] }));
+  assert.equal(res.vinnovaChecks[0].verdict, 'no');
+  assert.match(res.vinnovaChecks[0].detail, /ägs till 100 % av bolag/);
+});
+
+// ─── Uppskattning för bolag utan bokslut (bilaga I art. 4.3) ─────────────────
+
+test('egen uppskattning fyller tröskelvärdet för ett nystartat bolag utan bokslut', () => {
+  const res = screenExcellence(
+    input({
+      subject: company({
+        orgNr: '5595728790',
+        name: 'Ny AB',
+        basic: { registeredAt: '2026-02-17', bolagStatus: 'aktiv', bolagsform: 'Aktiebolag' },
+        financials: [],
+        ownership: [...STANDALONE_OWNERS]
+      }),
+      manual: { companies: {}, de_minimis_related: {}, estimates: { '5595728790': { employees: 2, revenue_sek: 0, balance_sheet_sek: 50_000, note: 'budget 2026' } } },
+      deMinimis: { usedEur: 0, capEur: 300_000 }
+    })
+  );
+  const row = res.thresholds.rows[0];
+  assert.equal(row.estimated, true);
+  assert.match(row.note ?? '', /uppskattning: budget 2026/);
+  assert.equal(res.thresholds.check.verdict, 'yes');
+  assert.equal(res.thresholds.check.source, 'manual');
+  assert.match(res.thresholds.check.detail, /art\. 4\.3/);
+  assert.equal(res.stateAid.outcome, 'art22_possible');
 });

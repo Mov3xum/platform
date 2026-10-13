@@ -30,24 +30,76 @@ interface Props {
   onUpdated: (a: ExcellenceAssessment) => void;
 }
 
-const CONDITION_LABEL: Record<CompanyManualCondition, string> = {
-  listed: 'Inte börsnoterat',
-  dividend: 'Har inte beslutat om eller delat ut vinst',
-  concentration: 'Inte bildat genom företagskoncentration',
-  takeover: 'Har inte övertagit annat företags verksamhet'
+/**
+ * Frågorna ställs som NATURLIGA frågor med svarsalternativ som säger vad de
+ * betyder. Lagrat `verdict` är alltid i VILLKORETS riktning (`yes` = villkoret
+ * uppfyllt) — alternativet "Nej — inte börsnoterat" lagras alltså som `yes`.
+ * Incident 2026-10-13: med etiketten "Inte börsnoterat" + Ja/Nej svarade
+ * controllern "Nej" (= inte noterat) och bedömningen läste det som "ÄR
+ * börsnoterat" för Wellgo Health AB. Därför aldrig mer ett nakent Ja/Nej.
+ */
+interface QuestionMeta {
+  question: string;
+  /** Svarsalternativ som betyder "villkoret uppfyllt" (lagras som `yes`). */
+  fulfilled: string;
+  /** Svarsalternativ som betyder "villkoret INTE uppfyllt" (lagras som `no`). */
+  failed: string;
+  hint?: string;
+}
+
+const CONDITION_QUESTION: Record<CompanyManualCondition, QuestionMeta> = {
+  listed: {
+    question: 'Är bolaget börsnoterat?',
+    fulfilled: 'Nej — inte börsnoterat',
+    failed: 'Ja — aktierna är upptagna till handel',
+    hint: 'Avgörs normalt ur registret: ett privat aktiebolag (utan "(publ)" i namnet) kan inte vara noterat. Svara bara för ett publikt bolag.'
+  },
+  dividend: {
+    question: 'Har bolaget beslutat om eller delat ut vinst?',
+    fulfilled: 'Nej — ingen utdelning',
+    failed: 'Ja — utdelning har beslutats',
+    hint: 'Avgörs ur årsredovisningens utdelningspost när bokslutet hämtats; ett intyg fyller bara en okänd punkt.'
+  },
+  concentration: {
+    question: 'Är bolaget bildat genom företagskoncentration (fusion/sammanslagning)?',
+    fulfilled: 'Nej',
+    failed: 'Ja — bildat genom koncentration'
+  },
+  takeover: {
+    question: 'Har bolaget övertagit ett annat företags verksamhet?',
+    fulfilled: 'Nej',
+    failed: 'Ja — övertagit verksamhet',
+    hint: 'Ombildning av enskild firma till aktiebolag undantas.'
+  }
 };
 
-const VINNOVA_MANUAL: Array<{ id: 'not_market_ready' | 'innovative' | 'other_criteria'; label: string; hint: string }> = [
+const VINNOVA_MANUAL: Array<{ id: 'not_market_ready' | 'innovative' | 'other_criteria'; meta: QuestionMeta }> = [
   {
     id: 'not_market_ready',
-    label: 'Inte marknadsredo',
-    hint: 'Eget kapital under omkostnaderna kommande 24 mån och affärsmodellen valideras fortfarande (budget + coachens bedömning).'
+    meta: {
+      question: 'Är bolaget fortfarande inte marknadsredo?',
+      fulfilled: 'Ja — inte marknadsredo',
+      failed: 'Nej — bolaget är marknadsredo',
+      hint: 'Eget kapital under omkostnaderna kommande 24 mån och affärsmodellen valideras fortfarande (budget + coachens bedömning).'
+    }
   },
-  { id: 'innovative', label: 'Innovativt', hint: 'Unika egenskaper som ger uthålliga konkurrensfördelar (coachens bedömning).' },
+  {
+    id: 'innovative',
+    meta: {
+      question: 'Är bolaget innovativt?',
+      fulfilled: 'Ja — unika egenskaper ger uthålliga konkurrensfördelar',
+      failed: 'Nej',
+      hint: 'Coachens bedömning av innovationshöjd.'
+    }
+  },
   {
     id: 'other_criteria',
-    label: 'Övriga villkor',
-    hint: 'Agenda 2030 i SRL-dimensionen, skalbarhet (tydlig från mognadsnivå 2), unika kunskapstillgångar.'
+    meta: {
+      question: 'Uppfylls övriga villkor?',
+      fulfilled: 'Ja — uppfyllda',
+      failed: 'Nej',
+      hint: 'Agenda 2030 i SRL-dimensionen, skalbarhet (tydlig från mognadsnivå 2), unika kunskapstillgångar.'
+    }
   }
 ];
 
@@ -76,30 +128,35 @@ function withAnswer(prev: ManualAnswer | undefined, verdict: AnswerValue, note?:
 }
 
 function AnswerRow({
-  label,
-  hint,
+  meta,
   current,
   value,
   onChange
 }: {
-  label: string;
-  hint?: string;
-  current?: ScreeningVerdict;
+  meta: QuestionMeta;
+  /** Punkten som bedömningen räknade fram (visar vad registret redan avgjort). */
+  current?: { verdict: ScreeningVerdict; source: string; detail: string };
   value: ManualAnswer | undefined;
   onChange: (v: ManualAnswer | undefined) => void;
 }) {
+  const label = meta.question;
+  const decidedByRegister = !!current && current.verdict !== 'unknown' && current.source === 'register';
   return (
-    <div className="grid gap-2 border-t border-default py-2 first:border-t-0 sm:grid-cols-[minmax(0,1.4fr)_120px_minmax(0,1.6fr)] sm:items-start">
+    <div className="grid gap-2 border-t border-default py-2 first:border-t-0 sm:grid-cols-[minmax(0,1.4fr)_minmax(180px,220px)_minmax(0,1.4fr)] sm:items-start">
       <div className="min-w-0">
         <p className="text-[12.5px] font-medium text-foreground">
           {label}
           {current && (
-            <span className={`ml-2 rounded-full px-1.5 py-0.5 text-[10.5px] font-semibold ${VERDICT_TONE[current]}`}>
-              nu: {VERDICT_LABEL[current]}
+            <span className={`ml-2 rounded-full px-1.5 py-0.5 text-[10.5px] font-semibold ${VERDICT_TONE[current.verdict]}`}>
+              villkoret nu: {VERDICT_LABEL[current.verdict]}
             </span>
           )}
         </p>
-        {hint && <p className="text-[11.5px] text-foreground-subtle">{hint}</p>}
+        {decidedByRegister ? (
+          <p className="text-[11.5px] text-foreground-subtle">Avgjort ur registret: {current.detail} Svara bara om du vet något annat.</p>
+        ) : meta.hint ? (
+          <p className="text-[11.5px] text-foreground-subtle">{meta.hint}</p>
+        ) : null}
       </div>
       <select
         aria-label={`${label} — svar`}
@@ -107,9 +164,9 @@ function AnswerRow({
         onChange={(e) => onChange(withAnswer(value, e.target.value as AnswerValue))}
         className={inputCls}
       >
-        <option value="">Okänt</option>
-        <option value="yes">Ja</option>
-        <option value="no">Nej</option>
+        <option value="">{decidedByRegister ? 'Inget eget svar (registret gäller)' : 'Okänt'}</option>
+        <option value="yes">{meta.fulfilled}</option>
+        <option value="no">{meta.failed}</option>
       </select>
       <input
         aria-label={`${label} — motivering`}
@@ -141,7 +198,7 @@ export function ManualFactsPanel({ assessment, onUpdated }: Props) {
     setFoundersOpen(assessment.foundersSource === 'manual');
   }, [assessment.context, assessment.facts, assessment.foundersSource]);
 
-  const companies = assessment.result.companies.filter((c) => c.role === 'subject' || c.role === 'linked');
+  const companies = assessment.result.companies.filter((c) => c.role === 'subject' || (c.role === 'linked' && c.orgNr));
   const linked = companies.filter((c) => c.role === 'linked' && c.orgNr);
   // Vilka anknutna bolag redan har de minimis ur plattformen (intyg behövs inte).
   const platformDeMinimis = useMemo(() => {
@@ -154,6 +211,9 @@ export function ManualFactsPanel({ assessment, onUpdated }: Props) {
     }
     return set;
   }, [assessment.context]);
+  // Bolag i tröskelvärdet som saknar bokslut (registret svarade "inga
+  // uppgifter", eller delen hämtades inte) — kan fyllas med egen uppskattning.
+  const withoutAccounts = assessment.result.thresholds.rows.filter((r) => r.orgNr && (r.estimated || (r.note && r.year === undefined)));
   const irl = assessment.result.irl;
   const platformIrl = !!irl && !irl.manualLevels && IRL_AXES.some((ax) => typeof irl[ax] === 'number');
   const founderRows: ScreeningFounderFact[] = facts.founders ?? (assessment.foundersSource === 'platform' ? (assessment.founders ?? []) : []);
@@ -200,8 +260,8 @@ export function ManualFactsPanel({ assessment, onUpdated }: Props) {
             {COMPANY_MANUAL_CONDITIONS.map((id) => (
               <AnswerRow
                 key={id}
-                label={CONDITION_LABEL[id]}
-                current={c.conditions.find((x) => x.id === id)?.verdict}
+                meta={CONDITION_QUESTION[id]}
+                current={c.conditions.find((x) => x.id === id)}
                 value={facts.companies[c.orgNr]?.[id]}
                 onChange={(v) => setCompany(c.orgNr, id, v)}
               />
@@ -258,6 +318,65 @@ export function ManualFactsPanel({ assessment, onUpdated }: Props) {
                       }))
                     }
                     className={`${inputCls} disabled:opacity-50`}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* Uppskattning för bolag utan bokslut (bilaga I art. 4.3) */}
+      {withoutAccounts.length > 0 && (
+        <section className="mt-4">
+          <p className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">Tröskelvärde — bolag utan bokslut</p>
+          <p className="text-[11.5px] text-foreground-subtle">
+            Nystartade bolag saknar bokslut i registret. Ange bolagets egen uppskattning i god tro för innevarande räkenskapsår
+            (bilaga I art. 4.3) — anställda (årsarbetskrafter), omsättning och balansomslutning i kronor. Ett bokslut vinner alltid över
+            uppskattningen.
+          </p>
+          <div className="mt-1">
+            {withoutAccounts.map((r) => {
+              const est = facts.estimates[r.orgNr];
+              const setEst = (patch: Partial<NonNullable<typeof est>>) =>
+                setFacts((f) => {
+                  const next = { ...(f.estimates[r.orgNr] ?? {}), ...patch };
+                  for (const k of Object.keys(next) as Array<keyof typeof next>) if (next[k] === undefined) delete next[k];
+                  const estimates = { ...f.estimates };
+                  if (Object.keys(next).length > 0) estimates[r.orgNr] = next;
+                  else delete estimates[r.orgNr];
+                  return { ...f, estimates };
+                });
+              const numField = (key: 'employees' | 'revenue_sek' | 'balance_sheet_sek', label: string) => (
+                <input
+                  aria-label={`${r.name || r.orgNr} — ${label}`}
+                  inputMode="decimal"
+                  placeholder={label}
+                  value={est?.[key] ?? ''}
+                  onChange={(e) => {
+                    const v = e.target.value.replace(/\s/g, '').replace(',', '.');
+                    const n = Number(v);
+                    setEst({ [key]: v === '' || !Number.isFinite(n) || n < 0 ? undefined : n });
+                  }}
+                  className={`${inputCls} mx-tnum`}
+                />
+              );
+              return (
+                <div key={r.orgNr} className="grid gap-2 border-t border-default py-2 first:border-t-0 sm:grid-cols-[minmax(0,1.2fr)_110px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] sm:items-center">
+                  <p className="text-[12.5px] font-medium text-foreground">
+                    {r.name || r.orgNr}
+                    <span className="ml-2 text-[11px] font-normal text-foreground-subtle">{r.note}</span>
+                  </p>
+                  {numField('employees', 'Anställda')}
+                  {numField('revenue_sek', 'Omsättning kr')}
+                  {numField('balance_sheet_sek', 'Balansomslutning kr')}
+                  <input
+                    aria-label={`${r.name || r.orgNr} — källa för uppskattningen`}
+                    placeholder="Källa (budget, bolagets uppgift)"
+                    maxLength={SCREENING_NOTE_MAX}
+                    value={est?.note ?? ''}
+                    onChange={(e) => setEst({ note: e.target.value || undefined })}
+                    className={inputCls}
                   />
                 </div>
               );
@@ -408,9 +527,8 @@ export function ManualFactsPanel({ assessment, onUpdated }: Props) {
           {VINNOVA_MANUAL.map((v) => (
             <AnswerRow
               key={v.id}
-              label={v.label}
-              hint={v.hint}
-              current={assessment.result.vinnovaChecks.find((c) => c.id === v.id)?.verdict}
+              meta={v.meta}
+              current={assessment.result.vinnovaChecks.find((c) => c.id === v.id)}
               value={facts[v.id]}
               onChange={(a) => setFacts((f) => ({ ...f, [v.id]: a }))}
             />
@@ -468,9 +586,13 @@ export function ManualFactsPanel({ assessment, onUpdated }: Props) {
         <p className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">Excellent inkubation och kommentar</p>
         <div className="mt-1">
           <AnswerRow
-            label="Uppfyller villkoren för excellent inkubation"
-            hint="Har något hänt som påverkar rätten att ta emot inkubationsmedel? Beslutet registreras som förut på bolagskortet."
-            current={assessment.result.excellence.verdict}
+            meta={{
+              question: 'Uppfyller bolaget villkoren för excellent inkubation?',
+              fulfilled: 'Ja — villkoren uppfyllda',
+              failed: 'Nej — uppfylls inte',
+              hint: 'Har något hänt som påverkar rätten att ta emot inkubationsmedel? Beslutet registreras som förut på bolagskortet.'
+            }}
+            current={assessment.result.excellence}
             value={facts.excellence}
             onChange={(a) => setFacts((f) => ({ ...f, excellence: a }))}
           />

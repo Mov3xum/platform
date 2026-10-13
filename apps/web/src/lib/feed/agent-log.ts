@@ -753,6 +753,37 @@ function mapRow(
     }
 
     // Stödcheckar & finansieringsprojekt (§ 46).
+    // Bedömning excellens (§ 51.6): körningar på bolagskortet + begäran om komplettering.
+    case 'startup_screenings': {
+      const name = str(after.startup_name);
+      const sid = str(after.startup);
+      return {
+        title: `${name ? `${name}: ` : ''}bedömning excellens gjord`,
+        detail: [str(after.state_aid), str(after.vinnova)].filter(Boolean).join(' · ') || undefined,
+        href: sid ? `/startups/${sid}#statsstod` : '/bedomning-excellens',
+        icon: 'shield'
+      };
+    }
+    case 'screening_requests': {
+      const name = str(after.startup_name);
+      const to = str(after.recipient_kind) === 'coach' ? 'coachen' : 'bolaget';
+      const href = row.record_id ? `/komplettering/${row.record_id}` : '/bedomning-excellens';
+      if (after.closed === true) return { title: `${name ? `${name}: ` : ''}begäran om komplettering avslutad`, href, icon: 'check' };
+      if (action === 'create') {
+        return {
+          title: `${name ? `${name}: ` : ''}begäran om komplettering till ${to}`,
+          detail: typeof after.items === 'number' ? `${after.items} punkter` : undefined,
+          href,
+          icon: 'send'
+        };
+      }
+      return {
+        title: `${name ? `${name}: ` : ''}komplettering besvarad`,
+        detail: typeof after.answered === 'number' ? `${after.answered} av ${after.items ?? '?'} punkter` : undefined,
+        href,
+        icon: 'check'
+      };
+    }
     case 'support_check_types': {
       const title = str(after.title);
       if (after.deleted === true) return { title: `Checktyp borttagen: "${title || 'checktyp'}"`, href: '/checkar/typer', icon: 'check' };

@@ -4,9 +4,11 @@ import fontkit from '@pdf-lib/fontkit';
 import { BRAND, rgb01, LOGO_RATIO } from '@/lib/documents/brand';
 import { loadLogoPng, loadPdfFonts } from '@/lib/documents/assets';
 import {
+  GROUP_ROLE_LABEL,
   MATURITY_PHASE_LABEL,
   STATE_AID_OUTCOME_LABEL,
   VINNOVA_OUTCOME_LABEL,
+  describeCompanyAge,
   type CompanyAssessment,
   type ScreeningCheck,
   type ScreeningOwnershipEntry,
@@ -275,8 +277,12 @@ function companyBlock(ctx: Ctx, c: CompanyAssessment, subjectName: string) {
   if (c.role !== 'subject') {
     drawLines(
       ctx,
-      `${c.relationLabel ?? ''} · ${c.shareLabel ?? ''}${c.indirect ? ' (indirekt)' : ''} — ${c.reason ?? ''}${
-        c.relation === 'linked' ? ` ${title} kontrollerar mer än 50 % och är därmed ett anknutet företag till ${subjectName}.` : ''
+      `${c.relationLabel ?? ''}${c.groupRole ? ` · ${GROUP_ROLE_LABEL[c.groupRole]}` : ''} · ${c.shareLabel ?? ''}${c.indirect ? ' (indirekt)' : ''} — ${c.reason ?? ''}${
+        c.relation === 'linked' && !c.groupRole && !c.transitive
+          ? ` ${title} kontrollerar mer än 50 % och är därmed ett anknutet företag till ${subjectName}.`
+          : c.relation === 'linked'
+            ? ` Anknutet företag till ${subjectName} — 100 % av uppgifterna räknas in och grundförutsättningarna prövas.`
+            : ''
       }`,
       { size: 9, color: INK_SOFT, gap: 4 }
     );
@@ -361,9 +367,7 @@ export async function buildExcellenceAssessmentPdf(a: ExcellenceAssessment): Pro
   if (a.cost) {
     drawLines(
       ctx,
-      `Kostnad för uppslagen hos ${a.providerName ?? 'leverantören'}: ${a.cost.companies} bolag × ${a.cost.parts.length} ${
-        a.cost.parts.length === 1 ? 'del' : 'delar'
-      } = ${formatRegistryCost(a.cost)} (uppskattning — leverantörens faktura är facit).`,
+      `Kostnad för uppslagen hos ${a.providerName ?? 'leverantören'}: ${a.cost.companies} uppslagna bolag = ${formatRegistryCost(a.cost)} (uppskattning summerad per uppslag — leverantörens faktura är facit).`,
       { size: 8.5, color: INK_SOFT, gap: 6 }
     );
   }
@@ -393,6 +397,47 @@ export async function buildExcellenceAssessmentPdf(a: ExcellenceAssessment): Pro
   // ── Steg 1 ──────────────────────────────────────────────────────────────
   sectionTitle(ctx, 'Steg 1 — Företagsstöd enligt art. 22 GBER eller de minimis');
   companyBlock(ctx, result.companies[0], subjectName);
+
+  // Koncernkartan — samma rader som skärmvyn: vilka bolag som räknas in och varför.
+  subTitle(ctx, `Koncernkarta — bolag som räknas in för ${subjectName}`);
+  drawLines(
+    ctx,
+    a.mode === 'register'
+      ? 'Ur koncernregistrets lista (hela koncernen: moder-, syster- och dotterbolag är alla anknutna, bilaga I art. 3.3) plus bolag ur verklig huvudman och andra ledet ur de uppslagna bolagen.'
+      : 'Ur sparad ägarbild på bolagskortet — bara ägarkedjan och direkta innehav; systerbolag syns först vid en färsk hämtning med Koncernstruktur.',
+    { size: 8.5, color: INK_SOFT, gap: 3 }
+  );
+  const refDate = new Date(a.assessedAt);
+  table(
+    ctx,
+    ['Bolag', 'Plats i koncernen', 'Relation', 'Andel', 'Registrerat · ålder', 'Status', 'Underlag'],
+    result.companies.map((c) => {
+      const reg = c.basic?.registeredAt?.slice(0, 10);
+      const regDate = reg ? new Date(`${reg}T00:00:00Z`) : null;
+      const age = regDate && !Number.isNaN(regDate.getTime()) ? `${reg} · ${describeCompanyAge(regDate, refDate)}${c.conditions.find((x) => x.id === 'age')?.verdict === 'no' ? ' — över 5 år' : ''}` : '–';
+      const place =
+        c.role === 'subject'
+          ? 'Startup-bolaget'
+          : [
+              c.groupRole ? `${GROUP_ROLE_LABEL[c.groupRole]}${typeof c.level === 'number' ? ` (nivå ${c.level})` : ''}` : c.transitive ? 'Andra ledet' : c.indirect ? 'Indirekt ägare/innehav' : 'Direkt ägare/innehav',
+              c.via ? `via ${c.via}` : ''
+            ]
+              .filter(Boolean)
+              .join(' · ');
+      return [
+        `${c.name || '–'}${c.orgNr ? ` ${formatOrgNr(c.orgNr)}` : ''}`,
+        place,
+        c.role === 'subject' ? '—' : (c.relationLabel ?? ''),
+        c.role === 'subject' ? '' : (c.shareLabel ?? ''),
+        age,
+        c.basic?.bolagStatus ?? '–',
+        c.dataFetched ? 'Uppslag gjort' : 'Inget uppslag'
+      ];
+    }),
+    [2.4, 2.2, 1.5, 1, 1.9, 1, 1.2],
+    { size: 8 }
+  );
+
   subTitle(ctx, 'Fristående företag?');
   checks(ctx, [result.standalone]);
   for (const c of result.companies.slice(1)) companyBlock(ctx, c, subjectName);
@@ -405,7 +450,7 @@ export async function buildExcellenceAssessmentPdf(a: ExcellenceAssessment): Pro
       ...result.thresholds.rows.map((r) => [
         `${r.name || formatOrgNr(r.orgNr)}${r.note ? ` (${r.note})` : ''}`,
         r.role === 'subject' ? 'Startup' : r.role === 'linked' ? '100 % (anknutet)' : `${Math.round(r.weight * 100)} % (partner)`,
-        r.year ? String(r.year) : '–',
+        r.estimated ? 'uppskattning' : r.year ? String(r.year) : '–',
         r.employees !== undefined ? String(r.employees) : '–',
         sek(r.revenue_sek),
         sek(r.balance_sheet_sek)

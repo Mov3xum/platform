@@ -159,6 +159,9 @@ async function verifyCollectionsExist() {
     'feedback_items',
     // Kompetens-hashtags (§ 29.7, migration 1700000178) — tenantens vokabulär.
     'competence_tags',
+    // Bedömning excellens (§ 51.6, migration 1700000191) — historik + begäran om komplettering.
+    'startup_screenings',
+    'screening_requests',
     'capital_rounds',
     'intellectual_property',
     'startup_kpis',
@@ -422,7 +425,10 @@ const MUST_SCOPE_TO_MEMBER = [
   'support_check_applications',
   'support_check_revisions',
   'support_check_comments',
-  'support_check_documents'
+  'support_check_documents',
+  // Bedömning excellens (§ 51.6): bolaget ser/svarar på en begäran om
+  // komplettering BARA när den är ställd till bolaget (recipient_kind).
+  'screening_requests'
 ];
 
 const MUST_BE_STAFF_OR_OBSERVER = [
@@ -478,6 +484,9 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   // Kompetens-hashtags (§ 29.7, migration 1700000178). Intern bemannings-
   // vokabulär → staff/observer-only.
   'competence_tags',
+  // Bedömning excellens (§ 51.6, migration 1700000191). Statsstödsbedömningar
+  // (utfall, punkter, PDF) är internt underlag → staff/observer-only.
+  'startup_screenings',
   // Finansieringsprojekt/arbetspaket och stödcheck-regler (§ 46). Intern
   // projektekonomi och uppföljningsstyrning → staff/observer-only.
   'funding_projects',

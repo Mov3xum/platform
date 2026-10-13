@@ -507,9 +507,10 @@ uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
     `support_check_applications`/`_revisions`/`_comments`/`_documents`
     (§ 46 — deltagarnamn, signeringsbevis och bilagor)
     samt `compass_responses` (råa enkät-/intagssvar per fråga, § 43 —
-    målstyrningen får bara det k-anonyma aggregatet) och
+    målstyrningen får bara det k-anonyma aggregatet),
     `notifications`/`notification_preferences` (privata notiser och
-    notisinställningar, § 50).
+    notisinställningar, § 50) och `startup_screenings`/`screening_requests`
+    (statsstödsbedömningar + kompletteringssvar med grundaruppgifter, § 51.6).
 
   Allt annat — CRM (`contacts`), compass-inflöde (`compass_*`), de minimis
   (`de_minimis_*`), avtal/signeringsbevis (`agreement_signatures`),
@@ -1591,8 +1592,20 @@ Regler:
   Konsumering efter första uppslaget.
 - **Audit:** valda delar står i synkens sammanfattning (`last_sync_summary`)
   och i aktivitetsraden ("Hämtade: Grunddata, Bokslut") — PII-fritt.
-- Senaste val sparas per leverantör i `localStorage`
-  (`movexum-registry-parts-<slug>`, bekvämlighet — ingen datakälla).
+- **Ingen del är förvald (2026-10-13)** — varje anrop debiteras, så personalen
+  bockar aktivt i det som ska begäras ut (`useRegistryPartSelection` startar
+  tomt; "Markera alla" finns kvar). Senaste val sparas per leverantör i
+  `localStorage` (`movexum-registry-parts-<slug>`, bekvämlighet — ingen
+  datakälla).
+- **Hela koncernen ur koncernstrukturen (2026-10-13).** Roarings platta
+  `groupCompanies[]` bär HELA koncernen (moder, moderns moder, syskon,
+  dotterbolag). Utöver ägare/innehav (`ownership`) exporterar normaliseraren
+  listan som `RegistryCompany.group` (`RegistryGroupMember[]`:
+  org-nr/namn/nivå/moder/andel; personnummer-derivat utelämnas) — bara när
+  datadelen `group_structure` hämtades (`restrictToParts`). Fältet skrivs
+  aldrig till databasen (`startup_ownership` är oförändrad); det används av
+  Bedömning excellens (§ 51.5) för att pröva grundförutsättningarna för varje
+  anknutet bolag.
 Ingen ny dataväg, ingen PII i det nya fältet; riskklass oförändrad.
 
 **Kostnad per anrop — credits och kronor (2026-10-12, migration
@@ -1651,7 +1664,12 @@ schema-drift (§ 24.4). Ingen ny dataväg, ingen PII; riskklass oförändrad.
 
 **GDPR § 5 / § 9.3.** Fysiska personer i ägarbilden lagras UTAN namn,
 personnummer och födelsedatum — bara `owner_kind='person'` + andel/intervall
-+ kontrollgrund ur en **fast vokabulär** (`controlBasisCategory`: shares/
++ kontrollgrund ur en **fast vokabulär**. **Namnet visas ändå på skärmen
+(2026-10-13, § 51.7):** `RegistryOwnershipEntry.person_name` bär huvudmannens
+för-/efternamn TRANSIENT från hämtningen till skärmen ("Testa mot org-nr" och
+Bedömning excellens) så personalen vet vem huvudmannen är; `writer.ts` bygger
+raden utan fältet, så det når aldrig `startup_ownership`, PDF:n, historiken
+eller AI. Personnummer, födelsedatum och adress läses aldrig (`controlBasisCategory`: shares/
 votes/board/agreement/other — leverantörens fritext kan bära namn och når
 aldrig databasen). En ägarrad utan giltigt org-nr för **juridisk** person
 (saknat, ogiltigt eller personnummer-derivat = enskild firma) behandlas
@@ -8239,6 +8257,8 @@ det.
 | `contact_request`/`contact_decision` | Kontaktboken (§ 45.3) | Ägare / frågare |
 | `support_check_*` | Stödcheckar (§ 46) | Coacher/ledning resp. bolaget |
 | `feedback_answered`/`feedback_done` | Ledningen svarar/klarmarkerar (§ 49) | Kortets författare |
+| `screening_request` (obligatorisk) | Controllern skickar begäran om komplettering (§ 51.6) | Vald coach resp. bolagets medlemmar |
+| `screening_answered` | Coachen/bolaget besvarar punkter (§ 51.6) | Den som skickade förfrågan |
 | `due_soon` | (reserverad — påminnelse-ticken, nästa steg) | Ägare/tilldelade |
 
 Alla anrop är best-effort (`.catch`) — en misslyckad notis fäller aldrig
@@ -8332,8 +8352,9 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
 - **Deterministiskt, inget beslut.** Ingen AI-inferens; varje punkt får
   JA / NEJ / OKÄNT med motivering och källa (bolagsregister / plattformen /
   manuell kontroll). OKÄNT när underlaget saknas — motorn gissar aldrig
-  (börsnotering, företagskoncentration, övertagen verksamhet,
-  grundarengagemang, innovationshöjd är alltid manuella).
+  (företagskoncentration, övertagen verksamhet, grundarengagemang,
+  innovationshöjd är alltid manuella; börsnotering avgörs ur registret för
+  privata AB, § 51.5).
 - **Vinstutdelning avgörs ur bokslutet (2026-10-12).** Punkten "har
   inte beslutat om eller delat ut vinst" läser `dividend_reported`/
   `dividend_sek` (fältet `dividend` i Roarings economy-overview 2.1
@@ -8470,6 +8491,87 @@ svaren. Nu finns panelen **Manuella svar** under varje bedömning:
   skriva personuppgifter; personnummer saneras på skrivvägen. Riskklass n/a
   (ingen AI). Ingen ny kollektion.
 
+### 51.5 Hela koncernen, börsnotering ur registret & frågor som inte kan inverteras (2026-10-13)
+
+**Incident.** Bedömningen av Wellgo Health AB sade "Wellgo Health AB är
+börsnoterat; bildat genom företagskoncentration; har övertagit annat
+företags verksamhet" och landade på de minimis. Orsak: panelen Manuella svar
+visade villkoret ("Inte börsnoterat") med ett nakent Ja/Nej, controllern
+svarade "Nej" (= inte noterat) och svaret lagrades i villkorets riktning som
+NEJ (= ÄR noterat). Dessutom prövades bara ägarkedjan uppåt och de direkta
+innehaven — systerbolag under samma holdingbolag (ofta det äldsta i gruppen)
+föll bort ur både grundförutsättningarna och tröskelvärdet, och "andra
+analysen" av ett holdingbolags egna ägare/innehav stannade vid visning.
+
+- **Börsnotering avgörs ur registret** (`listedCheck`, ren + enhetstestad):
+  bara ett PUBLIKT aktiebolag kan ta upp aktier till handel, och ett publikt
+  bolags namn ska följas av "(publ)" (ABL 28 kap. 7 §). Privat AB (namn utan
+  "(publ)", bolagsform utan "publik"), handels-/kommanditbolag, ekonomisk
+  förening och enskild firma ⇒ JA ur registret. "(publ)"/"Publikt aktiebolag"
+  ⇒ OKÄNT med manuell kontroll (är aktierna upptagna till handel?). Namnet
+  räcker för ett bolag i koncernlistan utan eget uppslag. **Undantag från
+  "manuellt NEJ vinner":** ett register-JA är ett rättsligt faktum — ett
+  manuellt "börsnoterat" på ett privat AB bortses från med en not i
+  bedömningen (det räddar redan sparade inverterade svar).
+- **Frågorna i Manuella svar är naturliga frågor med uttydda alternativ**
+  (`CONDITION_QUESTION`/`VINNOVA_MANUAL` i `ManualFactsPanel.tsx`): "Är
+  bolaget börsnoterat?" → "Nej — inte börsnoterat" / "Ja — aktierna är
+  upptagna till handel". Lagrat `verdict` är oförändrat i VILLKORETS riktning
+  (`yes` = uppfyllt); bara presentationen ändrades. En punkt registret redan
+  avgjort visar "Avgjort ur registret: …" och alternativet "Inget eget svar
+  (registret gäller)". Aldrig mer ett nakent Ja/Nej mot en negerad etikett.
+- **Hela koncernen** (`deriveGroupCompanies`, ren + enhetstestad, ersätter
+  `deriveRelatedCompanies` som ensam källa; `GroupCompanyFacts.groupMembers`
+  bär koncernlistan § 11.8). Tre lager: (1) startup-bolagets egen ägarbild,
+  (2) VARJE bolag i koncernregistrets lista — moder, moderns moder,
+  **systerbolag** och dotterbolag — är anknutet (koncern = majoritetskontroll
+  i varje led; bilaga I art. 3.3: anknutna via ett eller flera andra företag),
+  med `groupRole` parent/subsidiary/sibling, `via` (modern) och nivå; (3)
+  andra ledet ur de bolag som slagits upp: ett anknutet bolags egna anknutna
+  (ägarbild + dess koncern) är anknutna, ett partnerföretags anknutna räknas
+  med partnerns andel (art. 6.3). En rad per org-nr, starkaste relationen
+  vinner, tak `MAX_GROUP_COMPANIES` = 30. Alla anknutna får
+  grundförutsättningar (ålder/status/börsnotering/utdelning …) och en
+  100 %-rad i tröskelvärdet; "Fristående?" beskriver rollerna. Sparade data
+  (bolagskortet) bär bara ägarkedjan — vyn säger att systerbolag kräver en
+  färsk hämtning med Koncernstruktur.
+- **Uppslagen** (`assessExcellenceAction`): två rundor, varje bolag en gång,
+  högst `MAX_RELATED_COMPANIES` = 8 (överskott listas i koncernkartan utan
+  uppslag + varning). Ett bolag UR koncernlistan hämtas BARA med grunddata +
+  bokslut av det valda (koncernen är redan känd — inte 150 credits
+  koncernstruktur per bolag igen); verklig huvudman bara för moderbolagen
+  (indirekt grundarägande); ett bolag ur ägarbilden som inte ligger i listan
+  (partner/oklart ur verklig huvudman) hämtas med hela valet så dess egen
+  koncern blir känd (`partsForRelated`). Kostnaden summeras per uppslag
+  (`sumRegistryCosts`, enhetstestad) i stället för "delar × bolag". Rate-
+  limiten för uppslag är 60/10 min per användare (en koncernbedömning är upp
+  till 9 uppslag). Väljs bara Koncernstruktur slås koncernbolagen inte upp —
+  varningen säger att Grunddata/Bokslut behövs.
+- **Koncernkarta** i vyn och PDF:n (efter startup-bolagets block): bolag ·
+  plats i koncernen (moder/dotter/syster + nivå, "via X", andra ledet) ·
+  relation · andel · registrerat/ålder (med "över 5 år") · status · uppslag
+  gjort/inte. Det är tabellen som visar VARFÖR ett bolag räknas in och var
+  underlaget slutar.
+- **Indirekt grundarägande** (`indirectPersonOwnership`, ren + enhetstestad):
+  via ägarkedjan (Combly ← Wellgo 100 % ← Ewell 90 % ← personer) räknas
+  fysiska personers minsta andel av startup-bolaget ur verklig huvudman för
+  ägarbolagen. Punkten "grundarteamet äger ≥ 75 % (direkt eller indirekt)"
+  får det som LEDTRÅD ("via Wellgo → Ewell äger fysiska personer minst
+  67,5 %") — aldrig ett JA av sig självt, registret vet inte att personerna
+  är grundarna; controllern anger andelen inkl. indirekt under Manuella svar.
+  Ägs startup-bolaget till ≥ 25 % av bolag utan att huvudmännen hämtats sägs
+  det uttryckligen.
+- **Uppskattning för bolag utan bokslut** (bilaga I art. 4.3): nystartade
+  bolag saknar bokslut och gjorde tröskelvärdet OKÄNT ⇒ art. 22 "kan inte
+  avgöras". `ScreeningManualFacts.estimates[orgNr]` (anställda, omsättning,
+  balansomslutning, källa — normaliseras i `excellence-facts.ts`) fyller
+  raden med not "Bolagets egen uppskattning", källa manuell; ett bokslut
+  vinner alltid. Panelen visar inmatningen bara för bolag utan årsrader.
+- Riskklass/PII: oförändrat n/a — inga nya kollektioner eller fält i PB
+  (`screening_facts` bär uppskattningarna, redan fältmaskat för AI); koncern-
+  listan bär bara juridiska personer; namn på fysiska personer når aldrig
+  motorn.
+
 ### 51.3 Var en bedömning lagras — PDF i Filer, i bolagets mapp (2026-10-12)
 
 **Incident:** en bedömning (som kostar credits hos Roaring) fanns bara på
@@ -8511,3 +8613,113 @@ dela eller bifoga. Nu arkiveras **varje körning** automatiskt:
   e-post). `user_files` är fortsatt denylistad för `query_collection`
   (§ 27); loggar bär status, aldrig filnamn (bolagsnamn). Ingen ny
   kollektion, inga nya fält, ingen migration; riskklass n/a (ingen AI).
+
+### 51.6 Historik på bolagskortet & begäran om komplettering (2026-10-13)
+
+**Incident/behov.** PDF:n låg bara i controllerns egna Filer (strikt
+ägaren-bara, § 51.3) — kollegor och revisorer såg ingen historik, och
+"Saknat underlag" var en lista på skärmen som controllern fick jaga per mejl.
+
+**Historik — `startup_screenings` (migration 1700000191).** Varje körning för
+ett PORTFÖLJBOLAG sparas (`lib/excellence/history.server.ts`,
+`storeScreeningRun`, anropad av `finishAssessment` efter PDF:n): `startup`,
+`mode`/`provider`, utfallen (`state_aid_outcome`/`vinnova_outcome`/
+`excellence_verdict` — select-värden som MÅSTE spegla
+`excellence-screening.ts`), `summary` (json: `summarizeScreeningRun` i den
+rena, enhetstestade `packages/shared/src/excellence-history.ts` — varje punkts
+utfall + källa, saknat underlag, koncernens bolag, viktat tröskelvärde och
+kostnad; **aldrig `detail`-texter**, som kan bära grundarnamn), `assessed_by`/
+`assessed_at` och **PDF:n** (`file`, protected, serverad via den tenant-
+scopade proxyn `/api/screenings/<id>/pdf`, § 39.3-mönstret). Bolagskortet
+(`StartupScreeningSection`, sektion **Statsstöd & Vinnova**, `#statsstod`,
+även i hopp-navet) listar körningarna nyast först med chips, vem/när/kostnad,
+PDF-länk och **"Sedan föregående"** — `diffScreeningRuns` (ren, enhetstestad)
+jämför två körningar i rad: utfall (bättre/sämre), punkter som bytte utfall
+(med källa), underlag som kom på plats/tillkom, bolag som kom in i/föll ur
+koncernen, tröskelvärdets tal. Samma diff visas i bedömningsvyn direkt efter
+en körning (`ExcellenceAssessment.history`). Användarens egen PDF-kopia i
+Filer finns kvar (§ 51.3). RLS: list/view staff/observer; create pinnad
+(`tenant` + `assessed_by` = inloggad, § 21.8); update/delete ledning.
+Fail-soft: kan raden inte skapas visas bedömningen ändå med `history.error`.
+
+**Begäran om komplettering — `screening_requests` (samma migration).**
+Punkterna ur "Saknat underlag" blir en förfrågan till **coachen** (vald
+kollega) eller till **bolaget**, som båda svarar direkt i systemet:
+- **Modellen** (`packages/shared/src/excellence-requests.ts`, ren +
+  enhetstestad): `deriveScreeningRequestItems(result)` gör varje OKÄNT som en
+  människa kan svara på till ett ärende (`condition` per bolag — bara det
+  registret inte avgör; `document` = aktiebok när fristående är okänt;
+  `estimate` per bolag utan bokslut; `de_minimis` per anknutet bolag utan känt
+  stöd; `founders`; `vinnova`; `irl`; `excellence`). Punkter registret ska
+  avgöra (ålder/status) tas inte med. `SCREENING_REQUEST_ITEM_AUDIENCE` styr
+  vem som rimligen svarar — bolaget får aldrig coachens bedömningspunkter
+  (Vinnova/IRL/excellens). Frågetexterna (`SCREENING_CONDITION_QUESTION` m.fl.)
+  är de otvetydiga formuleringarna från § 51.5 och delas med Manuella svar.
+- **Skapa** (`ScreeningRequestComposer` under bedömningen → action
+  `createScreeningRequestAction` → skrivlagret `lib/core/write/
+  screening-requests.ts`): mottagare, kollega (Movexum-personal i tenanten,
+  verifierad), valda punkter, meddelande (personnummer-saneras), frist.
+  Notis `screening_request` (obligatorisk, § 50) till kollegan resp. bolagets
+  medlemmar; har bolaget ingen inloggad medlem sägs det — då kopieras i
+  stället **"Kopiera som text (mejl)"** (`screeningRequestText`: numrerad
+  checklista med länk och frist).
+- **Svara** (`/komplettering/<id>`, `ScreeningRequestAnswerForm`; bolaget
+  når den via kortet **Uppgifter till Movexum** på Mitt bolag, coachen via
+  notisen/bolagskortet): en inmatning per sort, delvis sparande tillåtet.
+  `answerScreeningRequest` normaliserar svaren (`applyScreeningRequestAnswers`),
+  slår ihop de nyss besvarade punkterna till **`startups.screening_facts`**
+  (`mergeScreeningRequestAnswersIntoFacts` — EN sanning, § 51.4; `document`-
+  svar stannar i förfrågan), markerar punkterna med PII-fri etikett
+  (`screeningAnswerLabel`) och status (`open`/`partially_answered`/
+  `answered`), notifierar avsändaren (`screening_answered`). Nästa omräkning
+  ("Spara svar och uppdatera", ny körning) väger in svaren.
+- **Behörighet (koden är gränsen, PB speglar):** skicka/avsluta =
+  admin/incubator_lead/coach (`CREATE_POLICIES.screening_requests`, agent
+  deny); svara = Movexum-personal ELLER en `startup_member` länkad till
+  bolaget NÄR `recipient_kind = "startup"` (`canAnswer`). Medlemmens skrivning
+  till `startups.screening_facts` går via `writeWithFallback` (superuser)
+  EFTER kontrollen. RLS: list/view staff/observer eller länkad medlem på
+  bolagsförfrågningar (`MUST_SCOPE_TO_MEMBER`); update: staff eller medlemmen
+  med identitets-/avsändarfälten låsta (`@request.body.<fält>:isset = false`);
+  delete: ledning eller avsändaren. Create pinnad (`requested_by`).
+- **GDPR § 5:** `items` kan bära grundarnamn/andel/engagemang (samma uppgifter
+  som teamet på bolagskortet; berättigat intresse: statsstödskontroll) och
+  fri text → båda kollektionerna **denylistade** i `lib/ai/redaction.ts`
+  (`redaction.test.ts`); personnummer saneras på skrivvägen; audit i
+  `agent_actions` bär bara mottagartyp/antal/status (mappat i
+  `feed/agent-log.ts` → Bolagsnytt/`/aktivitet`). Cascade på tenant/startup.
+- Speglat i `setup-via-api.mjs` (defs + `FORCE_CREATE_RULES`), asserterat i
+  `verify-baseline.mjs` (must-exist, `MUST_BE_STAFF_OR_OBSERVER` resp.
+  `MUST_SCOPE_TO_MEMBER`). Riskklass n/a (ingen AI).
+
+### 51.7 Verklig huvudman med namn, "hämta mer" per koncernbolag & kostnaden (2026-10-13)
+
+- **Huvudmannens namn visas.** Utan namn visste ingen vem huvudmannen var.
+  `RegistryOwnershipEntry.person_name` (för-/efternamn ur `person{firstName,
+  lastName}` eller toppnivå — `beneficialOwnerName`, siffror strippas) följer
+  med TRANSIENT till skärmen: ägarbildstabellen i Bedömning excellens
+  ("visas bara här, lagras inte") och "Testa mot org-nr". `writer.ts` bygger
+  `startup_ownership`-raden utan fältet; PDF:n, `startup_screenings.summary`
+  och AI-kontexten får det aldrig; underlaget (`context`, § 51.4) bär det bara
+  inom samma session (`parseAssessmentContext` släpper det igenom på person-
+  rader, fortsatt aldrig `name`/`org_nr`). Personnummer, födelsedatum och
+  adress läses aldrig (`normalize.test.ts`). Rättslig grund oförändrad
+  (berättigat intresse, § 11.3 — DPA/licens med Roaring krävs).
+- **Systerbolag** ingår i koncernkartan sedan § 51.5 (`deriveGroupCompanies`,
+  rollen "Systerbolag / annat bolag i koncernen").
+- **Hämta mer per bolag.** Koncernkartan har kolumnen **Hämta mer** i
+  registerläget (admin/incubator_lead med ansluten leverantör): kryssa i
+  delar per bolag (ingen förvald), se **kostnaden innan** ("Kostar: N credits
+  ≈ kr", pris per del), hämta → `fetchGroupCompanyAction` slår upp bolaget
+  (samma `runRegistryLookup`, rate-limit och audit som § 11.8), slår ihop
+  svaret med underlaget via den rena, enhetstestade
+  `lib/excellence/merge.ts` (**bara hämtade delar ersätter** — bokslut rör
+  inte ägarbilden, verklig huvudman ersätter bara huvudmannens rader) och
+  räknar om bedömningen med samma manuella svar. Underlaget bär
+  `providerSlug` för detta.
+- **Kostnaden syns hela tiden:** per del i kryssrutorna, per bolag före
+  "Hämta", som löpande total i bedömningsvyn ("Denna bedömning har hittills
+  kostat …", `sumRegistryCosts` över alla uppslag inkl. hämta-mer), per
+  körning i historiken på bolagskortet och i PDF:ns huvud. Saknas pris sägs
+  "pris ej angivet" — aldrig en gissning (§ 11.8).
+

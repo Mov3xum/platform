@@ -52,3 +52,17 @@ test('normalizeScreeningFacts: org-nr normaliseras, okända punkter/värden slä
   assert.equal(summary.de_minimis_related, 1);
   assert.equal(summary.has_comment, true);
 });
+
+test('normalizeScreeningFacts: uppskattningar per bolag (bilaga I art. 4.3) normaliseras; tomma/ogiltiga släpps', () => {
+  const f = normalizeScreeningFacts({
+    estimates: {
+      '559572-8790': { employees: '2,5', revenue_sek: '1 200 000', balance_sheet_sek: -5, note: 'budget 2026, pnr 19800101-1234' },
+      '5594427808': { employees: 'x' },
+      nonsense: { employees: 1 }
+    }
+  });
+  assert.deepEqual(f.estimates, { '5595728790': { employees: 2.5, revenue_sek: 1_200_000, note: 'budget 2026, pnr [REDACTED]' } });
+  assert.equal(isEmptyScreeningFacts(f), false);
+  assert.equal(summarizeScreeningFacts(f).estimates, 1);
+  assert.deepEqual(normalizeScreeningFacts({}).estimates, {});
+});

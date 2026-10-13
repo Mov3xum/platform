@@ -463,6 +463,13 @@ const CREATE_POLICIES: Record<
     user: { kind: 'roles', roles: STAFF_FULL },
     agent: { kind: 'allow' }
   },
+  // Bedömning excellens (§ 51.6) — begäran om komplettering skickas av
+  // controllern (admin/incubator_lead/coach, finkontroll i skrivlagret);
+  // agenten har inget verktyg (människa-i-loopen).
+  screening_requests: {
+    user: { kind: 'roles', roles: STAFF_AND_COACH },
+    agent: { kind: 'deny', reason: 'Begäran om komplettering skickas av controllern i Bedömning excellens.' }
+  },
   // Upphandlingar & avrop (§ 39) — registreras av staff; agenten ärver rollen.
   procurements: {
     user: { kind: 'roles', roles: STAFF_FULL },

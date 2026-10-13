@@ -33,6 +33,8 @@ export interface ScreeningOwnershipEntry {
   owner_kind: ScreeningOwnerKind;
   name?: string;
   org_nr?: string;
+  /** TRANSIENT: fysisk persons namn ur verklig huvudman — bara skärmen, aldrig PDF/historik/DB (§ 51.7). */
+  person_name?: string;
   capital_pct?: number;
   voting_pct?: number;
   pct_min?: number;
@@ -67,6 +69,38 @@ export interface ScreeningBasic {
 /** Bilaga I-relation mellan startup-bolaget och ett annat företag. */
 export type ScreeningRelation = 'linked' | 'partner' | 'exempt' | 'uncertain';
 
+/**
+ * Plats i koncernen relativt startup-bolaget (ur koncernregistrets platta
+ * lista): moderbolag (direkt eller högre upp), dotterbolag, eller systerbolag
+ * / annat bolag i samma koncern (anknutet via gemensam moder — bilaga I
+ * art. 3.3: företag som är anknutna via ett eller flera andra företag).
+ */
+export type ScreeningGroupRole = 'parent' | 'subsidiary' | 'sibling';
+
+export const GROUP_ROLE_LABEL: Record<ScreeningGroupRole, string> = {
+  parent: 'Moderbolag',
+  subsidiary: 'Dotterbolag',
+  sibling: 'Systerbolag / annat bolag i koncernen'
+};
+
+/**
+ * Ett bolag i koncernregistrets platta lista (Roaring group-structure:
+ * `groupCompanies[]` med `motherCompanyId`/`ownedPercentage`/`companyLevel`).
+ * Alla bolag i listan ingår i samma koncern = majoritetskontroll i varje led
+ * ⇒ anknutna företag enligt bilaga I. Bara juridiska personer (org-nr/namn),
+ * aldrig fysiska personer.
+ */
+export interface ScreeningGroupMember {
+  org_nr?: string;
+  name?: string;
+  /** Nivå i koncernen enligt leverantören (0 = yttersta moder). */
+  level?: number;
+  mother_org_nr?: string;
+  mother_name?: string;
+  /** Moderns andel av bolaget i procent. */
+  owned_pct?: number;
+}
+
 export interface RelatedCompanyRef {
   name?: string;
   org_nr?: string;
@@ -77,6 +111,13 @@ export interface RelatedCompanyRef {
   shareLabel: string;
   reason: string;
   indirect?: boolean;
+  /** Plats i koncernen när bolaget kommer ur koncernregistret. */
+  groupRole?: ScreeningGroupRole;
+  /** Via vilket bolag relationen går (moder, partnerföretag) — namn. */
+  via?: string;
+  level?: number;
+  /** Sant när bolaget kom från ett ANNAT bolags ägarbild/koncern (andra ledet), inte startup-bolagets egen. */
+  transitive?: boolean;
 }
 
 /** Ett bolag i koncernen med den data som hämtats för det. */
@@ -92,6 +133,12 @@ export interface GroupCompanyFacts {
   ownership: ScreeningOwnershipEntry[];
   groupStructureFetched: boolean;
   beneficialOwnersFetched: boolean;
+  /**
+   * HELA koncernen enligt koncernregistret (inkl. moderbolag, syskon och
+   * dotterbolag — inte bara ägarkedjan). `undefined` ⇒ inte känd (sparade
+   * data eller koncernstruktur inte hämtad).
+   */
+  groupMembers?: ScreeningGroupMember[];
   /**
    * Anknutet bolags de minimis-stöd (EUR, innevarande + två år bakåt) — ur
    * plattformen när bolaget är ett portföljbolag, annars ur bolagets intyg
@@ -164,6 +211,8 @@ export interface ThresholdRow {
   balance_sheet_sek?: number;
   /** Bokslut hämtat men utan rader (nystartat), eller inte hämtat alls. */
   note?: string;
+  /** Talen är bolagets egen uppskattning (bilaga I art. 4.3 — nystartat utan bokslut), ur Manuella svar. */
+  estimated?: boolean;
 }
 
 export interface CompanyAssessment {
@@ -175,6 +224,11 @@ export interface CompanyAssessment {
   shareLabel?: string;
   reason?: string;
   indirect?: boolean;
+  /** Plats i koncernen (moder/dotter/syster) när bolaget kommer ur koncernregistret. */
+  groupRole?: ScreeningGroupRole;
+  via?: string;
+  level?: number;
+  transitive?: boolean;
   dataFetched: boolean;
   basic?: ScreeningBasic;
   /** Grundförutsättningarna i Comblys ordning: ekonomisk verksamhet, < 5 år, börsnoterat, utdelning, koncentration, övertagit verksamhet. */
@@ -218,7 +272,10 @@ export const SME_MAX_EUR = 10_000_000;
 export const PARTNER_THRESHOLD_PCT = 25;
 export const LINKED_THRESHOLD_PCT = 50;
 export const FOUNDER_OWNERSHIP_MIN_PCT = 75;
-export const MAX_RELATED_COMPANIES = 6;
+/** Högsta antal koncern-/partnerbolag som slås upp hos leverantören per bedömning (varje uppslag debiteras). */
+export const MAX_RELATED_COMPANIES = 8;
+/** Tak för hur många bolag regelträdet listar (koncernkartan) — skydd mot explosion i stora koncerner. */
+export const MAX_GROUP_COMPANIES = 30;
 
 export const STATE_AID_OUTCOME_LABEL: Record<StateAidOutcome, string> = {
   art22_possible: 'Art. 22 GBER möjlig',
@@ -388,6 +445,272 @@ export function deriveRelatedCompanies(ownership: ScreeningOwnershipEntry[]): Re
   return [...out.values()];
 }
 
+/**
+ * HELA koncernen — bilaga I i tre lager, i den ordning servern och regelträdet
+ * behöver den:
+ *
+ * 1. Startup-bolagets egen ägarbild (`deriveRelatedCompanies`): ägare och
+ *    innehav med andel ⇒ anknutet / partner / oklart.
+ * 2. Koncernregistrets platta lista (`subject.groupMembers`): VARJE bolag i
+ *    listan — moderbolag, moderns moder, dotterbolag OCH systerbolag — är
+ *    anknutet till startup-bolaget (koncern = majoritetskontroll i varje led;
+ *    art. 3.3 sista stycket: anknutna via ett eller flera andra företag).
+ *    Tidigare räknades bara ägarkedjan uppåt och de direkta innehaven, så ett
+ *    systerbolag under samma holdingbolag (ofta det äldsta i gruppen) föll
+ *    bort ur både grundförutsättningarna och tröskelvärdet.
+ * 3. Andra ledet ur de bolag som faktiskt slagits upp (`related`): ett
+ *    anknutet bolags egna anknutna (via dess ägarbild/koncern) är anknutna
+ *    till startup-bolaget; ett partnerföretags anknutna räknas med partnerns
+ *    andel (art. 6.3 — partnerns uppgifter är dess konsoliderade uppgifter).
+ *
+ * En rad per org-nr; starkaste relationen vinner; aldrig startup-bolaget
+ * självt. Capat till `MAX_GROUP_COMPANIES`.
+ */
+export function deriveGroupCompanies(subject: GroupCompanyFacts, related: GroupCompanyFacts[]): RelatedCompanyRef[] {
+  const rank: Record<ScreeningRelation, number> = { linked: 3, partner: 2, uncertain: 1, exempt: 0 };
+  const out = new Map<string, RelatedCompanyRef>();
+  const keyOf = (orgNr: string | undefined, name: string | undefined, fallback: string) => orgNr || (name ? `name:${name.trim().toLowerCase()}` : fallback);
+  const isSubject = (orgNr?: string, name?: string) =>
+    (!!orgNr && orgNr === subject.orgNr) || (!orgNr && !!name && !!subject.name && name.trim().toLowerCase() === subject.name.trim().toLowerCase());
+  const add = (ref: RelatedCompanyRef, key: string) => {
+    if (isSubject(ref.org_nr, ref.name)) return;
+    const prev = out.get(key);
+    if (!prev) {
+      if (out.size >= MAX_GROUP_COMPANIES) return;
+      out.set(key, ref);
+      return;
+    }
+    const stronger = rank[ref.relation] > rank[prev.relation];
+    out.set(key, {
+      ...prev,
+      ...(stronger ? { relation: ref.relation, reason: ref.reason, sharePct: ref.sharePct ?? prev.sharePct, shareLabel: ref.shareLabel } : {}),
+      name: prev.name ?? ref.name,
+      org_nr: prev.org_nr ?? ref.org_nr,
+      groupRole: prev.groupRole ?? ref.groupRole,
+      via: prev.via ?? ref.via,
+      level: prev.level ?? ref.level,
+      transitive: prev.transitive && ref.transitive
+    });
+  };
+
+  // 1. Egen ägarbild.
+  let anon = 0;
+  for (const r of deriveRelatedCompanies(subject.ownership)) add(r, keyOf(r.org_nr, r.name, `anon-${anon++}`));
+
+  // 2. Koncernregistret — hela listan.
+  const members = subject.groupMembers ?? [];
+  if (members.length > 0) {
+    const byKey = new Map<string, ScreeningGroupMember>();
+    for (const m of members) {
+      const k = keyOf(m.org_nr, m.name, '');
+      if (k) byKey.set(k, m);
+    }
+    const subjectKey = keyOf(subject.orgNr, subject.name, '');
+    const motherKey = (m: ScreeningGroupMember | undefined) =>
+      m ? (m.mother_org_nr ?? (m.mother_name ? `name:${m.mother_name.trim().toLowerCase()}` : undefined)) : undefined;
+    // Ägarkedjan uppåt från startup-bolaget (direkt moder först).
+    const ancestors: string[] = [];
+    let cur = motherKey(byKey.get(subjectKey));
+    while (cur && !ancestors.includes(cur) && ancestors.length < 12) {
+      ancestors.push(cur);
+      cur = motherKey(byKey.get(cur));
+    }
+    const descendantOf = (m: ScreeningGroupMember): boolean => {
+      let mk = motherKey(m);
+      let g = 0;
+      while (mk && g++ < 12) {
+        if (mk === subjectKey) return true;
+        mk = motherKey(byKey.get(mk));
+      }
+      return false;
+    };
+    for (const m of members) {
+      const k = keyOf(m.org_nr, m.name, '');
+      if (!k || k === subjectKey) continue;
+      const role: ScreeningGroupRole = ancestors.includes(k) ? 'parent' : descendantOf(m) ? 'subsidiary' : 'sibling';
+      const mk = motherKey(m);
+      const motherLabel = m.mother_name || (mk ? byKey.get(mk)?.name : undefined) || m.mother_org_nr;
+      // Andelen: för ett moderbolag = dess andel av bolaget UNDER det i kedjan
+      // (direkt moder ⇒ startup-bolagets egen post); annars moderns andel av
+      // bolaget självt.
+      const childKey = role === 'parent' ? (ancestors.indexOf(k) === 0 ? subjectKey : ancestors[ancestors.indexOf(k) - 1]) : k;
+      const shareRaw = byKey.get(childKey)?.owned_pct;
+      const share = typeof shareRaw === 'number' ? shareRaw : undefined;
+      const reason =
+        role === 'parent'
+          ? `Moderbolag enligt koncernregistret${share !== undefined ? ` (${formatPct(share)} av ${ancestors.indexOf(k) === 0 ? 'startup-bolaget' : byKey.get(childKey)?.name ?? 'bolaget under'})` : ''}${motherLabel ? `, ägs i sin tur av ${motherLabel}` : ''} — kontrollerar startup-bolaget i majoritetsled.`
+          : role === 'subsidiary'
+            ? `Dotterbolag enligt koncernregistret${motherLabel ? ` (ägs av ${motherLabel}${share !== undefined ? ` ${formatPct(share)}` : ''})` : ''}.`
+            : `Ingår i samma koncern enligt koncernregistret${motherLabel ? ` (ägs av ${motherLabel}${share !== undefined ? ` ${formatPct(share)}` : ''})` : ''} — anknutet via gemensam moder (bilaga I art. 3.3).`;
+      add(
+        {
+          name: m.name,
+          org_nr: m.org_nr,
+          direction: role === 'parent' ? 'owner' : 'holding',
+          relation: 'linked',
+          sharePct: share,
+          shareLabel: share !== undefined ? formatPct(share) : 'andel okänd',
+          reason,
+          indirect: role === 'parent' ? ancestors[0] !== k : role === 'sibling',
+          groupRole: role,
+          via: motherLabel,
+          level: m.level,
+          transitive: false
+        },
+        k
+      );
+    }
+  }
+
+  // 3. Andra ledet ur uppslagna bolag.
+  const firstLevel = [...out.values()];
+  for (const ref of firstLevel) {
+    if (!ref.org_nr || (ref.relation !== 'linked' && ref.relation !== 'partner')) continue;
+    const facts = related.find((r) => r.orgNr === ref.org_nr);
+    if (!facts) continue;
+    const viaName = facts.name ?? ref.name ?? ref.org_nr;
+    const second: Array<{ name?: string; org_nr?: string; share?: number; label: string }> = [];
+    for (const e of deriveRelatedCompanies(facts.ownership)) {
+      if (e.relation !== 'linked') continue;
+      second.push({ name: e.name, org_nr: e.org_nr, share: e.sharePct, label: `${e.direction === 'owner' ? 'äger' : 'ägs av'} ${viaName} ${e.shareLabel}` });
+    }
+    for (const m of facts.groupMembers ?? []) {
+      if (m.org_nr === facts.orgNr) continue;
+      second.push({ name: m.name, org_nr: m.org_nr, share: m.owned_pct, label: `ingår i ${viaName}s koncern` });
+    }
+    for (const s of second) {
+      const k = keyOf(s.org_nr, s.name, '');
+      if (!k) continue;
+      if (ref.relation === 'linked') {
+        add(
+          {
+            name: s.name,
+            org_nr: s.org_nr,
+            direction: 'holding',
+            relation: 'linked',
+            sharePct: s.share,
+            shareLabel: s.share !== undefined ? formatPct(s.share) : 'andel okänd',
+            reason: `Anknutet i andra ledet: ${s.label} — och ${viaName} är anknutet till startup-bolaget.`,
+            indirect: true,
+            via: viaName,
+            transitive: true
+          },
+          k
+        );
+      } else {
+        add(
+          {
+            name: s.name,
+            org_nr: s.org_nr,
+            direction: 'holding',
+            relation: 'partner',
+            sharePct: ref.sharePct,
+            shareLabel: ref.shareLabel,
+            reason: `Anknutet till partnerföretaget ${viaName} (${s.label}) — räknas med partnerns andel (bilaga I art. 6.3).`,
+            indirect: true,
+            via: viaName,
+            transitive: true
+          },
+          k
+        );
+      }
+    }
+  }
+  return [...out.values()];
+}
+
+/**
+ * Art. 22 GBER: bolaget får inte vara börsnoterat. Avgörs ur registret så
+ * långt lagen tillåter: bara ett PUBLIKT aktiebolag kan ta upp aktier till
+ * handel, och ett publikt aktiebolags namn ska följas av "(publ)" (ABL
+ * 28 kap. 7 §). Ett privat aktiebolag (namn utan "(publ)"), ett handels-/
+ * kommanditbolag, en ekonomisk förening eller en enskild firma kan därför
+ * inte vara börsnoterat ⇒ JA ur registret. Ett "(publ)"-bolag ⇒ OKÄNT —
+ * kontrollera om aktierna faktiskt är upptagna till handel.
+ */
+export function listedCheck(c: GroupCompanyFacts): ScreeningCheck {
+  const id = 'listed';
+  const label = 'Inte börsnoterat';
+  const name = (c.name ?? '').trim();
+  const form = (c.basic?.bolagsform ?? '').trim();
+  if (c.basic?.isPersonal) {
+    return { id, label, verdict: 'yes', detail: 'Enskild firma — kan inte vara börsnoterad.', source: 'register' };
+  }
+  const publ = /\(publ\)|\bpubl\b/i.test(name) || /publik/i.test(form);
+  if (publ) {
+    return {
+      id,
+      label,
+      verdict: 'unknown',
+      detail: `Publikt aktiebolag (${/publik/i.test(form) ? form : 'beteckningen (publ) i namnet'}) — ett publikt bolag KAN ha aktier upptagna till handel; kontrollera.`,
+      source: 'manual',
+      needs: 'Är aktierna upptagna till handel på en börs/reglerad marknad? (bolaget, Finansinspektionen/börsens lista).'
+    };
+  }
+  const nonAbForm = /handelsbolag|kommanditbolag|ekonomisk förening|ekonomisk forening|enskild|ideell|stiftelse|bostadsrätt|^(hb|kb|ef|brf)$/i.test(form);
+  if (nonAbForm) {
+    return { id, label, verdict: 'yes', detail: `${form} — bolagsformen kan inte vara börsnoterad.`, source: 'register' };
+  }
+  const abByForm = /aktiebolag|^ab$/i.test(form);
+  const abByName = /\bAB\b|aktiebolag/i.test(name);
+  if (abByForm || abByName) {
+    return {
+      id,
+      label,
+      verdict: 'yes',
+      detail: `Privat aktiebolag — ${abByForm ? `bolagsform "${form}" och ` : ''}namnet saknar beteckningen (publ) (ABL 28 kap. 7 §). Bara publika aktiebolag kan ta upp aktier till handel.`,
+      source: 'register'
+    };
+  }
+  return {
+    id,
+    label,
+    verdict: 'unknown',
+    detail: !c.dataFetched ? 'Inget uppslag gjort för bolaget.' : 'Bolagsform och namn saknas i underlaget — kan inte avgöras ur registret.',
+    source: 'register',
+    needs: 'Bolagsform/namn ur registret (grunddata) eller bolagets intyg.'
+  };
+}
+
+/**
+ * Indirekt ägande av fysiska personer i startup-bolaget via ägarkedjan: för
+ * varje direkt bolagsägare med andel s hämtas DESS verklig huvudman (fysiska
+ * personer, direkt, minsta intervallgräns) ⇒ s × p / 100, rekursivt uppåt
+ * (Combly ← Wellgo 100 % ← Ewell 90 % ← personer). Används som LEDTRÅD i
+ * punkten "grundarteamet äger ≥ 75 %" — registret vet inte att personerna är
+ * grundarna, så svaret blir aldrig JA av detta ensamt.
+ */
+export function indirectPersonOwnership(
+  subject: GroupCompanyFacts,
+  factsByOrg: Map<string, GroupCompanyFacts>
+): { minPct: number; via: string[] } | null {
+  let total = 0;
+  const via: string[] = [];
+  const visited = new Set<string>([subject.orgNr]);
+  const walk = (c: GroupCompanyFacts, factor: number, depth: number) => {
+    if (depth > 4) return;
+    for (const e of c.ownership) {
+      if (e.direction !== 'owner' || e.indirect === true) continue;
+      if (e.owner_kind === 'person') {
+        if (c !== subject && (e.control_basis === undefined || e.control_basis === 'shares' || e.control_basis === 'votes')) {
+          total += (factor * (ownershipShareRange(e)?.min ?? 0)) / 100;
+        }
+        continue;
+      }
+      if (!e.org_nr || visited.has(e.org_nr)) continue;
+      const share = ownershipShareRange(e);
+      const owner = factsByOrg.get(e.org_nr);
+      if (!owner || !share) continue;
+      visited.add(e.org_nr);
+      via.push(owner.name ?? e.name ?? e.org_nr);
+      walk(owner, (factor * share.max) / 100, depth + 1);
+    }
+  };
+  walk(subject, 100, 0);
+  if (via.length === 0 || total <= 0) return null;
+  return { minPct: Math.round(total * 100) / 100, via };
+}
+
 function latestFinancials(rows: ScreeningFinancialsYear[]): ScreeningFinancialsYear | null {
   const usable = rows.filter(
     (r) =>
@@ -472,14 +795,20 @@ function conditionsFor(c: GroupCompanyFacts, ref: Date, manual?: CompanyManualAn
     });
   }
 
-  push({
-    id: 'listed',
-    label: 'Inte börsnoterat',
-    verdict: 'unknown',
-    detail: 'Finns inte i bolagsregistret — bekräftas av bolaget.',
-    source: 'manual',
-    needs: 'Bolagsordning/ägarförteckning.'
-  });
+  // Börsnotering: ett register-JA (privat aktiebolag, annan bolagsform) är
+  // ett rättsligt faktum — ett manuellt svar kan inte göra ett privat AB
+  // noterat. Undantag från "manuellt NEJ vinner" (incident 2026-10-13: ett
+  // inverterat svar hade gjort Wellgo Health AB "börsnoterat").
+  const listed = listedCheck(c);
+  if (listed.verdict === 'yes' && listed.source === 'register') {
+    checks.push(
+      manual?.listed?.verdict === 'no'
+        ? { ...listed, detail: `${listed.detail} (Ett manuellt svar "börsnoterat" bortses från — ett privat aktiebolag kan inte vara noterat; ta bort svaret under Manuella svar.)` }
+        : listed
+    );
+  } else {
+    push(listed);
+  }
   push(dividendCheck(c.financials ?? [], registered, ref, noData));
   for (const [id, label, needs] of [
     ['concentration', 'Inte bildat genom företagskoncentration', 'Bolagets intyg (undantag kan finnas).'],
@@ -606,8 +935,9 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
     }
   ];
 
-  // Anknutna / partner / oklara ur ägarbilden
-  const refs = subject.basic?.isPersonal ? [] : deriveRelatedCompanies(subject.ownership);
+  // Anknutna / partner / oklara — hela koncernen (egen ägarbild +
+  // koncernregistrets lista + andra ledet ur uppslagna bolag).
+  const refs = subject.basic?.isPersonal ? [] : deriveGroupCompanies(subject, input.related);
   const factsByOrg = new Map(input.related.map((r) => [r.orgNr, r]));
   const linkedRefs = refs.filter((r) => r.relation === 'linked');
   const partnerRefs = refs.filter((r) => r.relation === 'partner');
@@ -634,6 +964,10 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
       shareLabel: r.shareLabel,
       reason: r.reason,
       indirect: r.indirect,
+      groupRole: r.groupRole,
+      via: r.via,
+      level: r.level,
+      transitive: r.transitive,
       dataFetched: base.dataFetched,
       basic: base.basic,
       conditions,
@@ -644,7 +978,14 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
 
   const describe = (list: RelatedCompanyRef[]) =>
     list
-      .map((r) => `${r.name || r.org_nr || 'okänt bolag'} (${r.direction === 'owner' ? 'äger' : 'ägs'} ${r.shareLabel})`)
+      .map((r) => {
+        const name = r.name || r.org_nr || 'okänt bolag';
+        if (r.groupRole === 'parent') return `${name} (moderbolag${r.indirect ? ', indirekt' : ''}, ${r.shareLabel})`;
+        if (r.groupRole === 'subsidiary') return `${name} (dotterbolag, ${r.shareLabel})`;
+        if (r.groupRole === 'sibling') return `${name} (systerbolag${r.via ? ` under ${r.via}` : ''})`;
+        if (r.transitive) return `${name} (via ${r.via ?? 'annat bolag'})`;
+        return `${name} (${r.direction === 'owner' ? 'äger' : 'ägs'} ${r.shareLabel})`;
+      })
       .join(', ');
 
   // Fristående företag?
@@ -659,11 +1000,18 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
       needs: 'Uppgift om vilka andra företag innehavaren kontrollerar.'
     };
   } else if (linkedRefs.length > 0) {
+    const fromGroup = linkedRefs.filter((r) => r.groupRole).length;
     standalone = {
       id: 'standalone',
       label: 'Fristående företag',
       verdict: 'no',
-      detail: `Finns anknutet företag: ${describe(linkedRefs)}. 100 % av det anknutna bolagets uppgifter läggs till och grundförutsättningarna prövas även för det.`,
+      detail: `Finns anknutet företag: ${describe(linkedRefs)}. 100 % av varje anknutet bolags uppgifter läggs till och grundförutsättningarna prövas även för dem.${
+        fromGroup > 0
+          ? ` Koncernregistret visar ${linkedRefs.length === 1 ? 'ett bolag' : `${linkedRefs.length} bolag`} i samma koncern (moder-, dotter- och systerbolag räknas alla som anknutna, bilaga I art. 3.3).`
+          : subject.groupMembers === undefined && subject.groupStructureFetched
+            ? ' Systerbolag under samma moder syns bara när koncernstrukturen hämtas färskt från registret (sparade data bär bara ägarkedjan).'
+            : ''
+      }`,
       source: 'register'
     };
   } else if (partnerRefs.length > 0) {
@@ -729,6 +1077,24 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
   const rows: ThresholdRow[] = [];
   const rowFor = (c: GroupCompanyFacts, role: ThresholdRow['role'], weight: number): ThresholdRow => {
     const fin = c.financials ? latestFinancials(c.financials) : null;
+    if (!fin) {
+      // Nystartat bolag utan bokslut: bilaga I art. 4.3 — uppgifterna tas ur
+      // en uppskattning i god tro under räkenskapsåret (Manuella svar).
+      const est = manual?.estimates?.[c.orgNr];
+      if (est && (est.employees !== undefined || est.revenue_sek !== undefined || est.balance_sheet_sek !== undefined)) {
+        return {
+          orgNr: c.orgNr,
+          name: c.name,
+          role,
+          weight,
+          employees: est.employees,
+          revenue_sek: est.revenue_sek,
+          balance_sheet_sek: est.balance_sheet_sek,
+          note: `Bolagets egen uppskattning${est.note ? `: ${est.note}` : ''}`,
+          estimated: true
+        };
+      }
+    }
     return {
       orgNr: c.orgNr,
       name: c.name,
@@ -786,12 +1152,16 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
   const bal = sumField('balance_sheet_sek');
   const capSek = SME_MAX_EUR * input.sekPerEur;
   const allRowsComplete = emp.complete && (rev.complete || bal.complete);
+  const anyEstimated = rows.some((r) => r.estimated);
+  const thresholdSource: ScreeningSource = anyEstimated ? 'manual' : 'register';
   let thresholdCheck: ScreeningCheck;
   const parts: string[] = [];
   if (emp.value !== undefined) parts.push(`${fmtInt(emp.value)} anställda`);
   if (rev.value !== undefined) parts.push(`omsättning ${formatMillionEur(rev.value, input.sekPerEur)}`);
   if (bal.value !== undefined) parts.push(`balansomslutning ${formatMillionEur(bal.value, input.sekPerEur)}`);
-  const basis = parts.length > 0 ? `Sammanlagt: ${parts.join(', ')}.` : 'Inga tal i underlaget.';
+  const basis = `${parts.length > 0 ? `Sammanlagt (${rows.length === 1 ? 'startup-bolaget' : `${rows.length} bolag`}): ${parts.join(', ')}.` : 'Inga tal i underlaget.'}${
+    anyEstimated ? ' Bolagets egen uppskattning ingår (bilaga I art. 4.3).' : ''
+  }`;
   const moneyOk =
     (rev.value !== undefined && rev.value <= capSek) || (bal.value !== undefined && bal.value <= capSek);
   const moneyFail =
@@ -802,7 +1172,7 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
       label: 'Klarar tröskelvärdet för småföretag (< 50 anställda, ≤ 10 M€ omsättning eller balansomslutning)',
       verdict: 'no',
       detail: `${basis} 50 anställda eller fler.`,
-      source: 'register'
+      source: thresholdSource
     };
   } else if (moneyFail) {
     thresholdCheck = {
@@ -810,7 +1180,7 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
       label: 'Klarar tröskelvärdet för småföretag (< 50 anställda, ≤ 10 M€ omsättning eller balansomslutning)',
       verdict: 'no',
       detail: `${basis} Både omsättning och balansomslutning över 10 M€.`,
-      source: 'register'
+      source: thresholdSource
     };
   } else if (emp.value !== undefined && moneyOk && allRowsComplete) {
     thresholdCheck = {
@@ -818,7 +1188,7 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
       label: 'Klarar tröskelvärdet för småföretag (< 50 anställda, ≤ 10 M€ omsättning eller balansomslutning)',
       verdict: 'yes',
       detail: basis,
-      source: 'register'
+      source: thresholdSource
     };
   } else {
     const missingRows = rows.filter((r) => r.note).map((r) => `${r.name || r.orgNr}: ${r.note}`);
@@ -830,7 +1200,7 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
         missingRows.length > 0
           ? `${basis} Saknas: ${missingRows.join('; ')}.`
           : `${basis} Anställda eller omsättning/balansomslutning saknas för något bolag.`,
-      source: 'register',
+      source: thresholdSource,
       needs: 'Senaste bokslut (anställda, omsättning, balansomslutning) för varje bolag i koncernen — eller bolagets egna uppgifter när inget bokslut finns.'
     };
   }
@@ -969,36 +1339,49 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
   const vinnovaChecks: ScreeningCheck[] = [];
   const founders = input.founders;
   const founderSource: ScreeningSource = input.foundersSource === 'manual' ? 'manual' : 'platform';
+  // Indirekt ägande via holdingbolag (Combly ← Wellgo ← personer): registret
+  // visar att FYSISKA PERSONER äger via kedjan, men inte att de är grundarna
+  // — därför en ledtråd, aldrig ett JA av sig självt.
+  const indirect = subject.basic?.isPersonal ? null : indirectPersonOwnership(subject, factsByOrg);
+  const directCompanyOwned = subject.ownership
+    .filter((e) => e.direction === 'owner' && e.indirect !== true && e.owner_kind !== 'person')
+    .reduce((a, e) => a + (ownershipShareRange(e)?.max ?? 0), 0);
+  const indirectHint = indirect
+    ? ` Indirekt ägande: via ${indirect.via.join(' → ')} äger fysiska personer minst ${formatPct(indirect.minPct)} av startup-bolaget enligt verklig huvudman — är det grundarteamet räknas det (direkt eller indirekt); ange då grundarnas totala andel inkl. indirekt under Manuella svar.`
+    : directCompanyOwned >= PARTNER_THRESHOLD_PCT
+      ? ` Startup-bolaget ägs till ${formatPct(directCompanyOwned)} av bolag — grundarnas andel kan vara indirekt (via holdingbolag); hämta verklig huvudman för ägarbolagen eller ange andelen inkl. indirekt ägande under Manuella svar.`
+      : '';
   if (founders === undefined) {
     vinnovaChecks.push({
       id: 'founders_75',
-      label: 'Grundarteamet äger minst 75 % av startup-bolaget',
+      label: 'Grundarteamet äger minst 75 % av startup-bolaget (direkt eller indirekt)',
       verdict: 'unknown',
-      detail: 'Bolaget finns inte i plattformen — grundarnas ägande finns inte i registret (verklig huvudman visas utan namn). Lägg in grundarna under Manuella svar.',
+      detail: `Bolaget finns inte i plattformen — grundarnas ägande finns inte i registret (verklig huvudman visas utan namn). Lägg in grundarna under Manuella svar.${indirectHint}`,
       source: 'manual',
-      needs: 'Grundare och ägarandelar (aktiebok).'
+      needs: 'Grundare och ägarandelar (aktiebok, inkl. indirekt ägande via holdingbolag).'
     });
   } else if (founders.length === 0) {
     vinnovaChecks.push({
       id: 'founders_75',
-      label: 'Grundarteamet äger minst 75 % av startup-bolaget',
+      label: 'Grundarteamet äger minst 75 % av startup-bolaget (direkt eller indirekt)',
       verdict: 'unknown',
-      detail: 'Inga grundare med ägarandel i teamet på bolagskortet. Lägg in grundarna under Manuella svar eller i teamet.',
+      detail: `Inga grundare med ägarandel i teamet på bolagskortet. Lägg in grundarna under Manuella svar eller i teamet.${indirectHint}`,
       source: 'platform',
-      needs: 'Grundare och ägarandelar läggs in i teamet på bolagskortet.'
+      needs: 'Grundare och ägarandelar läggs in i teamet på bolagskortet (inkl. indirekt ägande via holdingbolag).'
     });
   } else {
     const sum = founders.reduce((a, f) => a + (typeof f.equity_pct === 'number' ? f.equity_pct : 0), 0);
     const withPct = founders.filter((f) => typeof f.equity_pct === 'number').length;
+    const below = sum < FOUNDER_OWNERSHIP_MIN_PCT && withPct > 0;
     vinnovaChecks.push({
       id: 'founders_75',
-      label: 'Grundarteamet äger minst 75 % av startup-bolaget',
+      label: 'Grundarteamet äger minst 75 % av startup-bolaget (direkt eller indirekt)',
       verdict: sum >= FOUNDER_OWNERSHIP_MIN_PCT ? 'yes' : withPct === 0 ? 'unknown' : 'no',
       detail: `${founders.length} grundare${founderSource === 'manual' ? ' (manuellt inmatade)' : ' i teamet'}, sammanlagt ${formatPct(Math.round(sum * 100) / 100)}${
         withPct < founders.length ? ` (${founders.length - withPct} utan angiven andel)` : ''
-      }.${sum < FOUNDER_OWNERSHIP_MIN_PCT && withPct > 0 ? ' Undantag: kapitalintensiv bransch med giltigt skäl för emission.' : ''}`,
+      }.${below ? ' Undantag: kapitalintensiv bransch med giltigt skäl för emission.' : ''}${below || withPct === 0 ? indirectHint : ''}`,
       source: founderSource,
-      needs: withPct === 0 ? 'Ägarandel per grundare.' : undefined
+      needs: withPct === 0 ? 'Ägarandel per grundare (inkl. indirekt via holdingbolag).' : undefined
     });
   }
   vinnovaChecks.push(founderDrivenCheck(founders, manual?.maturity_phase, manual?.research_spinoff === true, founderSource));

@@ -2,7 +2,9 @@ import type {
   ExcellenceScreeningResult,
   ScreeningFinancialsYear,
   ScreeningFounderRow,
-  ScreeningManualFacts
+  ScreeningManualFacts,
+  ScreeningRequestItem,
+  ScreeningRunDiff
 } from '@platform/shared';
 import type { RegistryCostEstimate } from '@/lib/integrations/company-registry/pricing';
 
@@ -65,4 +67,17 @@ export interface ExcellenceAssessment {
   file?: ExcellenceAssessmentFile;
   /** Lagringen misslyckades — bedömningen visas ändå (fail-soft). */
   fileError?: string;
+  /** Körningen på bolagskortet (§ 51.6) + "vad ändrades sedan senast". */
+  history?: ExcellenceAssessmentHistory;
+  /** Punkter som kan skickas som begäran om komplettering (§ 51.6) — härledda ur "Saknat underlag". */
+  requestItems: ScreeningRequestItem[];
+}
+
+export interface ExcellenceAssessmentHistory {
+  /** Raden i `startup_screenings` (bara portföljbolag). */
+  runId?: string;
+  previous?: { id: string; assessedAt: string; assessedBy?: string };
+  diff?: ScreeningRunDiff;
+  /** Historiken kunde inte sparas — bedömningen visas ändå. */
+  error?: string;
 }
