@@ -3,6 +3,7 @@ import { canAccessModuleForUser } from '@/lib/rbac';
 import type { SessionUser } from '@/lib/auth.server';
 import { LogoutButton } from './LogoutButton';
 import { Logo } from './Logo';
+import { ThemeToggle } from './ThemeToggle';
 import { NavbarMobileMenu } from './NavbarMobileMenu';
 import { coreModules } from '@platform/shared';
 
@@ -35,6 +36,7 @@ export function Navbar({ user }: { user: SessionUser | null }) {
         ) : null}
 
         <div className="flex items-center gap-2 sm:gap-3">
+          <ThemeToggle />
           {user ? (
             <>
               <div className="hidden text-right md:block">

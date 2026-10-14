@@ -45,9 +45,12 @@ export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoR
   return (
     <aside id="mx-rail" className="mx-rail" aria-label="Huvudnavigation">
       <div className="mx-rail-head">
+        {/* `auto` följer temat: svart wordmark/ljus-logotyp på den ljusa
+            railen, vit på den mörka. `variant="dark"` tvingade fram den vita
+            wordmarken även i ljust läge → osynlig logotyp (§ 2.1). */}
         <Logo
           href={homeHref}
-          variant="dark"
+          variant="auto"
           width={120}
           height={28}
           className="mx-rail-brand"

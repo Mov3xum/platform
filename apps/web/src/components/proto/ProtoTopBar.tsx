@@ -7,6 +7,7 @@ import { coreModules } from '@platform/shared';
 import { SETTINGS_ROUTE_LABELS } from '@/lib/settings-sections';
 import { RailReopenButton } from './MobileRail';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
+import { ThemeToggle } from '@/components/ThemeToggle';
 
 function buildCrumbs(pathname: string): { label: string; href: string; now: boolean }[] {
   if (pathname === '/' || pathname === '/hem') {
@@ -66,6 +67,7 @@ export function ProtoTopBar({
       </div>
 
       <div className="mx-topbar-spacer" />
+      <ThemeToggle />
       <NotificationBell initialUnseen={unseenNotifications} allHref={notificationsHref} />
     </div>
   );
