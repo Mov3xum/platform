@@ -5,8 +5,10 @@ import {
   type MistralMessage
 } from '@/lib/ai/mistral';
 import { countUserTurns, withExchangeBudget } from './chat-closing';
+import { stripStructuredTrailer, VISITOR_REPLY_RULES } from './reply-sanitize';
 import {
   AI_REVIEW_SYSTEM_PROMPT,
+  CHAT_SUMMARY_SYSTEM_PROMPT,
   EXTRACTION_SYSTEM_PROMPT,
   INTAKE_SYSTEM_PROMPT,
   MARKET_SCAN_SYSTEM_PROMPT,
@@ -75,10 +77,13 @@ export async function intakeReply(
   // Avslutsstyrning (§ 23.9): med ett tak på antal utbyten får modellen veta
   // hur många svar som återstår och tvingas knyta ihop samtalet på sista
   // turen — läggs SIST så en egen systemprompt aldrig kan ta bort den.
-  const systemPrompt = withExchangeBudget(options.systemPrompt || INTAKE_SYSTEM_PROMPT, {
+  // Svarets form (§ 23.10): aldrig JSON/taggar till besökaren — regeln läggs
+  // sist så en egen systemprompt inte kan skriva över den, och svaret
+  // rensas dessutom från strukturerade block innan det lämnar servern.
+  const systemPrompt = `${withExchangeBudget(options.systemPrompt || INTAKE_SYSTEM_PROMPT, {
     userTurns: countUserTurns(history),
     maxExchanges: options.maxExchanges
-  });
+  })}\n\n${VISITOR_REPLY_RULES}`;
   const messages: MistralMessage[] = [
     { role: 'system', content: systemPrompt },
     ...history.map<MistralMessage>((m) => ({ role: m.role, content: m.content }))
@@ -89,7 +94,7 @@ export async function intakeReply(
   const chain = options.model ? [options.model] : INTAKE_FALLBACK_MODELS;
   const res = await callMistralWithFallback(chain, messages);
   return {
-    text: res.text,
+    text: stripStructuredTrailer(res.text) || res.text.trim(),
     tokensIn: res.usage.prompt_tokens,
     tokensOut: res.usage.completion_tokens,
     model: res.modelUsed
@@ -144,6 +149,44 @@ export async function summarizeSubmission(
 }
 
 /** Extraherar lead-data från en konversation. Returnerar null på fel. */
+/**
+ * Sammanfattning TILL BESÖKAREN av chatten + avslutsstegets svar (§ 23.10):
+ * laddas ned som PDF och/eller mejlas till adressen besökaren själv angav.
+ * Best-effort — null vid fel, anroparen faller tillbaka på det sista
+ * assistentsvaret. Riskklass: begränsad (sammanfattar besökarens egna ord,
+ * märks "Genererat av AI").
+ */
+export async function summarizeChatForVisitor(
+  history: CompassChatMessage[],
+  closingEntries: SubmissionEntry[],
+  moduleName: string
+): Promise<{ summary: string | null; usage: CompassAiUsage | null }> {
+  const turns = history
+    .filter((m) => m.content.trim())
+    .slice(-30)
+    .map((m) => `${m.role === 'user' ? 'Besökaren' : 'Assistenten'}: ${m.content.trim()}`);
+  if (turns.length === 0 && closingEntries.length === 0) return { summary: null, usage: null };
+  const transcript = [
+    `Modul: ${moduleName}`,
+    'Samtal:',
+    ...turns,
+    closingEntries.length > 0 ? 'Uppgifter i avslutssteget:' : '',
+    ...closingEntries.map((e) => `Fråga: ${e.question}\nSvar: ${e.answer}`)
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+  try {
+    const res = await callMistral(SCORING_MODEL, [
+      { role: 'system', content: CHAT_SUMMARY_SYSTEM_PROMPT },
+      { role: 'user', content: redactPersonnummer(transcript).slice(0, 16000) }
+    ]);
+    const text = redactPersonnummer(stripStructuredTrailer(res.text));
+    return { summary: text ? text.slice(0, 6000) : null, usage: usageOf(SCORING_MODEL, res) };
+  } catch {
+    return { summary: null, usage: null };
+  }
+}
+
 export async function extractLead(
   history: CompassChatMessage[],
   onUsage?: CompassUsageSink

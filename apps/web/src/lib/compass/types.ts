@@ -125,6 +125,12 @@ export interface Lead {
   ai_summary?: string;
   /** Besökarens kontaktpreferens (migration 1700000125). */
   contact_preference?: ContactPreference;
+  /**
+   * Vad besökaren gjorde (migration 1700000192, § 23.10): pågående, slutförd
+   * eller avbruten. Saknat = slutförd. Skilt från `status` (personalens
+   * pipeline).
+   */
+  completion?: import('./completion').LeadCompletion;
   // Quiz-resultat (Startupkompassen)
   quiz_result_bucket?: string;
   quiz_score?: number;

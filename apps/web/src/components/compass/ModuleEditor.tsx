@@ -505,6 +505,11 @@ export function ModuleEditor({
                   <span>Organisation</span>
                 </label>
               </div>
+              <span className="mx-t-xs mx-muted" style={{ display: 'block', marginTop: 6 }}>
+                Gäller alla flödestyper. I AI-chatten ställs de obligatoriska frågorna och
+                kontaktfälten i ett avslutssteg efter samtalet — besökaren måste fylla i dem innan
+                leadet skickas in, och kan få en sammanfattning som PDF eller per e-post.
+              </span>
             </div>
 
             <label className="mx-label">

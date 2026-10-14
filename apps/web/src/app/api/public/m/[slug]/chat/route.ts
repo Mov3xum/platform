@@ -186,7 +186,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
         sourceKey: 'ai-chat',
         landingModule: slug,
         attribution: pickAttribution(body.attribution),
-        notifyModule: module,
+        // Inflödesnotisen går vid slutförandet (/complete, § 23.10) — inte vid
+        // första turen: ett påbörjat samtal är ännu inget inflöde.
         createLead: moduleWantsLead(module)
       });
     }

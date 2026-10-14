@@ -2947,3 +2947,13 @@ html.dark .mx-tab-badge {
     -webkit-touch-callout: none;
   }
 }
+
+/* Startupkompassen — chattens avslutssteg (§ 23.10): kort i loggen */
+.mx-chat-card {
+  background: var(--mx-paper);
+  border: 1px solid var(--mx-line);
+  border-radius: var(--mx-r-lg);
+  padding: 18px 18px 16px;
+  box-shadow: var(--mx-sh-1);
+}
+.mx-chat-closing .mx-qchoices { margin-top: 0; }

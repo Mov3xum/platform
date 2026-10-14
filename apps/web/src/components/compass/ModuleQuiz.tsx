@@ -5,6 +5,7 @@ import type { CompassQuestion, ResultBucket, NextModuleLink } from '@/lib/compas
 import { QuestionInput, readAttribution } from './QuestionInput';
 import { NextModuleCta } from './NextModuleCta';
 import { ContactPreferencePicker } from './ContactPreferencePicker';
+import { useFlowProgress } from './useFlowProgress';
 import { resolveNextQuestionIndex } from '@/lib/compass/question-flow';
 
 interface Props {
@@ -21,6 +22,8 @@ interface Props {
   nextModule?: NextModuleLink | null;
   /** Enkätsubjekt ur `?om=<id>` (§ 43) — skickas med, valideras server-side. */
   subject?: string | null;
+  /** Bokför pågående/avbrutet flöde (§ 23.10) — bara publika flöden. */
+  trackProgress?: boolean;
 }
 
 interface QuizResult {
@@ -41,7 +44,8 @@ export function ModuleQuiz({
   requireOrganization,
   successMessage,
   nextModule,
-  subject
+  subject,
+  trackProgress
 }: Props) {
   const [step, setStep] = useState(0);
   // Besökta steg (för "Tillbaka") — hopplogik (next_key) kan skippa frågor,
@@ -55,6 +59,12 @@ export function ModuleQuiz({
   const [result, setResult] = useState<QuizResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const attribution = useMemo(readAttribution, []);
+  const progressTracker = useFlowProgress({
+    endpointBase: trackProgress ? apiBase : undefined,
+    moduleSlug,
+    consent,
+    attribution
+  });
 
   const total = questions.length;
   const wantsContact = requireEmail || requirePhone || requireOrganization;
@@ -193,13 +203,15 @@ export function ModuleQuiz({
           attribution,
           consent,
           contact_preference: contactPreference || undefined,
-          subject: subject || undefined
+          subject: subject || undefined,
+          sessionToken: trackProgress ? progressTracker.sessionToken : undefined
         })
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(data.error || `Servern svarade ${res.status}`);
       }
+      progressTracker.markDone();
       const data = (await res.json()) as QuizResult;
       setResult({ bucket: data.bucket ?? null, score: data.score ?? 0 });
     } catch (err) {
@@ -223,6 +235,7 @@ export function ModuleQuiz({
       const nextStep = resolveNextQuestionIndex(questions, step, value);
       setTrail((t) => [...t, step]);
       setStep(nextStep >= total ? total : nextStep);
+      progressTracker.report(answers, step + 1, total);
       return;
     }
 

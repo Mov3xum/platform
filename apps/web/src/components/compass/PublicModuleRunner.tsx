@@ -71,9 +71,24 @@ export function PublicModuleRunner({ module, questions, nextModule, subject }: P
             avatarInitial={(module.name || 'M').slice(0, 1).toUpperCase()}
             maxExchanges={module.max_exchanges || 0}
             consent
+            closing={
+              module.collects_lead
+                ? {
+                    apiBase: PUBLIC_API_BASE,
+                    questions,
+                    requireEmail: module.require_email,
+                    requirePhone: module.require_phone,
+                    requireOrganization: module.require_organization,
+                    successMessage: module.success_message
+                  }
+                : undefined
+            }
+            nextModule={nextModule}
           />
         </div>
-        {nextModule && <NextModuleCta next={nextModule} prompt="Klar? Gå vidare till nästa steg." />}
+        {!module.collects_lead && nextModule && (
+          <NextModuleCta next={nextModule} prompt="Klar? Gå vidare till nästa steg." />
+        )}
       </div>
     );
   }
@@ -91,6 +106,7 @@ export function PublicModuleRunner({ module, questions, nextModule, subject }: P
         successMessage={module.success_message}
         nextModule={nextModule}
         subject={subject}
+        trackProgress={module.collects_lead}
       />
     );
   }
@@ -105,6 +121,7 @@ export function PublicModuleRunner({ module, questions, nextModule, subject }: P
       redirectUrl={module.redirect_url}
       nextModule={nextModule}
       subject={subject}
+      trackProgress={module.collects_lead}
     />
   );
 }

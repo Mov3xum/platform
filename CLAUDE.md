@@ -3953,6 +3953,75 @@ Samtalet slutade som ett avbrott, inte ett avslut.
   begränsad). Lead-garantin (§ 23.6) är oförändrad — sista turen persisteras
   som alla andra.
 
+### 23.10 Chattens avslutssteg, besökarsammanfattning & genomförandestatus (2026-10-14)
+
+**Incidenter.** (1) Chatten ställde sin sista fråga när taket på utbyten
+redan låst inmatningen, så modulens obligatoriska frågor och kontaktfält
+("Obligatoriska uppgifter från besökaren", steg 4) gick aldrig att fylla i
+— de gällde i praktiken bara formulär/quiz. (2) En modul vars egen
+systemprompt bad modellen bokföra leadet skrev ut `<lead>{ … }</lead>`-JSON
+i den publika chatten. (3) Ett avbrutet formulär/quiz lämnade inget spår
+alls och en avbruten chatt såg ut som en slutförd.
+
+- **Avslutssteg i chatten (`ChatClosingForm`).** När taket nås (efter sista
+  svaret) eller besökaren trycker **Avsluta** visas ett formulär i chatten:
+  modulens **obligatoriska frågor** (`closingQuestions` = `required`,
+  renderade med samma `QuestionInput` som formulär/quiz), kontaktfälten
+  enligt `require_email/phone/organization`, kontaktpreferens och valet
+  "Skicka sammanfattningen till min e-post". `missingClosingField`
+  (`lib/compass/completion.ts`, ren + enhetstestad) körs i klienten OCH i
+  `/api/public/m/[slug]/complete` — inget skickas in förrän allt
+  obligatoriskt är ifyllt. Steget visas bara när modulen sparar lead
+  (`PublicCompassModule.collects_lead`, en boolean — aldrig `create_lead`
+  självt). Inflödesnotisen (§ 23.5) går nu vid slutförandet, inte vid
+  första turen.
+- **Sammanfattning till besökaren.** `/complete` genererar
+  `summarizeChatForVisitor` (`chat.ts`, `CHAT_SUMMARY_SYSTEM_PROMPT`,
+  mistral-small, budgettak § 9.6, anonym usage-logg; fallback = sista
+  assistentsvaret), sparar den + avslutssvaren i
+  `compass_conversations.extracted_data` (`visitor_summary`,
+  `closing_answers`; staff-only RLS) och på leadet (`ai_summary`). Besökaren
+  **laddar ned** den som brandad PDF (`/summary-pdf` → `chat-summary.ts` →
+  `buildQuizResultPdf` med `sections`/`disclaimer`; klienten skickar BARA
+  sin sessionstoken — texten tas ur serverns lagrade data, § 21.8-läxan från
+  result-pdf) och/eller får den **mejlad** till adressen hen själv angav
+  (`sendChatSummaryEmail`, Resend, PDF som bilaga; engångsmejl, ingen
+  prenumeration, best-effort med synligt fel). AI-disclaimer (art. 50) i
+  chatten, PDF:n och mejlet.
+- **Aldrig strukturerad data i chatten.** `VISITOR_REPLY_RULES`
+  (`reply-sanitize.ts`) läggs sist i systemprompten i `intakeReply`
+  (en egen systemprompt kan inte ta bort den) och `stripStructuredTrailer`
+  rensar `<tagg>…</tagg>`, kodblock och naket JSON ur svaret innan det
+  returneras eller persisteras. Enhetstestat.
+- **Genomförandestatus — `compass_leads.completion` (migration 1700000192):**
+  `in_progress` | `completed` | `abandoned`, skild från personalens
+  `status`. Saknat fält ⇒ `completed` (`normalizeLeadCompletion`), och
+  befintliga rader backfillas så. Chatten upsertar `in_progress` per tur;
+  formulär/quiz anropar `/progress` när besökaren går vidare ett steg
+  (`useFlowProgress`) och upsertar ett pågående lead med det som hunnit
+  svaras + en PII-fri not ("Påbörjade formuläret: 2 av 5 frågor besvarade");
+  `/submit`, `/quiz-result` och `/complete` **slutför SAMMA lead** via
+  `finalizeLead` (`lead-capture.ts`, nycklat på sessionstoken) i stället för
+  att skapa ett nytt. **Avbrutet** sätts av en `pagehide`-beacon
+  (`/progress` med `event: abandon`, bara om flödet startats och inte
+  slutförts) och av ett lazy-svep när personalen öppnar leadlistan
+  (`markStaleLeadsAbandoned`: pågående utan aktivitet på `ABANDON_AFTER_MS`
+  = 2 h). En återvändande besökare blir pågående igen. Konversationens
+  `status` speglar (`active`/`completed`/`abandoned`).
+- **Statistik:** tratt (`countLeadsByStatus`, med fallback till det gamla
+  filtret på ett schema utan fältet), dashboard och analys räknar bara
+  slutförda (`countsInStatistics`, JS-filter på hämtade rader). Leadlistan
+  har chipsen **Avbrutna** / **Pågående** (`?done=`), raden en chip, och
+  lead-vyn en banner. Avbrutna leads är ofta "Anonym" med partiella svar —
+  det är avsett (de visar var folk hoppar av).
+- **Ingen notis, ingen AI-körning för avbrutna flöden.** Riskklass
+  oförändrad (begränsad); sammanfattningen är en ny AI-funktion över
+  besökarens egna ord (ingen profilering, märks som AI). GDPR § 5: partiella
+  svar lagras bara efter samtyckesgrinden och bara whitelistade fält
+  (`mapAnswersToLead`); e-posten besökaren anger används för ett
+  engångsmejl. Speglat i `setup-via-api.mjs` (`compass_leads`-def +
+  index); compass är annars migration-only (§ 23.4).
+
 ---
 
 ## 24. AI-sorterat filarkiv — ämnes-/bolagsmappar (/filer)

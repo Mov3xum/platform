@@ -2,7 +2,7 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import { isSurveyModule } from '@platform/shared';
 import { summarizeSubmission, type SubmissionEntry } from './chat';
-import { updateLead } from './store';
+import { createConversation, createLead, findConversationBySession, patchConversation, updateLead } from './store';
 import { assertWithinAiBudget } from '@/lib/ai/budget.server';
 import { logAiUsage } from '@/lib/ai/usage';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
@@ -107,4 +107,52 @@ export async function attachAiSummary(
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Slutför ett flöde till EN lead (§ 23.10). Finns en session-konversation
+ * med ett pågående lead (progress-upsert i formulär/quiz, tur-upsert i
+ * chatten) uppdateras DET leadet till `completed` — annars skapas ett nytt
+ * slutfört lead och en konversation. Sessionstoken är valfri (äldre klienter
+ * och admin-previewen skickar ingen → skapa som förut). Returnerar null bara
+ * när leadet varken kunde uppdateras eller skapas (hård lead-garanti § 23.6).
+ */
+export async function finalizeLead(
+  pb: PocketBase,
+  tenant: string,
+  input: {
+    moduleSlug: string;
+    sessionToken?: string | null;
+    fields: Partial<Lead>;
+  }
+): Promise<{ lead: Lead; created: boolean } | null> {
+  const token = input.sessionToken && /^[A-Za-z0-9_-]{16,100}$/.test(input.sessionToken) ? input.sessionToken : null;
+  const existing = token ? await findConversationBySession(pb, tenant, input.moduleSlug, token) : null;
+  // Fält som den slutförande inskickningen ALLTID bestämmer; tomma värden
+  // får inte skriva över det AI-extraktionen redan fyllt i (chatt).
+  const patch: Partial<Lead> = { completion: 'completed' };
+  for (const [k, v] of Object.entries(input.fields)) {
+    if (v === undefined || v === null || v === '') continue;
+    (patch as Record<string, unknown>)[k] = v;
+  }
+  // Ett uttryckligt tomt `notes` rensar progress-noten ("Påbörjade formuläret:
+  // 2 av 5 frågor besvarade") när flödet slutförs — chatten skickar inget
+  // `notes` och behåller sin samtalsnot.
+  if (input.fields.notes === '') patch.notes = '';
+  if (existing?.lead) {
+    const updated = await updateLead(pb, tenant, existing.lead, patch);
+    if (updated) {
+      await patchConversation(pb, existing.id, { status: 'completed' });
+      return { lead: updated, created: false };
+    }
+    // Leadet försvann (raderat av personal) — skapa ett nytt nedan.
+  }
+  const lead = await createLead(pb, tenant, { ...input.fields, completion: 'completed' });
+  if (!lead) return null;
+  if (existing) {
+    await patchConversation(pb, existing.id, { status: 'completed', lead: lead.id });
+  } else {
+    await createConversation(pb, tenant, { moduleSlug: input.moduleSlug, sessionToken: token ?? undefined, leadId: lead.id });
+  }
+  return { lead, created: true };
 }

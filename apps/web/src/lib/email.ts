@@ -331,3 +331,72 @@ export async function sendSurveyInvites(
   }
   return { sent, failed };
 }
+
+export interface ChatSummaryEmailFields {
+  moduleName: string;
+  /** Besökarsammanfattningen (ren text; radbrytningar bevaras). */
+  summary: string;
+  /** "Fråga: svar"-rader ur avslutssteget. */
+  answers?: { question: string; answer: string }[];
+  /** PDF-bilaga (samma dokument som nedladdningen). */
+  pdf?: Buffer;
+  brandName?: string;
+}
+
+/**
+ * Skickar chattsammanfattningen (§ 23.10) till den adress BESÖKAREN själv
+ * angav i avslutssteget. Ett engångsmejl — ingen prenumeration, ingen
+ * notis till personalen. Kastar vid fel; anroparen är best-effort.
+ */
+export async function sendChatSummaryEmail(to: string, fields: ChatSummaryEmailFields): Promise<void> {
+  const apiKey = getResendApiKey();
+  const addr = (to || '').trim();
+  if (!addr.includes('@')) return;
+  const brand = fields.brandName || 'Movexum';
+  const subject = `Din sammanfattning från ${brand} – ${fields.moduleName}`;
+  const summaryHtml = escapeHtml(fields.summary).replace(/\n/g, '<br />');
+  const answers = (fields.answers || []).filter((a) => a.question && a.answer);
+  const html = `<!DOCTYPE html>
+<html lang="sv">
+<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>${escapeHtml(subject)}</title></head>
+<body style="margin:0;padding:0;background:#f2f2f2;font-family:'Nunito Sans','Nunito Sans Variable',system-ui,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f2f2f2;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;padding:40px;max-width:560px;">
+        <tr><td style="padding-bottom:24px;">
+          <span style="font-size:22px;font-weight:700;color:#121212;letter-spacing:-0.5px;">movexum</span>
+          <div style="margin-top:4px;font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#002c40;font-weight:600;">${escapeHtml(fields.moduleName)}</div>
+        </td></tr>
+        <tr><td>
+          <h1 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#121212;">Sammanfattning av ditt samtal</h1>
+          <p style="margin:0 0 20px;font-size:14px;color:#404040;line-height:1.7;">${summaryHtml}</p>
+          ${
+            answers.length > 0
+              ? `<table width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e4dbfe;">${answers
+                  .map((a) => row(a.question, a.answer))
+                  .join('')}</table>`
+              : ''
+          }
+          <p style="margin:20px 0 0;font-size:11px;color:#999999;">Sammanfattningen är genererad av AI utifrån det du själv berättade – verifiera innan du delar den vidare. Dina uppgifter hanteras inom EU.</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+  const payload: Record<string, unknown> = { from: FROM_EMAIL, to: [addr], subject, html };
+  if (fields.pdf) {
+    payload.attachments = [{ filename: 'sammanfattning.pdf', content: fields.pdf.toString('base64') }];
+  }
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    console.error(`[email] Resend chat summary error ${res.status}:`, body);
+    throw new Error(`Kunde inte skicka sammanfattningen (fel ${res.status}).`);
+  }
+}

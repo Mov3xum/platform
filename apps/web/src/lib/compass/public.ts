@@ -3,6 +3,7 @@ import type PocketBase from 'pocketbase';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { getPublicPbUrl } from '@/lib/pb-url';
 import { sortCompassQuestions } from '@platform/shared';
+import { moduleWantsLead } from './lead-capture';
 import type { CompassModule, CompassQuestion, NextModuleLink } from './types';
 
 export type { NextModuleLink };
@@ -54,10 +55,18 @@ export type PublicCompassModule = Pick<
   | 'require_email'
   | 'require_phone'
   | 'require_organization'
->;
+> & {
+  /**
+   * Sparar modulen ett lead (steg 4-valet + inte enkät)? Styr om chattens
+   * avslutssteg visas (§ 23.10). Bara en boolean — aldrig `create_lead`
+   * eller andra interna fält.
+   */
+  collects_lead: boolean;
+};
 
 export function toPublicModule(m: CompassModule): PublicCompassModule {
   return {
+    collects_lead: moduleWantsLead(m),
     id: m.id,
     slug: m.slug,
     public_slug: m.public_slug,

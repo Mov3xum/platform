@@ -6,6 +6,7 @@ import { QuestionInput, readAttribution } from './QuestionInput';
 import { NextModuleCta } from './NextModuleCta';
 import { ContactPreferencePicker } from './ContactPreferencePicker';
 import { resolveNextQuestionIndex } from '@/lib/compass/question-flow';
+import { useFlowProgress } from './useFlowProgress';
 
 interface Props {
   moduleSlug: string;
@@ -23,6 +24,8 @@ interface Props {
   consent?: boolean;
   /** Enkätens subjekt (`?om=<id>`, § 43) — skickas med i submit-body. */
   subject?: string | null;
+  /** Bokför pågående/avbrutet flöde (§ 23.10) — bara publika flöden. */
+  trackProgress?: boolean;
 }
 
 export function ModuleWizard({
@@ -33,7 +36,8 @@ export function ModuleWizard({
   apiBase = '/api/inflode/m',
   consent,
   subject,
-  nextModule
+  nextModule,
+  trackProgress
 }: Props) {
   const [step, setStep] = useState(0);
   // Besökta steg (för "Tillbaka") — hopplogik (next_key) kan skippa frågor,
@@ -45,6 +49,12 @@ export function ModuleWizard({
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const attribution = useMemo(readAttribution, []);
+  const progressTracker = useFlowProgress({
+    endpointBase: trackProgress ? apiBase : undefined,
+    moduleSlug,
+    consent,
+    attribution
+  });
 
   const total = questions.length;
   const q = questions[step];
@@ -94,6 +104,7 @@ export function ModuleWizard({
     if (nextStep < total) {
       setTrail((t) => [...t, step]);
       setStep(nextStep);
+      progressTracker.report(answers, step + 1, total);
       return;
     }
 
@@ -108,7 +119,8 @@ export function ModuleWizard({
           attribution,
           consent,
           contact_preference: contactPreference || undefined,
-          subject: subject || undefined
+          subject: subject || undefined,
+          sessionToken: trackProgress ? progressTracker.sessionToken : undefined
         })
       });
       if (!res.ok) {
@@ -117,6 +129,7 @@ export function ModuleWizard({
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(data.error || `Servern svarade ${res.status}`);
       }
+      progressTracker.markDone();
       setDone(true);
       if (redirectUrl) {
         setTimeout(() => {

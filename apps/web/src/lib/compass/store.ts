@@ -13,6 +13,7 @@ import type {
   SecurityEventKind
 } from './types';
 import { LEAD_STATUS_ORDER, PREVIEW_SOURCE_KEY } from './types';
+import { countsInStatistics, isStaleInProgress, type LeadCompletion } from './completion';
 
 /* ────────────────────────────────────────────────────────────────────
    Läs-fallback — PB v0.23.4 rule-eval-bugg (CLAUDE.md § 21.3)
@@ -157,6 +158,11 @@ export interface LeadListOptions {
    * satt (så staff kan filtrera fram just förhandsgranskningarna).
    */
   excludePreview?: boolean;
+  /**
+   * Genomförandefilter (§ 23.10): `completed` matchar även rader utan fält
+   * (oapplicerad migration ⇒ slutförd); `abandoned`/`in_progress` exakt.
+   */
+  completion?: LeadCompletion;
 }
 
 /** Delad filterbyggare för lead-listning/-export (bunden syntax, § 10.3). */
@@ -178,6 +184,13 @@ function buildLeadFilter(pb: PocketBase, tenant: string, options: LeadListOption
     filters.push('landing_module = {:lm}');
     params.lm = options.landingModule;
   }
+  if (options.completion === 'completed') {
+    filters.push('(completion = {:cmp} || completion = "")');
+    params.cmp = 'completed';
+  } else if (options.completion) {
+    filters.push('completion = {:cmp}');
+    params.cmp = options.completion;
+  }
   if (options.q) {
     filters.push(
       '(name ~ {:q} || email ~ {:q} || idea_summary ~ {:q} || organization ~ {:q})'
@@ -189,11 +202,11 @@ function buildLeadFilter(pb: PocketBase, tenant: string, options: LeadListOption
 
 /** Fälten lead-listorna renderar (namn, status, källa, modul, idé, poäng, tid). */
 export const LEAD_LIST_FIELDS =
-  'id,name,email,organization,idea_summary,status,source_key,landing_module,score,converted_startup,created';
+  'id,name,email,organization,idea_summary,status,source_key,landing_module,score,converted_startup,completion,created';
 
 /** Fälten CSV-exporten skriver (speglar kolumnerna i /api/inflode/leads/export). */
 export const LEAD_EXPORT_FIELDS =
-  'id,created,name,email,phone,organization,status,score,source_key,landing_module,idea_category,idea_summary,quiz_result_bucket,quiz_score,utm_source,utm_medium,utm_campaign,converted_startup,converted_at,consent_at';
+  'id,created,name,email,phone,organization,status,completion,score,source_key,landing_module,idea_category,idea_summary,quiz_result_bucket,quiz_score,utm_source,utm_medium,utm_campaign,converted_startup,converted_at,consent_at';
 
 /** Största sidstorlek en listvy får begära (PB:s eget tak är 1000). */
 const LEAD_LIST_MAX_PER_PAGE = 200;
@@ -420,23 +433,34 @@ export async function countLeadsByStatus(
     tenant,
     pv: PREVIEW_SOURCE_KEY
   });
-  const countAll = async (client: PocketBase): Promise<Record<LeadStatus, number>> => {
-    const out = empty();
-    const totals = await Promise.all(
+  // Tratten räknar bara SLUTFÖRDA flöden (§ 23.10): avbrutna/pågående leads
+  // är inga ansökningar. `completion = ""` = rad utan fält (oapplicerad
+  // migration ⇒ slutförd). 400:ar filtret (schema utan fältet) räknas som
+  // förut, utan villkoret.
+  const COMPLETED_CLAUSE = '(completion = "completed" || completion = "")';
+  const countWith = (client: PocketBase, completedOnly: boolean) =>
+    Promise.all(
       LEAD_STATUS_ORDER.map((status) =>
         client
           .collection('compass_leads')
           .getList(1, 1, {
-            filter: pb.filter('tenant = {:tenant} && source_key != {:pv} && status = {:s}', {
-              tenant,
-              pv: PREVIEW_SOURCE_KEY,
-              s: status
-            }),
+            filter: pb.filter(
+              `tenant = {:tenant} && source_key != {:pv} && status = {:s}${completedOnly ? ` && ${COMPLETED_CLAUSE}` : ''}`,
+              { tenant, pv: PREVIEW_SOURCE_KEY, s: status }
+            ),
             fields: 'id'
           })
           .then((r) => r.totalItems)
       )
     );
+  const countAll = async (client: PocketBase): Promise<Record<LeadStatus, number>> => {
+    const out = empty();
+    let totals: number[];
+    try {
+      totals = await countWith(client, true);
+    } catch {
+      totals = await countWith(client, false);
+    }
     LEAD_STATUS_ORDER.forEach((status, i) => {
       out[status] = totals[i];
     });
@@ -506,6 +530,102 @@ export async function createConversation(
     );
   } catch {
     return null;
+  }
+}
+
+/**
+ * Pågående session-konversation (tenant + modul + sessionstoken). PB v0.23.4
+ * kan TYST neka list/view-regeln (§ 21.3) → superuser-fallback innan "finns
+ * inte". Tenant-likhet verifieras alltid i koden.
+ */
+export async function findConversationBySession(
+  pb: PocketBase,
+  tenant: string,
+  moduleSlug: string,
+  sessionToken: string
+): Promise<Conversation | null> {
+  const find = (client: PocketBase) =>
+    client
+      .collection('compass_conversations')
+      .getFirstListItem<Conversation>(
+        client.filter('tenant = {:t} && module_slug = {:m} && session_token = {:s}', {
+          t: tenant,
+          m: moduleSlug,
+          s: sessionToken
+        })
+      );
+  try {
+    const found = await find(pb);
+    return found.tenant === tenant ? found : null;
+  } catch {
+    const su = await getSuperuserPb();
+    if (!su.ok) return null;
+    try {
+      const found = await find(su.pb);
+      return found.tenant === tenant ? found : null;
+    } catch {
+      return null;
+    }
+  }
+}
+
+/** Konversationens status + ev. lead-koppling (best-effort, superuser-fallback). */
+export async function patchConversation(
+  pb: PocketBase,
+  conversationId: string,
+  patch: { status?: Conversation['status']; lead?: string; extracted_data?: Record<string, unknown> }
+): Promise<void> {
+  try {
+    await writeWithFallback(pb, (client) =>
+      client.collection('compass_conversations').update(conversationId, patch)
+    );
+  } catch {
+    // best-effort — konversationsstatusen är spegling, leadet är sanningen
+  }
+}
+
+/**
+ * Lazy-svep (§ 23.10): pågående leads utan aktivitet på `ABANDON_AFTER_MS`
+ * markeras `abandoned`. Körs när personalen öppnar leadlistan (med deras
+ * token; superuser-fallback vid tyst nekande). Kapat till 200 per anrop,
+ * fail-soft — ett schema utan fältet (400) gör ingenting.
+ */
+export async function markStaleLeadsAbandoned(pb: PocketBase, tenant: string): Promise<number> {
+  try {
+    const rows = await readWithFallback(
+      pb,
+      (client) =>
+        client.collection('compass_leads').getList<Lead>(1, 200, {
+          filter: client.filter('tenant = {:tenant} && completion = {:c}', {
+            tenant,
+            c: 'in_progress'
+          }),
+          fields: 'id,completion,updated,created'
+        }),
+      (r) => r.totalItems === 0,
+      async (client) => {
+        const r = await client
+          .collection('compass_leads')
+          .getList(1, 1, { filter: client.filter('tenant = {:tenant}', { tenant }), fields: 'id' });
+        return r.totalItems > 0;
+      }
+    );
+    const now = Date.now();
+    let n = 0;
+    for (const lead of rows.items) {
+      if (!isStaleInProgress(lead, now)) continue;
+      try {
+        await writeWithFallback(pb, (client) =>
+          client.collection('compass_leads').update(lead.id, { completion: 'abandoned' })
+        );
+        n += 1;
+      } catch {
+        // nästa
+      }
+    }
+    return n;
+  } catch {
+    return 0;
   }
 }
 
@@ -712,12 +832,15 @@ export async function getLeadAnalytics(
           client.collection('compass_leads').getFullList<Lead>({
             filter,
             fields:
-              'id,status,source_key,utm_source,utm_medium,utm_campaign,landing_module,quiz_result_bucket,converted_startup,converted_at,created',
+              'id,status,source_key,utm_source,utm_medium,utm_campaign,landing_module,quiz_result_bucket,converted_startup,converted_at,completion,created',
             batch: 1000
           }),
+        // Avbrutna/pågående flöden (§ 23.10) räknas aldrig i analysen —
+        // filtreras i JS så ett schema utan fältet (saknat = slutförd) aldrig
+        // 400:ar. Preview-raden filtreras fortsatt server-side.
         (rows) => rows.length === 0,
         leadExistsProbe(filter)
-      );
+      ).then((rows) => rows.filter((l) => countsInStatistics(l.completion)));
     let leads: Lead[];
     try {
       leads = await fetchLeads(
@@ -886,7 +1009,7 @@ export interface CompassDashboard {
   funnel: { status: LeadStatus; count: number }[];
 }
 
-type DashboardLeadRow = Pick<Lead, 'status' | 'score' | 'source_key' | 'created'>;
+type DashboardLeadRow = Pick<Lead, 'status' | 'score' | 'source_key' | 'completion' | 'created'>;
 
 function emptyDashboard(periodDays: number): CompassDashboard {
   return {
@@ -937,12 +1060,12 @@ export async function getCompassDashboard(
         (client) =>
           client.collection('compass_leads').getFullList<DashboardLeadRow>({
             filter,
-            fields: 'status,score,source_key,created',
+            fields: 'status,score,source_key,completion,created',
             batch: 1000
           }),
         (rows) => rows.length === 0,
         leadExistsProbe(filter)
-      );
+      ).then((rows) => rows.filter((l) => countsInStatistics(l.completion)));
     // Fönster-läsningen får ALDRIG fälla tratten (countLeadsByStatus räknar
     // utan datumfilter): saknat `created`-fält (innan migration 1700000126)
     // 400:ar datumfiltret → hämta då utan cutoff och fönstra i JS.

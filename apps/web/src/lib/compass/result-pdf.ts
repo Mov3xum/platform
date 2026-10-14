@@ -113,6 +113,12 @@ export interface QuizResultPdfInput {
   brandName?: string;
   /** Valfri accentfärg (hex) — speglar modulens theme_color. Default mörkblå. */
   accent?: string;
+  /** Extra sektioner (rubrik + punkter) — chattens sammanfattning (§ 23.10). */
+  sections?: { heading: string; items: string[] }[];
+  /** Egen sidfotstext (t.ex. AI-disclaimer för chattsammanfattningen). */
+  disclaimer?: string;
+  /** Egen eyebrow-text (default "<brand> · Startupkompassen"). */
+  eyebrow?: string;
 }
 
 export async function buildQuizResultPdf(input: QuizResultPdfInput): Promise<Buffer> {
@@ -169,7 +175,7 @@ export async function buildQuizResultPdf(input: QuizResultPdfInput): Promise<Buf
   const today = new Date().toLocaleDateString('sv-SE');
 
   // Eyebrow.
-  drawLines(ctx, `${brand} · Startupkompassen`.toUpperCase(), {
+  drawLines(ctx, (input.eyebrow || `${brand} · Startupkompassen`).toUpperCase(), {
     size: 10,
     font: 'bold',
     color: accent,
@@ -203,10 +209,24 @@ export async function buildQuizResultPdf(input: QuizResultPdfInput): Promise<Buf
     }
   }
 
+  // Extra sektioner (chattsammanfattning: "Dina uppgifter", "Nästa steg" …).
+  for (const section of input.sections || []) {
+    const items = (section.items || []).filter((t) => typeof t === 'string' && t.trim());
+    if (items.length === 0) continue;
+    ctx.y -= 10;
+    drawLines(ctx, section.heading, { size: 14, font: 'heading', color: accent, gap: 8 });
+    for (const t of items) {
+      const before = ctx.y;
+      drawLines(ctx, t, { size: 11.5, color: INK_SOFT, indent: 16, lh: 1.5, gap: 5 });
+      ctx.page.drawCircle({ x: MARGIN + 4, y: before - 7, size: 1.8, color: col(accent) });
+    }
+  }
+
   // Footer på alla sidor: vägledande disclaimer + EU-not.
   const disclaimer = clean(
     ctx,
-    'Resultatet är vägledande och baseras på dina egna svar. Dina uppgifter hanteras inom EU och delas aldrig vidare.'
+    input.disclaimer ||
+      'Resultatet är vägledande och baseras på dina egna svar. Dina uppgifter hanteras inom EU och delas aldrig vidare.'
   );
   const pages = pdf.getPages();
   for (const p of pages) {
