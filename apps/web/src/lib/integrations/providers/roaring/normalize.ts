@@ -478,14 +478,43 @@ function companyEntry(
  * Returnerar undefined när svaret inte är i platt form (äldre/nästlade
  * format hanteras av trädtolkningen nedan).
  */
+/**
+ * Nycklar som tolereras i den platta koncernlistan. Katalogen säger
+ * `groupCompanies[]` med `companyId`/`motherCompanyId`, men svaret har inte
+ * kunnat verifieras mot roaring.io från byggmiljön, så listan, bolags-id:t
+ * och moder-id:t läses ur en kandidatlista — ett avvikande namn får aldrig
+ * tyst ge "ingen koncern" (incident 2026-10-13: koncernkartan visade bara
+ * startup-bolaget). Listan får också ligga ett steg ned (`groupStructure{…}`).
+ */
+const GROUP_LIST_KEYS = ['groupCompanies', 'companies', 'groupMembers', 'members', 'subsidiaries', 'group', 'groupStructure', 'structure'];
+const GROUP_MOTHER_KEYS = ['motherCompanyId', 'parentCompanyId', 'groupMotherCompanyId', 'motherId', 'parentId', 'ownerCompanyId', 'motherCompanyRegistrationNumber', 'parentCompanyRegistrationNumber'];
+const GROUP_ID_KEYS = ['companyId', 'orgNr', 'organisationNumber', 'organizationNumber', 'companyRegistrationNumber', 'registrationNumber', 'organisationsnummer'];
+const GROUP_NAME_KEYS = ['companyName', 'name', 'legalName', 'companyNameLegal'];
+
+/** Den platta koncernlistan ur svaret — direkt under posten eller ett steg ned. */
+export function roaringGroupList(root: Record<string, unknown>): Record<string, unknown>[] | undefined {
+  const isRecordList = (v: unknown): v is Record<string, unknown>[] =>
+    Array.isArray(v) && v.some((x) => !!x && typeof x === 'object' && !Array.isArray(x));
+  for (const key of GROUP_LIST_KEYS) {
+    const v = root[key];
+    if (isRecordList(v)) return v.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object');
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      for (const inner of GROUP_LIST_KEYS) {
+        const w = (v as Record<string, unknown>)[inner];
+        if (isRecordList(w)) return w.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object');
+      }
+    }
+  }
+  return undefined;
+}
+
 function normalizeFlatGroupStructure(
   root: Record<string, unknown>,
   target: string,
   notes: string[]
 ): RegistryOwnershipEntry[] | undefined {
-  const raw = pickFirst(root, ['groupCompanies']);
-  if (!Array.isArray(raw)) return undefined;
-  const items = raw.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object');
+  const items = roaringGroupList(root);
+  if (!items) return undefined;
   // Grafnyckel: org-nr när id:t går att tolka, annars leverantörens råa id
   // (trimmat). Moder-kedjan följs på nyckeln, så ett bolag vars id Roaring
   // levererar i ett format vi inte känner igen fortfarande hittas i listan —
@@ -496,15 +525,14 @@ function normalizeFlatGroupStructure(
     if (!trimmed) return undefined;
     return normalizeOrgNr(trimmed) || trimmed;
   };
-  const motherOf = (rec: Record<string, unknown>) =>
-    graphKey(asString(pickFirst(rec, ['motherCompanyId', 'parentCompanyId', 'motherId', 'parentId'])));
+  const motherOf = (rec: Record<string, unknown>) => graphKey(asString(pickFirst(rec, GROUP_MOTHER_KEYS)));
   if (!items.some((x) => motherOf(x))) return undefined;
 
-  const ID_KEYS = ['companyId', 'orgNr', 'organisationNumber', 'organizationNumber'];
+  const ID_KEYS = GROUP_ID_KEYS;
   const asNode = (rec: Record<string, unknown>): GroupNode => ({
     id: normalizeOrgNr(asString(pickFirst(rec, ID_KEYS))) || undefined,
     rawId: asString(pickFirst(rec, ID_KEYS)),
-    name: asString(pickFirst(rec, ['companyName', 'name', 'legalName'])),
+    name: asString(pickFirst(rec, GROUP_NAME_KEYS)),
     pct: asPct(pickFirst(rec, PCT_PATHS)),
     votes: asPct(pickFirst(rec, VOTES_PATHS)),
     children: [],
@@ -569,12 +597,10 @@ function normalizeFlatGroupStructure(
 export function normalizeRoaringGroupMembers(raw: unknown, startupOrgNr: string): RegistryGroupMember[] | undefined {
   const root = firstRecord(raw);
   if (!root) return undefined;
-  const list = pickFirst(root, ['groupCompanies']);
-  if (!Array.isArray(list)) return undefined;
-  const items = list.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object');
-  const ID_KEYS = ['companyId', 'orgNr', 'organisationNumber', 'organizationNumber'];
-  const idOf = (rec: Record<string, unknown>) => asString(pickFirst(rec, ID_KEYS));
-  const nameOf = (rec: Record<string, unknown>) => asString(pickFirst(rec, ['companyName', 'name', 'legalName']));
+  const items = roaringGroupList(root);
+  if (!items) return undefined;
+  const idOf = (rec: Record<string, unknown>) => asString(pickFirst(rec, GROUP_ID_KEYS));
+  const nameOf = (rec: Record<string, unknown>) => asString(pickFirst(rec, GROUP_NAME_KEYS));
   const nameByRawId = new Map<string, string>();
   for (const rec of [root, ...items]) {
     const id = idOf(rec)?.trim();
@@ -596,7 +622,7 @@ export function normalizeRoaringGroupMembers(raw: unknown, startupOrgNr: string)
     const key = orgNr || `name:${(name || '').toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const motherRaw = asString(pickFirst(rec, ['motherCompanyId', 'parentCompanyId', 'motherId', 'parentId']))?.trim();
+    const motherRaw = asString(pickFirst(rec, GROUP_MOTHER_KEYS))?.trim();
     const motherOrg = normalizeOrgNr(motherRaw) || undefined;
     const member: RegistryGroupMember = {};
     if (isLegalEntityOrgNr(orgNr)) member.org_nr = orgNr;

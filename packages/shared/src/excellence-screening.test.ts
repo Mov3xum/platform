@@ -480,14 +480,14 @@ test('grundardrivet räknas mot fasens trösklar; formation har inget krav', () 
     { name: 'B', equity_pct: 30, engagement_pct: 15 }
   ];
   const base = { subject: company({ orgNr: '5595728790', name: 'Combly AB', ownership: [...STANDALONE_OWNERS] }), founders, foundersSource: 'manual' as const };
-  const psf = screenExcellence(input({ ...base, manual: { companies: {}, de_minimis_related: {}, estimates: {}, maturity_phase: 'problem_solution_fit' } }));
+  const psf = screenExcellence(input({ ...base, manual: { companies: {}, de_minimis_related: {}, group_companies: [], estimates: {}, maturity_phase: 'problem_solution_fit' } }));
   const fd = psf.vinnovaChecks.find((c) => c.id === 'founder_driven');
   assert.equal(fd?.verdict, 'yes');
   assert.match(fd?.detail ?? '', /sammantaget 45 %/);
-  const pmf = screenExcellence(input({ ...base, manual: { companies: {}, de_minimis_related: {}, estimates: {}, maturity_phase: 'product_market_fit' } }));
+  const pmf = screenExcellence(input({ ...base, manual: { companies: {}, de_minimis_related: {}, group_companies: [], estimates: {}, maturity_phase: 'product_market_fit' } }));
   assert.equal(pmf.vinnovaChecks.find((c) => c.id === 'founder_driven')?.verdict, 'no');
   assert.equal(pmf.vinnova.outcome, 'not_in_target');
-  const form = screenExcellence(input({ ...base, manual: { companies: {}, de_minimis_related: {}, estimates: {}, maturity_phase: 'formation' } }));
+  const form = screenExcellence(input({ ...base, manual: { companies: {}, de_minimis_related: {}, group_companies: [], estimates: {}, maturity_phase: 'formation' } }));
   assert.equal(form.vinnovaChecks.find((c) => c.id === 'founder_driven')?.verdict, 'yes');
   const none = screenExcellence(input({ ...base }));
   assert.equal(none.vinnovaChecks.find((c) => c.id === 'founder_driven')?.verdict, 'unknown');
@@ -540,13 +540,13 @@ test('de minimis räknar anknutna bolag: plattformen eller intyg, annars OKÄNT 
 test('IRL: manuella nivåer används bara utan readiness-rad; motivering följer alltid med', () => {
   const base = { subject: company({ orgNr: '5595728790', name: 'Combly AB' }) };
   const manualIrl = screenExcellence(
-    input({ ...base, irl: { level: 4 }, manual: { companies: {}, de_minimis_related: {}, estimates: {}, irl: { levels: { crl: 3, brl: 2 }, notes: { crl: 'LOI med två kunder' } } } })
+    input({ ...base, irl: { level: 4 }, manual: { companies: {}, de_minimis_related: {}, group_companies: [], estimates: {}, irl: { levels: { crl: 3, brl: 2 }, notes: { crl: 'LOI med två kunder' } } } })
   );
   assert.equal(manualIrl.irl?.crl, 3);
   assert.equal(manualIrl.irl?.manualLevels, true);
   assert.equal(manualIrl.irl?.notes?.crl, 'LOI med två kunder');
   const platformIrl = screenExcellence(
-    input({ ...base, irl: { level: 4, crl: 5, brl: 4, tmrl: 3, srl: 2 }, manual: { companies: {}, de_minimis_related: {}, estimates: {}, irl: { levels: { crl: 9 }, notes: { srl: 'Agenda 2030 mål 3' } } } })
+    input({ ...base, irl: { level: 4, crl: 5, brl: 4, tmrl: 3, srl: 2 }, manual: { companies: {}, de_minimis_related: {}, group_companies: [], estimates: {}, irl: { levels: { crl: 9 }, notes: { srl: 'Agenda 2030 mål 3' } } } })
   );
   assert.equal(platformIrl.irl?.crl, 5);
   assert.notEqual(platformIrl.irl?.manualLevels, true);
@@ -569,7 +569,7 @@ test('Vinnova-utfallet blir "ingår sannolikt" utan förbehåll när alla punkte
       manual: {
         companies: {},
         de_minimis_related: {},
-        estimates: {},
+        group_companies: [], estimates: {},
         maturity_phase: 'problem_solution_fit',
         innovative: { verdict: 'yes', note: 'patentsökt sensor' },
         other_criteria: { verdict: 'yes' },
@@ -790,7 +790,7 @@ test('egen uppskattning fyller tröskelvärdet för ett nystartat bolag utan bok
         financials: [],
         ownership: [...STANDALONE_OWNERS]
       }),
-      manual: { companies: {}, de_minimis_related: {}, estimates: { '5595728790': { employees: 2, revenue_sek: 0, balance_sheet_sek: 50_000, note: 'budget 2026' } } },
+      manual: { companies: {}, de_minimis_related: {}, group_companies: [], estimates: { '5595728790': { employees: 2, revenue_sek: 0, balance_sheet_sek: 50_000, note: 'budget 2026' } } },
       deMinimis: { usedEur: 0, capEur: 300_000 }
     })
   );
@@ -800,5 +800,105 @@ test('egen uppskattning fyller tröskelvärdet för ett nystartat bolag utan bok
   assert.equal(res.thresholds.check.verdict, 'yes');
   assert.equal(res.thresholds.check.source, 'manual');
   assert.match(res.thresholds.check.detail, /art\. 4\.3/);
-  assert.equal(res.stateAid.outcome, 'art22_possible');
+  // Ett nyregistrerat bolag bevisas aldrig fristående ur registret — först
+  // när controllern bekräftat aktieboken blir art. 22 möjlig.
+  assert.equal(res.standalone.verdict, 'unknown');
+  assert.equal(res.stateAid.outcome, 'undetermined');
+  const confirmed = screenExcellence(
+    input({
+      subject: company({
+        orgNr: '5595728790',
+        name: 'Ny AB',
+        basic: { registeredAt: '2026-02-17', bolagStatus: 'aktiv', bolagsform: 'Aktiebolag' },
+        financials: [],
+        ownership: [...STANDALONE_OWNERS]
+      }),
+      manual: {
+        companies: {},
+        de_minimis_related: {},
+        estimates: { '5595728790': { employees: 2, revenue_sek: 0, balance_sheet_sek: 50_000, note: 'budget 2026' } },
+        group_companies: [],
+        standalone: { verdict: 'yes', note: 'aktieboken 2026-09' }
+      },
+      deMinimis: { usedEur: 0, capEur: 300_000 }
+    })
+  );
+  assert.equal(confirmed.standalone.verdict, 'yes');
+  assert.equal(confirmed.standalone.source, 'manual');
+  assert.equal(confirmed.stateAid.outcome, 'art22_possible');
+});
+
+// ─── Manuellt angivna koncernbolag (§ 51.8) ─────────────────────────────────
+
+test('deriveGroupCompanies: ett manuellt angivet moderbolag blir anknutet, och dess uppslagna koncern följs som andra ledet', () => {
+  // Combly: koncernregistret tomt (nystartat bolag — finns inte i Wellgos årsredovisning än).
+  const subject = company({ orgNr: '5595728790', name: 'Combly AB', groupMembers: [] });
+  const manual = [{ org_nr: '5594427808', name: 'Wellgo Health AB', relation: 'linked' as const, direction: 'owner' as const, share_pct: 100, note: 'aktieboken' }];
+  const first = deriveGroupCompanies(subject, [], manual);
+  assert.equal(first.length, 1);
+  assert.equal(first[0].org_nr, '5594427808');
+  assert.equal(first[0].relation, 'linked');
+  assert.equal(first[0].manualDeclared, true);
+  assert.equal(first[0].groupRole, undefined, 'manuellt angivet bolag har ingen plats ur koncernregistret');
+  assert.match(first[0].reason, /Angivet manuellt/);
+
+  // När Wellgo slagits upp bär dess koncernlista Ewell (moder) — andra ledet.
+  const wellgo = company({
+    orgNr: '5594427808',
+    name: 'Wellgo Health AB',
+    basic: { registeredAt: '2023-07-01', bolagStatus: 'aktiv', bolagsform: 'AB' },
+    ownership: [{ direction: 'owner', owner_kind: 'company', org_nr: '5567036271', name: 'Ewell AB', capital_pct: 90 }],
+    groupMembers: [
+      { org_nr: '5567036271', name: 'Ewell AB', level: 0 },
+      { org_nr: '5594427808', name: 'Wellgo Health AB', level: 1, mother_org_nr: '5567036271', owned_pct: 90 }
+    ]
+  });
+  const refs = deriveGroupCompanies(subject, [wellgo], manual);
+  const byOrg = Object.fromEntries(refs.map((r) => [r.org_nr, r]));
+  assert.equal(byOrg['5567036271']?.relation, 'linked');
+  assert.equal(byOrg['5567036271']?.transitive, true);
+  assert.equal(byOrg['5567036271']?.via, 'Wellgo Health AB');
+
+  // Hela bedömningen: Ewell från 2006 fäller art. 22 ⇒ de minimis.
+  const ewell = company({ orgNr: '5567036271', name: 'Ewell AB', basic: { registeredAt: '2006-05-10', bolagStatus: 'aktiv', bolagsform: 'AB' } });
+  const res = screenExcellence(
+    input({
+      subject,
+      related: [wellgo, ewell],
+      manual: { companies: {}, de_minimis_related: {}, estimates: {}, group_companies: manual }
+    })
+  );
+  assert.equal(res.standalone.verdict, 'no');
+  assert.match(res.standalone.detail, /angivet manuellt/);
+  assert.equal(res.stateAid.outcome, 'de_minimis');
+  assert.match(res.stateAid.text, /Ewell AB är äldre än 5 år/);
+  assert.ok(res.companies.find((c) => c.orgNr === '5594427808')?.manualDeclared);
+});
+
+test('fristående: ett nyregistrerat bolag med tom koncernlista bevisas aldrig fristående ur registret (årsredovisningarnas eftersläpning)', () => {
+  const subject = company({
+    orgNr: '5595728790',
+    name: 'Combly AB',
+    basic: { registeredAt: '2026-02-17', bolagStatus: 'aktiv', bolagsform: 'AB' },
+    groupMembers: [],
+    ownership: [{ direction: 'owner', owner_kind: 'person', pct_min: 75, pct_max: 100, control_basis: 'shares' }]
+  });
+  const young = screenExcellence(input({ subject }));
+  assert.equal(young.standalone.verdict, 'unknown');
+  assert.match(young.standalone.detail, /registrerades 2026-02-17/);
+  assert.match(young.standalone.needs ?? '', /koncernbolag/);
+  // Samma ägarbild på ett bolag med tre års historik ⇒ fristående kan bevisas.
+  const matureSubject = {
+    ...subject,
+    basic: { ...subject.basic!, registeredAt: '2023-02-17' },
+    ownership: [{ direction: 'owner' as const, owner_kind: 'person' as const, pct_min: 80, pct_max: 100, control_basis: 'shares' as const }]
+  };
+  const mature = screenExcellence(input({ subject: matureSubject }));
+  assert.equal(mature.standalone.verdict, 'yes');
+  // Ett manuellt Nej (aktieboken visar en bolagsägare) väger alltid tyngst.
+  const overruled = screenExcellence(
+    input({ subject: matureSubject, manual: { companies: {}, de_minimis_related: {}, estimates: {}, group_companies: [], standalone: { verdict: 'no', note: 'Holding AB 30 %' } } })
+  );
+  assert.equal(overruled.standalone.verdict, 'no');
+  assert.match(overruled.standalone.detail, /Holding AB 30 %/);
 });

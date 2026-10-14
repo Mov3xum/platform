@@ -1,4 +1,5 @@
 import 'server-only';
+import { describeTokenFailure, parseOAuthErrorCode } from './oauth-errors';
 
 // OAuth2 client-credentials för bolagsregister-API:er (Roaring och
 // Bolagsverket använder båda Basic-auth mot en token-endpoint). Token cachas
@@ -18,10 +19,13 @@ const TIMEOUT_MS = 15_000;
 
 export class OAuthTokenError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** Sant när leverantören avvisade själva nyckelparet (401 / invalid_client). */
+  credentialsRejected: boolean;
+  constructor(status: number, message: string, credentialsRejected = false) {
     super(message);
     this.name = 'OAuthTokenError';
     this.status = status;
+    this.credentialsRejected = credentialsRejected;
   }
 }
 
@@ -59,12 +63,11 @@ async function requestToken(opts: ClientCredentialsOptions): Promise<CachedToken
   }
 
   if (!response.ok) {
-    throw new OAuthTokenError(
-      response.status,
-      response.status === 401 || response.status === 400
-        ? 'Klient-id/klienthemlighet avvisades av leverantören.'
-        : `Token-endpointen svarade HTTP ${response.status}.`
-    );
+    // OAuth-felkoden (`invalid_client` m.fl.) skiljer fel nyckelpar från fel
+    // på begäran — bara koden läses, aldrig `error_description` (oauth-errors.ts).
+    const body: unknown = await response.json().catch(() => null);
+    const described = describeTokenFailure(response.status, parseOAuthErrorCode(body));
+    throw new OAuthTokenError(response.status, described.message, described.credentialsRejected);
   }
 
   const json = (await response.json().catch(() => null)) as

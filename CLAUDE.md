@@ -1353,6 +1353,18 @@ denna princip.
   koppling" utan formulär och varje synk föll på "saknas eller kunde inte
   dekrypteras". Nyckeln måste vara satt på **web-appen** i Coolify; GitHub-
   secrets med samma namn läses inte av någon workflow.
+- **Avvisad token = leverantörens svar, inte plattformens (2026-10-13).**
+  "Klient-id/klienthemlighet avvisades av leverantören" kommer ur
+  `company-registry/oauth.ts` när leverantörens `/token` svarar 401 (eller
+  400 med `invalid_client`) på det SPARADE nyckelparet — samma kod som
+  "Testa mot org-nr", Bedömning excellens och portföljsynken delar
+  (`runRegistryLookup`). Meddelandet bär nu HTTP-status + OAuth-felkoden
+  (`oauth-errors.ts`, ren + enhetstestad; aldrig `error_description`, som kan
+  bära klient-id) och skiljer "nycklarna avvisades" från "begäran avvisades"
+  (400 med annan kod: grant/scope). Åtgärd: Inställningar → Integrationer →
+  leverantören → **Byt nycklar** (connect-flödet testar token innan det
+  sparar); en secret som regenererats i leverantörens portal gör den sparade
+  ogiltig.
 
 ### 11.6 Sync-cadence
 
@@ -8528,7 +8540,8 @@ bolagsregister bär (börsnotering, företagskoncentration, övertagen
 verksamhet, grundarnas engagemang, innovationshöjd, de minimis-intyg för
 anknutna bolag, IRL-motivering, controllerns kommentar) — en körning gav
 därför fler OKÄNT än dokumentet och det fanns inget ställe att fylla i
-svaren. Nu finns panelen **Manuella svar** under varje bedömning:
+svaren. Svaren fylls i direkt i rapporten (sedan 2026-10-14 EN interaktiv rapport,
+§ 51.9 — den tidigare separata panelen "Manuella svar" är borttagen):
 
 - **Datamodell:** `startups.screening_facts` (json, migration **1700000190**;
   speglad i `setup-via-api.mjs`, asserterad i `verify-baseline.mjs`
@@ -8612,7 +8625,7 @@ analysen" av ett holdingbolags egna ägare/innehav stannade vid visning.
   manuellt "börsnoterat" på ett privat AB bortses från med en not i
   bedömningen (det räddar redan sparade inverterade svar).
 - **Frågorna i Manuella svar är naturliga frågor med uttydda alternativ**
-  (`CONDITION_QUESTION`/`VINNOVA_MANUAL` i `ManualFactsPanel.tsx`): "Är
+  (`CONDITION_QUESTION`/`VINNOVA_QUESTION` i `AssessmentReport.tsx`): "Är
   bolaget börsnoterat?" → "Nej — inte börsnoterat" / "Ja — aktierna är
   upptagna till handel". Lagrat `verdict` är oförändrat i VILLKORETS riktning
   (`yes` = uppfyllt); bara presentationen ändrades. En punkt registret redan
@@ -8656,7 +8669,7 @@ analysen" av ett holdingbolags egna ägare/innehav stannade vid visning.
   ägarbolagen. Punkten "grundarteamet äger ≥ 75 % (direkt eller indirekt)"
   får det som LEDTRÅD ("via Wellgo → Ewell äger fysiska personer minst
   67,5 %") — aldrig ett JA av sig självt, registret vet inte att personerna
-  är grundarna; controllern anger andelen inkl. indirekt under Manuella svar.
+  är grundarna; controllern anger andelen inkl. indirekt i grundartabellen.
   Ägs startup-bolaget till ≥ 25 % av bolag utan att huvudmännen hämtats sägs
   det uttryckligen.
 - **Uppskattning för bolag utan bokslut** (bilaga I art. 4.3): nystartade
@@ -8669,6 +8682,50 @@ analysen" av ett holdingbolags egna ägare/innehav stannade vid visning.
   (`screening_facts` bär uppskattningarna, redan fältmaskat för AI); koncern-
   listan bär bara juridiska personer; namn på fysiska personer når aldrig
   motorn.
+
+### 51.9 En interaktiv rapport — inga separata manuella fält (2026-10-14)
+
+**Incident/behov.** Bedömningen visades först som en läsrapport och därunder
+en separat panel "Manuella svar" med dropdowns för samma punkter — två listor
+över samma saker, och den som läste rapporten såg inte var ett svar skulle
+in. Nu är det **EN rapport** (`AssessmentReport.tsx`, ersätter
+`AssessmentView` + `ManualFactsPanel`) där varje punkt ändras på platsen:
+
+- **Punkter:** ett utfall som registret inte kan avgöra är en knapp (Ja/Nej/
+  Okänt med ▾). Klick öppnar svarsalternativen under punkten — alltid uttydda
+  ("Nej — inte börsnoterat" / "Ja — aktierna är upptagna till handel" /
+  "Vet inte" resp. "Inget eget svar (registret gäller)") + motivering. Ett
+  eget svar visas som raden "Ditt svar" tills det sparas. Gäller
+  grundförutsättningarna per bolag (startup + anknutna med org-nr),
+  "Fristående företag?", Vinnovas coachpunkter (inte marknadsredo,
+  innovativt, övriga villkor) och excellens. Ålder/status/tröskel/de minimis
+  avgörs av registret/plattformen och går inte att ändra.
+- **Tabeller:** grundartabellen (namn, andel, engagemang, forskare,
+  mognadsfas, forskningsavknoppning), IRL-tabellen (nivå när plattformen
+  saknar readiness-rad, motivering alltid) och review-radens kommentar har en
+  **Ändra**-länk som byter tabellen till inmatning; ett klick på
+  grundarpunkterna (≥ 75 %, grundardrivet) öppnar grundartabellen.
+  Tröskelvärdets rader för bolag UTAN bokslut är inmatning direkt i cellerna
+  (uppskattning i god tro, bilaga I art. 4.3, + källa i bokslutskolumnen).
+  De minimis-intyg för anknutna bolag utan plattformsdata ligger som en rad
+  under de minimis-punkten ("Ange intyg").
+- **Ett enda Spara.** Alla ändringar samlas i state och serialiseras till ett
+  dolt formulär (`FACTS_FORM_ID`, `context` + `facts`); den klistrade raden
+  längst ned ("Spara och räkna om", aktiv bara vid osparade ändringar, med
+  Ångra) skickar `applyExcellenceFactsAction` — samma underlag, inga nya
+  leverantörsanrop, svaren sparas på bolagskortet (§ 51.4). Koncernkartans
+  egna formulär (lägg till koncernbolag, hämta mer) ligger INUTI rapporten
+  utan nästlade `<form>` (sparaknappen använder `form=`-attributet) och tar
+  med rapportens AKTUELLA svar (även osparade) så inget går förlorat när man
+  hämtar mer mitt i en redigering. En ny körning/omräkning stänger alla
+  redigeringar och laddar om svaren.
+- **Lugn som default:** en redigering i taget (`editing`-nyckel), tabellerna
+  är läsbara tills man klickar Ändra, "Behövs: …" döljs medan punkten
+  redigeras, och motorns hjälptexter pekar in i rapporten ("grundartabellen",
+  "svara på punkten") i stället för till en panel som inte finns.
+- Ingen ny dataväg, inga nya fält; samma skrivväg, samma personnummer-
+  sanering och samma regel (manuellt Nej vinner, Ja fyller OKÄNT). Riskklass
+  n/a.
 
 ### 51.3 Var en bedömning lagras — PDF i Filer, i bolagets mapp (2026-10-12)
 
@@ -8820,4 +8877,71 @@ kollega) eller till **bolaget**, som båda svarar direkt i systemet:
   kostat …", `sumRegistryCosts` över alla uppslag inkl. hämta-mer), per
   körning i historiken på bolagskortet och i PDF:ns huvud. Saknas pris sägs
   "pris ej angivet" — aldrig en gissning (§ 11.8).
+
+### 51.8 Koncern ur aktieboken, ett klick till coach/bolag & omräkning till ny PDF (2026-10-13)
+
+**Incident.** Koncernkartan för ett nyregistrerat bolag visade bara startup-
+bolaget fast den manuella bedömningen kände till moder (registrerat 2023) och
+moderns moder (2006) — det som fäller art. 22. Orsak: Roarings koncernstruktur
+bygger på **årsredovisningar** och bär sällan ett bolag som registrerats de
+senaste ~två åren, och motorn hade ingen väg för en människa att säga "det här
+bolaget äger startup-bolaget". Allt nedan gäller **vilket svenskt org-nr som
+helst** — inga bolagsspecifika regler.
+
+- **Registret bevisar aldrig "fristående" för ett nytt bolag.**
+  `GROUP_REGISTER_LAG_MS` (2 år): är startup-bolaget registrerat senare än så
+  och koncernlistan tom blir "Fristående företag" **OKÄNT** med aktieboken
+  som nästa steg — aldrig JA ur en tom lista. Ett äldre bolag bevisas som
+  förut (ingen koncern i registret + fysiska personer direkt > 75 %).
+- **Manuellt angivna koncernbolag** (`screening_facts.group_companies`,
+  `ManualGroupCompanyFact`: org-nr för juridisk person, relation
+  `linked`/`partner`, riktning `owner`/`holding`, andel, PII-fri källa;
+  normaliseras i `excellence-facts.ts` — enskild firma avvisas, tak 20).
+  `deriveGroupCompanies(subject, related, manual)` lägger dem som lager 0,
+  med `manualDeclared` på referensen/`CompanyAssessment` ("Angivet manuellt"
+  i kartan och PDF:n); ett angivet bolag utan koncernplats slås upp med HELA
+  valet, så dess egen koncern följs som andra ledet (moderns moder kommer
+  med av sig själv). **Manuellt "fristående"** (`screening_facts.standalone`,
+  `ManualAnswer`) prövas med `applyManualAnswer` — Nej väger alltid tyngst,
+  Ja fyller bara OKÄNT. Punkten "Fristående företag?" besvaras direkt i
+  rapporten (§ 51.9); koncernkartan har **"Lägg till koncernbolag"**
+  (`addGroupCompanyAction`): sparas i de manuella svaren, i registerläget
+  valfritt uppslag med valda delar (kostnad visas innan) och "följ koncernen
+  vidare" (andra ledet: grunddata + bokslut av det valda, tak
+  `MAX_RELATED_COMPANIES`, `followGroupLookups` — samma loop som den
+  ursprungliga bedömningen, ingen divergerande kopia); "Ta bort" per rad.
+  Kartan visar dessutom **vad registret svarade** (koncernstruktur hämtad/
+  tom/inte hämtad, verklig huvudman, bolag i ägarbilden) så en karta med
+  ett enda bolag aldrig läses som fristående.
+- **Tolerant koncernlista** (`roaringGroupList`): listan, bolags-id och
+  moder-id läses ur kandidatlistor (`groupCompanies|companies|groupMembers|…`,
+  `companyId|organisationNumber|…`, `motherCompanyId|parentCompanyId|…`,
+  även ett steg ned under `groupStructure{…}`) — roaring.io nås inte från
+  byggmiljön, så ett avvikande fältnamn får aldrig tyst ge "ingen koncern".
+- **Begäran med ett klick.** Förfrågans punkt för aktieboken är nu sorten
+  **`group`** ("Äger något företag 25 % eller mer …?"): svaret är "inga"
+  (⇒ `standalone: ja`) eller en lista bolag (⇒ `group_companies`; ett
+  tidigare "fristående: ja" tas bort) — `mergeScreeningRequestAnswersIntoFacts`.
+  Composern har knapparna **"Skicka allt till coachen (N)"** / **"Skicka allt
+  till bolaget"** med standardtext; detaljformuläret finns kvar. Svarsformuläret
+  (`/komplettering/<id>`, coach och bolag) har en enkel radlista
+  (org-nr/namn/andel/riktning/relation) eller kryssrutan "inga sådana bolag".
+- **Omräkning till ny PDF med ett klick.** Migration **1700000192**:
+  `startup_screenings.context` (json 2 MB) = körningens underlag (samma
+  format som vyn, `stripTransientNames` tar bort verklig huvudmans namn
+  innan lagring; speglat i `setup-via-api.mjs`, asserterat i
+  `verify-baseline.mjs`). `recomputeLatestScreeningAction` (formuläraction;
+  admin/incubator_lead/coach) tar senaste underlaget + bolagskortets manuella
+  svar (dit kompletteringarna redan slagits ihop), räknar om UTAN nya
+  leverantörsanrop (kostnad 0, "Omräknat på sparade registeruppslag" i
+  PDF:n) och sparar en ny körning: PDF på bolagskortet (§ 51.6) + i den
+  inloggades Filer. Knappen **"Räkna om med svaren"** finns på bolagskortets
+  sektion Statsstöd & Vinnova och på svarssidan; utfallet visas via
+  `?bedomning=ok|underlag|behorighet|fel`. PDF:n har sektionen
+  **Kompletteringar** (`ExcellenceAssessment.requests`): varje förfrågan med
+  mottagare, status och per punkt status/PII-fri svarsetikett/datum.
+- **GDPR/RLS oförändrat:** `group_companies` bär bara juridiska personer;
+  `context` ligger i den staff/observer-scopade, AI-denylistade
+  `startup_screenings` (grundarnamn ur teamet — samma krets som bolagskortet);
+  `screening_facts` är fortsatt fältmaskat för AI. Riskklass n/a (ingen AI).
 

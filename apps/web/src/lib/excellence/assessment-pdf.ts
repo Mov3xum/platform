@@ -5,6 +5,8 @@ import { BRAND, rgb01, LOGO_RATIO } from '@/lib/documents/brand';
 import { loadLogoPng, loadPdfFonts } from '@/lib/documents/assets';
 import {
   GROUP_ROLE_LABEL,
+  SCREENING_REQUEST_STATUS_LABEL,
+  formatStockholmDateTime,
   MATURITY_PHASE_LABEL,
   STATE_AID_OUTCOME_LABEL,
   VINNOVA_OUTCOME_LABEL,
@@ -353,7 +355,7 @@ export async function buildExcellenceAssessmentPdf(a: ExcellenceAssessment): Pro
   );
   drawLines(
     ctx,
-    `${a.mode === 'register' ? `Färska registeruppslag från ${a.providerName ?? 'bolagsregistret'}` : 'Sparade data i plattformen'} · ${assessedAt}${
+    `${a.mode === 'register' ? `${a.recomputed ? 'Omräknat på sparade registeruppslag från' : 'Färska registeruppslag från'} ${a.providerName ?? 'bolagsregistret'}` : 'Sparade data i plattformen'} · ${assessedAt}${
       a.assessedBy ? ` · utförd av ${a.assessedBy}` : ''
     }`,
     { size: 9, color: MUTED, gap: 2 }
@@ -419,7 +421,9 @@ export async function buildExcellenceAssessmentPdf(a: ExcellenceAssessment): Pro
         c.role === 'subject'
           ? 'Startup-bolaget'
           : [
-              c.groupRole ? `${GROUP_ROLE_LABEL[c.groupRole]}${typeof c.level === 'number' ? ` (nivå ${c.level})` : ''}` : c.transitive ? 'Andra ledet' : c.indirect ? 'Indirekt ägare/innehav' : 'Direkt ägare/innehav',
+              c.manualDeclared
+                ? 'Angivet manuellt (aktiebok/avtal)'
+                : c.groupRole ? `${GROUP_ROLE_LABEL[c.groupRole]}${typeof c.level === 'number' ? ` (nivå ${c.level})` : ''}` : c.transitive ? 'Andra ledet' : c.indirect ? 'Indirekt ägare/innehav' : 'Direkt ägare/innehav',
               c.via ? `via ${c.via}` : ''
             ]
               .filter(Boolean)
@@ -551,6 +555,27 @@ export async function buildExcellenceAssessmentPdf(a: ExcellenceAssessment): Pro
       [0.7, 1.0, 1.5, 1.5, 1.7, 1.5, 1.4]
     );
   }
+  // Kompletteringar — begäran till coach/bolag och deras svar (§ 51.8), så
+  // PDF:n på bolagskortet bär hela underlaget: vad som frågades, vem som
+  // svarade och vad (PII-fria etiketter; motiveringstexter visas inte här).
+  if (a.requests && a.requests.length > 0) {
+    sectionTitle(ctx, 'Kompletteringar');
+    for (const r of a.requests) {
+      const recipient = r.recipient_kind === 'coach' ? `coachen${r.recipient_name ? ` ${r.recipient_name}` : ''}` : 'bolaget';
+      const answered = r.items.filter((i) => i.status === 'answered').length;
+      subTitle(
+        ctx,
+        `Till ${recipient} · ${formatStockholmDateTime(r.created)}${r.requested_by_name ? ` · av ${r.requested_by_name}` : ''} · ${SCREENING_REQUEST_STATUS_LABEL[r.status]} (${answered} av ${r.items.length} besvarade)${r.due_at ? ` · svar senast ${r.due_at.slice(0, 10)}` : ''}`
+      );
+      table(
+        ctx,
+        ['Punkt', 'Status', 'Svar', 'Besvarad'],
+        r.items.map((i) => [i.label, i.status === 'answered' ? 'Besvarad' : 'Öppen', i.answer_label ?? '–', i.answered_at ? formatStockholmDateTime(i.answered_at) : '–']),
+        [3.2, 0.9, 2.2, 1.3]
+      );
+    }
+  }
+
   for (const n of a.notes) {
     if (n.notes.length === 0) continue;
     eyebrow(ctx, `Noteringar — ${n.name || formatOrgNr(n.orgNr)}`);
