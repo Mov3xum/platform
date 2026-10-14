@@ -43,7 +43,7 @@ export interface ExcellenceAssessment {
   /** Grundarna bedömningen räknade på (teamet på bolagskortet eller manuellt inmatade). */
   founders: ScreeningFounderRow[] | null;
   foundersSource: 'platform' | 'manual';
-  /** De manuella svar som vägdes in (§ 51.4) — förifyller panelen "Manuella svar". */
+  /** De manuella svar som vägdes in (§ 51.4) — förifyller de redigerbara punkterna i rapporten. */
   facts: ScreeningManualFacts;
   /** Sant när svaren kunde sparas på bolagskortet (portföljbolag). */
   factsSaved?: boolean;
@@ -71,6 +71,21 @@ export interface ExcellenceAssessment {
   history?: ExcellenceAssessmentHistory;
   /** Punkter som kan skickas som begäran om komplettering (§ 51.6) — härledda ur "Saknat underlag". */
   requestItems: ScreeningRequestItem[];
+  /** Bolagets begäran om komplettering (coach/bolag) med svar — sammanställs i PDF:n (§ 51.8). */
+  requests?: AssessmentRequestSummary[];
+  /** Sant när körningen räknades om på sparat underlag (inga nya leverantörsanrop). */
+  recomputed?: boolean;
+}
+
+export interface AssessmentRequestSummary {
+  id: string;
+  recipient_kind: 'coach' | 'startup';
+  recipient_name?: string;
+  requested_by_name?: string;
+  status: 'open' | 'partially_answered' | 'answered' | 'closed';
+  created: string;
+  due_at?: string;
+  items: Array<{ label: string; kind: string; status: 'open' | 'answered'; answer_label?: string; answered_at?: string }>;
 }
 
 export interface ExcellenceAssessmentHistory {

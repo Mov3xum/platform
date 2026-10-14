@@ -15,6 +15,7 @@ import {
 import { Icon } from '@/components/proto';
 import { listScreeningRuns, type ScreeningRunRow } from '@/lib/excellence/history.server';
 import { listScreeningRequestsForStartup } from '@/lib/excellence/requests.server';
+import { recomputeLatestScreeningAction } from '@/lib/actions/excellence';
 
 // Bolagskortets sektion "Statsstöd & Vinnova" (CLAUDE.md § 51.6): alla
 // körningar av Bedömning excellens för bolaget (utfall, vem, när, kostnad,
@@ -63,7 +64,8 @@ export async function StartupScreeningSection({
   viewerRoles,
   startupId,
   canAssess,
-  canRequest
+  canRequest,
+  feedback
 }: {
   pb: PocketBase;
   tenantId: string;
@@ -74,6 +76,8 @@ export async function StartupScreeningSection({
   canAssess: boolean;
   /** Får skicka/följa upp begäran om komplettering. */
   canRequest: boolean;
+  /** `?bedomning=` efter "Räkna om med svaren" (§ 51.8). */
+  feedback?: string;
 }) {
   const [{ runs, error }, { requests, error: reqError }] = await Promise.all([
     listScreeningRuns(pb, tenantId, startupId, 20),
@@ -91,14 +95,43 @@ export async function StartupScreeningSection({
           </p>
         </div>
         {canAssess && (
-          <Link
-            href={`/bedomning-excellens?startup=${startupId}`}
-            className="inline-flex items-center gap-1.5 rounded-full bg-brand px-3 py-1 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover"
-          >
-            <Icon name="shield" size={13} /> {runs.length > 0 ? 'Ny bedömning' : 'Gör en bedömning'}
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            {runs.length > 0 && (
+              <form action={recomputeLatestScreeningAction}>
+                <input type="hidden" name="startup_id" value={startupId} />
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-strong px-3 py-1 text-sm font-semibold text-foreground transition hover:bg-canvas-subtle"
+                  title="Räknar om den senaste bedömningen på sparat underlag med bolagets manuella svar och kompletteringar — inga nya anrop hos leverantören. Ny PDF sparas här och i dina Filer."
+                >
+                  <Icon name="rotate-ccw" size={13} /> Räkna om med svaren
+                </button>
+              </form>
+            )}
+            <Link
+              href={`/bedomning-excellens?startup=${startupId}`}
+              className="inline-flex items-center gap-1.5 rounded-full bg-brand px-3 py-1 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover"
+            >
+              <Icon name="shield" size={13} /> {runs.length > 0 ? 'Ny bedömning' : 'Gör en bedömning'}
+            </Link>
+          </div>
         )}
       </div>
+
+      {feedback === 'ok' && (
+        <p className="mb-3 rounded-xl bg-movexum-pastell-gron px-3 py-2 text-[12.5px] text-movexum-morkgron dark:bg-movexum-morkgron/30 dark:text-movexum-pastell-gron">
+          Bedömningen räknades om med svaren — ny körning och PDF sparad nedan (och i dina Filer).
+        </p>
+      )}
+      {feedback && feedback !== 'ok' && (
+        <p className="mb-3 rounded-xl bg-movexum-pastell-orange px-3 py-2 text-[12.5px] text-movexum-morkorange dark:bg-movexum-morkorange/30 dark:text-movexum-pastell-orange">
+          {feedback === 'underlag'
+            ? 'Inget sparat underlag att räkna om på — den senaste körningen gjordes innan underlaget började sparas (eller fältet saknas: migration 1700000192). Kör en ny bedömning.'
+            : feedback === 'behorighet'
+              ? 'Du har inte behörighet att räkna om bedömningen.'
+              : 'Omräkningen misslyckades — försök igen eller kör en ny bedömning.'}
+        </p>
+      )}
 
       {(error || reqError) && (
         <p className="mb-3 rounded-xl bg-movexum-pastell-gul px-3 py-2 text-[12.5px] text-movexum-morkgul dark:bg-movexum-morkgul/30 dark:text-movexum-pastell-gul">

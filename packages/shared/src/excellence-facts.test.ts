@@ -66,3 +66,29 @@ test('normalizeScreeningFacts: uppskattningar per bolag (bilaga I art. 4.3) norm
   assert.equal(summarizeScreeningFacts(f).estimates, 1);
   assert.deepEqual(normalizeScreeningFacts({}).estimates, {});
 });
+
+test('normalizeScreeningFacts: manuellt angivna koncernbolag — org-nr normaliseras, enskild firma och dubbletter släpps, okända val får default', () => {
+  const f = normalizeScreeningFacts({
+    group_companies: [
+      { org_nr: '559442-7808', name: 'Wellgo Health AB', relation: 'linked', direction: 'owner', share_pct: '100', note: 'aktieboken 2026-03, pnr 19800101-1234' },
+      { org_nr: '5594427808', name: 'Dubblett' },
+      { org_nr: '19800101-1234', name: 'Enskild firma', relation: 'linked' },
+      { org_nr: '5567036271', relation: 'nonsense', direction: 'sideways', share_pct: 150 },
+      'skräp',
+      { name: 'utan org-nr' }
+    ]
+  });
+  assert.equal(f.group_companies.length, 2);
+  assert.deepEqual(f.group_companies[0], {
+    org_nr: '5594427808',
+    name: 'Wellgo Health AB',
+    relation: 'linked',
+    direction: 'owner',
+    share_pct: 100,
+    note: 'aktieboken 2026-03, pnr [REDACTED]'
+  });
+  assert.deepEqual(f.group_companies[1], { org_nr: '5567036271', relation: 'linked', direction: 'owner' });
+  assert.equal(isEmptyScreeningFacts(f), false);
+  assert.equal(summarizeScreeningFacts(f).group_companies, 2);
+  assert.deepEqual(normalizeScreeningFacts({ group_companies: 'nej' }).group_companies, []);
+});

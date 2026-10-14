@@ -65,6 +65,132 @@ function num(v: string): number | undefined {
   return v.trim() === '' || !Number.isFinite(n) ? undefined : n;
 }
 
+type GroupRow = { org_nr: string; name: string; share_pct: string; direction: 'owner' | 'holding'; relation: 'linked' | 'partner' };
+const emptyGroupRow = (): GroupRow => ({ org_nr: '', name: '', share_pct: '', direction: 'owner', relation: 'linked' });
+
+/**
+ * Punkten "Ägarbolag (aktieboken)": antingen "inga sådana bolag" eller en
+ * lista med org-nr/namn/andel/riktning. Normaliseras server-side (enskild
+ * firma = personnummer släpps; andel 0–100). Fysiska personer anges aldrig här.
+ */
+function GroupCompaniesInput({
+  value,
+  onChange,
+  disabled,
+  viewer
+}: {
+  value?: ScreeningRequestAnswer;
+  onChange: (v: ScreeningRequestAnswer | undefined) => void;
+  disabled?: boolean;
+  viewer: 'coach' | 'startup';
+}) {
+  const [rows, setRows] = useState<GroupRow[]>(() =>
+    value?.companies && value.companies.length > 0
+      ? value.companies.map((c) => ({
+          org_nr: c.org_nr,
+          name: c.name ?? '',
+          share_pct: typeof c.share_pct === 'number' ? String(c.share_pct) : '',
+          direction: c.direction,
+          relation: c.relation
+        }))
+      : [emptyGroupRow()]
+  );
+  const none = value?.none === true;
+  const emit = (nextRows: GroupRow[], nextNone: boolean, note?: string) => {
+    setRows(nextRows);
+    if (nextNone) {
+      onChange({ none: true, note: note ?? value?.note });
+      return;
+    }
+    const companies = nextRows
+      .filter((r) => r.org_nr.replace(/\D/g, '').length >= 10)
+      .map((r) => ({
+        org_nr: r.org_nr,
+        name: r.name || undefined,
+        share_pct: r.share_pct === '' ? undefined : num(r.share_pct),
+        direction: r.direction,
+        relation: r.relation
+      }));
+    onChange(companies.length > 0 ? { companies, note: note ?? value?.note } : undefined);
+  };
+  return (
+    <div className="space-y-2">
+      <label className="flex cursor-pointer items-center gap-2 text-[12.5px] text-foreground">
+        <input type="checkbox" checked={none} disabled={disabled} onChange={(e) => emit(rows, e.target.checked)} className="h-4 w-4 accent-brand" />
+        Nej — inget företag äger 25 % eller mer av bolaget, och bolaget äger inte 25 % eller mer i något annat företag
+      </label>
+      {!none && (
+        <div className="space-y-1.5">
+          <p className="text-[11.5px] text-foreground-subtle">
+            {viewer === 'startup'
+              ? 'Annars: ange varje företag enligt aktieboken (även holdingbolag). Org-nr, namn och andel i procent.'
+              : 'Annars: ange varje bolag (org-nr, namn, andel). Bolagen läggs till i koncernkartan och slås upp vid nästa bedömning.'}
+          </p>
+          {rows.map((r, i) => (
+            <div key={i} className="grid gap-2 sm:grid-cols-[130px_minmax(0,1fr)_90px_150px_130px_auto]">
+              <input
+                aria-label="Org-nr"
+                placeholder="Org-nr"
+                inputMode="numeric"
+                disabled={disabled}
+                value={r.org_nr}
+                onChange={(e) => emit(rows.map((x, j) => (j === i ? { ...x, org_nr: e.target.value } : x)), false)}
+                className={`${inputCls} mx-tnum`}
+              />
+              <input
+                aria-label="Bolagsnamn"
+                placeholder="Bolagsnamn"
+                disabled={disabled}
+                maxLength={160}
+                value={r.name}
+                onChange={(e) => emit(rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)), false)}
+                className={inputCls}
+              />
+              <input
+                aria-label="Andel %"
+                placeholder="Andel %"
+                inputMode="decimal"
+                disabled={disabled}
+                value={r.share_pct}
+                onChange={(e) => emit(rows.map((x, j) => (j === i ? { ...x, share_pct: e.target.value } : x)), false)}
+                className={`${inputCls} mx-tnum`}
+              />
+              <select aria-label="Riktning" disabled={disabled} value={r.direction} onChange={(e) => emit(rows.map((x, j) => (j === i ? { ...x, direction: e.target.value as GroupRow['direction'] } : x)), false)} className={inputCls}>
+                <option value="owner">äger bolaget</option>
+                <option value="holding">ägs av bolaget</option>
+              </select>
+              <select aria-label="Relation" disabled={disabled} value={r.relation} onChange={(e) => emit(rows.map((x, j) => (j === i ? { ...x, relation: e.target.value as GroupRow['relation'] } : x)), false)} className={inputCls}>
+                <option value="linked">över 50 % / kontroll</option>
+                <option value="partner">25–50 %</option>
+              </select>
+              <button
+                type="button"
+                disabled={disabled || rows.length === 1}
+                onClick={() => emit(rows.filter((_, j) => j !== i), false)}
+                className="text-[11.5px] font-semibold text-foreground-subtle hover:text-foreground disabled:opacity-40"
+              >
+                Ta bort
+              </button>
+            </div>
+          ))}
+          <button type="button" disabled={disabled} onClick={() => emit([...rows, emptyGroupRow()], false)} className="text-[12px] font-semibold text-link hover:underline">
+            + Lägg till bolag
+          </button>
+        </div>
+      )}
+      <input
+        aria-label="Källa"
+        placeholder="Källa (t.ex. aktieboken 2026-10)"
+        disabled={disabled || !value}
+        maxLength={SCREENING_NOTE_MAX}
+        value={value?.note ?? ''}
+        onChange={(e) => (value ? onChange({ ...value, note: e.target.value || undefined }) : undefined)}
+        className={inputCls}
+      />
+    </div>
+  );
+}
+
 function VerdictInput({ meta, value, onChange, disabled }: { meta: ScreeningQuestionMeta; value?: ScreeningRequestAnswer; onChange: (v: ScreeningRequestAnswer | undefined) => void; disabled?: boolean }) {
   return (
     <div className="grid gap-2 sm:grid-cols-[minmax(200px,260px)_minmax(0,1fr)]">
@@ -156,6 +282,8 @@ export function ScreeningRequestAnswerForm({ requestId, items, prefill, viewer, 
                     className={inputCls}
                   />
                 )}
+
+                {item.kind === 'group' && <GroupCompaniesInput value={a} onChange={(v) => set(item.key, v)} disabled={disabled} viewer={viewer} />}
 
                 {item.kind === 'de_minimis' && (
                   <div className="grid gap-2 sm:grid-cols-[160px_minmax(0,1fr)]">

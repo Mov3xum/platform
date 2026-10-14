@@ -12,6 +12,7 @@ import { PageShell } from '@/components/PageShell';
 import { getScreeningRequest } from '@/lib/excellence/requests.server';
 import { loadPlatformStartupFacts } from '@/lib/excellence/data.server';
 import { closeScreeningRequestAction } from '@/lib/actions/screening-requests';
+import { recomputeLatestScreeningAction } from '@/lib/actions/excellence';
 import { ScreeningRequestAnswerForm } from '@/components/excellence/ScreeningRequestAnswerForm';
 
 export const dynamic = 'force-dynamic';
@@ -100,8 +101,20 @@ export default async function KompletteringPage({ params }: { params: Promise<{ 
               Avsluta förfrågan
             </button>
             <span className="text-[12px] text-foreground-muted">Avslutad = inga fler svar tas emot. Svaren som redan lämnats finns kvar på bolagskortet.</span>
+          </form>
+        )}
+        {canClose && (
+          <form action={recomputeLatestScreeningAction} className="flex flex-wrap items-center gap-3">
+            <input type="hidden" name="startup_id" value={request.startup} />
+            <input type="hidden" name="back" value={`/startups/${request.startup}`} />
+            <button type="submit" className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground hover:bg-brand-hover">
+              Räkna om med svaren och spara ny PDF
+            </button>
+            <span className="text-[12px] text-foreground-muted">
+              Senaste bedömningens underlag + svaren här ⇒ ny körning på bolagskortet och PDF i dina Filer. Inga nya anrop hos leverantören.
+            </span>
             <Link href={`/bedomning-excellens?startup=${request.startup}`} className="text-[12px] font-semibold text-link hover:underline">
-              Räkna om bedömningen →
+              Ny bedömning med färska uppslag →
             </Link>
           </form>
         )}

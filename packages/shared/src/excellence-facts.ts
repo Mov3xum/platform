@@ -96,6 +96,12 @@ export interface ScreeningManualFacts {
   founders?: ScreeningFounderFact[];
   maturity_phase?: MaturityPhase;
   research_spinoff?: boolean;
+  /**
+   * Fristående företag (bilaga I art. 3.1) efter kontroll av aktieboken:
+   * `yes` = inget företag äger 25 % eller mer och bolaget äger inget sådant;
+   * registret kan aldrig bevisa det för ett nyregistrerat bolag.
+   */
+  standalone?: ManualAnswer;
   not_market_ready?: ManualAnswer;
   innovative?: ManualAnswer;
   other_criteria?: ManualAnswer;
@@ -105,7 +111,34 @@ export interface ScreeningManualFacts {
   /** Egen uppskattning av anställda/omsättning/balansomslutning per bolag utan bokslut (nyckel = org-nr). */
   estimates: Record<string, CompanyEstimateFact>;
   irl?: ScreeningIrlFacts;
+  /**
+   * Koncernbolag controllern själv anger (aktieboken, avtal) när registret
+   * inte bär koncernen — t.ex. ett nystartat bolag som ännu inte finns i
+   * moderns årsredovisning. Motorn räknar dem som anknutna/partner och
+   * uppslagsloopen följer deras egen koncern vidare (§ 51.8).
+   */
+  group_companies: ManualGroupCompanyFact[];
 }
+
+export const MANUAL_GROUP_RELATIONS = ['linked', 'partner'] as const;
+export type ManualGroupRelation = (typeof MANUAL_GROUP_RELATIONS)[number];
+export const MANUAL_GROUP_DIRECTIONS = ['owner', 'holding'] as const;
+export type ManualGroupDirection = (typeof MANUAL_GROUP_DIRECTIONS)[number];
+
+export interface ManualGroupCompanyFact {
+  /** Org-nr, 10 siffror — alltid en juridisk person (enskild firma avvisas). */
+  org_nr: string;
+  name?: string;
+  /** `linked` = anknutet (> 50 % / kontroll), `partner` = partnerföretag (25–50 %). */
+  relation: ManualGroupRelation;
+  /** `owner` = bolaget äger startup-bolaget, `holding` = startup-bolaget äger det. */
+  direction: ManualGroupDirection;
+  share_pct?: number;
+  /** Varifrån uppgiften kommer (t.ex. "aktieboken 2026-03") — PII-fri. */
+  note?: string;
+}
+
+export const SCREENING_MAX_GROUP_COMPANIES = 20;
 
 export const SCREENING_NOTE_MAX = 600;
 export const SCREENING_COMMENT_MAX = 2000;
@@ -156,6 +189,15 @@ function cleanAnswer(v: unknown): ManualAnswer | undefined {
   return note ? { verdict: o.verdict, note } : { verdict: o.verdict };
 }
 
+/**
+ * Personnummer-derivat: ett 10-siffrigt org-nr vars tredje siffra är < 2
+ * (månad 01–12 i ÅÅMMDD) är en enskild firma — speglar `isPersonalOrgNr` i
+ * webbappens org-nr-modul (juridiska personer har 2–9 som tredje siffra).
+ */
+function isPersonalOrgNrDigits(org: string): boolean {
+  return /^\d{10}$/.test(org) && Number(org[2]) < 2;
+}
+
 function cleanOrgNr(k: string): string | null {
   const digits = k.replace(/\D/g, '');
   if (digits.length === 12 && digits.startsWith('16')) return digits.slice(2);
@@ -186,7 +228,7 @@ function cleanCount(v: unknown): number | undefined {
 }
 
 export function normalizeScreeningFacts(raw: unknown): ScreeningManualFacts {
-  const out: ScreeningManualFacts = { companies: {}, de_minimis_related: {}, estimates: {} };
+  const out: ScreeningManualFacts = { companies: {}, de_minimis_related: {}, estimates: {}, group_companies: [] };
   if (!raw || typeof raw !== 'object') return out;
   const r = raw as Record<string, unknown>;
 
@@ -232,7 +274,7 @@ export function normalizeScreeningFacts(raw: unknown): ScreeningManualFacts {
   }
   if (r.research_spinoff === true) out.research_spinoff = true;
 
-  for (const id of ['not_market_ready', 'innovative', 'other_criteria', 'excellence'] as const) {
+  for (const id of ['standalone', 'not_market_ready', 'innovative', 'other_criteria', 'excellence'] as const) {
     const a = cleanAnswer(r[id]);
     if (a) out[id] = a;
   }
@@ -271,6 +313,31 @@ export function normalizeScreeningFacts(raw: unknown): ScreeningManualFacts {
     }
   }
 
+  if (Array.isArray(r.group_companies)) {
+    const seen = new Set<string>();
+    for (const g of r.group_companies) {
+      if (!g || typeof g !== 'object') continue;
+      const o = g as Record<string, unknown>;
+      const org = typeof o.org_nr === 'string' ? cleanOrgNr(o.org_nr) : null;
+      // Personnummer-derivat (enskild firma) är en fysisk person — aldrig ett koncernbolag.
+      if (!org || isPersonalOrgNrDigits(org) || seen.has(org)) continue;
+      seen.add(org);
+      const row: ManualGroupCompanyFact = {
+        org_nr: org,
+        relation: (MANUAL_GROUP_RELATIONS as readonly string[]).includes(String(o.relation)) ? (o.relation as ManualGroupRelation) : 'linked',
+        direction: (MANUAL_GROUP_DIRECTIONS as readonly string[]).includes(String(o.direction)) ? (o.direction as ManualGroupDirection) : 'owner'
+      };
+      const name = cleanText(o.name, 160);
+      if (name) row.name = name;
+      const share = cleanPct(o.share_pct);
+      if (share !== undefined) row.share_pct = share;
+      const note = cleanText(o.note, SCREENING_NOTE_MAX);
+      if (note) row.note = note;
+      out.group_companies.push(row);
+      if (out.group_companies.length >= SCREENING_MAX_GROUP_COMPANIES) break;
+    }
+  }
+
   if (r.irl && typeof r.irl === 'object') {
     const i = r.irl as Record<string, unknown>;
     const levels: Partial<Record<IrlAxis, number>> = {};
@@ -304,12 +371,14 @@ export function isEmptyScreeningFacts(f: ScreeningManualFacts): boolean {
     !f.founders &&
     !f.maturity_phase &&
     !f.research_spinoff &&
+    !f.standalone &&
     !f.not_market_ready &&
     !f.innovative &&
     !f.other_criteria &&
     !f.excellence &&
     Object.keys(f.de_minimis_related).length === 0 &&
     Object.keys(f.estimates).length === 0 &&
+    f.group_companies.length === 0 &&
     !f.irl
   );
 }
@@ -323,9 +392,11 @@ export function summarizeScreeningFacts(f: ScreeningManualFacts): Record<string,
     has_phase: !!f.maturity_phase,
     vinnova_answers: ['not_market_ready', 'innovative', 'other_criteria'].filter((k) => !!f[k as keyof ScreeningManualFacts]).length,
     has_excellence: !!f.excellence,
+    has_standalone: !!f.standalone,
     de_minimis_related: Object.keys(f.de_minimis_related).length,
     estimates: Object.keys(f.estimates).length,
     irl_notes: Object.keys(f.irl?.notes ?? {}).length,
+    group_companies: f.group_companies.length,
     has_comment: !!f.comment
   };
 }
