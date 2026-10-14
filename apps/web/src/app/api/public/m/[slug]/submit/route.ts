@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { clientIpFromRequest } from '@/lib/client-ip';
-import { createConversation, createLead } from '@/lib/compass/store';
 import {
   resolvePublicModule,
   getPublicModuleQuestions,
@@ -10,6 +9,7 @@ import {
 import {
   attachAiSummary,
   buildSubmissionEntries,
+  finalizeLead,
   moduleWantsLead,
   parseContactPreference
 } from '@/lib/compass/lead-capture';
@@ -33,6 +33,8 @@ interface SubmitBody {
   contact_preference?: string;
   /** Enkätens subjekt ur `?om=<id>` (§ 43) — valideras server-side. */
   subject?: string;
+  /** Sessionstoken (§ 23.10) — slutför det pågående leadet i stället för att skapa ett nytt. */
+  sessionToken?: string;
 }
 
 // Högra (proxy-tillagda) XFF-värdet — det vänstra är klientstyrt och lät en
@@ -105,15 +107,23 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   const attribution = pickAttribution(body.attribution);
   const contactPreference = parseContactPreference(body.contact_preference);
 
-  const lead = await createLead(pb, tenant, {
-    ...leadPayload,
-    ...attribution,
-    name: leadPayload.name || 'Anonym',
-    source_key: 'web',
-    landing_module: slug,
-    contact_preference: contactPreference,
-    consent_at: new Date().toISOString()
+  // Slutför det pågående leadet från progress-upserten (§ 23.10) — eller
+  // skapa ett nytt slutfört lead + konversation när ingen session finns.
+  const finalized = await finalizeLead(pb, tenant, {
+    moduleSlug: slug,
+    sessionToken: body.sessionToken,
+    fields: {
+      ...leadPayload,
+      ...attribution,
+      name: leadPayload.name || 'Anonym',
+      source_key: 'web',
+      landing_module: slug,
+      contact_preference: contactPreference,
+      notes: '',
+      consent_at: new Date().toISOString()
+    }
   });
+  const lead = finalized?.lead;
 
   // Hård lead-garanti (CLAUDE.md § 23.6): är modulen konfigurerad att skapa
   // lead MÅSTE leadet finnas — annars felar inskickningen HÖGT i stället för
@@ -125,8 +135,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
       { status: 500 }
     );
   }
-
-  await createConversation(pb, tenant, { moduleSlug: slug, leadId: lead.id });
 
   // AI-sammanställning av det inskickade (best-effort — blockerar aldrig).
   const entries = buildSubmissionEntries(questions, answers);

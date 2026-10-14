@@ -2596,10 +2596,13 @@ await ensureCollection({
     { name: 'converted_startup', type: 'relation', required: false, collectionId: 'startups_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'converted_at', type: 'date', required: false },
     { name: 'quiz_result_bucket', type: 'text', required: false, max: 60 },
-    { name: 'quiz_score', type: 'number', required: false, min: 0 }
+    { name: 'quiz_score', type: 'number', required: false, min: 0 },
+    // Genomförandestatus (migration 1700000192, § 23.10). Saknat = slutförd.
+    { name: 'completion', type: 'select', required: false, maxSelect: 1, values: ['in_progress', 'completed', 'abandoned'] }
   ],
   indexes: [
     'CREATE INDEX idx_compass_leads_tenant_status ON compass_leads (tenant, status)',
+    'CREATE INDEX idx_compass_leads_tenant_completion ON compass_leads (tenant, completion)',
     'CREATE INDEX idx_compass_leads_tenant_name ON compass_leads (tenant, name)',
     'CREATE INDEX idx_compass_leads_tenant_source ON compass_leads (tenant, source_key)'
   ],

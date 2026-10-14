@@ -8,8 +8,15 @@ import {
   LEAD_LIST_FIELDS,
   listLeads,
   listLeadSources,
-  listModules
+  listModules,
+  markStaleLeadsAbandoned
 } from '@/lib/compass/store';
+import {
+  isLeadCompletion,
+  LEAD_COMPLETION_LABEL,
+  normalizeLeadCompletion,
+  type LeadCompletion
+} from '@/lib/compass/completion';
 import { pagerState, parsePageParam } from '@/lib/read-scaling';
 import {
   LEAD_STATUS_LABEL,
@@ -33,6 +40,8 @@ export default async function LeadsPage({
     q?: string;
     src?: string;
     landing?: string;
+    /** Genomförandefilter (§ 23.10): in_progress | completed | abandoned. */
+    done?: string;
     page?: string;
   }>;
 }) {
@@ -45,15 +54,20 @@ export default async function LeadsPage({
   const q = params.q?.trim() || undefined;
   const sourceKey = params.src?.trim() || undefined;
   const landingModule = params.landing?.trim() || undefined;
+  const completion: LeadCompletion | undefined = isLeadCompletion(params.done) ? params.done : undefined;
   const page = parsePageParam(params.page);
 
   const pb = await getServerPb();
+  // Lazy-svep (§ 23.10): påbörjade flöden utan aktivitet på två timmar blir
+  // "Avbrutna" när personalen tittar — ingen cron, fail-soft.
+  await markStaleLeadsAbandoned(pb, user.tenant);
   const [{ items, totalItems }, sources, modules] = await Promise.all([
     listLeads(pb, user.tenant, {
       status,
       q,
       sourceKey,
       landingModule,
+      completion,
       page,
       perPage: PER_PAGE,
       fields: LEAD_LIST_FIELDS
@@ -78,6 +92,7 @@ export default async function LeadsPage({
   if (status) baseQs.set('status', status);
   if (q) baseQs.set('q', q);
   if (sourceKey) baseQs.set('src', sourceKey);
+  if (completion) baseQs.set('done', completion);
   if (landingModule) baseQs.set('landing', landingModule);
 
   const pager = pagerState(page, PER_PAGE, totalItems);
@@ -174,6 +189,24 @@ export default async function LeadsPage({
         >
           {PREVIEW_SOURCE_LABEL}
         </Link>
+        <span className="mx-muted mx-t-xs" aria-hidden style={{ alignSelf: 'center' }}>
+          ·
+        </span>
+        {(['abandoned', 'in_progress'] as const).map((c) => (
+          <Link
+            key={c}
+            href={`/inflode/leads?done=${c}`}
+            className={`mx-chip mx-mono${completion === c ? ' mx-ink-chip' : ''}`}
+            style={{ textDecoration: 'none' }}
+            title={
+              c === 'abandoned'
+                ? 'Besökaren påbörjade modulen men slutförde den inte — räknas inte i statistiken'
+                : 'Pågår just nu (eller lämnades för mindre än två timmar sedan)'
+            }
+          >
+            {LEAD_COMPLETION_LABEL[c]}
+          </Link>
+        ))}
       </div>
 
       {/* Lista */}
@@ -218,6 +251,14 @@ export default async function LeadsPage({
                       <Chip variant={statusChipVariant(lead.status)} mono>
                         {LEAD_STATUS_LABEL[lead.status]}
                       </Chip>
+                      {normalizeLeadCompletion(lead.completion) !== 'completed' && (
+                        <Chip
+                          variant={normalizeLeadCompletion(lead.completion) === 'abandoned' ? 'copper' : 'review'}
+                          mono
+                        >
+                          {LEAD_COMPLETION_LABEL[normalizeLeadCompletion(lead.completion)].toUpperCase()}
+                        </Chip>
+                      )}
                       {lead.source_key === PREVIEW_SOURCE_KEY ? (
                         <Chip variant="draft" mono>
                           {PREVIEW_SOURCE_LABEL.toUpperCase()}

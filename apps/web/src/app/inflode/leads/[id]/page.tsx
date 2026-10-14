@@ -11,6 +11,7 @@ import {
 } from '@/components/proto';
 import { ConfirmSubmitButton } from '@/components/ConfirmSubmitButton';
 import { getLead, listAssignableStaff, listLeadSources, listModules } from '@/lib/compass/store';
+import { normalizeLeadCompletion } from '@/lib/compass/completion';
 import {
   CONTACT_PREFERENCE_LABEL,
   LEAD_STATUS_LABEL,
@@ -108,6 +109,27 @@ export default async function LeadDetailPage({
           </>
         }
       />
+
+      {normalizeLeadCompletion(lead.completion) !== 'completed' && (
+        <Card style={{ padding: 12, marginBottom: 16, background: 'var(--mx-st-review-bg)' }}>
+          <div className="mx-flex mx-items-c mx-gap-2 mx-t-13">
+            <Icon name="clock" size={14} />
+            <span>
+              {normalizeLeadCompletion(lead.completion) === 'abandoned' ? (
+                <>
+                  <strong>Avbrutet flöde.</strong> Besökaren påbörjade modulen men slutförde den
+                  inte — uppgifterna är det som hann lämnas. Räknas inte i statistik eller tratt.
+                </>
+              ) : (
+                <>
+                  <strong>Pågående flöde.</strong> Besökaren är mitt i modulen (eller lämnade den
+                  för mindre än två timmar sedan). Markeras avbrutet automatiskt om inget mer händer.
+                </>
+              )}
+            </span>
+          </div>
+        </Card>
+      )}
 
       {lead.source_key === PREVIEW_SOURCE_KEY && (
         <Card style={{ padding: 12, marginBottom: 16, background: 'var(--mx-paper-2)' }}>

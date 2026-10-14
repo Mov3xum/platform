@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { clientIpFromRequest } from '@/lib/client-ip';
 import { isSurveyModule } from '@platform/shared';
 import { storeSurveyResponse } from '@/lib/compass/survey';
-import { createLead } from '@/lib/compass/store';
 import {
   resolvePublicModule,
   getPublicModuleQuestions,
@@ -11,6 +10,7 @@ import {
 import {
   attachAiSummary,
   buildSubmissionEntries,
+  finalizeLead,
   moduleWantsLead,
   parseContactPreference
 } from '@/lib/compass/lead-capture';
@@ -33,6 +33,8 @@ interface QuizBody {
   attribution?: Attribution;
   consent?: boolean;
   contact_preference?: string;
+  /** Sessionstoken (§ 23.10) — slutför det pågående leadet i stället för att skapa ett nytt. */
+  sessionToken?: string;
 }
 
 // Högra (proxy-tillagda) XFF-värdet — det vänstra är klientstyrt och lät en
@@ -128,7 +130,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   // frivilliga om modulen inte kräver dem.
   const attribution = pickAttribution(body.attribution);
   const contactPreference = parseContactPreference(body.contact_preference);
-  const lead = await createLead(pb, tenant, {
+  const finalized = await finalizeLead(pb, tenant, {
+    moduleSlug: slug,
+    sessionToken: body.sessionToken,
+    fields: {
     name: cleanContact(contact.name, 200) || 'Anonym',
     email: cleanContact(contact.email, 254),
     phone: cleanContact(contact.phone, 50),
@@ -141,8 +146,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     quiz_result_bucket: bucket?.key,
     quiz_score: score.total,
     contact_preference: contactPreference,
+    notes: '',
     consent_at: new Date().toISOString()
+    }
   });
+  const lead = finalized?.lead;
 
   // Hård lead-garanti (CLAUDE.md § 23.6): leadet MÅSTE finnas när modulen är
   // konfigurerad att skapa det — fela högt i stället för att besökaren ser
