@@ -108,6 +108,35 @@ export const SCREENING_REQUEST_RECIPIENT_LABEL: Record<ScreeningRequestRecipient
   startup: 'Bolaget'
 };
 
+/**
+ * Vem får SE en förfrågan — spegel av list/viewRule i migration 1700000191
+ * (§ 51.6): Movexum-personal och observer ser tenantens alla förfrågningar;
+ * en bolagsmedlem BARA förfrågningar ställda till sitt eget länkade bolag.
+ * Används av läsvägen när PocketBase 0.23.4 tyst nekar användartokenens
+ * läsning (§ 21.3) och raden i stället lästs med superuser — klienten och
+ * PB-regeln är aldrig ensam gräns.
+ */
+export const SCREENING_REQUEST_VIEWER_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'] as const;
+
+export interface ScreeningRequestViewer {
+  tenant: string;
+  roles: readonly string[];
+  linkedStartups?: readonly string[];
+}
+
+export function canViewScreeningRequest(
+  viewer: ScreeningRequestViewer,
+  row: { tenant: string; startup: string; recipient_kind: ScreeningRequestRecipient }
+): boolean {
+  if (!viewer.tenant || row.tenant !== viewer.tenant) return false;
+  if (viewer.roles.some((r) => (SCREENING_REQUEST_VIEWER_ROLES as readonly string[]).includes(r))) return true;
+  return (
+    viewer.roles.includes('startup_member') &&
+    row.recipient_kind === 'startup' &&
+    (viewer.linkedStartups ?? []).includes(row.startup)
+  );
+}
+
 export const SCREENING_REQUEST_STATUSES = ['open', 'partially_answered', 'answered', 'closed'] as const;
 export type ScreeningRequestStatus = (typeof SCREENING_REQUEST_STATUSES)[number];
 

@@ -60,12 +60,15 @@ function costText(run: ScreeningRunRow): string | null {
 export async function StartupScreeningSection({
   pb,
   tenantId,
+  viewerRoles,
   startupId,
   canAssess,
   canRequest
 }: {
   pb: PocketBase;
   tenantId: string;
+  /** Den inloggades roller — läsvägens behörighetskontroll i koden (§ 51.6). */
+  viewerRoles: readonly string[];
   startupId: string;
   /** admin/incubator_lead/coach — får köra en ny bedömning. */
   canAssess: boolean;
@@ -74,7 +77,7 @@ export async function StartupScreeningSection({
 }) {
   const [{ runs, error }, { requests, error: reqError }] = await Promise.all([
     listScreeningRuns(pb, tenantId, startupId, 20),
-    listScreeningRequestsForStartup(pb, tenantId, startupId, { limit: 20 })
+    listScreeningRequestsForStartup(pb, { tenant: tenantId, roles: viewerRoles }, startupId, { limit: 20 })
   ]);
   if (runs.length === 0 && requests.length === 0 && !error && !reqError && !canAssess) return null;
 

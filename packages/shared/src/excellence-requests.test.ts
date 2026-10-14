@@ -4,6 +4,7 @@ import { screenExcellence, type ExcellenceScreeningInput, type GroupCompanyFacts
 import { normalizeScreeningFacts } from './excellence-facts';
 import {
   applyScreeningRequestAnswers,
+  canViewScreeningRequest,
   deriveScreeningRequestItems,
   mergeScreeningRequestAnswersIntoFacts,
   normalizeScreeningRequestItems,
@@ -221,4 +222,18 @@ test('screeningRequestText: numrerad checklista med länk och frist', () => {
   assert.ok(text.includes('https://app.movexum.se/komplettering/abc'));
   assert.ok(text.includes('Skriv inga personnummer'));
   assert.ok(text.trim().endsWith('Controllern'));
+});
+
+test('canViewScreeningRequest: speglar list/viewRule — staff/observer i tenanten, medlem bara sitt bolags bolagsförfrågan', () => {
+  const row = { tenant: 't1', startup: 's1', recipient_kind: 'startup' as const };
+  const coachRow = { ...row, recipient_kind: 'coach' as const };
+  assert.equal(canViewScreeningRequest({ tenant: 't1', roles: ['coach'] }, row), true);
+  assert.equal(canViewScreeningRequest({ tenant: 't1', roles: ['observer'] }, coachRow), true);
+  assert.equal(canViewScreeningRequest({ tenant: 't2', roles: ['admin'] }, row), false);
+  assert.equal(canViewScreeningRequest({ tenant: '', roles: ['admin'] }, { ...row, tenant: '' }), false);
+  const member = { tenant: 't1', roles: ['startup_member'], linkedStartups: ['s1'] };
+  assert.equal(canViewScreeningRequest(member, row), true);
+  assert.equal(canViewScreeningRequest(member, coachRow), false);
+  assert.equal(canViewScreeningRequest({ ...member, linkedStartups: ['s9'] }, row), false);
+  assert.equal(canViewScreeningRequest({ tenant: 't1', roles: ['partner'] }, row), false);
 });

@@ -1,16 +1,17 @@
 import Link from 'next/link';
 import type PocketBase from 'pocketbase';
-import { SCREENING_REQUEST_STATUS_LABEL, formatStockholmDateTime } from '@platform/shared';
+import { SCREENING_REQUEST_STATUS_LABEL, formatStockholmDateTime, type ScreeningRequestViewer } from '@platform/shared';
 import { Icon } from '@/components/proto/Icon';
 import { listScreeningRequestsForStartup } from '@/lib/excellence/requests.server';
 
 // Mitt bolag (§ 21bis): begäran om komplettering ställd TILL bolaget inför en
 // statsstödsbedömning (§ 51.6). Reads med användarens token → RLS visar en
 // bolagsmedlem bara förfrågningar med recipient_kind = "startup"; staff ser
-// alla bolagets förfrågningar (filtreras här till bolagets egna).
+// alla bolagets förfrågningar. Läsvägen har superuser-reserv vid PB 0.23.4:s
+// tysta regel-nekande och prövar då samma villkor i koden (§ 51.6).
 
-export async function ScreeningRequestsCard({ pb, tenantId, startupId, isStaff }: { pb: PocketBase; tenantId: string; startupId: string; isStaff: boolean }) {
-  const { requests } = await listScreeningRequestsForStartup(pb, tenantId, startupId, { limit: 20 });
+export async function ScreeningRequestsCard({ pb, viewer, startupId, isStaff }: { pb: PocketBase; viewer: ScreeningRequestViewer; startupId: string; isStaff: boolean }) {
+  const { requests } = await listScreeningRequestsForStartup(pb, viewer, startupId, { limit: 20 });
   const visible = requests.filter((r) => r.recipient_kind === 'startup' || isStaff);
   if (visible.length === 0) return null;
   const open = visible.filter((r) => r.status !== 'closed' && r.status !== 'answered');
