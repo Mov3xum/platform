@@ -8846,6 +8846,20 @@ kollega) eller till **bolaget**, som båda svarar direkt i systemet:
 - Speglat i `setup-via-api.mjs` (defs + `FORCE_CREATE_RULES`), asserterat i
   `verify-baseline.mjs` (must-exist, `MUST_BE_STAFF_OR_OBSERVER` resp.
   `MUST_SCOPE_TO_MEMBER`). Riskklass n/a (ingen AI).
+- **Notisen gick inte att öppna (incident 2026-10-14).** Coachen fick
+  "Begäran om komplettering" i klockan men `/komplettering/<id>` svarade
+  "sidan finns inte": läsvägen (`lib/excellence/requests.server.ts`) läste
+  med användartoken UTAN reserv, och PB 0.23.4 nekade tyst view-regeln
+  (§ 21.3) → `getOne` 404 → `notFound()`. Skrivlagret hade redan
+  `getRecordInTenant`-reserven, läsvägen inte. Nu tar `getScreeningRequest`/
+  `listScreeningRequestsForStartup` en **viewer** (tenant, roller, länkade
+  bolag), faller tillbaka på den cachade superusern vid regel-nekande
+  (400/403/404 — och för listor även vid TOMT svar, § 21.8) och prövar
+  behörigheten i koden med den rena, enhetstestade
+  `canViewScreeningRequest` (`@platform/shared`) — exakt list/viewRulens
+  villkor (staff/observer i tenanten; medlem bara sitt bolags
+  bolagsförfrågan). Reserven är robusthet, inte behörighet. En ren medlem
+  utan åtkomst skickas till Mitt bolag i stället för en 404.
 
 ### 51.7 Verklig huvudman med namn, "hämta mer" per koncernbolag & kostnaden (2026-10-13)
 

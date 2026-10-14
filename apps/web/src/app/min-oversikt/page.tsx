@@ -362,7 +362,12 @@ export default async function MinOversiktPage() {
         </Card>
 
         {/* § 51.6 — begäran om komplettering inför statsstödsbedömning */}
-        <ScreeningRequestsCard pb={pb} tenantId={user.tenant} startupId={linkedId} isStaff={isStaff} />
+        <ScreeningRequestsCard
+          pb={pb}
+          viewer={{ tenant: user.tenant, roles: user.roles, linkedStartups: user.linkedStartups }}
+          startupId={linkedId}
+          isStaff={isStaff}
+        />
 
         {/* § 45.4 — kontakter Movexum delat med bolaget via kontaktboken */}
         <SharedContactsCard tenantId={user.tenant} startupId={linkedId} />

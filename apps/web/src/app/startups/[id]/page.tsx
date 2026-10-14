@@ -1106,6 +1106,7 @@ export default async function StartupDetailPage({
           <StartupScreeningSection
             pb={pb}
             tenantId={user.tenant}
+            viewerRoles={user.roles}
             startupId={id}
             canAssess={canAccessModuleForUser(user.roles, 'bedomning_excellens', user.enabledModules)}
             canRequest={hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])}

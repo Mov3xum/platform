@@ -26,8 +26,14 @@ export default async function KompletteringPage({ params }: { params: Promise<{ 
   const user = await requireUser();
   const { id } = await params;
   const pb = await getServerPb();
-  const request = await getScreeningRequest(pb, user.tenant, id);
-  if (!request) notFound();
+  // Läsvägen prövar behörigheten i koden (canViewScreeningRequest, samma
+  // villkor som RLS) även när raden lästs med superuser-reserven (§ 21.3) —
+  // null betyder "finns inte eller får inte ses".
+  const request = await getScreeningRequest(pb, { tenant: user.tenant, roles: user.roles, linkedStartups: user.linkedStartups }, id);
+  if (!request) {
+    if (isPureStartupMember(user.roles)) redirect('/min-oversikt');
+    notFound();
+  }
 
   const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
   const isObserver = hasRole(user.roles, ['observer']);
