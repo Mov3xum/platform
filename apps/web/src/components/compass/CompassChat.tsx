@@ -153,6 +153,11 @@ export function CompassChat({
           </div>
         )}
         {error && <div className="mx-chat-err">{error}</div>}
+        {reachedLimit && !pending && (
+          <div className="mx-t-xs mx-muted" style={{ textAlign: 'center', padding: '8px 0' }}>
+            Samtalet är avslutat — tack för att du delade din idé.
+          </div>
+        )}
       </div>
 
       {/* Input */}

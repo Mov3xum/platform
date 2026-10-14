@@ -3924,6 +3924,35 @@ Tre fel i samma yta, en gemensam grundorsak för de två första:
   `/aktivitet` som "frågornas ordning ändrades". Riskklass/PII: n/a — inga
   nya fält, kollektioner eller datavägar.
 
+### 23.9 Avslut vid max antal utbyten (2026-10)
+
+**Incident.** En modul med `max_exchanges = 5` låste inmatningen ("Samtalet
+är avslutat") direkt efter besökarens femte meddelande — men modellen visste
+inget om taket och avslutade med nya frågor ("Har du funderat på hur du skulle
+kunna göra en enkel prototyp …?") som besökaren aldrig kunde besvara.
+Samtalet slutade som ett avbrott, inte ett avslut.
+
+- **Motorn vet var i samtalet den är.** Den rena, enhetstestade
+  `lib/compass/chat-closing.ts` (`exchangeBudgetGuidance`,
+  `withExchangeBudget`) räknar återstående svar ur historiken
+  (`countUserTurns`) mot modulens tak och lägger en instruktion **sist** i
+  systemprompten (efter persona/egen prompt — en modulredaktör kan inte ta
+  bort den): *öppet* = "N svar återstår, prioritera idé/målgrupp/kontakt";
+  *näst sista* = högst EN fråga, kontaktuppgifter först om de saknas, signalera
+  att det rundas av; *sista* = **inga frågor**, tacka, sammanfatta, konkret
+  nästa steg (någon hör av sig om e-post/telefon finns, annars hur man når
+  Movexum) och en tydlig avslutningsfras. Tak 1 ⇒ första svaret är det sista.
+- **En plats:** `intakeReply` (`lib/compass/chat.ts`) tar `maxExchanges` och
+  sätter ihop prompten — den publika routen (`/api/public/m/[slug]/chat`) och
+  den interna testchatten (`/api/inflode/chat`) skickar bara modulens värde,
+  så beteendet kan inte divergera. Utan tak (0) ändras ingenting.
+- **UI:** `CompassChat` visar "Samtalet är avslutat — tack för att du delade
+  din idé" under sista svaret; modul-admin förklarar vid "Max antal utbyten"
+  att assistenten alltid rundar av.
+- Ingen ny dataväg, inga nya fält; riskklass oförändrad (publik AI-chatt =
+  begränsad). Lead-garantin (§ 23.6) är oförändrad — sista turen persisteras
+  som alla andra.
+
 ---
 
 ## 24. AI-sorterat filarkiv — ämnes-/bolagsmappar (/filer)

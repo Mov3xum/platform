@@ -442,6 +442,11 @@ export function ModuleEditor({
                 className="mx-input"
                 style={{ marginTop: 4, maxWidth: 200 }}
               />
+              <span className="mx-t-xs mx-muted" style={{ display: 'block', marginTop: 4 }}>
+                Assistenten vet hur många svar besökaren har kvar och rundar alltid av på sista
+                turen (sammanfattning + nästa steg, inga frågor) — samtalet slutar aldrig mitt i
+                en fråga.
+              </span>
             </label>
             <details>
               <summary className="mx-t-13" style={{ cursor: 'pointer' }}>

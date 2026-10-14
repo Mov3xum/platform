@@ -4,6 +4,7 @@ import {
   callMistralWithFallback,
   type MistralMessage
 } from '@/lib/ai/mistral';
+import { countUserTurns, withExchangeBudget } from './chat-closing';
 import {
   AI_REVIEW_SYSTEM_PROMPT,
   EXTRACTION_SYSTEM_PROMPT,
@@ -69,10 +70,17 @@ const INTAKE_FALLBACK_MODELS = [
 /** Det publika intake-samtalet — assistent-svar via Mistral. */
 export async function intakeReply(
   history: CompassChatMessage[],
-  options: { model?: string; systemPrompt?: string } = {}
+  options: { model?: string; systemPrompt?: string; maxExchanges?: number | null } = {}
 ): Promise<{ text: string; tokensIn: number; tokensOut: number; model: string }> {
+  // Avslutsstyrning (§ 23.9): med ett tak på antal utbyten får modellen veta
+  // hur många svar som återstår och tvingas knyta ihop samtalet på sista
+  // turen — läggs SIST så en egen systemprompt aldrig kan ta bort den.
+  const systemPrompt = withExchangeBudget(options.systemPrompt || INTAKE_SYSTEM_PROMPT, {
+    userTurns: countUserTurns(history),
+    maxExchanges: options.maxExchanges
+  });
   const messages: MistralMessage[] = [
-    { role: 'system', content: options.systemPrompt || INTAKE_SYSTEM_PROMPT },
+    { role: 'system', content: systemPrompt },
     ...history.map<MistralMessage>((m) => ({ role: m.role, content: m.content }))
   ];
 
