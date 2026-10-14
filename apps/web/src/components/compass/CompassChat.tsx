@@ -18,9 +18,9 @@ interface Props {
   showAiBadge?: boolean;
   /** Chat-endpoint. Default = /api/inflode/chat (inloggad). Publik: /api/public/m/<slug>/chat */
   endpoint?: string;
-  /** Rubriknamn i chat-headern (default "Inflöde"). */
+  /** Assistentens namn: rubrik i chat-headern och i standardhälsningen. */
   title?: string;
-  /** Initial i header-avataren (default "I"). */
+  /** Initial i header-avataren (default "M"). */
   avatarInitial?: string;
   /** Max antal användarmeddelanden (0/odefinierat = obegränsat). */
   maxExchanges?: number;
@@ -49,23 +49,29 @@ function readAttribution(): Attribution {
   };
 }
 
-const DEFAULT_GREETING =
-  'Hej! Jag är Inflöde, Movexums AI-assistent. Berätta gärna lite om idén du går och funderar på — vad försöker du lösa, och för vem?';
+/**
+ * Hälsningen bär assistentens namn (modulens "Assistentens namn", annars
+ * modulens namn) — aldrig ett hårdkodat produktnamn. Modulens egen
+ * `intro_message` vinner när den är satt.
+ */
+function defaultGreeting(name: string): string {
+  return `Hej! Jag är ${name}. Berätta gärna lite om idén du går och funderar på — vad försöker du lösa, och för vem?`;
+}
 
 export function CompassChat({
   initialAssistantMessage,
   moduleSlug,
   showAiBadge = true,
   endpoint = '/api/inflode/chat',
-  title = 'Inflöde',
-  avatarInitial = 'I',
+  title = 'Movexums AI-assistent',
+  avatarInitial = 'M',
   maxExchanges = 0,
   consent,
   closing,
   nextModule
 }: Props) {
   const [messages, setMessages] = useState<Msg[]>(() => [
-    { role: 'assistant', content: initialAssistantMessage || DEFAULT_GREETING }
+    { role: 'assistant', content: initialAssistantMessage || defaultGreeting(title) }
   ]);
   const [input, setInput] = useState('');
   const [pending, setPending] = useState(false);

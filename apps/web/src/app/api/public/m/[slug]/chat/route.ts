@@ -148,7 +148,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     reply = await intakeReply(history, {
       systemPrompt,
       model: module.model,
-      maxExchanges: module.max_exchanges
+      maxExchanges: module.max_exchanges,
+      assistantName: module.chat_persona || module.name
     });
   } catch (err) {
     if (err instanceof MistralError && err.status === 429) {
