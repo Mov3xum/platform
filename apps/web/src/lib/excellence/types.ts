@@ -43,7 +43,7 @@ export interface ExcellenceAssessment {
   /** Grundarna bedömningen räknade på (teamet på bolagskortet eller manuellt inmatade). */
   founders: ScreeningFounderRow[] | null;
   foundersSource: 'platform' | 'manual';
-  /** De manuella svar som vägdes in (§ 51.4) — förifyller panelen "Manuella svar". */
+  /** De manuella svar som vägdes in (§ 51.4) — förifyller de redigerbara punkterna i rapporten. */
   facts: ScreeningManualFacts;
   /** Sant när svaren kunde sparas på bolagskortet (portföljbolag). */
   factsSaved?: boolean;

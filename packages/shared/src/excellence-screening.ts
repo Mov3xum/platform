@@ -214,7 +214,7 @@ export interface ThresholdRow {
   balance_sheet_sek?: number;
   /** Bokslut hämtat men utan rader (nystartat), eller inte hämtat alls. */
   note?: string;
-  /** Talen är bolagets egen uppskattning (bilaga I art. 4.3 — nystartat utan bokslut), ur Manuella svar. */
+  /** Talen är bolagets egen uppskattning (bilaga I art. 4.3 — nystartat utan bokslut), skriven i rapporten. */
   estimated?: boolean;
 }
 
@@ -838,7 +838,7 @@ function conditionsFor(c: GroupCompanyFacts, ref: Date, manual?: CompanyManualAn
   if (listed.verdict === 'yes' && listed.source === 'register') {
     checks.push(
       manual?.listed?.verdict === 'no'
-        ? { ...listed, detail: `${listed.detail} (Ett manuellt svar "börsnoterat" bortses från — ett privat aktiebolag kan inte vara noterat; ta bort svaret under Manuella svar.)` }
+        ? { ...listed, detail: `${listed.detail} (Ett manuellt svar "börsnoterat" bortses från — ett privat aktiebolag kan inte vara noterat; ta bort svaret på punkten i rapporten.)` }
         : listed
     );
   } else {
@@ -862,7 +862,7 @@ function conditionsFor(c: GroupCompanyFacts, ref: Date, manual?: CompanyManualAn
 }
 
 const DIVIDEND_LABEL = 'Har inte beslutat om eller delat ut vinst';
-const DIVIDEND_NEEDS = 'Bokslut med utdelningspost (datadelen Bokslut hos Roaring, /extended) eller bolagets intyg (Manuella svar).';
+const DIVIDEND_NEEDS = 'Bokslut med utdelningspost (datadelen Bokslut hos Roaring, /extended) eller bolagets intyg (svara på punkten i rapporten).';
 
 /**
  * Art. 22 GBER: bolaget får inte ha delat ut vinst. Avgörs ur årsredovisningens
@@ -1135,7 +1135,7 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
     const fin = c.financials ? latestFinancials(c.financials) : null;
     if (!fin) {
       // Nystartat bolag utan bokslut: bilaga I art. 4.3 — uppgifterna tas ur
-      // en uppskattning i god tro under räkenskapsåret (Manuella svar).
+      // en uppskattning i god tro under räkenskapsåret (skrivs direkt i tröskelvärdets rad).
       const est = manual?.estimates?.[c.orgNr];
       if (est && (est.employees !== undefined || est.revenue_sek !== undefined || est.balance_sheet_sek !== undefined)) {
         return {
@@ -1403,16 +1403,16 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
     .filter((e) => e.direction === 'owner' && e.indirect !== true && e.owner_kind !== 'person')
     .reduce((a, e) => a + (ownershipShareRange(e)?.max ?? 0), 0);
   const indirectHint = indirect
-    ? ` Indirekt ägande: via ${indirect.via.join(' → ')} äger fysiska personer minst ${formatPct(indirect.minPct)} av startup-bolaget enligt verklig huvudman — är det grundarteamet räknas det (direkt eller indirekt); ange då grundarnas totala andel inkl. indirekt under Manuella svar.`
+    ? ` Indirekt ägande: via ${indirect.via.join(' → ')} äger fysiska personer minst ${formatPct(indirect.minPct)} av startup-bolaget enligt verklig huvudman — är det grundarteamet räknas det (direkt eller indirekt); ange då grundarnas totala andel inkl. indirekt i grundartabellen.`
     : directCompanyOwned >= PARTNER_THRESHOLD_PCT
-      ? ` Startup-bolaget ägs till ${formatPct(directCompanyOwned)} av bolag — grundarnas andel kan vara indirekt (via holdingbolag); hämta verklig huvudman för ägarbolagen eller ange andelen inkl. indirekt ägande under Manuella svar.`
+      ? ` Startup-bolaget ägs till ${formatPct(directCompanyOwned)} av bolag — grundarnas andel kan vara indirekt (via holdingbolag); hämta verklig huvudman för ägarbolagen eller ange andelen inkl. indirekt ägande i grundartabellen.`
       : '';
   if (founders === undefined) {
     vinnovaChecks.push({
       id: 'founders_75',
       label: 'Grundarteamet äger minst 75 % av startup-bolaget (direkt eller indirekt)',
       verdict: 'unknown',
-      detail: `Bolaget finns inte i plattformen — grundarnas ägande finns inte i registret (verklig huvudman visas utan namn). Lägg in grundarna under Manuella svar.${indirectHint}`,
+      detail: `Bolaget finns inte i plattformen — grundarnas ägande finns inte i registret (verklig huvudman visas utan namn). Lägg in grundarna i grundartabellen.${indirectHint}`,
       source: 'manual',
       needs: 'Grundare och ägarandelar (aktiebok, inkl. indirekt ägande via holdingbolag).'
     });
@@ -1421,7 +1421,7 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
       id: 'founders_75',
       label: 'Grundarteamet äger minst 75 % av startup-bolaget (direkt eller indirekt)',
       verdict: 'unknown',
-      detail: `Inga grundare med ägarandel i teamet på bolagskortet. Lägg in grundarna under Manuella svar eller i teamet.${indirectHint}`,
+      detail: `Inga grundare med ägarandel i teamet på bolagskortet. Lägg in grundarna i grundartabellen eller i teamet på bolagskortet.${indirectHint}`,
       source: 'platform',
       needs: 'Grundare och ägarandelar läggs in i teamet på bolagskortet (inkl. indirekt ägande via holdingbolag).'
     });
@@ -1610,7 +1610,7 @@ export function founderDrivenCheck(
   const label = 'Grundardrivet (engagemang i % av heltid)';
   const rule =
     'Trösklar enligt kartan: formation inget krav; problem/solution-fit sammantaget ≥ 40 % och en grundare ≥ 20 %; product/market-fit sammantaget ≥ 60 % och en grundare ≥ 40 %.';
-  const needs = 'Grundarnas engagemang i % av heltid och bolagets mognadsfas (Manuella svar).';
+  const needs = 'Grundarnas engagemang i % av heltid och bolagets mognadsfas (grundartabellen i rapporten).';
   if (!phase) {
     return { id: 'founder_driven', label, verdict: 'unknown', detail: `Mognadsfas inte angiven. ${rule}`, source: 'manual', needs };
   }
@@ -1633,7 +1633,7 @@ export function founderDrivenCheck(
       verdict: 'unknown',
       detail: `Fas ${phaseLabel} (krav: sammantaget ≥ ${t.total} %, en grundare ≥ ${t.single} %), men inget engagemang är angivet per grundare.`,
       source: 'manual',
-      needs: 'Engagemang i % av heltid per grundare (Manuella svar).'
+      needs: 'Engagemang i % av heltid per grundare (grundartabellen i rapporten).'
     };
   }
   const total = withEng.reduce((a, f) => a + (f.engagement_pct ?? 0), 0);

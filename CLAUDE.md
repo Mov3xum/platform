@@ -8442,7 +8442,8 @@ bolagsregister bär (börsnotering, företagskoncentration, övertagen
 verksamhet, grundarnas engagemang, innovationshöjd, de minimis-intyg för
 anknutna bolag, IRL-motivering, controllerns kommentar) — en körning gav
 därför fler OKÄNT än dokumentet och det fanns inget ställe att fylla i
-svaren. Nu finns panelen **Manuella svar** under varje bedömning:
+svaren. Svaren fylls i direkt i rapporten (sedan 2026-10-14 EN interaktiv rapport,
+§ 51.9 — den tidigare separata panelen "Manuella svar" är borttagen):
 
 - **Datamodell:** `startups.screening_facts` (json, migration **1700000190**;
   speglad i `setup-via-api.mjs`, asserterad i `verify-baseline.mjs`
@@ -8526,7 +8527,7 @@ analysen" av ett holdingbolags egna ägare/innehav stannade vid visning.
   manuellt "börsnoterat" på ett privat AB bortses från med en not i
   bedömningen (det räddar redan sparade inverterade svar).
 - **Frågorna i Manuella svar är naturliga frågor med uttydda alternativ**
-  (`CONDITION_QUESTION`/`VINNOVA_MANUAL` i `ManualFactsPanel.tsx`): "Är
+  (`CONDITION_QUESTION`/`VINNOVA_QUESTION` i `AssessmentReport.tsx`): "Är
   bolaget börsnoterat?" → "Nej — inte börsnoterat" / "Ja — aktierna är
   upptagna till handel". Lagrat `verdict` är oförändrat i VILLKORETS riktning
   (`yes` = uppfyllt); bara presentationen ändrades. En punkt registret redan
@@ -8570,7 +8571,7 @@ analysen" av ett holdingbolags egna ägare/innehav stannade vid visning.
   ägarbolagen. Punkten "grundarteamet äger ≥ 75 % (direkt eller indirekt)"
   får det som LEDTRÅD ("via Wellgo → Ewell äger fysiska personer minst
   67,5 %") — aldrig ett JA av sig självt, registret vet inte att personerna
-  är grundarna; controllern anger andelen inkl. indirekt under Manuella svar.
+  är grundarna; controllern anger andelen inkl. indirekt i grundartabellen.
   Ägs startup-bolaget till ≥ 25 % av bolag utan att huvudmännen hämtats sägs
   det uttryckligen.
 - **Uppskattning för bolag utan bokslut** (bilaga I art. 4.3): nystartade
@@ -8583,6 +8584,50 @@ analysen" av ett holdingbolags egna ägare/innehav stannade vid visning.
   (`screening_facts` bär uppskattningarna, redan fältmaskat för AI); koncern-
   listan bär bara juridiska personer; namn på fysiska personer når aldrig
   motorn.
+
+### 51.9 En interaktiv rapport — inga separata manuella fält (2026-10-14)
+
+**Incident/behov.** Bedömningen visades först som en läsrapport och därunder
+en separat panel "Manuella svar" med dropdowns för samma punkter — två listor
+över samma saker, och den som läste rapporten såg inte var ett svar skulle
+in. Nu är det **EN rapport** (`AssessmentReport.tsx`, ersätter
+`AssessmentView` + `ManualFactsPanel`) där varje punkt ändras på platsen:
+
+- **Punkter:** ett utfall som registret inte kan avgöra är en knapp (Ja/Nej/
+  Okänt med ▾). Klick öppnar svarsalternativen under punkten — alltid uttydda
+  ("Nej — inte börsnoterat" / "Ja — aktierna är upptagna till handel" /
+  "Vet inte" resp. "Inget eget svar (registret gäller)") + motivering. Ett
+  eget svar visas som raden "Ditt svar" tills det sparas. Gäller
+  grundförutsättningarna per bolag (startup + anknutna med org-nr),
+  "Fristående företag?", Vinnovas coachpunkter (inte marknadsredo,
+  innovativt, övriga villkor) och excellens. Ålder/status/tröskel/de minimis
+  avgörs av registret/plattformen och går inte att ändra.
+- **Tabeller:** grundartabellen (namn, andel, engagemang, forskare,
+  mognadsfas, forskningsavknoppning), IRL-tabellen (nivå när plattformen
+  saknar readiness-rad, motivering alltid) och review-radens kommentar har en
+  **Ändra**-länk som byter tabellen till inmatning; ett klick på
+  grundarpunkterna (≥ 75 %, grundardrivet) öppnar grundartabellen.
+  Tröskelvärdets rader för bolag UTAN bokslut är inmatning direkt i cellerna
+  (uppskattning i god tro, bilaga I art. 4.3, + källa i bokslutskolumnen).
+  De minimis-intyg för anknutna bolag utan plattformsdata ligger som en rad
+  under de minimis-punkten ("Ange intyg").
+- **Ett enda Spara.** Alla ändringar samlas i state och serialiseras till ett
+  dolt formulär (`FACTS_FORM_ID`, `context` + `facts`); den klistrade raden
+  längst ned ("Spara och räkna om", aktiv bara vid osparade ändringar, med
+  Ångra) skickar `applyExcellenceFactsAction` — samma underlag, inga nya
+  leverantörsanrop, svaren sparas på bolagskortet (§ 51.4). Koncernkartans
+  egna formulär (lägg till koncernbolag, hämta mer) ligger INUTI rapporten
+  utan nästlade `<form>` (sparaknappen använder `form=`-attributet) och tar
+  med rapportens AKTUELLA svar (även osparade) så inget går förlorat när man
+  hämtar mer mitt i en redigering. En ny körning/omräkning stänger alla
+  redigeringar och laddar om svaren.
+- **Lugn som default:** en redigering i taget (`editing`-nyckel), tabellerna
+  är läsbara tills man klickar Ändra, "Behövs: …" döljs medan punkten
+  redigeras, och motorns hjälptexter pekar in i rapporten ("grundartabellen",
+  "svara på punkten") i stället för till en panel som inte finns.
+- Ingen ny dataväg, inga nya fält; samma skrivväg, samma personnummer-
+  sanering och samma regel (manuellt Nej vinner, Ja fyller OKÄNT). Riskklass
+  n/a.
 
 ### 51.3 Var en bedömning lagras — PDF i Filer, i bolagets mapp (2026-10-12)
 
@@ -8760,8 +8805,8 @@ helst** — inga bolagsspecifika regler.
   valet, så dess egen koncern följs som andra ledet (moderns moder kommer
   med av sig själv). **Manuellt "fristående"** (`screening_facts.standalone`,
   `ManualAnswer`) prövas med `applyManualAnswer` — Nej väger alltid tyngst,
-  Ja fyller bara OKÄNT. Panelen Manuella svar har sektionen "Fristående
-  företag — aktieboken"; koncernkartan har **"Lägg till koncernbolag"**
+  Ja fyller bara OKÄNT. Punkten "Fristående företag?" besvaras direkt i
+  rapporten (§ 51.9); koncernkartan har **"Lägg till koncernbolag"**
   (`addGroupCompanyAction`): sparas i de manuella svaren, i registerläget
   valfritt uppslag med valda delar (kostnad visas innan) och "följ koncernen
   vidare" (andra ledet: grunddata + bokslut av det valda, tak
