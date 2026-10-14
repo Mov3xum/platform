@@ -149,7 +149,7 @@ async function finishAssessment(
       deMinimisFromPlatform: ctx.input.related.filter((r) => r.deMinimis?.source === 'platform').map((r) => r.orgNr)
     }),
     // Bolagets begäran om komplettering med svar — sammanställs i PDF:n (§ 51.8).
-    requests: startupId ? await loadRequestSummaries(pb, user.tenant, startupId) : undefined,
+    requests: startupId ? await loadRequestSummaries(pb, user, startupId) : undefined,
     recomputed: opts.recomputed || undefined
   };
   // PDF:en renderas EN gång och arkiveras på två ställen: i den inloggades
@@ -628,8 +628,13 @@ function displayName(user: { name?: string }): string | undefined {
 }
 
 /** Begäran om komplettering för bolaget, PII-fritt sammanfattade för PDF:n (fail-soft). */
-async function loadRequestSummaries(pb: PocketBase, tenant: string, startupId: string): Promise<AssessmentRequestSummary[] | undefined> {
-  const { requests } = await listScreeningRequestsForStartup(pb, tenant, startupId, { limit: 20 });
+async function loadRequestSummaries(pb: PocketBase, user: SessionUser, startupId: string): Promise<AssessmentRequestSummary[] | undefined> {
+  const { requests } = await listScreeningRequestsForStartup(
+    pb,
+    { tenant: user.tenant, roles: user.roles, linkedStartups: user.linkedStartups },
+    startupId,
+    { limit: 20 }
+  );
   if (requests.length === 0) return undefined;
   return requests.map((r) => ({
     id: r.id,
