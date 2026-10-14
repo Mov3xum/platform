@@ -77,6 +77,8 @@ export default async function ModulePage({
           <CompassChat
             moduleSlug={mod.slug}
             initialAssistantMessage={mod.intro_message || undefined}
+            title={mod.chat_persona || mod.name}
+            avatarInitial={(mod.name || 'M').slice(0, 1).toUpperCase()}
           />
         </div>
       ) : mod.flow_type === 'quiz' ? (

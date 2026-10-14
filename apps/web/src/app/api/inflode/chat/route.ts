@@ -94,6 +94,7 @@ export async function POST(req: Request) {
   let systemPrompt: string | undefined;
   let model: string | undefined;
   let maxExchanges: number | undefined;
+  let assistantName: string | undefined;
   let mod: CompassModule | null = null;
   if (body.moduleSlug) {
     mod = await getModuleBySlug(pb, user.tenant, body.moduleSlug);
@@ -102,12 +103,13 @@ export async function POST(req: Request) {
       systemPrompt = buildModuleChatSystemPrompt(mod, questions);
       if (mod.model) model = mod.model;
       maxExchanges = mod.max_exchanges;
+      assistantName = mod.chat_persona || mod.name;
     }
   }
 
   let reply;
   try {
-    reply = await intakeReply(history, { systemPrompt, model, maxExchanges });
+    reply = await intakeReply(history, { systemPrompt, model, maxExchanges, assistantName });
   } catch (err) {
     if (err instanceof MistralError) {
       if (err.status === 429) {

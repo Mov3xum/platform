@@ -298,6 +298,8 @@ export function buildModuleChatSystemPrompt(
 ): string | undefined {
   const segments: string[] = [];
 
+  // Namnet sätts av `intakeReply` (identitetsblocket, först i prompten);
+  // här räcker rollen.
   if (module.chat_persona) {
     segments.push(`Du agerar som "${module.chat_persona}".`);
   }

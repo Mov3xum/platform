@@ -414,6 +414,9 @@ export function ModuleEditor({
                   style={{ marginTop: 4 }}
                   placeholder="t.ex. Movexums rådgivare"
                 />
+                <span className="mx-muted mx-t-xs" style={{ display: 'block', marginTop: 4 }}>
+                  Namnet assistenten hälsar och presenterar sig med. Tomt = modulens namn.
+                </span>
               </label>
               <label className="mx-label">
                 AI-modell

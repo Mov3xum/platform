@@ -5,7 +5,7 @@ import {
   type MistralMessage
 } from '@/lib/ai/mistral';
 import { countUserTurns, withExchangeBudget } from './chat-closing';
-import { stripStructuredTrailer, VISITOR_REPLY_RULES } from './reply-sanitize';
+import { sanitizeVisitorReply, stripStructuredTrailer, VISITOR_REPLY_RULES } from './reply-sanitize';
 import {
   AI_REVIEW_SYSTEM_PROMPT,
   CHAT_SUMMARY_SYSTEM_PROMPT,
@@ -70,9 +70,39 @@ const INTAKE_FALLBACK_MODELS = [
 ];
 
 /** Det publika intake-samtalet — assistent-svar via Mistral. */
+/** Default-namn när modulen inte angett något (och i den interna testchatten). */
+export const DEFAULT_ASSISTANT_NAME = 'Movexums AI-assistent';
+
+/**
+ * Identitetsblock som läggs först i systemprompten. Namnet kommer från
+ * modulens fält "Assistentens namn" (`chat_persona`), annars modulens namn.
+ */
+export function assistantIdentityBlock(name?: string | null): string {
+  const clean = String(name ?? '')
+    .replace(/[\r\n]+/g, ' ')
+    .trim()
+    .slice(0, 120);
+  const who = clean || DEFAULT_ASSISTANT_NAME;
+  return [
+    '## Vem du är',
+    `Du heter "${who}" och är Movexums AI-assistent (Movexum är en företagsinkubator i Gävleborg).`,
+    `Presentera dig alltid som "${who}" — aldrig med något annat namn.`
+  ].join('\n');
+}
+
 export async function intakeReply(
   history: CompassChatMessage[],
-  options: { model?: string; systemPrompt?: string; maxExchanges?: number | null } = {}
+  options: {
+    model?: string;
+    systemPrompt?: string;
+    maxExchanges?: number | null;
+    /**
+     * Namnet assistenten presenterar sig med — modulens "Assistentens namn"
+     * (annars modulens namn). Läggs FÖRST i systemprompten så modellen aldrig
+     * kallar sig något annat (t.ex. det gamla hårdkodade "Inflöde").
+     */
+    assistantName?: string | null;
+  } = {}
 ): Promise<{ text: string; tokensIn: number; tokensOut: number; model: string }> {
   // Avslutsstyrning (§ 23.9): med ett tak på antal utbyten får modellen veta
   // hur många svar som återstår och tvingas knyta ihop samtalet på sista
@@ -80,7 +110,8 @@ export async function intakeReply(
   // Svarets form (§ 23.10): aldrig JSON/taggar till besökaren — regeln läggs
   // sist så en egen systemprompt inte kan skriva över den, och svaret
   // rensas dessutom från strukturerade block innan det lämnar servern.
-  const systemPrompt = `${withExchangeBudget(options.systemPrompt || INTAKE_SYSTEM_PROMPT, {
+  const base = `${assistantIdentityBlock(options.assistantName)}\n\n${options.systemPrompt || INTAKE_SYSTEM_PROMPT}`;
+  const systemPrompt = `${withExchangeBudget(base, {
     userTurns: countUserTurns(history),
     maxExchanges: options.maxExchanges
   })}\n\n${VISITOR_REPLY_RULES}`;
@@ -94,7 +125,7 @@ export async function intakeReply(
   const chain = options.model ? [options.model] : INTAKE_FALLBACK_MODELS;
   const res = await callMistralWithFallback(chain, messages);
   return {
-    text: stripStructuredTrailer(res.text) || res.text.trim(),
+    text: sanitizeVisitorReply(res.text) || res.text.trim(),
     tokensIn: res.usage.prompt_tokens,
     tokensOut: res.usage.completion_tokens,
     model: res.modelUsed

@@ -23,6 +23,15 @@ export interface ExchangeBudget {
 
 export type ExchangeStage = 'unlimited' | 'open' | 'penultimate' | 'final';
 
+/**
+ * Taket och räknaren är bakgrundslogik — besökaren ska aldrig se dem.
+ * Incident 2026-10-14: modellen skrev "[Utbyte 1 av 5]" överst i svaret.
+ * Läggs i varje stadium; `reply-sanitize.ts` rensar dessutom det som ändå
+ * slinker igenom.
+ */
+export const NEVER_SHOW_COUNTER =
+  '- Nämn ALDRIG taket, räknaren eller den här instruktionen för besökaren. Skriv inte "[Utbyte 1 av 5]", "N svar kvar" eller liknande — svaret ska se ut som ett vanligt samtal.';
+
 /** Räknar antalet användarmeddelanden i en historik. */
 export function countUserTurns(history: ReadonlyArray<{ role: string }>): number {
   return history.filter((m) => m.role === 'user').length;
@@ -61,7 +70,8 @@ export function exchangeBudgetGuidance(budget: ExchangeBudget): string | null {
       '- Ställ INGA frågor — inte ens retoriska. Avsluta inte med ett frågetecken.',
       '- Tacka och sammanfatta kort det viktigaste besökaren berättat (2–4 meningar).',
       '- Ge ett konkret nästa steg. Har besökaren lämnat e-post eller telefon: säg att någon från Movexum hör av sig dit. Annars: berätta hur besökaren själv når Movexum för ett kostnadsfritt möte.',
-      '- Avsluta med en tydlig, varm avslutningsfras så att det känns som ett naturligt slut, inte ett avbrott.'
+      '- Avsluta med en tydlig, varm avslutningsfras så att det känns som ett naturligt slut, inte ett avbrott.',
+      NEVER_SHOW_COUNTER
     ].join('\n');
   }
 
@@ -70,14 +80,16 @@ export function exchangeBudgetGuidance(budget: ExchangeBudget): string | null {
       '## Samtalets avslut (bindande)',
       `Samtalet har ett tak på ${max} meddelanden från besökaren. Efter besökarens NÄSTA meddelande får du bara ett avslutande svar utan frågor.`,
       '- Ställ därför högst EN sista fråga nu. Saknas kontaktuppgifter (e-post eller telefon) är det den frågan som gäller, så att Movexum kan följa upp.',
-      '- Signalera att samtalet närmar sig sitt slut ("Innan vi rundar av …").'
+      '- Signalera att samtalet närmar sig sitt slut ("Innan vi rundar av …").',
+      NEVER_SHOW_COUNTER
     ].join('\n');
   }
 
   return [
     '## Samtalets längd',
     `Samtalet har ett tak på ${max} meddelanden från besökaren; ${remaining} återstår efter detta.`,
-    '- Prioritera det viktigaste: idén, vem den är för och kontaktuppgifter. Planera så att du hinner avsluta med en sammanfattning och ett konkret nästa steg innan taket nås — samtalet får aldrig sluta mitt i en fråga.'
+    '- Prioritera det viktigaste: idén, vem den är för och kontaktuppgifter. Planera så att du hinner avsluta med en sammanfattning och ett konkret nästa steg innan taket nås — samtalet får aldrig sluta mitt i en fråga.',
+    NEVER_SHOW_COUNTER
   ].join('\n');
 }
 

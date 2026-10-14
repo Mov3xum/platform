@@ -3990,9 +3990,25 @@ alls och en avbruten chatt såg ut som en slutförd.
   chatten, PDF:n och mejlet.
 - **Aldrig strukturerad data i chatten.** `VISITOR_REPLY_RULES`
   (`reply-sanitize.ts`) läggs sist i systemprompten i `intakeReply`
-  (en egen systemprompt kan inte ta bort den) och `stripStructuredTrailer`
-  rensar `<tagg>…</tagg>`, kodblock och naket JSON ur svaret innan det
-  returneras eller persisteras. Enhetstestat.
+  (en egen systemprompt kan inte ta bort den) och `sanitizeVisitorReply`
+  (= `stripStructuredTrailer` + `stripInternalMarkers`) rensar
+  `<tagg>…</tagg>`, kodblock, naket JSON OCH interna markörer/räknare
+  ("[Utbyte 1 av 5]", "(Svar 2/5)", "Tur 3 av 5:" på egen rad) ur svaret
+  innan det returneras eller persisteras. Incident 2026-10-14: modellen ekade
+  takräknaren ur avslutsstyrningen (§ 23.9) överst i varje svar — varje
+  stadium i `exchangeBudgetGuidance` säger nu uttryckligen att taket aldrig
+  får nämnas (`NEVER_SHOW_COUNTER`). Bakgrundslogik, fält och regler syns
+  aldrig i besökarens UI. Enhetstestat.
+- **Assistentens namn kommer ur modulen, aldrig ur koden.** Det hårdkodade
+  "Hej! Jag är Inflöde …" är borta: `intakeReply` tar `assistantName`
+  (modulens fält **Assistentens namn** = `chat_persona`, annars modulens
+  namn; `DEFAULT_ASSISTANT_NAME` = "Movexums AI-assistent" bara i den
+  interna testchatten utan modul) och lägger ett identitetsblock FÖRST i
+  systemprompten (`assistantIdentityBlock`: "Du heter X — presentera dig
+  alltid som X"); `INTAKE_SYSTEM_PROMPT` namnger inte längre assistenten.
+  `CompassChat` bygger standardhälsningen av samma namn (`title`), och
+  modulens `intro_message` vinner när den är satt. Publik sida och
+  förhandsgranskning skickar samma namn.
 - **Genomförandestatus — `compass_leads.completion` (migration 1700000192):**
   `in_progress` | `completed` | `abandoned`, skild från personalens
   `status`. Saknat fält ⇒ `completed` (`normalizeLeadCompletion`), och

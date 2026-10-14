@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { stripStructuredTrailer, VISITOR_REPLY_RULES } from './reply-sanitize';
+import {
+  sanitizeVisitorReply,
+  stripInternalMarkers,
+  stripStructuredTrailer,
+  VISITOR_REPLY_RULES
+} from './reply-sanitize';
 
 test('tar bort <lead>-block med JSON efter texten', () => {
   const reply =
@@ -27,4 +32,35 @@ test('ett svar som bara är JSON blir tomt', () => {
 test('reglerna förbjuder JSON/taggar i klartext', () => {
   assert.match(VISITOR_REPLY_RULES, /ALDRIG JSON/);
   assert.match(VISITOR_REPLY_RULES, /<lead>/);
+});
+
+test('tar bort interna räknare och markörer på egen rad', () => {
+  const reply =
+    '[Utbyte 1 av 5]\n\nEn spade på sju meter – det låter som något specifikt! Vem har behov av den?';
+  assert.equal(
+    stripInternalMarkers(reply),
+    'En spade på sju meter – det låter som något specifikt! Vem har behov av den?'
+  );
+  assert.equal(stripInternalMarkers('(Svar 2/5)\nHej igen!'), 'Hej igen!');
+  assert.equal(stripInternalMarkers('Tur 3 av 5:\nHej igen!'), 'Hej igen!');
+  assert.equal(stripInternalMarkers('Hej!\n\n[Intern notering: kontaktuppgifter saknas]\n\nVad heter du?'), 'Hej!\n\nVad heter du?');
+  assert.equal(stripInternalMarkers('Hej!\n[Meddelande 4 av 5]'), 'Hej!');
+});
+
+test('rör inte vanliga rader som råkar innehålla samma ord', () => {
+  const t = 'Svar på din fråga: ja, det går.\nSteg 1 är att prata med kunder.\n(Jag förstår att det är svårt.)';
+  assert.equal(stripInternalMarkers(t), t);
+  assert.equal(stripInternalMarkers('Har du 3 personer i teamet?'), 'Har du 3 personer i teamet?');
+});
+
+test('sanitizeVisitorReply kombinerar båda lagren', () => {
+  assert.equal(
+    sanitizeVisitorReply('[Utbyte 5 av 5]\nTack för samtalet!\n\n<lead>{"a":1}</lead>'),
+    'Tack för samtalet!'
+  );
+});
+
+test('reglerna förbjuder interna räknare i klartext', () => {
+  assert.match(VISITOR_REPLY_RULES, /Utbyte 1 av 5/);
+  assert.match(VISITOR_REPLY_RULES, /interna räknare/);
 });

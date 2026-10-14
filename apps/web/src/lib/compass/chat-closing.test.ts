@@ -63,3 +63,10 @@ test('countUserTurns räknar bara användarmeddelanden', () => {
     2
   );
 });
+
+test('varje stadium förbjuder att räknaren visas för besökaren', () => {
+  for (const userTurns of [1, 4, 5]) {
+    const g = exchangeBudgetGuidance({ userTurns, maxExchanges: 5 }) ?? '';
+    assert.match(g, /Nämn ALDRIG taket/);
+  }
+});
