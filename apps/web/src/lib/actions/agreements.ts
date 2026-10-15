@@ -269,7 +269,7 @@ export async function signAgreementAction(
     tenant: user.tenant,
     actorId: user.id,
     entity: { type: 'agreements', id: agreementId },
-    payload: { title: String(agreement.title || 'Avtal'), snippet: startupName, href: `/startups/${startupId}#agreements` }
+    payload: { title: String(agreement.title || 'Avtal'), snippet: startupName, href: `/startups/${startupId}/dokument#agreements` }
   };
   if (fullySigned) {
     await notify(pb, { ...notifyBase, recipients: movexumSide, kind: 'agreement_signed' }).catch(() => undefined);

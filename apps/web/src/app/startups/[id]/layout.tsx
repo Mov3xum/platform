@@ -1,21 +1,12 @@
-import { notFound } from 'next/navigation';
-import { getServerPb, requireUser } from '@/lib/auth.server';
-import { canAccessModule } from '@/lib/rbac';
-import { getOneForTenant } from '@/lib/pb.server';
+import Link from 'next/link';
 import { escFilter } from '@/lib/pb-filter';
 import { StartupWorkspaceShell } from '@/components/intric/StartupWorkspaceShell';
 import { RightPanel, type KnowledgeItem } from '@/components/intric/RightPanel';
-import type { StartupPhase } from '@platform/shared';
-
-interface StartupRow {
-  id: string;
-  tenant: string;
-  name: string;
-  phase: StartupPhase;
-  irl_level?: number;
-  tags?: string;
-  coaches?: string[];
-}
+import { PhaseBadge, StatusBadge } from '@/components/Badges';
+import { summarizeIrl } from '@platform/shared';
+import { loadIrlAssessments } from '@/lib/irl/data.server';
+import { irlLevelTone } from '@/components/irl/tone';
+import { loadStartupPage } from './_shared/context';
 
 interface NoteRow {
   id: string;
@@ -80,17 +71,8 @@ export default async function StartupLayout({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const user = await requireUser();
-  if (!canAccessModule(user.roles, 'startups')) notFound();
+  const { user, startup, pb, flags } = await loadStartupPage(id);
 
-  let startup: StartupRow;
-  try {
-    startup = await getOneForTenant<StartupRow>('startups', id);
-  } catch {
-    notFound();
-  }
-
-  const pb = await getServerPb();
 
   // Knowledge sources: aktiviteter + anteckningar (icke-konfidentiella) + milstolpar + AI-resultat
   const [notesRes, milestonesRes, toolsRes, runsRes, activitiesRes] = await Promise.allSettled([
@@ -180,7 +162,7 @@ export default async function StartupLayout({
           name: m.title,
           meta: `Milstolpe · ${m.status}`,
           updated: rel(m.updated),
-          href: `/startups/${id}#milestones`
+          href: `/startups/${id}/utveckling#milestones`
         },
         ts: m.updated
       }))
@@ -198,13 +180,64 @@ export default async function StartupLayout({
       r.status === 'ready_for_review'
   ).length;
 
+  // Header: KTH IRL-snitt (staff/observer — kollektionen är staff-only) med
+  // bolagskortets sammanfattande irl_level som reserv, och coachernas namn.
+  const [irlRes, coachRes] = await Promise.allSettled([
+    flags.isStaffOrObserver ? loadIrlAssessments(pb, user.tenant, id, 1) : Promise.resolve({ assessments: [] }),
+    startup.coaches && startup.coaches.length > 0
+      ? pb.collection('startups').getOne<{ expand?: { coaches?: Array<{ display_name?: string }> } }>(id, {
+          expand: 'coaches',
+          fields: 'id,expand.coaches.display_name'
+        })
+      : Promise.resolve(null)
+  ]);
+  const latestIrl = irlRes.status === 'fulfilled' ? irlRes.value.assessments[0] : undefined;
+  const irlAverage = latestIrl ? summarizeIrl(latestIrl.profile).average : null;
+  const coachNames =
+    coachRes.status === 'fulfilled' && coachRes.value
+      ? (coachRes.value.expand?.coaches ?? []).map((c) => c.display_name).filter(Boolean).join(', ')
+      : '';
+
+  const meta = (
+    <>
+      <PhaseBadge phase={startup.phase} />
+      <StatusBadge status={startup.status} />
+      {irlAverage !== null ? (
+        <Link
+          href={`/startups/${id}/utveckling#irl`}
+          title="Snitt över KTH:s sex IRL-axlar"
+          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold mx-tnum ${irlLevelTone(Math.round(irlAverage))}`}
+        >
+          IRL {irlAverage.toLocaleString('sv-SE')}
+        </Link>
+      ) : startup.irl_level ? (
+        <span className="inline-flex items-center rounded-full bg-canvas-subtle px-2.5 py-0.5 text-xs font-medium text-foreground-muted">
+          IRL {startup.irl_level}
+        </span>
+      ) : null}
+      {startup.industri ? (
+        <span className="inline-flex items-center rounded-full border border-default px-2.5 py-0.5 text-xs text-foreground-muted">
+          {startup.industri}
+        </span>
+      ) : null}
+      {coachNames ? <span className="text-xs text-foreground-subtle">Coach: {coachNames}</span> : null}
+    </>
+  );
+
   return (
     <StartupWorkspaceShell
-      startup={{
-        id: startup.id,
-        name: startup.name,
-        phase: startup.phase
-      }}
+      startup={{ id: startup.id, name: startup.name }}
+      meta={meta}
+      actions={
+        flags.canEdit ? (
+          <Link
+            href={`/startups/${id}/edit`}
+            className="inline-flex items-center justify-center rounded-full border border-default bg-surface px-4 py-2 text-sm font-semibold text-foreground-muted transition hover:bg-canvas-subtle"
+          >
+            Redigera
+          </Link>
+        ) : null
+      }
       rightPanel={
         <RightPanel knowledge={knowledge} startupId={startup.id} />
       }

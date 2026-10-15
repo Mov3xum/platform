@@ -99,7 +99,7 @@ export default async function ProjektDetailPage({ params }: { params: Promise<{ 
                       {ledger.map((r) => (
                         <tr key={r.id} className="border-t border-default">
                           <td className="px-2 py-2">
-                            <Link href={`/startups/${r.startup}#stodcheckar`} className="text-foreground hover:underline">
+                            <Link href={`/startups/${r.startup}/ekonomi#stodcheckar`} className="text-foreground hover:underline">
                               {r.startup_name || 'Bolag'}
                             </Link>
                           </td>

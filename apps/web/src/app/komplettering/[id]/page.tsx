@@ -57,7 +57,7 @@ export default async function KompletteringPage({ params }: { params: Promise<{ 
     : undefined;
 
   const answered = request.items.filter((i) => i.status === 'answered').length;
-  const backHref = viewer === 'startup' ? '/min-oversikt' : `/startups/${request.startup}#statsstod`;
+  const backHref = viewer === 'startup' ? '/min-oversikt' : `/startups/${request.startup}/ekonomi#statsstod`;
 
   return (
     <PageShell
@@ -106,7 +106,7 @@ export default async function KompletteringPage({ params }: { params: Promise<{ 
         {canClose && (
           <form action={recomputeLatestScreeningAction} className="flex flex-wrap items-center gap-3">
             <input type="hidden" name="startup_id" value={request.startup} />
-            <input type="hidden" name="back" value={`/startups/${request.startup}`} />
+            <input type="hidden" name="back" value={`/startups/${request.startup}/ekonomi`} />
             <button type="submit" className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground hover:bg-brand-hover">
               Räkna om med svaren och spara ny PDF
             </button>

@@ -190,7 +190,7 @@ export async function POST(request: Request): Promise<Response> {
 
   // Notiser (§ 50, `agreement_to_sign`): bolagets medlemmar när bolaget ska
   // signera, och den utpekade Movexum-signatären. Best-effort.
-  const agreementHref = `/startups/${startupId}#agreements`;
+  const agreementHref = `/startups/${startupId}/dokument#agreements`;
   const agreementPayload = { title: title.slice(0, 200), snippet: startupName, href: agreementHref };
   const agreementEntity = { type: 'agreements', id: agreementId };
   if (requiresCompany) {

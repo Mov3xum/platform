@@ -305,6 +305,19 @@ function mapRow(
       };
     }
 
+    // KTH IRL på bolagskortet (en ny bedömning per tillfälle).
+    case 'startup_readiness_assessments': {
+      const sid = str(after.startup);
+      const name = str(after.startup_name);
+      const avg = typeof after.average === 'number' ? after.average : null;
+      return {
+        title: `${name ? `${name}: ` : ''}ny IRL-bedömning`,
+        detail: avg !== null ? `Snitt ${avg.toLocaleString('sv-SE')} av 9` : undefined,
+        href: sid ? `/startups/${sid}/utveckling#irl` : undefined,
+        icon: 'target'
+      };
+    }
+
     // Workshop-tilldelningar skapar redan en egen activities-rad i feeden
     // (skrivlagret speglar UI-flödet) — loggraden vore en dubblett.
     case 'workshop_assignments':
@@ -760,7 +773,7 @@ function mapRow(
       return {
         title: `${name ? `${name}: ` : ''}bedömning excellens gjord`,
         detail: [str(after.state_aid), str(after.vinnova)].filter(Boolean).join(' · ') || undefined,
-        href: sid ? `/startups/${sid}#statsstod` : '/bedomning-excellens',
+        href: sid ? `/startups/${sid}/ekonomi#statsstod` : '/bedomning-excellens',
         icon: 'shield'
       };
     }

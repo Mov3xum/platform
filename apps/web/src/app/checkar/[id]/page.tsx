@@ -172,7 +172,7 @@ export default async function CheckPage({ params }: { params: Promise<{ id: stri
                   label="Bolag"
                   value={
                     isReader ? (
-                      <Link href={`/startups/${app.startup}#stodcheckar`} className="hover:underline">
+                      <Link href={`/startups/${app.startup}/ekonomi#stodcheckar`} className="hover:underline">
                         {app.startup_name || 'Bolag'}
                       </Link>
                     ) : (
@@ -312,7 +312,7 @@ export default async function CheckPage({ params }: { params: Promise<{ id: stri
                       <Fact
                         label="Kapitalrad"
                         value={
-                          <Link href={`/startups/${app.startup}#partners`} className="text-link hover:underline">
+                          <Link href={`/startups/${app.startup}/ekonomi#kapital`} className="text-link hover:underline">
                             Registrerad
                           </Link>
                         }

@@ -1,0 +1,56 @@
+import type { SprintXScore, StartupPhase } from '@platform/shared';
+import type { StartupStatus } from '@/lib/labels';
+
+export interface StartupRecord {
+  id: string;
+  tenant: string;
+  name: string;
+  description: string;
+  phase: StartupPhase;
+  status: StartupStatus;
+  irl_level?: number;
+  next_step?: string;
+  tags?: string;
+  sprint_x_json?: SprintXScore;
+  coaches?: string[];
+  owner?: string;
+  org_nr?: string;
+  kommun?: string;
+  bolagsform?: string;
+  industri?: string;
+  bolag_status?: string;
+  intagsdatum?: string;
+  avslutsdatum?: string;
+  city?: string;
+  website?: string;
+  idea_name?: string;
+  case_type?: string;
+  status_completion_pct?: number;
+  company_registered_at?: string;
+  contacted_at?: string;
+  signed_incubator_agreement?: boolean;
+  signed_incubator_agreement_at?: string;
+  signed_nda?: boolean;
+  signed_nda_at?: string;
+  potential_bc_case?: boolean;
+  signed_bc_agreement?: boolean;
+  signed_bc_agreement_at?: string;
+  preliminary_exit?: string;
+  is_deeptech?: boolean;
+  meets_excellence_criteria?: boolean;
+  inflow_source?: string;
+  approved_state_aid_art22?: boolean;
+  area?: string;
+  signed_vinnova_incubation_approval?: boolean;
+  signed_vinnova_incubation_approval_at?: string;
+  approved_de_minimis?: boolean;
+  sent_to?: string;
+  register_notes?: string;
+  is_regional?: boolean;
+  signed_partner_agreement?: boolean;
+  signed_partner_agreement_at?: string;
+  created: string;
+  updated: string;
+}
+
+export type FinancialsSource = 'manual' | 'import_excel' | 'allabolag' | 'roaring' | 'bolagsverket' | 'other';

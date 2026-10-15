@@ -153,7 +153,7 @@ export type ServiceActivityKind = 'incubation' | 'verification' | 'admin';
 
 export type ServiceCostType = 'verification' | 'external_service' | 'other';
 
-/** En av KTH:s fyra readiness-axlar (IRL 1–9). */
+/** Vinnovas fyra readiness-axlar (IRL 1–9). KTH:s sex axlar: se kth-irl.ts. */
 export type ReadinessAxis = 'crl' | 'tmrl' | 'brl' | 'srl';
 
 export interface ServiceTimeEntry {
@@ -203,6 +203,12 @@ export interface StartupReadinessAssessment {
   tmrl?: number;
   brl?: number;
   srl?: number;
+  /** KTH IRL — teknik, IPR, finansiering (migration 1700000193). */
+  trl?: number;
+  iprl?: number;
+  frl?: number;
+  /** Motivering per KTH-axel (`IrlAxisNotes`, personnummer-sanerad). */
+  axis_notes?: Record<string, string> | null;
   /** Datum då målgruppskriterier senast kontrollerades. */
   criteria_checked_at?: string;
   assessed_by?: string;
@@ -1840,3 +1846,4 @@ export interface OrgKnowledgeChunk {
   created: string;
   updated: string;
 }
+export * from './kth-irl';
