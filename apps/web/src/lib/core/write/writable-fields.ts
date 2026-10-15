@@ -470,6 +470,12 @@ const CREATE_POLICIES: Record<
     user: { kind: 'roles', roles: STAFF_AND_COACH },
     agent: { kind: 'deny', reason: 'Begäran om komplettering skickas av controllern i Bedömning excellens.' }
   },
+  // KTH IRL på bolagskortet — en ny bedömning per tillfälle, av Movexum-
+  // personalen (speglar kollektionens update-/deleteRule). Människans omdöme.
+  startup_readiness_assessments: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'deny', reason: 'IRL-bedömningen görs av coachen på bolagskortet, inte av agenten.' }
+  },
   // Upphandlingar & avrop (§ 39) — registreras av staff; agenten ärver rollen.
   procurements: {
     user: { kind: 'roles', roles: STAFF_FULL },

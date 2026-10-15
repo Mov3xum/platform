@@ -347,7 +347,7 @@ export default async function MinOversiktPage() {
           title="De minimis-status"
           action={
             <Link
-              href={`/startups/${linkedId}#de-minimis`}
+              href={`/startups/${linkedId}/ekonomi#de-minimis`}
               className="inline-flex items-center gap-1.5 rounded-full border border-default bg-surface px-3 py-1 text-sm font-medium text-foreground-muted transition hover:bg-canvas-subtle"
             >
               På bolagskortet <Icon name="external" size={14} />

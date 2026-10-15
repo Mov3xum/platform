@@ -471,7 +471,7 @@ function HistoryNote({ history, startupId }: { history: NonNullable<ExcellenceAs
   if (history.error) {
     return <p className={`rounded-xl px-3 py-2 text-[12.5px] ${WARN_TONE}`}>{history.error}</p>;
   }
-  const cardHref = startupId ? `/startups/${startupId}#statsstod` : undefined;
+  const cardHref = startupId ? `/startups/${startupId}/ekonomi#statsstod` : undefined;
   return (
     <div className="rounded-2xl border border-default bg-canvas-subtle px-4 py-3">
       <p className="text-[12.5px] text-foreground">

@@ -660,7 +660,7 @@ export async function recomputeLatestScreeningAction(formData: FormData): Promis
   const user = await requireUser();
   const startupId = String(formData.get('startup_id') || '').trim();
   const back = String(formData.get('back') || '').trim();
-  const target = back.startsWith('/') && !back.startsWith('//') ? back : `/startups/${startupId}`;
+  const target = back.startsWith('/') && !back.startsWith('//') ? back : `/startups/${startupId}/ekonomi`;
   const done = (code: string) => {
     const sep = target.includes('?') ? '&' : '?';
     redirect(`${target.split('#')[0]}${sep}bedomning=${code}#statsstod`);

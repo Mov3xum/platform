@@ -3251,6 +3251,11 @@ await ensureCollection({
     { name: 'tmrl', type: 'number', required: false, min: 1, max: 9 },
     { name: 'brl', type: 'number', required: false, min: 1, max: 9 },
     { name: 'srl', type: 'number', required: false, min: 1, max: 9 },
+    // KTH IRL (migration 1700000193): teknik, IPR, finansiering + motivering per axel.
+    { name: 'trl', type: 'number', required: false, min: 1, max: 9, onlyInt: true },
+    { name: 'iprl', type: 'number', required: false, min: 1, max: 9, onlyInt: true },
+    { name: 'frl', type: 'number', required: false, min: 1, max: 9, onlyInt: true },
+    { name: 'axis_notes', type: 'json', required: false, maxSize: 20000 },
     { name: 'criteria_checked_at', type: 'date', required: false },
     { name: 'assessed_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'note', type: 'text', required: false, max: 1000 }
@@ -3267,6 +3272,15 @@ await ensureCollection({
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT}`
 });
+
+// Migration 1700000193: KTH IRL-axlarna på en befintlig install (ensureCollection
+// lägger bara till saknade fält vid create — patchCollection täcker reconcile).
+await patchCollection('startup_readiness_assessments', [
+  { name: 'trl', type: 'number', required: false, min: 1, max: 9, onlyInt: true },
+  { name: 'iprl', type: 'number', required: false, min: 1, max: 9, onlyInt: true },
+  { name: 'frl', type: 'number', required: false, min: 1, max: 9, onlyInt: true },
+  { name: 'axis_notes', type: 'json', required: false, maxSize: 20000 }
+]);
 
 // Migration 1700000105: startup_state_aid_periods — statsstödsgrund (tidsserie).
 await ensureCollection({

@@ -8987,3 +8987,90 @@ helst** — inga bolagsspecifika regler.
   `startup_screenings` (grundarnamn ur teamet — samma krets som bolagskortet);
   `screening_facts` är fortsatt fältmaskat för AI. Riskklass n/a (ingen AI).
 
+## 52. Bolagskortet — flikar & KTH Innovation Readiness Level (2026-10)
+
+### 52.1 Struktur
+
+Bolagskortet (`/startups/[id]`) var en enda sida med ~30 sektioner (flera av
+dem platshållare) och krävde lång scrollning. Det är nu uppdelat i flikar —
+källan av sanning för flikar och sökvägar är `apps/web/src/lib/startup-tabs.ts`
+(ren + enhetstestad), som skalet (`StartupWorkspaceShell`) läser:
+
+| Flik | Route | Innehåll |
+| --- | --- | --- |
+| Översikt | `/startups/[id]` | Nästa steg, beskrivning, nyckelfakta, IRL-radar (kompakt), "Att hålla koll på" (väntande/försenat arbete, avtal att signera, öppna uppgifter), anteckningar (5 senaste, `?anteckningar=alla`), senaste händelser |
+| Utveckling & IRL | `/utveckling` | KTH IRL (radar, bedömning, historik), gjort & väntar, milstolpar, workshops med takeaways, immateriella rättigheter, fashistorik |
+| Aktiviteter | `/aktiviteter` | Bolagskanbanen (§ 15.7) |
+| Verktyg | `/verktyg` | Verktygskörningar |
+| Ekonomi & statsstöd | `/ekonomi` | Bokslut + registersynk, ägarbild, kapital (mottaget + partner-engagemang), de minimis, stödcheckar, Statsstöd & Vinnova, upphandlingar |
+| Avtal & dokument | `/dokument` | Avtal (§ 19), avtal & godkännanden, utbildningsdokument |
+| Team & nätverk | `/natverk` | Team, delade kontakter, möten (Outlook) & uppgifter, tvärfunktionella team, uppföljning |
+| Logg | `/logg` | Aktivitetsloggen |
+
+- **Header** i skalet (layouten): namn, fas, status, IRL-snitt (länk till
+  `/utveckling#irl`), bransch, coach och Redigera. Sidorna har ingen egen h1.
+- **Gemensam laddning:** `_shared/context.ts` (`loadStartupPage`, React
+  `cache` — layout och flik delar EN läsning per request, RLS § 21),
+  `_shared/work.ts` (tilldelningar + korten gjort/väntar), `_shared/ui.tsx`
+  (Section, TabPage, SectionNav, formatters). Varje flik läser bara det den
+  visar.
+- **Gamla ankarlänkar** (`/startups/<id>#de-minimis`, `#agreements`,
+  `#statsstod` …) finns kvar i sparade notiser, aktivitetsloggen och
+  bokmärken. `HashRedirect` på översikten skickar dem till rätt flik via
+  `legacyStartupAnchorTarget` (query som `?bedomning=` behålls). Nya länkar
+  ska peka direkt på fliken (`/startups/<id>/ekonomi#stodcheckar`).
+- **Borttaget:** platshållarsektionerna IPR (ersatt av riktiga
+  `intellectual_property`-rader), Arbetstid, Handlingsplan, Globala målen,
+  Mätetal och länk-sektionen Dokument, samt den dubblerade
+  verktygslistan och `StartupDetailDashboard`.
+
+### 52.2 KTH Innovation Readiness Level
+
+KTH:s IRL mäter mognad längs sex axlar, 1–9, ritade som radar: **kund (CRL),
+team (TMRL), affär (BRL), IPR (IPRL), finansiering (FRL), teknik (TRL)**.
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/kth-irl.ts` (+ `.test.ts`) | Axlar (`KTH_IRL_AXES`, KTH-diagrammets ordning), svenska nivåbeskrivningar 1–9, validering (`validateIrlAssessmentInput`), sammanfattning (snitt/svagast/saknas), diff per axel, radargeometri |
+| `backend/pocketbase-schema/migrations/1700000193_extend_readiness_kth_irl.js` | `startup_readiness_assessments` += `trl`, `iprl`, `frl` (1–9), `axis_notes` (json) |
+| `apps/web/src/lib/core/write/readiness.ts` | Skrivlager: `createReadinessAssessment` (RBAC, tenant, validering, `agent_actions`) |
+| `apps/web/src/lib/actions/irl.ts` | `saveIrlAssessmentAction` |
+| `apps/web/src/lib/irl/data.server.ts` | Enda läsvägen (`loadIrlAssessments`, fail-soft med synligt fel) |
+| `apps/web/src/components/irl/{IrlRadar,IrlWorkspace,tone}.tsx` | Radar (inline-SVG), editor + historik, nivåfärg |
+
+- **En tidsserie, en kollektion.** Varje bedömning är en NY rad — historiken
+  skrivs aldrig över, och radarn visar föregående bedömning som streckad
+  kontur. `crl`/`tmrl`/`brl`/`srl` delas med Vinnovas lägesredovisning och
+  Bedömning excellens (§ 51), så samma bedömning matar alla tre. `srl`
+  (hållbarhet) är Vinnovas tillägg och ritas inte i KTH-radarn; rader som bara
+  har `srl` (Vinnova-inmatning) visas inte som IRL-bedömning.
+  `startups.irl_level` (sammanfattande tal) skrivs inte av IRL-flödet och
+  visas bara som reserv när ingen KTH-bedömning finns.
+- **Nivåbeskrivningarna** är en förkortad svensk sammanfattning med källnot
+  (KTH Innovation, kthinnovationreadinesslevel.com) — inga påhittade
+  kriterier; uppdatera `kth-irl.ts` om KTH reviderar modellen.
+- **Färger:** radarns fyllning går från `--movexum-orange` (centrum) via
+  `--movexum-gul` till `--movexum-gron` (ytterkant) — KTH-diagrammets
+  läsning med Movexums palett (ingen röd, § 2.3); nivåchips via
+  `irlLevelTone` (≤ 3 orange, ≤ 6 gul, annars grön).
+- **RBAC/RLS:** kollektionen är staff/observer-only (§ 21.7) — en ren
+  bolagsmedlem ser inte IRL-bedömningen (översikten visar `irl_level` eller
+  "er coach gör bedömningen"). Bedöma = Movexum-personal
+  (admin/incubator_lead/coach/mentor; `CREATE_POLICIES` + kollektionens
+  update/delete-regel), agent nekad (människans omdöme, art. 14).
+  Skrivning via användartoken med `writeWithFallback` efter verifierad roll
+  + tenant.
+- **GDPR § 5:** bolagsbedömning, ingen individbedömning. `axis_notes`/`note`
+  är coachens fritext — personnummer saneras på skrivvägen (`cleanIrlText`),
+  UI:t uppmanar att inte skriva personuppgifter; auditen bär talen och
+  ANTAL motiveringar, aldrig texten. Inga nya fält i `lib/ai/context.ts`.
+- **Schema-drift (§ 24.4):** skrivlagret rapporterar fält som inte fastnade
+  ("kör migration 1700000193"); speglat i `setup-via-api.mjs`
+  (`patchCollection`), asserterat i `verify-baseline.mjs`
+  (`REQUIRED_APP_FIELDS`).
+- **Audit/feed:** `agent_actions` (`collection = 'startup_readiness_assessments'`)
+  → "ny IRL-bedömning · Snitt X av 9" i Bolagsnytt/`/aktivitet` med länk till
+  `/startups/<id>/utveckling#irl`.
+- **Riskklass (EU AI Act):** n/a — mänsklig bedömning + deterministisk
+  presentation, ingen AI-inferens.
+

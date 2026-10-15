@@ -227,7 +227,7 @@ export function ScreeningRequestComposer({ assessment, coaches, senderName }: Pr
           {startupId && (
             <>
               {' · '}
-              <Link href={`/startups/${startupId}#statsstod`} className="font-semibold underline">
+              <Link href={`/startups/${startupId}/ekonomi#statsstod`} className="font-semibold underline">
                 Bolagskortet
               </Link>
             </>

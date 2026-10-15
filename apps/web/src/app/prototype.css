@@ -2538,6 +2538,15 @@ html.dark .mx-page-head h1 {
   gap: 4px;
   margin-top: 16px;
   border-bottom: 1px solid transparent;
+  /* Åtta flikar på bolagskortet — scrolla i sidled hellre än att bryta rad
+     när högerpanelen tar plats. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+.mx-startup-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .mx-startup-tab {

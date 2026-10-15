@@ -1099,6 +1099,9 @@ const REQUIRED_APP_FIELDS = [
   // Bedömning excellens (§ 51.4, migration 1700000190): utan fältet "sparas"
   // controllerns manuella svar tyst bort och varje körning börjar om.
   { collection: 'startups', fields: ['screening_facts'] },
+  // KTH IRL på bolagskortet (migration 1700000193): utan fälten "sparas"
+  // teknik/IPR/finansiering tyst bort och radarn ritas med tre tomma axlar.
+  { collection: 'startup_readiness_assessments', fields: ['trl', 'iprl', 'frl', 'axis_notes'] },
   { collection: 'startup_screenings', fields: ['context'] },
   // Målstyrning (§ 42, migration 1700000159) + enkätkälla (§ 43, migration
   // 1700000160): utan flaggorna sparas "okänt" som 0 och en enkätindikator tappar sin källa.

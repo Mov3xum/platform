@@ -1,188 +1,17 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
-import { getOneForTenant } from '@/lib/pb.server';
 import { markdownToHtml } from '@/lib/safe-html';
-import { getServerPb, requireUser } from '@/lib/auth.server';
-import { getAssignmentReadPb } from '@/lib/assignments/read';
-import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
-import { escFilter } from '@/lib/pb-filter';
-import { canAccessModule, canAccessModuleForUser, hasRole } from '@/lib/rbac';
-import {
-  PhaseBadge,
-  StatusBadge,
-  ToolCategoryBadge,
-  ToolRunStatusBadge,
-  WorkshopAssignmentStatusBadge
-} from '@/components/Badges';
 import { NoteForm } from '@/components/NoteForm';
 import { NoteItem } from '@/components/NoteItem';
-import { StartupDetailDashboard } from '@/components/StartupDetailDashboard';
-import { StartupWorkCards, type WorkCard } from '@/components/StartupWorkCards';
-import {
-  StartupPhaseHistoryList,
-  type PhaseHistoryItem
-} from '@/components/StartupPhaseHistoryList';
-import { RegistrySyncButton } from './RegistrySyncButton';
-import { resolveRegistryPricing } from '@/lib/integrations/company-registry/pricing.server';
-import type { RegistryPricing } from '@/lib/integrations/company-registry/pricing';
-import { getHandler, listCompanyRegistrySlugs } from '@/lib/integrations/registry';
-import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
-import { LogMeetingButton } from './LogMeetingButton';
-import {
-  findIntegrationRow,
-  getActiveTokens,
-  markExpired
-} from '@/lib/app-integrations/storage';
-import { outlookCalendarProvider } from '@/lib/app-integrations/providers/outlook_calendar/provider';
-import { fetchCalendarEvents } from '@/lib/app-integrations/providers/outlook_calendar/calendar';
-import {
-  matchEventsToContacts,
-  matchedEventsForStartup,
-  type EmailIndex,
-  type EventMatch
-} from '@/lib/app-integrations/providers/outlook_calendar/match';
-import {
-  activityStatusLabels,
-  activityTypeLabels,
-  milestoneCategoryLabels,
-  milestoneStatusLabels,
-  toolRunStatusLabels,
-  type ActivityStatus,
-  type ActivityType,
-  type AgreementKind,
-  type AgreementStatus,
-  type MilestoneCategory,
-  type MilestoneStatus,
-  type StartupStatus,
-  type ToolRunStatus
-} from '@/lib/labels';
-import type {
-  StartupPhase,
-  SprintXScore,
-  EducationDocumentAssignment
-} from '@platform/shared';
-import { educationDocumentKindLabels, formatStockholmDateTime } from '@platform/shared';
 import { Icon } from '@/components/proto';
-import { DocumentCompleteButton } from '@/app/education/documents/DocumentCompleteButton';
-import { AgreementsSection, type AgreementView } from '@/components/intric/AgreementsSection';
-import { pbFileUrl } from '@/lib/pb-file';
-import { canManageStartupDeMinimis } from '@/lib/de-minimis/data';
-import { DeMinimisSection } from './DeMinimisSection';
-import { FollowUpSurveys } from '@/components/surveys/FollowUpSurveys';
-import { StartupProcurementsSection } from './StartupProcurementsSection';
-import { StartupSupportChecksSection } from './StartupSupportChecksSection';
-import { StartupScreeningSection } from './StartupScreeningSection';
-import { StartupContactsSection } from './StartupContactsSection';
-import { StartupMissionsSection } from './StartupMissionsSection';
-
-interface StartupRecord {
-  id: string;
-  tenant: string;
-  name: string;
-  description: string;
-  phase: StartupPhase;
-  status: StartupStatus;
-  irl_level?: number;
-  next_step?: string;
-  tags?: string;
-  sprint_x_json?: SprintXScore;
-  coaches?: string[];
-  org_nr?: string;
-  kommun?: string;
-  bolagsform?: string;
-  industri?: string;
-  bolag_status?: string;
-  intagsdatum?: string;
-  avslutsdatum?: string;
-  // Movexum Bolagslista (1700000061)
-  idea_name?: string;
-  case_type?: string;
-  status_completion_pct?: number;
-  company_registered_at?: string;
-  contacted_at?: string;
-  signed_incubator_agreement?: boolean;
-  signed_incubator_agreement_at?: string;
-  signed_nda?: boolean;
-  signed_nda_at?: string;
-  potential_bc_case?: boolean;
-  signed_bc_agreement?: boolean;
-  signed_bc_agreement_at?: string;
-  preliminary_exit?: string;
-  is_deeptech?: boolean;
-  meets_excellence_criteria?: boolean;
-  inflow_source?: string;
-  approved_state_aid_art22?: boolean;
-  area?: string;
-  signed_vinnova_incubation_approval?: boolean;
-  signed_vinnova_incubation_approval_at?: string;
-  approved_de_minimis?: boolean;
-  sent_to?: string;
-  register_notes?: string;
-  is_regional?: boolean;
-  signed_partner_agreement?: boolean;
-  signed_partner_agreement_at?: string;
-  created: string;
-  updated: string;
-}
-
-interface PhaseHistoryRecord {
-  id: string;
-  phase: StartupPhase;
-  entered_at: string;
-  exited_at?: string;
-  note?: string;
-  expand?: { created_by?: { id: string; display_name?: string; email: string } };
-}
-
-type FinancialsSource =
-  | 'manual'
-  | 'import_excel'
-  | 'allabolag'
-  | 'roaring'
-  | 'bolagsverket'
-  | 'other';
-
-interface FinancialsRow {
-  id: string;
-  year: number;
-  employees?: number;
-  revenue_sek?: number;
-  personnel_cost_sek?: number;
-  corporate_tax_sek?: number;
-  balance_sheet_sek?: number;
-  equity_sek?: number;
-  /** Beslutad utdelning (§ 51) — bara meningsfull när `dividend_reported` är sant. */
-  dividend_sek?: number;
-  dividend_reported?: boolean;
-  source: FinancialsSource;
-  synced_at?: string;
-}
-
-// Ägarbild (§ 11.8, migration 1700000172). Fysiska personer bär aldrig namn.
-interface OwnershipRow {
-  id: string;
-  direction: 'owner' | 'holding';
-  owner_kind: 'company' | 'person' | 'public_body' | 'investor' | 'other';
-  name?: string;
-  org_nr?: string;
-  capital_pct?: number;
-  voting_pct?: number;
-  pct_min?: number;
-  pct_max?: number;
-  control_basis?: string;
-  indirect?: boolean;
-  source: string;
-  synced_at?: string;
-}
-
-interface ConnectedRegistryProvider {
-  slug: string;
-  name: string;
-  parts: RegistryPartId[];
-  partEndpoints?: Partial<Record<RegistryPartId, string>>;
-  /** Prislista (§ 11.8) — kostnaden visas i valet före hämtning. */
-  pricing: RegistryPricing;
-}
+import { IrlRadar } from '@/components/irl/IrlRadar';
+import { irlLevelTone } from '@/components/irl/tone';
+import { loadIrlAssessments } from '@/lib/irl/data.server';
+import { activityTypeLabels, type ActivityType } from '@/lib/labels';
+import { irlAxis, irlNextStep, summarizeIrl } from '@platform/shared';
+import { loadStartupPage } from './_shared/context';
+import { loadStartupAssignments } from './_shared/work';
+import { HashRedirect } from './_shared/HashRedirect';
+import { Empty, PillLink, Section, TabPage, formatDate, relDays, stripHtml } from './_shared/ui';
 
 interface NoteRecord {
   id: string;
@@ -190,141 +19,50 @@ interface NoteRecord {
   author: string;
   confidential: boolean;
   created: string;
-  expand?: { author?: { id: string; display_name?: string; email: string } };
-}
-
-interface MilestoneRecord {
-  id: string;
-  title: string;
-  description?: string;
-  category: MilestoneCategory;
-  status: MilestoneStatus;
-  target_date?: string;
-  achieved_at?: string;
+  expand?: { author?: { id: string; display_name?: string } };
 }
 
 interface ActivityRecord {
   id: string;
-  title: string;
-  type: ActivityType;
-  status: ActivityStatus;
-  kind?: string;
-  tool?: string;
-  tool_run?: string;
-  due_date?: string;
+  title?: string;
   description?: string;
-  expand?: {
-    tool?: { id: string; name: string; icon?: string; category: string };
-    tool_run?: { id: string; status: string };
-  };
+  type?: ActivityType;
+  kind?: string;
+  created: string;
 }
 
 interface AgreementRecord {
   id: string;
   title: string;
-  kind: AgreementKind;
-  status: AgreementStatus;
-  signed_at?: string;
-  expires_at?: string;
-  file?: string;
+  status: string;
   requires_company_signature?: boolean;
   requires_movexum_signature?: boolean;
   company_signed_at?: string;
   movexum_signed_at?: string;
-  created: string;
 }
 
-interface TeamMemberRecord {
-  id: string;
-  name: string;
-  role_title?: string;
-  email?: string;
-  is_founder?: boolean;
-}
+const NOTES_PREVIEW = 5;
 
-interface StartupContactRecord {
-  id: string;
-  contact: string;
-  role?: string;
-  is_primary?: boolean;
-  expand?: {
-    contact?: { id: string; first_name?: string; last_name?: string; email?: string };
-  };
-}
+const activityKindLabels: Record<string, string> = {
+  tool_run: 'AI-körning',
+  integration_sync: 'Synk',
+  education_document: 'Utbildning',
+  agreement: 'Avtal',
+  onboarding: 'Onboarding',
+  meeting: 'Möte',
+  mission: 'Team',
+  support_check: 'Stödcheck',
+  workshop_assignment: 'Workshop',
+  workshop_run: 'Workshop'
+};
 
-type TaskKind = 'call' | 'meeting' | 'email' | 'prep' | 'followup' | 'admin' | 'other';
-type TaskStatus = 'open' | 'in_progress' | 'blocked' | 'done' | 'cancelled';
-
-interface TaskRecord {
-  id: string;
-  kind: TaskKind;
-  description: string;
-  starts_at?: string;
-  due_at?: string;
-  completed_at?: string;
-  status: TaskStatus;
-}
-
-interface PartnerEngagementRecord {
-  id: string;
-  engagement_type: string;
-  started_at?: string;
-  amount_sek?: number;
-  expand?: { partner?: { id: string; name: string; type: string } };
-}
-
-interface ToolActivityRecord {
-  id: string;
-  title: string;
-  type: ActivityType;
-  status: ActivityStatus;
-  kind?: string;
-  tool?: string;
-  tool_run?: string;
-  due_date?: string;
-  created: string;
-  expand?: {
-    tool?: { id: string; name: string; icon?: string; category: string };
-    tool_run?: { id: string; status: string };
-  };
-}
-
-interface WorkshopAssignmentRecord {
-  id: string;
-  status: 'planned' | 'in_progress' | 'done';
-  due_date?: string;
-  instructions?: string;
-  takeaway_json?: {
-    summary?: string;
-    keyInsights?: string;
-    prioritizedActions?: string;
-    artifacts?: string;
-  };
-  created: string;
-  completed_at?: string;
-  expand?: {
-    workshop?: { id: string; title: string; version?: string };
-    assigned_by?: { id: string; display_name?: string; email: string };
-    collaborators?: Array<{ id: string; display_name?: string; email: string }>;
-    meeting?: { id: string; name: string; starts_at: string; location?: string };
-  };
-}
-
-interface ToolRunRecord {
-  id: string;
-  tool?: string;
-  status: ToolRunStatus;
-  deadline?: string;
-  assigned_to?: string;
-  created: string;
-  output_md?: string;
-  expand?: {
-    tool?: { id: string; name: string; category: string };
-    assigned_to?: { id: string; display_name?: string; email: string };
-  };
-}
-
-export default async function StartupDetailPage({
+/**
+ * Bolagskortets översikt — det viktigaste på en skärm: läget och nästa steg,
+ * KTH IRL-profilen, vad som väntar, anteckningar och senaste händelser.
+ * Allt annat ligger i flikarna (Utveckling, Ekonomi, Avtal & dokument,
+ * Team & nätverk) så sidan inte längre kräver långa scrollningar.
+ */
+export default async function StartupOverviewPage({
   params,
   searchParams
 }: {
@@ -333,486 +71,121 @@ export default async function StartupDetailPage({
 }) {
   const { id } = await params;
   const sp = (await searchParams) ?? {};
-  const screeningFeedback = typeof sp.bedomning === 'string' && /^[a-z]{1,20}$/.test(sp.bedomning) ? sp.bedomning : undefined;
-  const user = await requireUser();
-  if (!canAccessModule(user.roles, 'startups')) notFound();
-  const canEdit = hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
-  const canManageDocs = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
-  const isLinkedMember =
-    hasRole(user.roles, ['startup_member']) && user.linkedStartups.includes(id);
-  const canCompleteDocs = canManageDocs || isLinkedMember;
-  // Avtalssignering (§ in-app AES): staff signerar Movexum-parten, en länkad
-  // bolagsmedlem signerar bolagsparten.
-  const canDeleteAgreements = hasRole(user.roles, ['admin', 'incubator_lead']);
-  const agreementSignParty: 'company' | 'movexum' | null = canManageDocs
-    ? 'movexum'
-    : isLinkedMember
-      ? 'company'
-      : null;
+  const showAllNotes = sp.anteckningar === 'alla';
+  const { user, startup, pb, flags } = await loadStartupPage(id);
+  const byStartup = pb.filter('startup = {:startup}', { startup: id });
 
-  let startup: StartupRecord;
-  try {
-    startup = await getOneForTenant<StartupRecord>('startups', id);
-  } catch {
-    notFound();
-  }
-
-  const pb = await getServerPb();
-  // Tilldelningarna läses via en robust klient (PB v0.23.4 rule-eval, § 21.3):
-  // åtkomsten till just detta bolag är redan verifierad ovan
-  // (getOneForTenant → notFound annars), och frågorna är tenant+startup-scopade.
-  // Se lib/assignments/read.ts.
-  const assignPb = await getAssignmentReadPb();
-
-  const emptyList = { items: [], totalItems: 0 };
-  const [
-    teamResult,
-    milestonesResult,
-    activitiesResult,
-    notesResult,
-    agreementsResult,
-    engagementsResult,
-    toolActivitiesResult,
-    workshopAssignmentsResult,
-    financialsResult,
-    phaseHistoryResult,
-    startupContactsResult,
-    tasksResult,
-    documentAssignmentsResult,
-    toolRunsResult
-  ] = await Promise.allSettled([
-    pb.collection('startup_team_members').getList<TeamMemberRecord>(1, 50, {
-      filter: `startup = "${escFilter(id)}"`,
-      sort: '-is_founder,name'
-    }),
-    pb.collection('milestones').getList<MilestoneRecord>(1, 50, {
-      filter: `startup = "${escFilter(id)}"`,
-      sort: 'target_date'
-    }),
-    pb.collection('activities').getList<ActivityRecord>(1, 50, {
-      filter: `startup = "${escFilter(id)}"`,
-      sort: '-due_date',
-      expand: 'tool,tool_run'
-    }),
-    pb.collection('notes').getList<NoteRecord>(1, 50, {
-      filter: `startup = "${escFilter(id)}"`,
-      sort: '-created',
-      expand: 'author'
-    }),
-    pb.collection('agreements').getList<AgreementRecord>(1, 50, {
-      filter: `startup = "${escFilter(id)}"`,
-      sort: '-created'
-    }),
-    pb.collection('partner_engagements').getList<PartnerEngagementRecord>(1, 50, {
-      filter: `startup = "${escFilter(id)}"`,
-      sort: '-started_at',
-      expand: 'partner'
-    }),
-    pb.collection('activities').getList<ToolActivityRecord>(1, 50, {
-      filter: `startup = "${escFilter(id)}" && kind = "tool_run"`,
-      sort: '-created',
-      expand: 'tool,tool_run'
-    }),
-    assignPb.collection(PB_COLLECTIONS.workshopAssignments).getList<WorkshopAssignmentRecord>(1, 50, {
-      filter: `startup = "${escFilter(id)}" && tenant = "${escFilter(user.tenant)}"`,
-      sort: '-created',
-      expand: 'workshop,assigned_by,collaborators,meeting'
-    }),
-    pb.collection('startup_financials').getList<FinancialsRow>(1, 5, {
-      filter: `startup = "${escFilter(id)}"`,
-      sort: '-year'
-    }),
-    pb.collection('startup_phase_history').getList<PhaseHistoryRecord>(1, 50, {
-      filter: `startup = "${escFilter(id)}"`,
-      sort: '-entered_at',
-      expand: 'created_by'
-    }),
-    pb.collection('startup_contacts').getList<StartupContactRecord>(1, 100, {
-      filter: `startup = "${escFilter(id)}"`,
-      expand: 'contact'
-    }),
-    pb.collection('tasks').getList<TaskRecord>(1, 50, {
-      filter: `startup = "${escFilter(id)}" && tenant = "${escFilter(user.tenant)}"`,
-      sort: '-starts_at'
-    }),
-    assignPb
-      .collection(PB_COLLECTIONS.educationDocumentAssignments)
-      .getList<EducationDocumentAssignment>(1, 100, {
-        filter: `startup = "${escFilter(id)}" && tenant = "${escFilter(user.tenant)}"`,
+  const [notesRes, activitiesRes, agreementsRes, tasksRes, irl, work] = await Promise.all([
+    pb
+      .collection('notes')
+      .getList<NoteRecord>(1, showAllNotes ? 50 : NOTES_PREVIEW, {
+        filter: byStartup,
         sort: '-created',
-        expand: 'document,completed_by,collaborators,meeting'
-      }),
-    pb.collection('tool_runs').getList<ToolRunRecord>(1, 100, {
-      filter: `startup = "${escFilter(id)}" && tenant = "${escFilter(user.tenant)}"`,
-      sort: '-created',
-      expand: 'tool,assigned_to'
-    })
+        expand: 'author',
+        fields: 'id,body,author,confidential,created,expand.author.id,expand.author.display_name'
+      })
+      .then((r) => ({ ok: true as const, r }), () => ({ ok: false as const })),
+    pb
+      .collection('activities')
+      .getList<ActivityRecord>(1, 6, { filter: byStartup, sort: '-created', fields: 'id,title,description,type,kind,created' })
+      .then((r) => ({ ok: true as const, r }), () => ({ ok: false as const })),
+    pb
+      .collection('agreements')
+      .getList<AgreementRecord>(1, 50, {
+        filter: byStartup,
+        fields: 'id,title,status,requires_company_signature,requires_movexum_signature,company_signed_at,movexum_signed_at'
+      })
+      .then((r) => ({ ok: true as const, r }), () => ({ ok: false as const })),
+    pb
+      .collection('tasks')
+      .getList(1, 1, {
+        filter: pb.filter('startup = {:startup} && tenant = {:tenant} && status != "done" && status != "cancelled"', {
+          startup: id,
+          tenant: user.tenant
+        })
+      })
+      .then((r) => r.totalItems, () => null),
+    flags.isStaffOrObserver ? loadIrlAssessments(pb, user.tenant, id, 2) : Promise.resolve(null),
+    loadStartupAssignments(pb, user.tenant, id)
   ]);
 
-  const team = teamResult.status === 'fulfilled' ? teamResult.value : emptyList;
+  const notes = notesRes.ok ? notesRes.r : null;
+  const activities = activitiesRes.ok ? activitiesRes.r.items : [];
+  const agreements = agreementsRes.ok ? agreementsRes.r.items : [];
+  const awaitingSignature = agreements.filter((a) => {
+    // Bara avtal som faktiskt skickats för signering (äldre rader saknar flaggorna).
+    if (a.status !== 'sent' && a.status !== 'partially_signed') return false;
+    const needCompany = a.requires_company_signature === true && !a.company_signed_at;
+    const needMovexum = a.requires_movexum_signature !== false && !a.movexum_signed_at;
+    return needCompany || needMovexum;
+  });
+  const overdue = work.pending.filter((w) => w.overdue).length;
+  const loadFailed = !notesRes.ok || !activitiesRes.ok || work.failed;
 
-  // Ägarbild + anslutna bolagsregister-providers (§ 11.8). Båda fail-soft:
-  // en instans utan migration 1700000172 visar sektionen som tom, och en
-  // tenant utan anslutna providers får ingen synk-knapp.
-  let ownershipRows: OwnershipRow[] = [];
-  try {
-    const res = await pb.collection('startup_ownership').getList<OwnershipRow>(1, 50, {
-      filter: `startup = "${escFilter(id)}" && tenant = "${escFilter(user.tenant)}"`,
-      sort: 'direction,-capital_pct'
-    });
-    ownershipRows = res.items;
-  } catch {
-    ownershipRows = [];
-  }
-  // Synk kräver admin/incubator_lead (speglar syncStartupFromRegistryAction).
-  const canSyncRegistry = hasRole(user.roles, ['admin', 'incubator_lead']);
-  let connectedRegistries: ConnectedRegistryProvider[] = [];
-  if (canSyncRegistry) {
-    try {
-      const registrySlugs = new Set(listCompanyRegistrySlugs());
-      const res = await pb
-        .collection('tenant_integrations')
-        .getList<{ status: string; pricing?: unknown; expand?: { provider?: { slug: string; name: string } } }>(1, 50, {
-          filter: `tenant = "${escFilter(user.tenant)}" && status = "connected"`,
-          expand: 'provider',
-          fields: 'id,status,pricing,expand.provider.slug,expand.provider.name'
-        });
-      connectedRegistries = res.items
-        .map((r) => ({ provider: r.expand?.provider, pricing: r.pricing }))
-        .filter((x): x is { provider: { slug: string; name: string }; pricing: unknown } => !!x.provider && registrySlugs.has(x.provider.slug))
-        .map(({ provider: p, pricing }) => {
-          const h = getHandler(p.slug);
-          const registry = h?.kind === 'company_registry' ? h : undefined;
-          return {
-            slug: p.slug,
-            name: p.name,
-            parts: registry?.parts ?? [],
-            partEndpoints: registry?.partEndpoints?.(),
-            pricing: resolveRegistryPricing(p.slug, pricing)
-          };
-        });
-    } catch {
-      connectedRegistries = [];
-    }
-  }
-  const milestones = milestonesResult.status === 'fulfilled' ? milestonesResult.value : emptyList;
-  const activities = activitiesResult.status === 'fulfilled' ? activitiesResult.value : emptyList;
-  const notes = notesResult.status === 'fulfilled' ? notesResult.value : emptyList;
-  const agreements = agreementsResult.status === 'fulfilled' ? agreementsResult.value : emptyList;
-  const agreementViews: AgreementView[] = (agreements.items as AgreementRecord[]).map((a) => ({
-    id: a.id,
-    title: a.title,
-    kind: a.kind,
-    status: a.status,
-    hasFile: Boolean(a.file),
-    // Befintliga (pre-signering) avtal saknar requires-flaggor → default:
-    // bara Movexum-parten krävs så de inte felaktigt visas som "väntar på bolaget".
-    requiresCompany: a.requires_company_signature === true,
-    requiresMovexum: a.requires_movexum_signature !== false,
-    companySignedAt: a.company_signed_at,
-    movexumSignedAt: a.movexum_signed_at,
-    expiresAt: a.expires_at,
-    createdAt: a.created
-  }));
-  const engagements = engagementsResult.status === 'fulfilled' ? engagementsResult.value : emptyList;
-  const toolActivities = toolActivitiesResult.status === 'fulfilled' ? toolActivitiesResult.value : emptyList;
-  const workshopAssignments =
-    workshopAssignmentsResult.status === 'fulfilled' ? workshopAssignmentsResult.value : emptyList;
-  const financials =
-    financialsResult.status === 'fulfilled' ? financialsResult.value : emptyList;
-  const phaseHistory =
-    phaseHistoryResult.status === 'fulfilled' ? phaseHistoryResult.value : emptyList;
-  const startupContacts =
-    startupContactsResult.status === 'fulfilled' ? startupContactsResult.value : emptyList;
-  const tasks = tasksResult.status === 'fulfilled' ? tasksResult.value : emptyList;
-  const documentAssignments =
-    documentAssignmentsResult.status === 'fulfilled' ? documentAssignmentsResult.value : emptyList;
-  const toolRuns = toolRunsResult.status === 'fulfilled' ? toolRunsResult.value : emptyList;
+  const latestIrl = irl?.assessments[0] ?? null;
+  const previousIrl = irl?.assessments[1] ?? null;
+  const irlSummary = latestIrl ? summarizeIrl(latestIrl.profile) : null;
+  const weakest = irlSummary?.weakest[0];
 
-  // Verktyg & utbildning — vad bolaget GJORT (grön bock) och vad som är
-  // tilldelat men INTE gjort ännu (verktyg + workshops + dokument).
-  const DONE_RUN_STATUSES = new Set<ToolRunStatus>([
-    'succeeded',
-    'approved',
-    'ready_for_review'
-  ]);
-  const PENDING_RUN_STATUSES = new Set<ToolRunStatus>([
-    'assigned',
-    'in_progress',
-    'queued',
-    'running'
-  ]);
-  const dayMs = 86_400_000;
-  const relDays = (iso?: string): string | undefined => {
-    if (!iso) return undefined;
-    const diff = Math.round((Date.now() - new Date(iso).getTime()) / dayMs);
-    if (diff < 1) return 'i dag';
-    if (diff === 1) return 'i går';
-    if (diff < 30) return `för ${diff} dgr sedan`;
-    return new Date(iso).toLocaleDateString('sv-SE');
-  };
-  const deadlineLabel = (iso?: string): { label?: string; overdue: boolean } => {
-    if (!iso) return { overdue: false };
-    const diff = Math.round((new Date(iso).getTime() - Date.now()) / dayMs);
-    if (diff < 0) return { label: `försenad ${-diff} dgr`, overdue: true };
-    if (diff === 0) return { label: 'deadline i dag', overdue: false };
-    return { label: `deadline om ${diff} dgr`, overdue: false };
-  };
+  const facts: Array<[string, React.ReactNode]> = (
+    [
+      ['Org.nr', startup.org_nr ? <span className="mx-tnum">{startup.org_nr}</span> : null],
+      ['Bolagsform', startup.bolagsform ? startup.bolagsform.replace(/_/g, ' ') : null],
+      ['Ort', startup.city || startup.kommun || null],
+      ['Bransch', startup.industri || null],
+      ['Idé', startup.idea_name || null],
+      ['Intag', startup.intagsdatum ? formatDate(startup.intagsdatum) : null],
+      ['Registrerat', startup.company_registered_at ? formatDate(startup.company_registered_at) : null],
+      ['Inflöde', startup.inflow_source || null],
+      [
+        'Webb',
+        startup.website ? (
+          <a
+            href={/^https?:\/\//i.test(startup.website) ? startup.website : `https://${startup.website}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-link hover:underline"
+          >
+            {startup.website.replace(/^https?:\/\//i, '')}
+          </a>
+        ) : null
+      ]
+    ] as Array<[string, React.ReactNode]>
+  ).filter(([, v]) => v !== null && v !== '');
 
-  const doneWork: WorkCard[] = [];
-  const pendingWork: WorkCard[] = [];
-
-  for (const run of toolRuns.items) {
-    if (run.status === 'rejected' || run.status === 'failed') continue;
-    const card: WorkCard = {
-      id: run.id,
-      kind: 'tool',
-      title: run.expand?.tool?.name || 'Verktyg',
-      statusLabel: toolRunStatusLabels[run.status],
-      href: `/startups/${id}/verktyg/${run.id}`
-    };
-    if (DONE_RUN_STATUSES.has(run.status)) {
-      doneWork.push({ ...card, dateLabel: relDays(run.created) });
-    } else if (PENDING_RUN_STATUSES.has(run.status)) {
-      const dl = deadlineLabel(run.deadline);
-      pendingWork.push({ ...card, dateLabel: dl.label, overdue: dl.overdue });
-    }
-  }
-
-  for (const wa of workshopAssignments.items) {
-    const card: WorkCard = {
-      id: wa.id,
-      kind: 'workshop',
-      title: wa.expand?.workshop?.title || 'Workshop',
-      statusLabel: wa.status === 'done' ? 'Klar' : wa.status === 'in_progress' ? 'Pågår' : 'Planerad',
-      href: `/education/assignments/${wa.id}`
-    };
-    if (wa.status === 'done') {
-      doneWork.push({ ...card, dateLabel: relDays(wa.completed_at || wa.created) });
-    } else {
-      const dl = deadlineLabel(wa.due_date);
-      pendingWork.push({ ...card, dateLabel: dl.label, overdue: dl.overdue });
-    }
-  }
-
-  for (const da of documentAssignments.items) {
-    const doc = da.expand?.document;
-    const card: WorkCard = {
-      id: da.id,
-      kind: 'document',
-      title: doc?.title || 'Dokument',
-      statusLabel: da.status === 'completed' ? 'Slutförd' : 'Tilldelad',
-      href: `/startups/${id}#edu-documents`
-    };
-    if (da.status === 'completed') {
-      doneWork.push({ ...card, dateLabel: relDays(da.completed_at || da.created) });
-    } else {
-      const dl = deadlineLabel(da.due_date);
-      pendingWork.push({ ...card, dateLabel: dl.label, overdue: dl.overdue });
-    }
-  }
-
-  // CLAUDE.md § 14: bygg en transient e-post→entitet-index för att matcha
-  // Outlook-möten mot detta bolags kontakter + teammedlemmar. Aldrig sparad.
-  const canLogMeeting = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
-  const emailIndex: EmailIndex = new Map();
-  const addEmail = (
-    email: string | undefined,
-    entry: { kind: 'contact' | 'team'; refId: string; name: string }
-  ) => {
-    const key = email?.trim().toLowerCase();
-    if (!key) return;
-    const list = emailIndex.get(key) ?? [];
-    list.push({ ...entry, startupId: id });
-    emailIndex.set(key, list);
-  };
-  for (const sc of startupContacts.items) {
-    const c = sc.expand?.contact;
-    if (!c) continue;
-    addEmail(c.email, {
-      kind: 'contact',
-      refId: c.id,
-      name: [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Kontakt'
-    });
-  }
-  for (const m of team.items) {
-    addEmail(m.email, { kind: 'team', refId: m.id, name: m.name });
-  }
-
-  // Live Outlook-möten för den inloggade användaren (per-user OAuth), matchade
-  // mot bolagets kontakter. Fail-soft: Graph-fel bryter aldrig sidan.
-  let outlookConnected = false;
-  let outlookMeetings: EventMatch[] = [];
-  let outlookError: string | null = null;
-  if (emailIndex.size > 0) {
-    try {
-      const row = await findIntegrationRow(pb, user.id, 'outlook_calendar');
-      if (row?.status === 'active' && row.auth_data) {
-        outlookConnected = true;
-        const tokens = await getActiveTokens({ pb, row, provider: outlookCalendarProvider });
-        const now = Date.now();
-        const events = await fetchCalendarEvents({
-          tokens,
-          from: new Date(now - 30 * 24 * 60 * 60 * 1000),
-          to: new Date(now + 30 * 24 * 60 * 60 * 1000),
-          timezone: 'Europe/Stockholm'
-        });
-        outlookMeetings = matchedEventsForStartup(
-          matchEventsToContacts(events, emailIndex),
-          id
-        );
-        // Senaste först.
-        outlookMeetings.sort(
-          (a, b) => Date.parse(b.event.start) - Date.parse(a.event.start)
-        );
-      }
-    } catch (err) {
-      outlookError = err instanceof Error ? err.message : 'Okänt fel mot Microsoft Graph.';
-      const row = await findIntegrationRow(pb, user.id, 'outlook_calendar').catch(() => null);
-      if (row) await markExpired(pb, row.id, outlookError);
-    }
-  }
-
-  const phaseHistoryItems: PhaseHistoryItem[] = phaseHistory.items.map((row) => ({
-    id: row.id,
-    phase: row.phase,
-    entered_at: row.entered_at,
-    exited_at: row.exited_at,
-    note: row.note,
-    authorLabel:
-      row.expand?.created_by?.display_name ||
-      row.expand?.created_by?.email ||
-      undefined
-  }));
-
-  const sectionLoadFailed = [
-    teamResult,
-    milestonesResult,
-    activitiesResult,
-    notesResult,
-    agreementsResult,
-    engagementsResult,
-    toolActivitiesResult,
-    workshopAssignmentsResult,
-    financialsResult,
-    phaseHistoryResult,
-    startupContactsResult,
-    tasksResult
-  ].some((result) => result.status === 'rejected');
-
-  if (sectionLoadFailed) {
-    console.error('[startup/detail] one or more sections failed to load', {
-      tenant: user.tenant,
-      userId: user.id,
-      startupId: id
-    });
-  }
+  const tags = (startup.tags || '')
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean);
 
   return (
-    <main className="flex-1 overflow-y-auto px-6 py-10 lg:px-8">
-      <div className="mx-auto max-w-6xl">
-      <div className="mb-6">
-        <Link href="/startups" className="text-sm text-foreground-muted hover:text-foreground">
-          ← Alla bolag
-        </Link>
-      </div>
+    <TabPage>
+      <HashRedirect startupId={id} />
+      {loadFailed ? (
+        <p className="rounded-2xl border border-default bg-surface p-4 text-sm text-foreground-muted">
+          Vissa delar av översikten kunde inte laddas just nu.
+        </p>
+      ) : null}
 
-      <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="mb-3 flex items-center gap-2">
-            <PhaseBadge phase={startup.phase} />
-            <StatusBadge status={startup.status} />
-            {startup.irl_level ? (
-              <span className="inline-flex items-center rounded-full bg-canvas-subtle px-2.5 py-0.5 text-xs font-medium text-foreground-muted">
-                IRL {startup.irl_level}
-              </span>
-            ) : null}
-          </div>
-          <h1 className="text-3xl font-semibold tracking-tight text-foreground">{startup.name}</h1>
-          {startup.next_step ? (
-            <p className="mt-2 text-sm text-foreground-muted">
-              <span className="font-medium text-foreground-muted">Nästa steg:</span> {startup.next_step}
-            </p>
-          ) : null}
-        </div>
-        {canEdit && (
-          <Link
-            href={`/startups/${id}/edit`}
-            className="inline-flex items-center justify-center rounded-full border border-default bg-surface px-5 py-2.5 text-sm font-semibold text-foreground-muted transition hover:bg-canvas-subtle"
-          >
-            Redigera
-          </Link>
-        )}
-      </header>
+      {/* Läget + IRL */}
+      <div className="grid gap-6 lg:grid-cols-3">
+        <section className="rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5 lg:col-span-2">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-foreground-subtle">Nästa steg</p>
+          <p className="mt-1 font-heading text-lg font-semibold text-foreground">
+            {startup.next_step || <span className="font-normal text-foreground-subtle">Inget nästa steg satt.</span>}
+          </p>
 
-      <StartupDetailDashboard
-        startup={startup}
-        metrics={{
-          activitiesCount: activities.totalItems,
-          notesCount: notes.totalItems,
-          milestonesCount: milestones.totalItems,
-          documentsCount: documentAssignments.totalItems,
-          teamMembersCount: team.totalItems,
-          workshopsCount: workshopAssignments.totalItems,
-          toolRunsCount: toolActivities.totalItems
-        }}
-      />
-
-      <div className="mt-8">
-        <StartupWorkCards done={doneWork} pending={pendingWork} />
-      </div>
-
-      <nav className="mb-8 mt-8 flex flex-wrap gap-3 text-sm">
-        {[
-          ['#overview', 'Info'],
-          ['#moten', `Möten & uppgifter (${tasks.totalItems})`],
-          ['#phase-history', `Fashistorik (${phaseHistory.totalItems})`],
-          ['#kunskap', 'Kunskap'],
-          ['#de-minimis', 'De minimis'],
-          ['#stodcheckar', 'Stöd & checkar'],
-          ['#statsstod', 'Statsstöd & Vinnova'],
-          ['#notes', `Anteckningar (${notes.totalItems})`],
-          ['#activities', `Aktiviteter (${activities.totalItems})`],
-          ['#documents', 'Dokument'],
-          ['#edu-documents', `Utbildningsdokument (${documentAssignments.totalItems})`],
-          ['#team', `Personer (${team.totalItems})`],
-          ['#agarbild', 'Ägarbild'],
-          ['#milestones', `Inkubatorprocess (${milestones.totalItems})`],
-          ['#readiness', 'Bolagsfas & Readiness'],
-          ['#partners', `Kapital (${engagements.totalItems})`],
-          ['#agreements', `Avtal (${agreements.totalItems})`],
-          ['#partners', `Partners (${engagements.totalItems})`],
-          ['#financials', `Finansiell historik (${financials.totalItems})`],
-          ['#tools', `Verktyg (${toolActivities.totalItems})`],
-          ['#workshops', `Workshops (${workshopAssignments.totalItems})`],
-          ['#team-uppdrag', 'Tvärfunktionella team']
-        ].map(([href, label]) => (
-          <a
-            key={href}
-            href={href}
-            className="rounded-full border border-default bg-surface px-3 py-1 font-medium text-foreground-muted transition hover:bg-canvas-subtle"
-          >
-            {label}
-          </a>
-        ))}
-      </nav>
-
-      <div className="space-y-8">
-        {sectionLoadFailed ? (
-          <div className="rounded-2xl border border-default bg-surface p-4 text-sm text-foreground-muted">
-            Vissa delar av bolagssidan kunde inte laddas just nu.
-          </div>
-        ) : null}
-
-        <Section id="overview" title="Översikt">
           {startup.description ? (
-            <div className="prose max-w-none text-sm text-foreground-muted dark:prose-invert" dangerouslySetInnerHTML={{ __html: markdownToHtml(startup.description) }} />
+            <div
+              className="prose mt-5 max-w-none text-sm text-foreground-muted dark:prose-invert"
+              dangerouslySetInnerHTML={{ __html: markdownToHtml(startup.description) }}
+            />
           ) : (
-            <Empty>Ingen beskrivning än.</Empty>
+            <p className="mt-5 text-sm text-foreground-subtle">Ingen beskrivning än.</p>
           )}
-          {startup.tags ? (
+          {tags.length > 0 ? (
             <div className="mt-4 flex flex-wrap gap-2">
-              {startup.tags.split(',').map((t) => t.trim()).filter(Boolean).map((tag) => (
+              {tags.map((tag) => (
                 <span key={tag} className="rounded-full bg-canvas-subtle px-3 py-1 text-xs font-medium text-foreground-muted">
                   #{tag}
                 </span>
@@ -820,1038 +193,207 @@ export default async function StartupDetailPage({
             </div>
           ) : null}
 
-          <div className="mt-5 rounded-2xl border border-default bg-canvas-subtle/40 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-foreground-subtle">Verktygskoppling</p>
-            <p className="mt-1 text-sm text-foreground-muted">Kör startup-specifika verktyg med förvalt bolag för snabbare analys och dokumentation.</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Link
-                href={`/toolbox?startup=${id}&category=ai_per_startup`}
-                className="rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle"
-              >
-                AI per bolag
-              </Link>
-              <Link
-                href={`/toolbox?startup=${id}&category=template`}
-                className="rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle"
-              >
-                Mallar
-              </Link>
-              <Link
-                href={`/toolbox?startup=${id}&category=checklist`}
-                className="rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle"
-              >
-                Checklistor
-              </Link>
-            </div>
-          </div>
-        </Section>
-
-        <Section id="activities" title="Aktiviteter">
-          {activities.items.length === 0 ? (
-            <Empty>Inga aktiviteter registrerade.</Empty>
-          ) : (
-            <ul className="space-y-3">
-              {activities.items.map((a) => (
-                <li key={a.id} className="rounded-2xl border border-default p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="font-medium text-foreground">{a.title}</p>
-                      <p className="text-xs text-foreground-subtle">
-                        {activityTypeLabels[a.type]} ·{' '}
-                        {a.due_date ? new Date(a.due_date).toLocaleDateString('sv-SE') : 'Inget datum'}
-                      </p>
-                    </div>
-                    <StatusPill label={activityStatusLabels[a.status]} variant={a.status === 'done' ? 'success' : a.status === 'cancelled' ? 'neutral' : 'info'} />
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
-
-        <Section id="notes" title="Anteckningar">
-          <div className="mb-6 rounded-2xl border border-default bg-canvas-subtle/50 p-4">
-            <NoteForm startupId={id} />
-          </div>
-          {notes.items.length === 0 ? (
-            <Empty>Inga anteckningar än.</Empty>
-          ) : (
-            <ul className="space-y-3">
-              {notes.items.map((n) => (
-                <li key={n.id} className="rounded-2xl border border-default p-4">
-                  <div className="mb-2 flex items-center justify-between text-xs text-foreground-subtle">
-                    <span>
-                      {n.expand?.author?.display_name || n.expand?.author?.email || 'Okänd'} ·{' '}
-                      {new Date(n.created).toLocaleString('sv-SE')}
-                    </span>
-                    {n.confidential ? (
-                      <span className="rounded-full bg-movexum-pastell-gul px-2 py-0.5 font-medium text-movexum-morkgul dark:bg-movexum-morkgul/30 dark:text-movexum-pastell-gul">
-                        Konfidentiell
-                      </span>
-                    ) : null}
-                  </div>
-                  <NoteItem
-                    noteId={n.id}
-                    body={n.body}
-                    confidential={n.confidential}
-                    isAuthor={n.author === user.id}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
-
-        <Section id="moten" title="Möten & uppgifter">
-          <div className="space-y-6">
-            <div>
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold text-foreground">Möten från Outlook</h3>
-                {outlookConnected ? (
-                  <span className="text-[11px] uppercase tracking-[0.06em] text-foreground-subtle">
-                    Live · din kalender
-                  </span>
-                ) : null}
-              </div>
-              {!outlookConnected ? (
-                <div className="rounded-2xl border border-dashed border-default bg-canvas-subtle/50 p-4 text-sm text-foreground-muted">
-                  <Link href="/integrationer/outlook-calendar" className="text-link hover:underline">
-                    Anslut din Outlook
-                  </Link>{' '}
-                  för att se möten med detta bolags kontakter direkt här. Read-only,
-                  inget cachas.
+          {facts.length > 0 ? (
+            <dl className="mt-6 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-default pt-5 text-sm sm:grid-cols-3">
+              {facts.map(([label, value]) => (
+                <div key={label} className="min-w-0">
+                  <dt className="text-[11px] font-semibold uppercase tracking-[0.1em] text-foreground-subtle">{label}</dt>
+                  <dd className="mt-0.5 truncate text-foreground">{value}</dd>
                 </div>
-              ) : outlookError ? (
-                <Empty>Kunde inte hämta möten just nu. Koppla om Outlook.</Empty>
-              ) : outlookMeetings.length === 0 ? (
-                <Empty>Inga möten (±30 dagar) med bolagets kontakter i din kalender.</Empty>
-              ) : (
-                <ul className="divide-y divide-default rounded-2xl border border-default">
-                  {outlookMeetings.map((m) => (
-                    <li key={m.event.id} className="flex flex-wrap items-start justify-between gap-3 p-4">
-                      <div className="min-w-0">
-                        <p className="font-medium text-foreground">
-                          {m.event.webLink ? (
-                            <a
-                              href={m.event.webLink}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="hover:text-brand hover:underline"
-                            >
-                              {m.event.subject}
-                            </a>
-                          ) : (
-                            m.event.subject
-                          )}
-                        </p>
-                        <p className="text-xs text-foreground-subtle">
-                          {new Date(m.event.start).toLocaleString('sv-SE', {
-                            dateStyle: 'medium',
-                            timeStyle: 'short'
-                          })}
-                          {m.contactName ? ` · ${m.contactName}` : ''}
-                        </p>
-                      </div>
-                      {canLogMeeting ? (
-                        <LogMeetingButton
-                          subject={m.event.subject}
-                          startsAt={m.event.start}
-                          endsAt={m.event.end}
-                          startupId={id}
-                          contactId={m.contactRefId}
-                        />
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+              ))}
+            </dl>
+          ) : null}
+        </section>
 
+        <section
+          id="irl"
+          className="scroll-mt-24 rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5"
+        >
+          <div className="flex items-start justify-between gap-2">
             <div>
-              <h3 className="mb-3 text-sm font-semibold text-foreground">
-                Uppgifter (CRM)
-              </h3>
-              {tasks.items.length === 0 ? (
-                <Empty>Inga uppgifter registrerade för bolaget.</Empty>
-              ) : (
-                <ul className="space-y-3">
-                  {tasks.items.map((t) => (
-                    <li key={t.id} className="flex items-center justify-between gap-3 rounded-2xl border border-default p-4">
-                      <div>
-                        <p className="font-medium text-foreground">{t.description}</p>
-                        <p className="text-xs text-foreground-subtle">
-                          {taskKindLabels[t.kind]}
-                          {t.starts_at
-                            ? ` · ${new Date(t.starts_at).toLocaleDateString('sv-SE')}`
-                            : ''}
-                        </p>
-                      </div>
-                      <StatusPill
-                        label={taskStatusLabels[t.status]}
-                        variant={
-                          t.status === 'done'
-                            ? 'success'
-                            : t.status === 'cancelled' || t.status === 'blocked'
-                            ? 'neutral'
-                            : 'info'
-                        }
-                      />
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <h2 className="text-base font-semibold text-foreground">Innovation Readiness Level</h2>
+              <p className="text-xs text-foreground-subtle">KTH IRL · sex axlar, 1–9</p>
             </div>
-          </div>
-        </Section>
-
-        <Section id="phase-history" title="Fashistorik">
-          <StartupPhaseHistoryList
-            startupId={id}
-            items={phaseHistoryItems}
-            canEdit={canEdit}
-            canDelete={hasRole(user.roles, ['admin'])}
-          />
-        </Section>
-
-        <Section id="kunskap" title="Kunskap">
-          <p className="mb-4 text-sm text-foreground-muted">
-            Signerade avtal, godkännanden och status för inkubator­stöd. Datum
-            registreras via Redigera.
-          </p>
-          <ul className="divide-y divide-default">
-            <KnowledgeRow
-              label="Inkubatoravtal"
-              signed={startup.signed_incubator_agreement}
-              date={startup.signed_incubator_agreement_at}
-            />
-            <KnowledgeRow
-              label="Sekretessavtal (NDA)"
-              signed={startup.signed_nda}
-              date={startup.signed_nda_at}
-            />
-            <KnowledgeRow
-              label="Boost Chamber-avtal"
-              signed={startup.signed_bc_agreement}
-              date={startup.signed_bc_agreement_at}
-            />
-            <KnowledgeRow
-              label="Godkännande av inkubationsstöd från Vinnova"
-              signed={startup.signed_vinnova_incubation_approval}
-              date={startup.signed_vinnova_incubation_approval_at}
-            />
-            <KnowledgeRow
-              label="Partneravtal"
-              signed={startup.signed_partner_agreement}
-              date={startup.signed_partner_agreement_at}
-            />
-            <KnowledgeRow
-              label="Godkänd för statsstöd artikel 22"
-              signed={startup.approved_state_aid_art22}
-            />
-            <KnowledgeRow
-              label="Godkänd för de minimis"
-              signed={startup.approved_de_minimis}
-            />
-          </ul>
-          <a
-            href="#de-minimis"
-            className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-link transition hover:bg-canvas-subtle"
-          >
-            Till de minimis-liggaren
-          </a>
-        </Section>
-
-        <Section id="de-minimis" title="De minimis">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-foreground-muted">
-              Stöd av mindre betydelse per enhet (&quot;ett enda företag&quot;) — rullande
-              treårssummor mot takbeloppen. Registrera stöd direkt här.
-            </p>
-            <Link
-              href={`/de-minimis/${startup.id}`}
-              className="inline-flex items-center gap-1.5 rounded-full border border-default bg-surface px-3 py-1 text-sm font-medium text-foreground-muted transition hover:bg-canvas-subtle"
-            >
-              Öppna fullskärm <Icon name="external" size={14} />
-            </Link>
-          </div>
-          <DeMinimisSection
-            startupId={id}
-            startupName={startup.name}
-            canManage={canManageStartupDeMinimis(user, id)}
-          />
-        </Section>
-
-        <Section id="uppfoljning" title="Uppföljning">
-          <FollowUpSurveys
-            pb={pb}
-            tenant={user.tenant}
-            kind="startup"
-            id={id}
-            canCreate={hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])}
-            compact
-          />
-        </Section>
-
-        {/* § 46.7 — stödcheckar: ansökan är sanningen, sektionen läser live */}
-        <StartupSupportChecksSection
-          pb={pb}
-          tenantId={user.tenant}
-          startupId={id}
-          isStaff={hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'])}
-          canApply={hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']) || user.linkedStartups.includes(id)}
-        />
-
-        {/* § 51.6 — Bedömning excellens: alla körningar + begäran om komplettering */}
-        {hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor', 'observer']) && (
-          <StartupScreeningSection
-            pb={pb}
-            tenantId={user.tenant}
-            viewerRoles={user.roles}
-            startupId={id}
-            canAssess={canAccessModuleForUser(user.roles, 'bedomning_excellens', user.enabledModules)}
-            canRequest={hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])}
-            feedback={screeningFeedback}
-          />
-        )}
-
-        {hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor', 'observer']) && (
-          <StartupProcurementsSection pb={pb} tenantId={user.tenant} startupId={id} />
-        )}
-
-        {/* § 45.4 — kontakter ur kontaktboken som delats med bolaget */}
-        {hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor', 'observer']) && (
-          <StartupContactsSection pb={pb} tenantId={user.tenant} startupId={id} />
-        )}
-
-        {/* § 29.4 — slutförda tvärfunktionella team sammanställs på bolagskortet */}
-        <StartupMissionsSection pb={pb} tenantId={user.tenant} startupId={id} />
-
-        <Section id="documents" title="Dokument">
-          <p className="text-sm text-foreground-muted">
-            Samlad yta för avtal, verktygsutdata och dokumentation kopplad till bolaget.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <a href="#agreements" className="rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle">
-              Visa avtal
-            </a>
-            <a href="#tools" className="rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle">
-              Visa verktygskörningar
-            </a>
-            <a href="#edu-documents" className="rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle">
-              Tilldelade dokument
-            </a>
-          </div>
-        </Section>
-
-        <Section id="edu-documents" title="Tilldelade utbildningsdokument">
-          <div className="mb-4 flex items-center justify-between">
-            <p className="text-sm text-foreground-muted">
-              Dokument (PDF, Excel, PowerPoint, Word) som bolaget ska gå igenom.
-            </p>
-            {canManageDocs ? (
-              <Link
-                href="/education/documents"
-                className="inline-flex items-center rounded-full border border-default bg-surface px-3 py-1 text-sm font-medium text-foreground-muted transition hover:bg-canvas-subtle"
-              >
-                Hantera dokument
-              </Link>
+            {irlSummary?.average != null ? (
+              <span className={`rounded-full px-2.5 py-0.5 text-sm font-semibold mx-tnum ${irlLevelTone(Math.round(irlSummary.average))}`}>
+                {irlSummary.average.toLocaleString('sv-SE')}
+              </span>
             ) : null}
           </div>
-          {documentAssignments.items.length === 0 ? (
-            <Empty>Inga tilldelade dokument än.</Empty>
+          {latestIrl ? (
+            <>
+              <div className="mt-2">
+                <IrlRadar profile={latestIrl.profile} previous={previousIrl?.profile} size="sm" />
+              </div>
+              {weakest ? (
+                <p className="mt-2 text-xs text-foreground-muted">
+                  <span className="font-semibold text-foreground">Svagast: {irlAxis(weakest).label}</span>
+                  {irlNextStep(weakest, latestIrl.profile[weakest]) ? (
+                    <> — nästa nivå: {irlNextStep(weakest, latestIrl.profile[weakest])}</>
+                  ) : null}
+                </p>
+              ) : null}
+              <p className="mt-2 text-[11px] text-foreground-subtle">
+                Bedömd {formatDate(latestIrl.assessedAt)}
+                {latestIrl.assessorName ? ` av ${latestIrl.assessorName}` : ''}
+              </p>
+            </>
           ) : (
-            <ul className="space-y-3">
-              {documentAssignments.items.map((assignment) => {
-                const doc = assignment.expand?.document;
-                const fileUrl = doc ? pbFileUrl('education_documents', doc.id, doc.file) : null;
-                const completed = assignment.status === 'completed';
-                return (
-                  <li key={assignment.id} className="rounded-2xl border border-default p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="flex items-start gap-3">
-                        {completed ? (
-                          <span className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-movexum-pastell-gron text-movexum-morkgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron">
-                            <Icon name="check" size={30} stroke={2.4} />
-                          </span>
-                        ) : (
-                          <span className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-canvas-muted text-foreground-subtle">
-                            <Icon name="doc" size={22} />
-                          </span>
-                        )}
-                        <div>
-                          <p className="font-medium text-foreground">{doc?.title || 'Dokument'}</p>
-                          <p className="text-xs text-foreground-subtle">
-                            {doc ? educationDocumentKindLabels[doc.doc_kind] || 'Dokument' : 'Dokument'}
-                            {completed && assignment.completed_at
-                              ? ` · Slutförd ${new Date(assignment.completed_at).toLocaleDateString('sv-SE')}`
-                              : ''}
-                          </p>
-                          {assignment.instructions ? (
-                            <p className="mt-2 whitespace-pre-wrap text-sm text-foreground-muted">
-                              {assignment.instructions}
-                            </p>
-                          ) : null}
-                          {assignment.due_date ? (
-                            <p className="mt-1 text-xs text-foreground-subtle">
-                              Deadline:{' '}
-                              {new Date(assignment.due_date).toLocaleDateString('sv-SE')}
-                            </p>
-                          ) : null}
-                          {(assignment.expand?.collaborators?.length ?? 0) > 0 ? (
-                            <p className="mt-1 text-xs text-foreground-subtle">
-                              Resurser:{' '}
-                              {assignment.expand?.collaborators
-                                ?.map((c) => c.display_name || c.email)
-                                .join(', ')}
-                            </p>
-                          ) : null}
-                          {assignment.expand?.meeting ? (
-                            <p className="mt-1 text-xs text-foreground-subtle">
-                              📅 Möte: {assignment.expand.meeting.name} ·{' '}
-                              {formatStockholmDateTime(assignment.expand.meeting.starts_at)}
-                            </p>
-                          ) : null}
-                          {fileUrl ? (
-                            <a
-                              href={fileUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-link hover:underline"
-                            >
-                              <Icon name="download" size={14} /> Ladda ner
-                            </a>
-                          ) : null}
-                        </div>
-                      </div>
-                      {canCompleteDocs ? (
-                        <DocumentCompleteButton
-                          assignmentId={assignment.id}
-                          completed={completed}
-                          canReopen={canManageDocs}
-                        />
-                      ) : completed ? (
-                        <span className="inline-flex items-center gap-1 text-xs font-medium text-movexum-morkgron dark:text-movexum-gron">
-                          Slutförd
+            <div className="mt-4 text-sm text-foreground-muted">
+              {flags.isStaffOrObserver ? (
+                irl?.error ? (
+                  <p>{irl.error}</p>
+                ) : (
+                  <p>Ingen IRL-bedömning än.{startup.irl_level ? ` Sammanfattande nivå på bolagskortet: ${startup.irl_level}.` : ''}</p>
+                )
+              ) : startup.irl_level ? (
+                <p>
+                  IRL-nivå <span className="font-semibold text-foreground">{startup.irl_level}</span> av 9.
+                </p>
+              ) : (
+                <p>Er coach gör IRL-bedömningen tillsammans med er.</p>
+              )}
+            </div>
+          )}
+          {flags.isStaffOrObserver ? (
+            <Link
+              href={`/startups/${id}/utveckling#irl`}
+              className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-link hover:underline"
+            >
+              {latestIrl ? 'Öppna IRL' : flags.isStaff ? 'Gör en bedömning' : 'Öppna IRL'} →
+            </Link>
+          ) : null}
+        </section>
+      </div>
+
+      {/* Att hålla koll på */}
+      <Section
+        id="att-gora"
+        title="Att hålla koll på"
+        action={<PillLink href={`/startups/${id}/utveckling#arbete`}>Allt arbete</PillLink>}
+      >
+        <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Signal label="Väntar på bolaget" value={work.pending.length} href={`/startups/${id}/utveckling#arbete`} />
+          <Signal label="Försenat" value={overdue} href={`/startups/${id}/utveckling#arbete`} warn={overdue > 0} />
+          <Signal
+            label="Avtal att signera"
+            value={agreementsRes.ok ? awaitingSignature.length : null}
+            href={`/startups/${id}/dokument#agreements`}
+            warn={awaitingSignature.length > 0}
+          />
+          <Signal label="Öppna uppgifter" value={tasksRes} href={`/startups/${id}/aktiviteter`} />
+        </div>
+        {work.pending.length === 0 ? (
+          <Empty>Inget väntar — bolaget är ikapp med allt som tilldelats.</Empty>
+        ) : (
+          <ul className="divide-y divide-default">
+            {work.pending.slice(0, 6).map((card) => (
+              <li key={`${card.kind}-${card.id}`} className="flex items-center justify-between gap-3 py-2.5">
+                <Link href={card.href} className="min-w-0 truncate text-sm font-medium text-foreground hover:text-brand hover:underline">
+                  {card.title}
+                </Link>
+                <span
+                  className={`shrink-0 text-xs ${card.overdue ? 'font-semibold text-movexum-orange' : 'text-foreground-subtle'}`}
+                >
+                  {card.dateLabel || card.statusLabel}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+
+      {/* Anteckningar + senaste händelser */}
+      <div className="grid gap-6 lg:grid-cols-5">
+        <div className="lg:col-span-3">
+          <Section
+            id="notes"
+            title="Anteckningar"
+            action={
+              notes && notes.totalItems > NOTES_PREVIEW ? (
+                <PillLink href={showAllNotes ? `/startups/${id}#notes` : `/startups/${id}?anteckningar=alla#notes`}>
+                  {showAllNotes ? 'Visa färre' : `Visa alla (${notes.totalItems})`}
+                </PillLink>
+              ) : null
+            }
+          >
+            <div className="mb-5 rounded-2xl border border-default bg-canvas-subtle/50 p-4">
+              <NoteForm startupId={id} />
+            </div>
+            {!notes ? (
+              <Empty>Anteckningarna kunde inte läsas just nu.</Empty>
+            ) : notes.items.length === 0 ? (
+              <Empty>Inga anteckningar än.</Empty>
+            ) : (
+              <ul className="space-y-3">
+                {notes.items.map((n) => (
+                  <li key={n.id} className="rounded-2xl border border-default p-4">
+                    <div className="mb-2 flex items-center justify-between gap-2 text-xs text-foreground-subtle">
+                      <span>
+                        {n.expand?.author?.display_name || 'Okänd'} · {relDays(n.created)}
+                      </span>
+                      {n.confidential ? (
+                        <span className="rounded-full bg-movexum-pastell-gul px-2 py-0.5 font-medium text-movexum-morkgul dark:bg-movexum-morkgul/30 dark:text-movexum-pastell-gul">
+                          Konfidentiell
                         </span>
                       ) : null}
                     </div>
+                    <NoteItem noteId={n.id} body={n.body} confidential={n.confidential} isAuthor={n.author === user.id} />
                   </li>
-                );
-              })}
-            </ul>
-          )}
-        </Section>
-
-        <Section id="team" title="Team">
-          {team.items.length === 0 ? (
-            <Empty>Inga teammedlemmar registrerade.</Empty>
-          ) : (
-            <ul className="divide-y divide-default">
-              {team.items.map((m) => (
-                <li key={m.id} className="flex items-center justify-between py-3">
-                  <div>
-                    <p className="font-medium text-foreground">
-                      {m.name} {m.is_founder ? <span className="ml-1 text-xs text-link">(grundare)</span> : null}
-                    </p>
-                    {m.role_title ? <p className="text-sm text-foreground-muted">{m.role_title}</p> : null}
-                  </div>
-                  {m.email ? <a href={`mailto:${m.email}`} className="text-sm text-link hover:underline">{m.email}</a> : null}
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
-
-        <Section id="agarbild" title="Ägarbild">
-          <p className="mb-3 text-sm text-foreground-muted">
-            Ägare och innehav från bolagsregister (Roaring: koncernstruktur + verklig
-            huvudman). Underlag för art. 22 GBER / de minimis och Vinnovas krav på
-            grundarägande. Fysiska personer visas utan namn.
-            {canAccessModuleForUser(user.roles, 'bedomning_excellens', user.enabledModules) ? (
-              <>
-                {' '}
-                <Link href={`/bedomning-excellens?startup=${startup.id}`} className="font-semibold text-link hover:underline">
-                  Bedöm mot art. 22 GBER / Vinnova →
-                </Link>
-              </>
-            ) : null}
-          </p>
-          {ownershipRows.length === 0 ? (
-            <Empty>
-              Ingen ägarbild synkad än.
-              {canSyncRegistry && startup.org_nr && connectedRegistries.some((p) => p.slug === 'roaring')
-                ? ' Kör "Synka från Roaring" under Finansiell historik.'
-                : ' Anslut Roaring under Integrationer för att hämta den.'}
-            </Empty>
-          ) : (
-            <div className="overflow-x-auto rounded-2xl border border-default">
-              <table className="w-full text-sm">
-                <thead className="bg-canvas-subtle text-left text-xs uppercase tracking-wider text-foreground-subtle">
-                  <tr>
-                    <th className="px-3 py-2 font-medium">Riktning</th>
-                    <th className="px-3 py-2 font-medium">Ägare / innehav</th>
-                    <th className="px-3 py-2 font-medium">Typ</th>
-                    <th className="px-3 py-2 font-medium">Kapital</th>
-                    <th className="px-3 py-2 font-medium">Röster</th>
-                    <th className="px-3 py-2 font-medium">Källa</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {ownershipRows.map((o) => (
-                    <tr key={o.id} className="border-t border-default">
-                      <td className="px-3 py-2 text-foreground-muted">
-                        {o.direction === 'owner' ? 'Ägare' : 'Innehav'}
-                        {o.indirect ? <span className="ml-1 text-xs text-foreground-subtle">(indirekt)</span> : null}
-                      </td>
-                      <td className="px-3 py-2 font-medium text-foreground">
-                        {o.owner_kind === 'person' ? 'Fysisk person' : o.name || '–'}
-                        {o.org_nr && o.owner_kind !== 'person' ? (
-                          <span className="ml-2 text-xs text-foreground-subtle mx-tnum">{o.org_nr}</span>
-                        ) : null}
-                        {o.control_basis ? (
-                          <p className="text-xs text-foreground-subtle">{controlBasisLabel(o.control_basis)}</p>
-                        ) : null}
-                      </td>
-                      <td className="px-3 py-2 text-foreground-muted">{ownerKindLabel(o.owner_kind)}</td>
-                      <td className="px-3 py-2 text-foreground-muted mx-tnum">{formatPctOrRange(o.capital_pct, o.pct_min, o.pct_max)}</td>
-                      <td className="px-3 py-2 text-foreground-muted mx-tnum">{formatPctOrRange(o.voting_pct)}</td>
-                      <td className="px-3 py-2">
-                        <SourceBadge source={(o.source as FinancialsSource) || 'other'} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Section>
-
-        <Section id="milestones" title="Milstolpar">
-          {milestones.items.length === 0 ? (
-            <Empty>Inga milstolpar registrerade.</Empty>
-          ) : (
-            <ul className="space-y-3">
-              {milestones.items.map((m) => (
-                <li key={m.id} className="rounded-2xl border border-default p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="font-medium text-foreground">{m.title}</p>
-                      <p className="text-xs text-foreground-subtle">
-                        {milestoneCategoryLabels[m.category]} ·{' '}
-                        {m.target_date ? new Date(m.target_date).toLocaleDateString('sv-SE') : 'Inget måldatum'}
-                      </p>
-                    </div>
-                    <StatusPill label={milestoneStatusLabels[m.status]} variant={m.status === 'achieved' ? 'success' : m.status === 'missed' ? 'danger' : 'neutral'} />
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
-
-        <Section id="agreements" title="Avtal">
-          <AgreementsSection
-            startupId={id}
-            startupName={startup.name}
-            agreements={agreementViews}
-            canManage={canManageDocs}
-            canDelete={canDeleteAgreements}
-            signParty={agreementSignParty}
-            defaultSignerName={user.name}
-          />
-        </Section>
-
-        <Section id="partners" title="Kapital">
-          {engagements.items.length === 0 ? (
-            <Empty>Inga partner-engagement.</Empty>
-          ) : (
-            <ul className="space-y-3">
-              {engagements.items.map((e) => (
-                <li key={e.id} className="flex items-center justify-between rounded-2xl border border-default p-4">
-                  <div>
-                    <p className="font-medium text-foreground">{e.expand?.partner?.name || 'Okänd partner'}</p>
-                    <p className="text-xs text-foreground-subtle">
-                      {e.engagement_type}
-                      {e.amount_sek ? ` · ${e.amount_sek.toLocaleString('sv-SE')} SEK` : ''}
-                      {e.started_at ? ` · sedan ${new Date(e.started_at).toLocaleDateString('sv-SE')}` : ''}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
-
-        <Section id="ipr" title="IPR">
-          <p className="text-sm text-foreground-muted">
-            IPR-spårning aktiveras via verktygsmallar och checklistor tills dedikerad datamodell är på plats.
-          </p>
-          <div className="mt-3">
-            <Link
-              href={`/toolbox?startup=${id}&category=template`}
-              className="inline-flex rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle"
-            >
-              Öppna relevanta verktyg
-            </Link>
-          </div>
-        </Section>
-
-        <Section id="worktime" title="Arbetstid">
-          <p className="text-sm text-foreground-muted">
-            Arbetstid kan dokumenteras via aktiviteter och notes tills separat tidloggningsmodul aktiveras.
-          </p>
-          <div className="mt-3">
-            <a href="#activities" className="inline-flex rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle">
-              Gå till aktiviteter
-            </a>
-          </div>
-        </Section>
-
-        <Section id="actionplan" title="Handlingsplan">
-          {startup.next_step ? (
-            <p className="text-sm text-foreground-muted">
-              Nästa steg: <span className="font-medium text-foreground">{startup.next_step}</span>
-            </p>
-          ) : (
-            <Empty>Ingen handlingsplan definierad ännu.</Empty>
-          )}
-          <div className="mt-3">
-            <a href="#milestones" className="inline-flex rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle">
-              Knyt till milstolpar
-            </a>
-          </div>
-        </Section>
-
-        <Section id="goals" title="Globala målen">
-          <p className="text-sm text-foreground-muted">
-            Målspårning mot globala målen kan knytas via mallar/checklistor i verktygslådan.
-          </p>
-          <div className="mt-3">
-            <Link
-              href={`/toolbox?startup=${id}&category=checklist`}
-              className="inline-flex rounded-full border border-default bg-surface px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:bg-canvas-subtle"
-            >
-              Öppna checklista-verktyg
-            </Link>
-          </div>
-        </Section>
-
-        <Section id="metrics" title="Mätetal">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="rounded-2xl border border-default bg-surface p-4">
-              <p className="text-xs text-foreground-subtle">Aktiviteter</p>
-              <p className="mt-1 text-lg font-semibold text-foreground">{activities.totalItems}</p>
-            </div>
-            <div className="rounded-2xl border border-default bg-surface p-4">
-              <p className="text-xs text-foreground-subtle">Milstolpar</p>
-              <p className="mt-1 text-lg font-semibold text-foreground">{milestones.totalItems}</p>
-            </div>
-            <div className="rounded-2xl border border-default bg-surface p-4">
-              <p className="text-xs text-foreground-subtle">Verktygskörningar</p>
-              <p className="mt-1 text-lg font-semibold text-foreground">{toolActivities.totalItems}</p>
-            </div>
-          </div>
-        </Section>
-
-        <Section id="financials" title="Finansiell historik">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-foreground-muted">
-              Årsvis nyckeltal från årsredovisningar och manuella inlägg. Källa
-              visas per rad.
-            </p>
-            {canSyncRegistry && startup.org_nr && connectedRegistries.length > 0 ? (
-              <div className="flex flex-wrap items-center gap-2">
-                {connectedRegistries.map((p) => (
-                  <RegistrySyncButton
-                    key={p.slug}
-                    startupId={id}
-                    providerSlug={p.slug}
-                    providerName={p.name}
-                    registryParts={p.parts}
-                    partEndpoints={p.partEndpoints}
-                    pricing={p.pricing}
-                    pricingHref={`/integrationer/${p.slug}#kostnad`}
-                  />
                 ))}
-              </div>
-            ) : canSyncRegistry && startup.org_nr ? (
-              <Link href="/integrationer" className="text-xs text-link hover:underline">
-                Anslut ett bolagsregister (Roaring/Bolagsverket) för att synka →
-              </Link>
-            ) : null}
-          </div>
-          {!startup.org_nr ? (
-            <Empty>
-              Fyll i organisationsnummer under "Redigera" för att aktivera
-              synk från bolagsregister.
-            </Empty>
-          ) : financials.items.length === 0 ? (
-            <Empty>Inga årsrader registrerade än.</Empty>
-          ) : (
-            <div className="overflow-x-auto rounded-2xl border border-default">
-              <table className="w-full text-sm">
-                <thead className="bg-canvas-subtle text-left text-xs uppercase tracking-wider text-foreground-subtle">
-                  <tr>
-                    <th className="px-3 py-2 font-medium">År</th>
-                    <th className="px-3 py-2 font-medium">Omsättning</th>
-                    <th className="px-3 py-2 font-medium">Anställda</th>
-                    <th className="px-3 py-2 font-medium">Balansomslutning</th>
-                    <th className="px-3 py-2 font-medium">Eget kapital</th>
-                    <th className="px-3 py-2 font-medium">Utdelning</th>
-                    <th className="px-3 py-2 font-medium">Personalkostnad</th>
-                    <th className="px-3 py-2 font-medium">Bolagsskatt</th>
-                    <th className="px-3 py-2 font-medium">Källa</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {financials.items.map((row) => (
-                    <tr key={row.id} className="border-t border-default">
-                      <td className="px-3 py-2 font-medium text-foreground">{row.year}</td>
-                      <td className="px-3 py-2 text-foreground-muted">
-                        {formatSek(row.revenue_sek)}
-                      </td>
-                      <td className="px-3 py-2 text-foreground-muted">
-                        {row.employees ?? '–'}
-                      </td>
-                      <td className="px-3 py-2 text-foreground-muted">
-                        {formatSek(row.balance_sheet_sek)}
-                      </td>
-                      <td className="px-3 py-2 text-foreground-muted">
-                        {formatSek(row.equity_sek)}
-                      </td>
-                      <td className="px-3 py-2 text-foreground-muted">
-                        {row.dividend_reported ? formatSek(row.dividend_sek ?? 0) : '–'}
-                      </td>
-                      <td className="px-3 py-2 text-foreground-muted">
-                        {formatSek(row.personnel_cost_sek)}
-                      </td>
-                      <td className="px-3 py-2 text-foreground-muted">
-                        {formatSek(row.corporate_tax_sek)}
-                      </td>
-                      <td className="px-3 py-2">
-                        <SourceBadge source={row.source} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Section>
+              </ul>
+            )}
+          </Section>
+        </div>
 
-        <Section id="tools" title="Verktyg">
-          <div className="mb-4 flex items-center justify-between">
-            <p className="text-sm text-foreground-muted">
-              Verktygskörningar kopplade till detta bolag.
-            </p>
-            <Link
-              href={`/toolbox?startup=${id}`}
-              className="inline-flex items-center rounded-full border border-default bg-surface px-3 py-1 text-sm font-medium text-foreground-muted transition hover:bg-canvas-subtle"
-            >
-              + Kör verktyg
-            </Link>
-          </div>
-          {toolActivities.items.length === 0 ? (
-            <Empty>Inga verktygskörningar än.</Empty>
-          ) : (
-            <ul className="space-y-3">
-              {toolActivities.items.map((a) => (
-                <li key={a.id} className="rounded-2xl border border-default p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      {a.expand?.tool?.icon && (
-                        <span className="text-lg">{a.expand.tool.icon}</span>
-                      )}
-                      <div>
-                        <p className="font-medium text-foreground">
-                          {a.tool_run ? (
-                            <Link
-                              href={`/toolbox/runs/${a.tool_run}`}
-                              className="hover:text-brand hover:underline"
-                            >
-                              {a.title}
-                            </Link>
-                          ) : (
-                            a.title
-                          )}
-                        </p>
-                        <p className="text-xs text-foreground-subtle">
-                          {new Date(a.created).toLocaleString('sv-SE')}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {a.expand?.tool && (
-                        <ToolCategoryBadge category={a.expand.tool.category as never} />
-                      )}
-                      {a.expand?.tool_run ? (
-                        <ToolRunStatusBadge
-                          status={a.expand.tool_run.status as ToolRunStatus}
-                        />
-                      ) : (
-                        <StatusPill
-                          label={activityStatusLabels[a.status]}
-                          variant={a.status === 'done' ? 'success' : 'info'}
-                        />
-                      )}
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
-
-        <Section id="workshops" title="Workshops">
-          <div className="mb-4 flex items-center justify-between">
-            <p className="text-sm text-foreground-muted">
-              Tilldelade workshops och takeaways som lagrats direkt på bolagskortet.
-            </p>
-            <Link
-              href={`/education`}
-              className="inline-flex items-center rounded-full border border-default bg-surface px-3 py-1 text-sm font-medium text-foreground-muted transition hover:bg-canvas-subtle"
-            >
-              Hantera workshops
-            </Link>
-          </div>
-          {workshopAssignments.items.length === 0 ? (
-            <Empty>Inga workshoptilldelningar än.</Empty>
-          ) : (
-            <ul className="space-y-3">
-              {workshopAssignments.items.map((assignment) => {
-                const takeaway = assignment.takeaway_json || {};
-                return (
-                  <li key={assignment.id} className="rounded-2xl border border-default p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="font-medium text-foreground">
-                          <Link
-                            href={`/education/assignments/${assignment.id}`}
-                            className="hover:text-brand hover:underline"
-                          >
-                            {assignment.expand?.workshop?.title || 'Workshop'}
-                          </Link>
-                        </p>
-                        <p className="text-xs text-foreground-subtle">
-                          Tilldelad av{' '}
-                          {assignment.expand?.assigned_by?.display_name ||
-                            assignment.expand?.assigned_by?.email ||
-                            'Okänd'}{' '}
-                          · {new Date(assignment.created).toLocaleString('sv-SE')}
-                        </p>
-                        {assignment.due_date ? (
-                          <p className="text-xs text-foreground-subtle">
-                            Deadline: {new Date(assignment.due_date).toLocaleDateString('sv-SE')}
-                          </p>
-                        ) : null}
-                        {assignment.instructions ? (
-                          <p className="mt-1 whitespace-pre-wrap text-xs text-foreground-muted">
-                            {assignment.instructions}
-                          </p>
-                        ) : null}
-                        {(assignment.expand?.collaborators?.length ?? 0) > 0 ? (
-                          <p className="mt-1 text-xs text-foreground-subtle">
-                            Resurser:{' '}
-                            {assignment.expand?.collaborators
-                              ?.map((c) => c.display_name || c.email)
-                              .join(', ')}
-                          </p>
-                        ) : null}
-                        {assignment.expand?.meeting ? (
-                          <p className="mt-1 text-xs text-foreground-subtle">
-                            📅 Möte: {assignment.expand.meeting.name} ·{' '}
-                            {formatStockholmDateTime(assignment.expand.meeting.starts_at)}
-                          </p>
-                        ) : null}
-                      </div>
-                      <WorkshopAssignmentStatusBadge status={assignment.status} />
-                    </div>
-                    {takeaway.summary ? (
-                      <div className="mt-3 rounded-xl border border-default bg-canvas-subtle/40 p-3 text-sm text-foreground-muted">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-foreground-subtle">
-                          Takeaway
-                        </p>
-                        <p className="mt-1">{takeaway.summary}</p>
-                        {takeaway.keyInsights ? (
-                          <p className="mt-2 whitespace-pre-wrap text-xs text-foreground-subtle">
-                            <span className="font-medium text-foreground-muted">Nyckelinsikter:</span>{' '}
-                            {takeaway.keyInsights}
-                          </p>
-                        ) : null}
-                        {takeaway.prioritizedActions ? (
-                          <p className="mt-2 whitespace-pre-wrap text-xs text-foreground-subtle">
-                            <span className="font-medium text-foreground-muted">Prioriterade actions:</span>{' '}
-                            {takeaway.prioritizedActions}
-                          </p>
-                        ) : null}
-                      </div>
-                    ) : null}
+        <div className="lg:col-span-2">
+          <Section id="activities" title="Senaste händelser" action={<PillLink href={`/startups/${id}/logg`}>Hela loggen</PillLink>}>
+            {activities.length === 0 ? (
+              <Empty>Inga händelser registrerade.</Empty>
+            ) : (
+              <ol className="relative space-y-4 border-l border-default pl-4">
+                {activities.map((a) => (
+                  <li key={a.id} className="relative">
+                    <span className="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full border-2 border-surface bg-brand" aria-hidden />
+                    <p className="text-sm font-medium text-foreground">
+                      {a.title || stripHtml(a.description || '').slice(0, 80) || 'Aktivitet'}
+                    </p>
+                    <p className="text-xs text-foreground-subtle">
+                      {(a.kind && activityKindLabels[a.kind]) || (a.type ? activityTypeLabels[a.type] : 'Aktivitet')} ·{' '}
+                      {relDays(a.created)}
+                    </p>
                   </li>
-                );
-              })}
-            </ul>
-          )}
-        </Section>
+                ))}
+              </ol>
+            )}
+          </Section>
+
+          <div className="mt-6 rounded-3xl border border-default bg-canvas-subtle/40 p-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-foreground-subtle">Verktyg för bolaget</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <PillLink href={`/toolbox?startup=${id}&category=ai_per_startup`}>
+                <Icon name="sparkle" size={13} /> AI per bolag
+              </PillLink>
+              <PillLink href={`/toolbox?startup=${id}&category=template`}>Mallar</PillLink>
+              <PillLink href={`/toolbox?startup=${id}&category=checklist`}>Checklistor</PillLink>
+            </div>
+          </div>
+        </div>
       </div>
-      </div>
-    </main>
+    </TabPage>
   );
 }
 
-const taskKindLabels: Record<TaskKind, string> = {
-  call: 'Samtal',
-  meeting: 'Möte',
-  email: 'E-post',
-  prep: 'Förberedelse',
-  followup: 'Uppföljning',
-  admin: 'Administration',
-  other: 'Övrigt'
-};
-
-const taskStatusLabels: Record<TaskStatus, string> = {
-  open: 'Öppen',
-  in_progress: 'Pågår',
-  blocked: 'Blockerad',
-  done: 'Klar',
-  cancelled: 'Avbruten'
-};
-
-function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
+function Signal({ label, value, href, warn }: { label: string; value: number | null; href: string; warn?: boolean }) {
   return (
-    <section id={id} className="scroll-mt-24 rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
-      <h2 className="mb-4 text-lg font-semibold text-foreground">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-  return <p className="text-sm text-foreground-subtle">{children}</p>;
-}
-
-function KnowledgeRow({
-  label,
-  signed,
-  date
-}: {
-  label: string;
-  signed?: boolean;
-  date?: string;
-}) {
-  return (
-    <li className="flex items-center justify-between gap-3 py-3 text-sm">
-      <span className="font-medium text-foreground">{label}</span>
-      <span className="flex items-center gap-2">
-        {date ? (
-          <span className="text-xs text-foreground-subtle">
-            {new Date(date).toLocaleDateString('sv-SE')}
-          </span>
-        ) : null}
-        {signed ? (
-          <span className="rounded-full bg-movexum-pastell-gron px-2.5 py-0.5 text-xs font-medium text-movexum-morkgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron">
-            Signerat / godkänt
-          </span>
-        ) : (
-          <span className="rounded-full bg-canvas-subtle px-2.5 py-0.5 text-xs font-medium text-foreground-muted">
-            Ej signerat
-          </span>
-        )}
+    <Link
+      href={href}
+      className="flex flex-col gap-0.5 rounded-2xl border border-default bg-canvas-subtle/40 px-4 py-3 transition hover:border-brand/40 hover:bg-canvas-subtle"
+    >
+      <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground-subtle">{label}</span>
+      <span className={`font-heading text-2xl font-semibold mx-tnum ${warn ? 'text-movexum-orange' : 'text-foreground'}`}>
+        {value ?? '–'}
       </span>
-    </li>
-  );
-}
-
-function ownerKindLabel(kind: OwnershipRow['owner_kind']): string {
-  switch (kind) {
-    case 'company':
-      return 'Bolag';
-    case 'person':
-      return 'Fysisk person';
-    case 'public_body':
-      return 'Offentlig / akademi';
-    case 'investor':
-      return 'Investerare';
-    default:
-      return 'Okänd';
-  }
-}
-
-function controlBasisLabel(v: string): string {
-  const map: Record<string, string> = {
-    shares: 'Ägande (aktier/kapital)',
-    votes: 'Rösträtt',
-    board: 'Rätt att utse styrelse/ledning',
-    agreement: 'Kontroll via avtal/stadgar',
-    other: 'Annan kontrollgrund'
-  };
-  return map[v] || v;
-}
-
-function formatPctOrRange(exact?: number, min?: number, max?: number): string {
-  if (typeof exact === 'number') return `${exact.toLocaleString('sv-SE')} %`;
-  if (typeof min === 'number' && typeof max === 'number') return `${min}–${max} %`;
-  return '–';
-}
-
-function formatSek(value?: number): string {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '–';
-  return `${value.toLocaleString('sv-SE')} kr`;
-}
-
-function SourceBadge({ source }: { source: FinancialsSource }) {
-  // Movexum-paletten: manual = neutral, import_excel = subtle muted,
-  // allabolag = brand-accent (mörkblå/ljusblå), other = neutral.
-  const cfg: Record<FinancialsSource, { label: string; className: string }> = {
-    manual: {
-      label: 'Manuell',
-      className: 'bg-canvas-subtle text-foreground-muted'
-    },
-    import_excel: {
-      label: 'Excel',
-      className: 'bg-canvas-muted text-foreground-muted'
-    },
-    allabolag: {
-      label: 'Allabolag',
-      className:
-        'bg-movexum-pastell-bla text-movexum-morkbla dark:bg-movexum-morkbla/60 dark:text-movexum-pastell-bla'
-    },
-    roaring: {
-      label: 'Roaring',
-      className:
-        'bg-movexum-pastell-bla text-movexum-morkbla dark:bg-movexum-morkbla/60 dark:text-movexum-pastell-bla'
-    },
-    bolagsverket: {
-      label: 'Bolagsverket',
-      className:
-        'bg-movexum-pastell-lila text-movexum-morklila dark:bg-movexum-morklila/60 dark:text-movexum-pastell-lila'
-    },
-    other: {
-      label: 'Övrigt',
-      className: 'bg-canvas-subtle text-foreground-muted'
-    }
-  };
-  const c = cfg[source] || cfg.other;
-  return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${c.className}`}>
-      {c.label}
-    </span>
-  );
-}
-
-function StatusPill({ label, variant }: { label: string; variant: 'success' | 'danger' | 'info' | 'neutral' }) {
-  const classes = {
-    success:
-      'bg-movexum-pastell-gron text-movexum-morkgron ring-movexum-ljusgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron dark:ring-movexum-gron',
-    danger:
-      'bg-movexum-pastell-orange text-movexum-morkorange ring-movexum-orange dark:bg-movexum-morkorange/40 dark:text-movexum-pastell-orange dark:ring-movexum-orange',
-    info:
-      'bg-movexum-pastell-bla text-movexum-morkbla ring-movexum-bla dark:bg-movexum-morkbla/60 dark:text-movexum-pastell-bla dark:ring-movexum-djupbla',
-    neutral:
-      'bg-canvas-subtle text-foreground-muted ring-default'
-  }[variant];
-  return (
-    <span className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${classes}`}>
-      {label}
-    </span>
+    </Link>
   );
 }

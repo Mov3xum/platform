@@ -43,7 +43,7 @@ interface Props {
 
 const inputCls =
   'block w-full rounded-xl border border-default bg-canvas px-3 py-1.5 text-[12.5px] text-foreground outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila disabled:opacity-60';
-const IRL_LABEL: Record<IrlAxis, string> = { crl: 'CRL — kund', brl: 'BRL — affär', tmrl: 'TMRL — teknik', srl: 'SRL — hållbarhet' };
+const IRL_LABEL: Record<IrlAxis, string> = { crl: 'CRL — kund', brl: 'BRL — affär', tmrl: 'TMRL — team', srl: 'SRL — hållbarhet' };
 const OK_TONE = 'bg-movexum-pastell-gron text-movexum-morkgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron';
 const WARN_TONE = 'bg-movexum-pastell-gul text-movexum-morkgul dark:bg-movexum-morkgul/40 dark:text-movexum-pastell-gul';
 
