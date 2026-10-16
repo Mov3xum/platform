@@ -1672,8 +1672,8 @@ den rena, enhetstestade `company-registry/pricing.ts`
 Visas **före** varje hämtning i kryssrutorna (`RegistryPartsPicker`: pris per
 del + "Vald hämtning: N bolag × M delar = K anrop · ≈ credits · ≈ kr") på
 "Testa mot org-nr" (1 bolag), portföljsynk (alla bolag med org-nr),
-bolagskortet (1 bolag) och Bedömning excellens (per bolag + att varje
-koncernbolag kostar lika mycket till, högst 1 + `MAX_RELATED_COMPANIES`), och
+bolagskortet (1 bolag) och Bedömning excellens (bara pris per del —
+summaraden visas inte där, 2026-10-16), och
 **efter** hämtningen i knappens svar, i synkloggen (`last_sync_summary`,
 "Kostnad: …"), i audit-raden (`activities`, PII-fri) och i bedömningens
 resultat ("Denna bedömning kostade … × uppslagna bolag"). Kostnaden räknas på
@@ -8528,9 +8528,9 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
 - **Kostnad:** varje koncernbolag är egna leverantörsanrop (de valda
   datadelarna × bolag) — kryssrutorna och taket på 6 bolag begränsar;
   samma rate-limit som "Testa mot org-nr". Enskild firma slås aldrig upp.
-  **Priset syns (2026-10-12):** kryssrutorna visar credits/kr per del och
-  "Vald hämtning" per bolag med noten att varje koncernbolag kostar lika
-  mycket till; resultatet visar "Denna bedömning kostade: N bolag × M delar
+  **Priset syns (2026-10-12):** kryssrutorna visar credits/kr per del
+  (raden "Vald hämtning" och sidans förklarande ingresser är borttagna
+  2026-10-16 — `RegistryPartsPicker showCost={false}`); resultatet visar "Denna bedömning kostade: N bolag × M delar
   = …" summerat över startup + faktiskt uppslagna koncernbolag
   (`ExcellenceAssessment.cost`, § 11.8 "Kostnad per anrop"). Priserna anges
   av ledningen per leverantör — saknas de visas "pris ej angivet", aldrig en
@@ -8722,11 +8722,12 @@ en separat panel "Manuella svar" med dropdowns för samma punkter — två listo
 in. Nu är det **EN rapport** (`AssessmentReport.tsx`, ersätter
 `AssessmentView` + `ManualFactsPanel`) där varje punkt ändras på platsen:
 
-- **Punkter:** ett utfall som registret inte kan avgöra är en knapp (Ja/Nej/
-  Okänt med ▾). Klick öppnar svarsalternativen under punkten — alltid uttydda
-  ("Nej — inte börsnoterat" / "Ja — aktierna är upptagna till handel" /
-  "Vet inte" resp. "Inget eget svar (registret gäller)") + motivering. Ett
-  eget svar visas som raden "Ditt svar" tills det sparas. Gäller
+- **Punkter (2026-10-16):** svaret sitter till HÖGER i raden — en väljare
+  med uttydda alternativ ("Nej — inte börsnoterat" / "Ja — aktierna är
+  upptagna till handel" / "Ej besvarad" resp. "Registret gäller") och, när
+  ett svar valts, ett motiveringsfält under. Ingen utfällning under punkten
+  och ingen "Ditt svar"-rad; utfallschippen till vänster är bara visning.
+  Grundarpunkterna har länken "Ändra grundare". Gäller
   grundförutsättningarna per bolag (startup + anknutna med org-nr),
   "Fristående företag?", Vinnovas coachpunkter (inte marknadsredo,
   innovativt, övriga villkor) och excellens. Ålder/status/tröskel/de minimis
@@ -8750,10 +8751,15 @@ in. Nu är det **EN rapport** (`AssessmentReport.tsx`, ersätter
   med rapportens AKTUELLA svar (även osparade) så inget går förlorat när man
   hämtar mer mitt i en redigering. En ny körning/omräkning stänger alla
   redigeringar och laddar om svaren.
-- **Lugn som default:** en redigering i taget (`editing`-nyckel), tabellerna
-  är läsbara tills man klickar Ändra, "Behövs: …" döljs medan punkten
-  redigeras, och motorns hjälptexter pekar in i rapporten ("grundartabellen",
-  "svara på punkten") i stället för till en panel som inte finns.
+- **Lugn som default:** en tabell i taget redigeras (`editing`-nyckel),
+  tabellerna är läsbara tills man klickar Ändra, och raderna visar inte
+  "Behövs: …" (det står under Saknat underlag).
+- **Inga instruktioner i formuläret (2026-10-16):** alla förklaringar —
+  datadelar, kostnad, hur punkter besvaras, uppskattningar, aktieboken,
+  komplettering, var bedömningen sparas, PII — står i den hopfällda guiden
+  **"Så funkar det"** överst (`HowItWorks.tsx`). Formulär, rapport och
+  kompletteringsrutan bär bara rubriker, etiketter och status. Ny instruktion
+  ⇒ lägg den i guiden, inte som textstycke i rapporten.
 - Ingen ny dataväg, inga nya fält; samma skrivväg, samma personnummer-
   sanering och samma regel (manuellt Nej vinner, Ja fyller OKÄNT). Riskklass
   n/a.
@@ -8822,8 +8828,8 @@ scopade proxyn `/api/screenings/<id>/pdf`, § 39.3-mönstret). Bolagskortet
 PDF-länk och **"Sedan föregående"** — `diffScreeningRuns` (ren, enhetstestad)
 jämför två körningar i rad: utfall (bättre/sämre), punkter som bytte utfall
 (med källa), underlag som kom på plats/tillkom, bolag som kom in i/föll ur
-koncernen, tröskelvärdets tal. Samma diff visas i bedömningsvyn direkt efter
-en körning (`ExcellenceAssessment.history`). Användarens egen PDF-kopia i
+koncernen, tröskelvärdets tal. Bedömningsvyn visar inte diffen (borttagen
+2026-10-16 — den finns på bolagskortet); bara `history.error` visas där. Användarens egen PDF-kopia i
 Filer finns kvar (§ 51.3). RLS: list/view staff/observer; create pinnad
 (`tenant` + `assessed_by` = inloggad, § 21.8); update/delete ledning.
 Fail-soft: kan raden inte skapas visas bedömningen ändå med `history.error`.

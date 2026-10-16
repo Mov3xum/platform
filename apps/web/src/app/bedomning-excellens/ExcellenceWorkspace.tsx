@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { useActionState, useCallback, useEffect, useRef, useState } from 'react';
-import { MAX_RELATED_COMPANIES } from '@platform/shared';
 import { assessExcellenceAction, type ExcellenceAssessment, type ExcellenceAssessmentState } from '@/lib/actions/excellence';
 import { RegistryPartsPicker, useRegistryPartSelection } from '@/components/integrations/RegistryPartsPicker';
 import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
@@ -77,12 +76,6 @@ export function ExcellenceWorkspace({ startups, registries, canLookup, initialSt
     <div className="space-y-6">
       <section className="rounded-2xl border border-default bg-surface px-5 py-5">
         <h2 className="text-[15px] font-semibold text-foreground">Välj bolag</h2>
-        <p className="mt-1 text-[12.5px] text-foreground-muted">
-          Hämta färskt från bolagsregistret (inget sparas) eller bedöm det som redan är sparat för ett
-          portföljbolag. Anknutna och partnerföretag i ägarbilden slås upp automatiskt så att
-          grundförutsättningarna prövas för hela koncernen. Grundarägande, registrerat de minimis-stöd,
-          IRL och excellensflaggan tas från plattformen när bolaget finns här.
-        </p>
 
         <form action={formAction} className="mt-4 flex flex-col gap-4">
           <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Bolag">
@@ -163,11 +156,10 @@ export function ExcellenceWorkspace({ startups, registries, canLookup, initialSt
                   onSetAll={selection.setAll}
                   endpoints={provider.partEndpoints}
                   providerName={provider.name}
-                  hint="Ingen del är förvald — bocka i det som ska begäras ut; varje anrop debiteras och inget sparas. För en komplett bedömning: Koncernstruktur (hittar HELA koncernen: moder-, syster- och dotterbolag), Grunddata (ålder/status/bolagsform — avgör även börsnotering), Bokslut (tröskelvärde, utdelning) och Verklig huvudman (fristående?, indirekt grundarägande)."
                   disabled={pending}
                   pricing={provider.pricing}
                   companies={1}
-                  costContext={`För startup-bolaget. Varje bolag i koncernen slås därefter upp med BARA grunddata + bokslut av ditt val (koncernen är redan känd; verklig huvudman bara för moderbolagen), högst ${MAX_RELATED_COMPANIES} bolag. Den faktiska summan visas i resultatet.`}
+                  showCost={false}
                   pricingHref={`/integrationer/${provider.slug}#kostnad`}
                 />
               )}

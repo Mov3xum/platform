@@ -92,6 +92,8 @@ interface Props {
   costContext?: string;
   /** Sökväg till sidan där priserna anges (visas när pris saknas). */
   pricingHref?: string;
+  /** Visa raden "Vald hämtning" med summan för valet. Default true. */
+  showCost?: boolean;
 }
 
 export function RegistryPartsPicker({
@@ -106,7 +108,8 @@ export function RegistryPartsPicker({
   pricing,
   companies = 1,
   costContext,
-  pricingHref
+  pricingHref,
+  showCost = true
 }: Props) {
   const allOn = selected.length === supported.length;
   const estimate = pricing ? estimateRegistryCost(pricing, selected, companies) : null;
@@ -171,7 +174,7 @@ export function RegistryPartsPicker({
           Välj minst en del att hämta.
         </p>
       )}
-      {estimate && selected.length > 0 && (
+      {showCost && estimate && selected.length > 0 && (
         <RegistryCostLine
           estimate={estimate}
           pricing={pricing!}

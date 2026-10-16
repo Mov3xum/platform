@@ -1,0 +1,77 @@
+// "Så funkar det" — ALLA instruktioner för Bedömning excellens samlade på ett
+// ställe överst (CLAUDE.md § 51). Själva formuläret och rapporten bär inga
+// förklarande textstycken; lägg nya instruktioner här, inte i rapporten.
+
+import { MAX_RELATED_COMPANIES } from '@platform/shared';
+
+const STEPS: { title: string; items: string[] }[] = [
+  {
+    title: '1. Välj bolag och vad som ska hämtas',
+    items: [
+      'Välj ett portföljbolag eller skriv ett org-nr (bolaget behöver inte finnas i plattformen).',
+      'Hämta från bolagsregistret: bocka i de datadelar som ska begäras ut — ingen är förvald, varje anrop debiteras. För en komplett bedömning: Koncernstruktur (hela koncernen: moder-, syster- och dotterbolag), Grunddata (ålder, status, bolagsform — avgör även börsnotering), Bokslut (tröskelvärden och utdelning) och Verklig huvudman (fristående, indirekt grundarägande).',
+      `Varje bolag i koncernen slås därefter upp med grunddata + bokslut av ditt val (verklig huvudman bara för moderbolag), högst ${MAX_RELATED_COMPANIES} bolag. Kostnaden för hela bedömningen visas i resultatet — leverantörens faktura är facit.`,
+      'Bedöm sparade data: använder det som redan finns på bolagskortet, utan nya anrop. Systerbolag syns bara vid en färsk hämtning med Koncernstruktur.',
+      'Grundarägande, registrerat de minimis-stöd, IRL och excellensflaggan tas från plattformen när bolaget finns här.'
+    ]
+  },
+  {
+    title: '2. Läs rapporten',
+    items: [
+      'Steg 1 prövar art. 22 GBER eller de minimis: grundförutsättningar för startup-bolaget och varje anknutet bolag, ägarbild, koncernkarta, fristående, tröskelvärden och de minimis. Steg 2 prövar Vinnovas målgrupp, steg 3 excellent inkubation.',
+      'Varje punkt får Ja / Nej / Okänt med källa (bolagsregister, plattformen eller manuell kontroll). Inget gissas och inget beslut fattas här — beslutet registreras som förut på bolagskortet.',
+      'Koncernkartan visar varför ett bolag räknas in: moder-, syster- och dotterbolag är anknutna (100 %), partnerföretag (25–50 %) räknas med sin andel.',
+      'Registerdata sparas inte på bolagskortet — synka bolagskortet separat om du vill behålla den.'
+    ]
+  },
+  {
+    title: '3. Svara på det registret inte kan avgöra',
+    items: [
+      'Välj svar i väljaren till höger på punkten och skriv en kort motivering/källa (t.ex. bolagsordning, intyg).',
+      'Ett eget Nej väger alltid tyngst; ett eget Ja fyller bara en okänd punkt. "Registret gäller" betyder att registret redan avgjort punkten.',
+      'Tabellerna (grundarteam med engagemang och mognadsfas, IRL, kommentaren) ändras med Ändra. Engagemanget prövas mot fasens trösklar.',
+      'Bolag utan bokslut: skriv bolagets egen uppskattning i god tro direkt i tröskelvärdestabellen (bilaga I art. 4.3) — ett bokslut vinner alltid.',
+      'Fristående kan sällan avgöras ur registret för nyregistrerade bolag — aktieboken avgör. Lägg till ägarbolag med "Lägg till koncernbolag" under koncernkartan, eller hämta mer om ett bolag direkt i kartan (kostnaden visas innan).',
+      'Spara och räkna om längst ned: samma underlag, inga nya anrop. Svaren sparas på bolagskortet och återanvänds vid nästa körning.'
+    ]
+  },
+  {
+    title: '4. Be om det som saknas',
+    items: [
+      'Begär komplettering skickar punkterna till coachen eller direkt till bolaget (svarar under Mitt bolag). Punkter som kräver coachens bedömning (Vinnova, IRL, excellens) går inte till bolaget.',
+      'Svaren hamnar i bolagets manuella svar — räkna om bedömningen när de kommit in.'
+    ]
+  },
+  {
+    title: 'Var bedömningen sparas',
+    items: [
+      'Varje körning sparas som PDF i dina Filer (i bolagets mapp) och, för portföljbolag, på bolagskortet under Ekonomi & statsstöd → Statsstöd & Vinnova med historik och vad som ändrats sedan förra bedömningen.',
+      'Skriv aldrig personuppgifter i motiveringar och kommentarer. Namn på verkliga huvudmän visas bara på skärmen och lagras inte.'
+    ]
+  }
+];
+
+export function HowItWorks() {
+  return (
+    <details className="group rounded-2xl border border-default bg-surface px-5 py-3">
+      <summary className="cursor-pointer list-none text-[13.5px] font-semibold text-foreground">
+        <span className="inline-flex items-center gap-2">
+          <span aria-hidden className="text-[11px] text-foreground-subtle transition group-open:rotate-90">▶</span>
+          Så funkar det
+        </span>
+      </summary>
+      <div className="mt-3 grid gap-4 pb-2 lg:grid-cols-2">
+        {STEPS.map((s) => (
+          <div key={s.title}>
+            <h3 className="text-[12.5px] font-semibold text-foreground">{s.title}</h3>
+            <ul className="mt-1 list-disc space-y-1 pl-5 text-[12.5px] text-foreground-muted">
+              {s.items.map((t) => (
+                <li key={t}>{t}</li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}

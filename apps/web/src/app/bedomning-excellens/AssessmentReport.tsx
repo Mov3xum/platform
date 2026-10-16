@@ -38,8 +38,8 @@ import { estimateRegistryCost, formatRegistryCost, registryPartCostLabel, type R
 
 // EN interaktiv rapport (CLAUDE.md § 51.9). Bedömningen visas i samma ordning
 // som referensbedömningen "Bedömning Vinnova Combly", och varje punkt som
-// registret inte kan avgöra ändras DIREKT i rapporten: klicka på punktens
-// utfall → välj svar + motivering. Grundarteam, uppskattningar för bolag utan
+// registret inte kan avgöra besvaras DIREKT i raden (väljare till höger +
+// motivering). Instruktionerna bor i "Så funkar det" överst. Grundarteam, uppskattningar för bolag utan
 // bokslut, de minimis-intyg, IRL och kommentaren redigeras på samma sätt, i
 // sin egen tabell. Ändringarna samlas i ett enda "Spara och räkna om": samma
 // underlag, inga nya debiterade anrop (`applyExcellenceFactsAction`). Ett
@@ -215,103 +215,56 @@ interface Editable {
 }
 
 /**
- * En punkt i rapporten. Går den att ändra är utfallet en knapp: klick öppnar
- * svarsalternativen (uttydda, aldrig nakent Ja/Nej) + motivering direkt under
- * punkten. Ett sparat eget svar visas som en rad "Ditt svar" tills det sparas.
+ * En punkt i rapporten. Går den att ändra sitter svaret till höger i raden:
+ * en väljare med uttydda alternativ (aldrig nakent Ja/Nej) och — när ett svar
+ * valts — ett motiveringsfält under. Ingen utfällning, så rapporten förblir
+ * smal. `action` = en länk till där punkten ändras (t.ex. grundartabellen).
  */
-function CheckRow({
-  check,
-  edit,
-  editing,
-  onToggle
-}: {
-  check: ScreeningCheck;
-  edit?: Editable;
-  editing: boolean;
-  onToggle: () => void;
-}) {
+function CheckRow({ check, edit, action }: { check: ScreeningCheck; edit?: Editable; action?: { label: string; onClick: () => void } }) {
   const decidedByRegister = check.verdict !== 'unknown' && check.source === 'register';
   const value = edit?.value;
-  const answerLabel = value ? (value.verdict === 'yes' ? edit!.meta.fulfilled : edit!.meta.failed) : null;
   return (
-    <li className="px-4 py-2.5">
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:gap-3">
-        {edit ? (
-          <button
-            type="button"
-            onClick={onToggle}
-            aria-expanded={editing}
-            title="Klicka för att ändra"
-            className={`inline-flex min-w-14 shrink-0 items-center justify-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ring-strong/60 transition hover:ring-brand ${VERDICT_TONE[check.verdict]}`}
-          >
-            {VERDICT_LABEL[check.verdict]}
-            <span aria-hidden className="text-[9px] opacity-70">▾</span>
-          </button>
-        ) : (
-          <Verdict v={check.verdict} />
-        )}
-        <div className="min-w-0 flex-1">
-          <p className="text-[13px] font-medium text-foreground">{check.label}</p>
-          <p className="mt-0.5 text-[12.5px] text-foreground-muted">{check.detail}</p>
-          {check.verdict === 'unknown' && check.needs && !editing && (
-            <p className="mt-0.5 text-[12px] text-foreground-subtle">Behövs: {check.needs}</p>
-          )}
-          {answerLabel && !editing && (
-            <p className="mt-0.5 text-[12px] text-foreground">
-              <span className="font-semibold">Ditt svar:</span> {answerLabel}
-              {value?.note ? <span className="text-foreground-muted"> · {value.note}</span> : null}
-            </p>
-          )}
-        </div>
-        <span className="shrink-0 text-[11px] text-foreground-subtle">{SOURCE_LABEL[check.source]}</span>
+    <li className="flex flex-col gap-2 px-4 py-2.5 sm:flex-row sm:items-start sm:gap-3">
+      <Verdict v={check.verdict} />
+      <div className="min-w-0 flex-1">
+        <p className="text-[13px] font-medium text-foreground">{check.label}</p>
+        <p className="mt-0.5 text-[12.5px] text-foreground-muted">{check.detail}</p>
       </div>
-      {edit && editing && (
-        <div className="mt-2 rounded-xl border border-default bg-canvas-subtle px-3 py-2.5">
-          <p className="text-[12.5px] font-medium text-foreground">{edit.meta.question}</p>
-          {decidedByRegister ? (
-            <p className="text-[11.5px] text-foreground-subtle">Avgjort ur registret — svara bara om du vet något annat.</p>
-          ) : edit.meta.hint ? (
-            <p className="text-[11.5px] text-foreground-subtle">{edit.meta.hint}</p>
-          ) : null}
-          <div className="mt-2 flex flex-wrap gap-1.5" role="radiogroup" aria-label={edit.meta.question}>
-            {(
-              [
-                ['yes', edit.meta.fulfilled],
-                ['no', edit.meta.failed],
-                ['', decidedByRegister ? 'Inget eget svar (registret gäller)' : 'Vet inte']
-              ] as const
-            ).map(([v, label]) => {
-              const active = (value?.verdict ?? '') === v;
-              return (
-                <button
-                  key={v || 'none'}
-                  type="button"
-                  role="radio"
-                  aria-checked={active}
-                  onClick={() => edit.onChange(v ? { verdict: v, ...(value?.note ? { note: value.note } : {}) } : undefined)}
-                  className={`rounded-full border px-3 py-1 text-[12px] font-semibold transition ${
-                    active ? 'border-brand bg-brand text-brand-foreground' : 'border-default bg-surface text-foreground-muted hover:bg-canvas-muted'
-                  }`}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-          <input
-            aria-label={`${edit.meta.question} — motivering`}
-            value={value?.note ?? ''}
-            maxLength={SCREENING_NOTE_MAX}
-            placeholder="Motivering/källa (t.ex. bolagsordning, intyg) — inga personuppgifter"
-            disabled={!value}
-            onChange={(e) => value && edit.onChange(e.target.value ? { verdict: value.verdict, note: e.target.value } : { verdict: value.verdict })}
-            className={`${inputCls} mt-2 disabled:opacity-50`}
-          />
-          <button type="button" onClick={onToggle} className="mt-2 text-[12px] font-semibold text-foreground-subtle hover:text-foreground">
-            Stäng
+      <div className="flex shrink-0 flex-col gap-1 sm:w-64 sm:items-end">
+        {edit ? (
+          <>
+            <select
+              aria-label={edit.meta.question}
+              title={edit.meta.hint ? `${edit.meta.question} ${edit.meta.hint}` : edit.meta.question}
+              value={value?.verdict ?? ''}
+              onChange={(e) => {
+                const v = e.target.value as '' | 'yes' | 'no';
+                edit.onChange(v ? { verdict: v, ...(value?.note ? { note: value.note } : {}) } : undefined);
+              }}
+              className={`${inputCls} ${value ? 'border-brand font-semibold' : 'text-foreground-muted'}`}
+            >
+              <option value="">{decidedByRegister ? 'Registret gäller' : 'Ej besvarad'}</option>
+              <option value="yes">{edit.meta.fulfilled}</option>
+              <option value="no">{edit.meta.failed}</option>
+            </select>
+            {value && (
+              <input
+                aria-label={`${edit.meta.question} — motivering`}
+                value={value.note ?? ''}
+                maxLength={SCREENING_NOTE_MAX}
+                placeholder="Motivering/källa"
+                onChange={(e) => edit.onChange(e.target.value ? { verdict: value.verdict, note: e.target.value } : { verdict: value.verdict })}
+                className={inputCls}
+              />
+            )}
+          </>
+        ) : action ? (
+          <button type="button" onClick={action.onClick} className="text-[12px] font-semibold text-link hover:underline">
+            {action.label}
           </button>
-        </div>
-      )}
+        ) : null}
+        <span className="text-[11px] text-foreground-subtle">{SOURCE_LABEL[check.source]}</span>
+      </div>
     </li>
   );
 }
@@ -349,10 +302,9 @@ function OwnershipTable({ rows, caption }: { rows: ScreeningOwnershipEntry[]; ca
                       o.person_name ? (
                         <>
                           {o.person_name}
-                          <span className="ml-2 text-[11px] text-foreground-subtle">fysisk person · visas bara här, lagras inte</span>
                         </>
                       ) : (
-                        'Fysisk person (namn lagras inte)'
+                        '–'
                       )
                     ) : (
                       o.name || '–'
@@ -461,55 +413,6 @@ function GroupCompanyFetch({
   );
 }
 
-const CHANGE_TONE: Record<'better' | 'worse' | 'neutral', string> = {
-  better: 'text-movexum-morkgron dark:text-movexum-pastell-gron',
-  worse: 'text-movexum-morkorange dark:text-movexum-pastell-orange',
-  neutral: 'text-foreground-muted'
-};
-
-function HistoryNote({ history, startupId }: { history: NonNullable<ExcellenceAssessment['history']>; startupId?: string }) {
-  if (history.error) {
-    return <p className={`rounded-xl px-3 py-2 text-[12.5px] ${WARN_TONE}`}>{history.error}</p>;
-  }
-  const cardHref = startupId ? `/startups/${startupId}/ekonomi#statsstod` : undefined;
-  return (
-    <div className="rounded-2xl border border-default bg-canvas-subtle px-4 py-3">
-      <p className="text-[12.5px] text-foreground">
-        <span className="font-semibold">Sparad på bolagskortet</span> under Statsstöd & Vinnova — kollegor ser samma utfall, PDF och historik.
-        {cardHref && (
-          <>
-            {' '}
-            <Link href={cardHref} className="font-semibold text-link hover:underline">
-              Öppna →
-            </Link>
-          </>
-        )}
-      </p>
-      {history.previous ? (
-        <div className="mt-2">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-foreground-subtle">
-            Sedan senaste bedömningen ({new Date(history.previous.assessedAt).toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm' })}
-            {history.previous.assessedBy ? `, ${history.previous.assessedBy}` : ''})
-          </p>
-          {!history.diff || history.diff.changes.length === 0 ? (
-            <p className="text-[12.5px] text-foreground-muted">Inga ändringar i utfall eller punkter.</p>
-          ) : (
-            <ul className="mt-1 space-y-0.5 text-[12.5px]">
-              {history.diff.changes.map((c, i) => (
-                <li key={i} className={CHANGE_TONE[c.tone]}>
-                  {c.text}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      ) : (
-        <p className="mt-1 text-[12px] text-foreground-muted">Första bedömningen av bolaget — nästa körning visar vad som ändrats.</p>
-      )}
-    </div>
-  );
-}
-
 /** Redigeringsläge per punkt/tabell — en i taget, så rapporten förblir lugn. */
 type EditKey = string | null;
 
@@ -517,16 +420,12 @@ function CompanyBlock({
   c,
   subjectName,
   facts,
-  setFacts,
-  editing,
-  setEditing
+  setFacts
 }: {
   c: CompanyAssessment;
   subjectName: string;
   facts: ScreeningManualFacts;
   setFacts: (f: (prev: ScreeningManualFacts) => ScreeningManualFacts) => void;
-  editing: EditKey;
-  setEditing: (k: EditKey) => void;
 }) {
   const title = c.name || formatOrgNr(c.orgNr) || 'Okänt bolag';
   // Manuella svar bara för bolag med org-nr som ingår i prövningen (startup + anknutna).
@@ -573,14 +472,11 @@ function CompanyBlock({
           {c.conditions.map((check) => {
             const id = check.id as CompanyManualCondition;
             const meta = editable && COMPANY_MANUAL_CONDITIONS.includes(id) ? CONDITION_QUESTION[id] : undefined;
-            const key = `${c.orgNr}:${check.id}`;
             return (
               <CheckRow
                 key={check.id}
                 check={check}
                 edit={meta ? { meta, value: facts.companies[c.orgNr]?.[id], onChange: (v) => setCondition(id, v) } : undefined}
-                editing={editing === key}
-                onToggle={() => setEditing(editing === key ? null : key)}
               />
             );
           })}
@@ -638,11 +534,6 @@ function GroupMap({
   return (
     <div>
       <h4 className="text-[13.5px] font-semibold text-foreground">Koncernkarta — bolag som räknas in för {subjectName}</h4>
-      <p className="mt-0.5 text-[12px] text-foreground-muted">
-        {mode === 'register'
-          ? `Ur koncernregistrets lista (hela koncernen: moder-, syster- och dotterbolag är alla anknutna, bilaga I art. 3.3) plus bolag ur verklig huvudman och andra ledet ur de uppslagna bolagen.${fetchMore ? ' Hämta mer om ett bolag direkt i tabellen — kryssa i delarna, se kostnaden, hämta.' : ''}`
-          : 'Ur sparad ägarbild på bolagskortet — bara ägarkedjan och direkta innehav. Systerbolag under samma moder syns först vid en färsk hämtning med Koncernstruktur.'}
-      </p>
       <div className="mt-2 overflow-x-auto rounded-xl border border-default">
         <table className="w-full text-[12.5px]">
           <thead className="bg-canvas-subtle text-left text-[11px] uppercase tracking-wider text-foreground-subtle">
@@ -687,11 +578,11 @@ function GroupMap({
                 {fetchMore && (
                   <td className="px-3 py-1.5">
                     {c.role === 'subject' ? (
-                      <span className="text-[11.5px] text-foreground-subtle">Ny bedömning hämtar om startup-bolaget.</span>
+                      <span className="text-foreground-subtle">–</span>
                     ) : c.orgNr ? (
                       <GroupCompanyFetch company={c} assessment={assessment} facts={facts} config={fetchMore} onUpdated={onUpdated} />
                     ) : (
-                      <span className="text-[11.5px] text-foreground-subtle">Saknar org-nr — kan inte slås upp.</span>
+                      <span className="text-[11.5px] text-foreground-subtle">Saknar org-nr</span>
                     )}
                   </td>
                 )}
@@ -733,7 +624,6 @@ function GroupCoverageNote({ assessment }: { assessment: ExcellenceAssessment })
     }
   }, [assessment.context]);
   if (!info) return null;
-  const standalone = assessment.result.standalone;
   const groupText = !info.groupFetched
     ? 'inte hämtad'
     : info.groupMembers === undefined
@@ -746,12 +636,6 @@ function GroupCoverageNote({ assessment }: { assessment: ExcellenceAssessment })
     <div className="mt-2 rounded-xl border border-default bg-canvas-subtle px-3 py-2 text-[12px] text-foreground-muted">
       <span className="font-semibold text-foreground">Vad registret svarade:</span> koncernstruktur {groupText} · verklig huvudman {boText}
       {info.companyOwners > 0 ? ` · ${info.companyOwners} bolag i ägarbilden` : ''}.
-      {standalone.verdict === 'unknown' && (
-        <span className="block">
-          Fristående kan inte avgöras ur registret — koncernregistret bygger på årsredovisningar och bär sällan ett nyregistrerat bolag. Aktieboken avgör:
-          lägg till ägarbolag här, svara på punkten "Fristående företag" nedan, eller skicka frågan till coach/bolag med ett klick längst ned.
-        </span>
-      )}
     </div>
   );
 }
@@ -824,7 +708,7 @@ function AddGroupCompanyForm({
         <form action={formAction} className="space-y-2 rounded-xl border border-default bg-canvas-subtle px-3 py-3">
           <input type="hidden" name="context" value={assessment.context} />
           <input type="hidden" name="facts" value={factsJson} />
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-foreground-muted">Lägg till koncernbolag — ett bolag registret inte bar</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-foreground-muted">Lägg till koncernbolag</p>
           <div className="grid gap-2 sm:grid-cols-[140px_minmax(0,1fr)_90px_160px_150px]">
             <input name="org_nr" required placeholder="Org-nr" inputMode="numeric" className={`${inputCls} mx-tnum`} aria-label="Org-nr" />
             <input name="name" placeholder="Bolagsnamn (fylls i från registret om tomt)" maxLength={160} className={inputCls} aria-label="Bolagsnamn" />
@@ -841,7 +725,7 @@ function AddGroupCompanyForm({
           <input name="note" placeholder="Källa, t.ex. aktieboken 2026-10 (inga personuppgifter)" maxLength={600} className={inputCls} aria-label="Källa" />
           {canLookup && fetchMore && (
             <div className="rounded-xl border border-default bg-canvas px-2.5 py-2">
-              <p className="text-[11.5px] font-semibold text-foreground">Slå upp bolaget hos {fetchMore.providerName} direkt (valfritt — kostar credits)</p>
+              <p className="text-[11.5px] font-semibold text-foreground">Slå upp hos {fetchMore.providerName} (valfritt)</p>
               <input type="hidden" name="parts_present" value={parts.length > 0 ? '1' : ''} disabled={parts.length === 0} />
               <div className="mt-1 grid gap-1 sm:grid-cols-2">
                 {fetchMore.parts.map((id) => (
@@ -864,17 +748,14 @@ function AddGroupCompanyForm({
               <label className="mt-1.5 flex cursor-pointer items-start gap-2 text-[12px] text-foreground">
                 <input type="checkbox" name="follow" value="1" checked={follow} onChange={(e) => setFollow(e.target.checked)} disabled={parts.length === 0} className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-brand" />
                 <span>
-                  Följ koncernen vidare: bolag som dyker upp i dess koncern/ägarbild slås också upp (grunddata och bokslut av det valda, högst {MAX_RELATED_COMPANIES} bolag totalt)
+                  Följ koncernen vidare (högst {MAX_RELATED_COMPANIES} bolag)
                   {followEstimate ? <span className="block text-[11px] text-foreground-subtle mx-tnum">≈ {formatRegistryCost(followEstimate)} per ytterligare bolag</span> : null}
                 </span>
               </label>
               <p className="mt-1 text-[11.5px] font-semibold text-foreground mx-tnum">
-                {parts.length === 0 ? 'Inga delar valda — bolaget läggs till utan uppslag (slås upp vid nästa bedömning).' : `Detta bolag kostar: ${estimate ? formatRegistryCost(estimate) : '–'}`}
+                {parts.length === 0 ? 'Inga delar valda — läggs till utan uppslag.' : `Detta bolag kostar: ${estimate ? formatRegistryCost(estimate) : '–'}`}
               </p>
             </div>
-          )}
-          {!canLookup && (
-            <p className="text-[11.5px] text-foreground-subtle">Bolaget läggs till i de manuella svaren och räknas som koncernbolag; det slås upp vid nästa bedömning med färska uppslag.</p>
           )}
           <div className="flex flex-wrap items-center gap-2">
             <button type="submit" disabled={pending} className="rounded-full bg-brand px-3 py-1 text-[12px] font-semibold text-brand-foreground hover:bg-brand-hover disabled:opacity-60">
@@ -994,7 +875,7 @@ export function AssessmentReport({ assessment, fetchMore, onUpdated }: Props) {
 
       <header className="border-b border-default pb-3">
         <p className="text-[10.5px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
-          {assessment.mode === 'register' ? `Färskt från ${assessment.providerName} · registerdata sparas inte på bolagskortet` : 'Sparade data i plattformen'}
+          {assessment.mode === 'register' ? `Färskt från ${assessment.providerName}` : 'Sparade data i plattformen'}
           {assessment.recomputed ? ' · omräknat på sparat underlag' : ''}
           {' · '}
           {new Date(assessment.assessedAt).toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm' })}
@@ -1018,6 +899,14 @@ export function AssessmentReport({ assessment, fetchMore, onUpdated }: Props) {
                 Ladda ned PDF
               </a>
             )}
+            {assessment.file && (
+              <Link
+                href={assessment.file.startupId ? `/filer?vy=bolag&bolag=${assessment.file.startupId}` : '/filer'}
+                className="text-[12.5px] font-semibold text-link hover:underline"
+              >
+                Visa i Filer
+              </Link>
+            )}
             {subject.startupId && (
               <Link href={`/startups/${subject.startupId}`} className="text-[12.5px] font-semibold text-link hover:underline">
                 Öppna bolagskortet →
@@ -1025,24 +914,6 @@ export function AssessmentReport({ assessment, fetchMore, onUpdated }: Props) {
             )}
           </div>
         </div>
-        <p className="mt-2 text-[12.5px] text-foreground-muted">
-          Rapporten är interaktiv: klicka på ett utfall med <span aria-hidden>▾</span> för att svara på det registret inte kan avgöra, eller på{' '}
-          <span className="font-semibold text-link">Ändra</span> vid en tabell. Spara längst ned så räknas bedömningen om på samma underlag — inga nya anrop
-          hos leverantören.
-          {assessment.file ? (
-            <>
-              {' '}
-              PDF:n ligger i{' '}
-              <Link
-                href={assessment.file.startupId ? `/filer?vy=bolag&bolag=${assessment.file.startupId}` : '/filer'}
-                className="font-semibold text-link hover:underline"
-              >
-                Filer{assessment.file.startupId ? ` → Bolag → ${subjectName}` : ' → Rapporter & uppföljning'}
-              </Link>
-              .
-            </>
-          ) : null}
-        </p>
         {assessment.fileError && <p className={`mt-2 inline-block rounded-xl px-3 py-1.5 text-[12.5px] ${WARN_TONE}`}>{assessment.fileError}</p>}
       </header>
 
@@ -1055,12 +926,13 @@ export function AssessmentReport({ assessment, fetchMore, onUpdated }: Props) {
           }`}
         >
           <span className="font-semibold">Kostnad hos {assessment.providerName} hittills:</span> {assessment.cost.companies} uppslagna bolag ={' '}
-          {formatRegistryCost(assessment.cost)}.{' '}
-          <span className="font-normal opacity-90">Uppskattning enligt angivna priser, summerad per uppslag — {assessment.providerName}s faktura är facit.</span>
+          {formatRegistryCost(assessment.cost)}.
         </p>
       )}
 
-      {assessment.history && <HistoryNote history={assessment.history} startupId={subject.startupId} />}
+      {assessment.history?.error && (
+        <p className={`rounded-xl px-3 py-2 text-[12.5px] ${WARN_TONE}`}>{assessment.history.error}</p>
+      )}
 
       {assessment.lookupWarnings.length > 0 && (
         <ul className={`rounded-xl px-3 py-2 text-[12.5px] ${WARN_TONE}`}>
@@ -1142,7 +1014,7 @@ export function AssessmentReport({ assessment, fetchMore, onUpdated }: Props) {
                 <p className="mt-1 flex flex-wrap items-center gap-2 text-[11.5px]">
                   <EditToggle editing={editingComment} onToggle={() => toggle('comment')} label={facts.comment ? 'Ändra' : 'Skriv kommentar'} />
                   <span>
-                    {counts.yes} ja · {counts.no} nej · {counts.unknown} okänt. Beslutet fattas av controllern.
+                    {counts.yes} ja · {counts.no} nej · {counts.unknown} okänt
                   </span>
                 </p>
               </td>
@@ -1154,7 +1026,7 @@ export function AssessmentReport({ assessment, fetchMore, onUpdated }: Props) {
       {/* Steg 1 */}
       <div className="space-y-5">
         <h3 className="text-[14px] font-semibold text-foreground">Steg 1 — Företagsstöd enligt art. 22 GBER eller de minimis</h3>
-        <CompanyBlock c={result.companies[0]} subjectName={subjectName} facts={facts} setFacts={setFacts} editing={editing} setEditing={setEditing} />
+        <CompanyBlock c={result.companies[0]} subjectName={subjectName} facts={facts} setFacts={setFacts} />
 
         <GroupMap companies={result.companies} subjectName={subjectName} assessment={assessment} facts={facts} fetchMore={fetchMore} onUpdated={onUpdated} />
 
@@ -1162,28 +1034,17 @@ export function AssessmentReport({ assessment, fetchMore, onUpdated }: Props) {
           <h4 className="text-[13.5px] font-semibold text-foreground">Fristående företag?</h4>
           <div className="mt-2">
             <CheckList>
-              <CheckRow
-                check={result.standalone}
-                edit={answerEdit('standalone', STANDALONE_QUESTION)}
-                editing={editing === 'standalone'}
-                onToggle={() => toggle('standalone')}
-              />
+              <CheckRow check={result.standalone} edit={answerEdit('standalone', STANDALONE_QUESTION)} />
             </CheckList>
           </div>
         </div>
 
         {result.companies.slice(1).map((c) => (
-          <CompanyBlock key={c.orgNr || c.name} c={c} subjectName={subjectName} facts={facts} setFacts={setFacts} editing={editing} setEditing={setEditing} />
+          <CompanyBlock key={c.orgNr || c.name} c={c} subjectName={subjectName} facts={facts} setFacts={setFacts} />
         ))}
 
         <div>
           <h4 className="text-[13.5px] font-semibold text-foreground">Tröskelvärden</h4>
-          {result.thresholds.rows.some(estimable) && (
-            <p className="mt-0.5 text-[12px] text-foreground-muted">
-              Bolag utan bokslut: skriv bolagets egen uppskattning i god tro för innevarande räkenskapsår direkt i raden (bilaga I art. 4.3) — ett bokslut
-              vinner alltid.
-            </p>
-          )}
           <div className="mt-2 overflow-x-auto rounded-xl border border-default">
             <table className="w-full text-[12.5px]">
               <thead className="bg-canvas-subtle text-left text-[11px] uppercase tracking-wider text-foreground-subtle">
@@ -1258,8 +1119,8 @@ export function AssessmentReport({ assessment, fetchMore, onUpdated }: Props) {
           </div>
           <div className="mt-2">
             <CheckList>
-              <CheckRow check={result.thresholds.check} editing={false} onToggle={() => undefined} />
-              <CheckRow check={result.deMinimis} editing={false} onToggle={() => undefined} />
+              <CheckRow check={result.thresholds.check} />
+              <CheckRow check={result.deMinimis} />
               {linkedForIntyg.length > 0 && (
                 <li className="px-4 py-2.5">
                   <p className="flex flex-wrap items-center gap-2 text-[12.5px] text-foreground-muted">
@@ -1344,7 +1205,7 @@ export function AssessmentReport({ assessment, fetchMore, onUpdated }: Props) {
                   {!editingFounders && facts.maturity_phase ? ` · fas: ${MATURITY_PHASE_LABEL[facts.maturity_phase]}` : ''}
                   {!editingFounders && facts.research_spinoff ? ' · forskningsavknoppning' : ''}
                 </span>
-                <EditToggle editing={editingFounders} onToggle={() => toggle('founders')} label="Ändra grundare, engagemang och fas" />
+                <EditToggle editing={editingFounders} onToggle={() => toggle('founders')} label="Ändra" />
               </span>
             </caption>
             <thead className="text-left text-[11px] uppercase tracking-wider text-foreground-subtle">
@@ -1413,7 +1274,7 @@ export function AssessmentReport({ assessment, fetchMore, onUpdated }: Props) {
               {founderRows.length === 0 && (
                 <tr className="border-t border-default">
                   <td colSpan={editingFounders ? 5 : 4} className="px-3 py-2 text-foreground-muted">
-                    Inga grundare angivna — grundarägande och grundardrivet kan inte prövas.
+                    Inga grundare angivna.
                   </td>
                 </tr>
               )}
@@ -1454,9 +1315,6 @@ export function AssessmentReport({ assessment, fetchMore, onUpdated }: Props) {
                         Forskningsavknoppning
                       </label>
                     </div>
-                    <p className="mt-1 text-[11.5px] text-foreground-subtle">
-                      Engagemanget prövas mot fasens trösklar. Namn och andel är yrkesuppgifter som bara visas här och i PDF:n — inga personnummer.
-                    </p>
                   </td>
                 </tr>
               )}
@@ -1474,8 +1332,7 @@ export function AssessmentReport({ assessment, fetchMore, onUpdated }: Props) {
                 key={check.id}
                 check={check}
                 edit={meta && VINNOVA_MANUAL_IDS.includes(id) ? answerEdit(id, meta) : undefined}
-                editing={editing === id}
-                onToggle={() => (isFounderCheck ? toggle('founders') : toggle(id))}
+                action={isFounderCheck ? { label: 'Ändra grundare', onClick: () => setEditing('founders') } : undefined}
               />
             );
           })}
@@ -1490,7 +1347,7 @@ export function AssessmentReport({ assessment, fetchMore, onUpdated }: Props) {
                   {typeof irl?.level === 'number' ? ` · sammanvägd nivå ${irl.level}` : ''}
                   {irl?.manualLevels ? ' · nivåer manuellt angivna' : ''}
                 </span>
-                <EditToggle editing={editingIrl} onToggle={() => toggle('irl')} label={platformIrl ? 'Skriv motivering' : 'Ange nivåer och motivering'} />
+                <EditToggle editing={editingIrl} onToggle={() => toggle('irl')} label="Ändra" />
               </span>
             </caption>
             <thead className="text-left text-[11px] uppercase tracking-wider text-foreground-subtle">
@@ -1570,7 +1427,7 @@ export function AssessmentReport({ assessment, fetchMore, onUpdated }: Props) {
       <div className="space-y-3">
         <h3 className="text-[14px] font-semibold text-foreground">Steg 3 — Excellent inkubation</h3>
         <CheckList>
-          <CheckRow check={result.excellence} edit={answerEdit('excellence', EXCELLENCE_QUESTION)} editing={editing === 'excellence'} onToggle={() => toggle('excellence')} />
+          <CheckRow check={result.excellence} edit={answerEdit('excellence', EXCELLENCE_QUESTION)} />
         </CheckList>
       </div>
 
@@ -1645,11 +1502,7 @@ export function AssessmentReport({ assessment, fetchMore, onUpdated }: Props) {
           {pending ? 'Räknar om…' : 'Spara och räkna om'}
         </button>
         <span className="text-[12px] text-foreground-muted">
-          {dirty
-            ? 'Osparade ändringar — bedömningen räknas om på samma underlag, inga nya anrop.'
-            : assessment.subject.startupId
-              ? 'Inga osparade ändringar. Svaren sparas på bolagskortet och återanvänds vid nästa körning.'
-              : 'Inga osparade ändringar. Bolaget finns inte i plattformen — svaren följer bara med i PDF:n.'}
+          {dirty ? 'Osparade ändringar' : assessment.subject.startupId ? 'Allt sparat' : 'Bolaget finns inte i plattformen — svaren följer bara med i PDF:n'}
         </span>
         {dirty && (
           <button type="button" onClick={() => setFacts(assessment.facts)} className="text-[12px] font-semibold text-foreground-subtle hover:text-foreground">
