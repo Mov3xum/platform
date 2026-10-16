@@ -8409,7 +8409,10 @@ huvudmutationen.
   olästa tills de öppnas). Pollar `/api/notifications` på fokus, synlig flik,
   navigering och var 60:e sekund — inloggningscookien är httpOnly, så
   PocketBase-realtime kan inte användas från webbläsaren. I en installerad
-  PWA speglas siffran på hemskärmsikonen (`navigator.setAppBadge`). "Visa
+  PWA speglas siffran på hemskärmsikonen (`navigator.setAppBadge`). Panelen
+  är `fixed` på alla skärmstorlekar — `.mx-topbar` har `overflow: hidden`
+  (§ 35.2), och en `absolute`-panel inuti den klipptes bort så att klockan
+  inte gick att öppna på desktop (incident 2026-10-16). "Visa
   alla" leder till `/inkorg#notiser` för den som har Mina uppgifter (inte en
   ren bolagsmedlem, § 22); kugghjulet till inställningarna.
 - **Notisraden** (`NotificationItem`, delas av klockan och listan): klick
