@@ -5,6 +5,7 @@ import { PageShell } from '@/components/PageShell';
 import { listConnectedRegistries, listScreenableStartups } from '@/lib/excellence/data.server';
 import { listAssignableResourcesForTenant } from '@/lib/assignments/collaboration';
 import { ExcellenceWorkspace } from './ExcellenceWorkspace';
+import { HowItWorks } from './HowItWorks';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,6 +43,7 @@ export default async function BedomningExcellensPage({
       }
     >
       <div className="space-y-5">
+        <HowItWorks />
         <ExcellenceWorkspace
           startups={startups}
           registries={registries}

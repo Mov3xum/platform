@@ -76,19 +76,17 @@ export function ScreeningRequestComposer({ assessment, coaches, senderName }: Pr
     return (
       <section className="rounded-2xl border border-default bg-surface px-5 py-4">
         <h3 className="text-[14px] font-semibold text-foreground">Begär komplettering</h3>
-        <p className="mt-1 text-[12.5px] text-foreground-muted">Inget saknat underlag som en människa behöver svara på — allt är känt eller avgörs av registret.</p>
+        <p className="mt-1 text-[12.5px] text-foreground-muted">Inget saknat underlag att fråga om.</p>
       </section>
     );
   }
 
   return (
     <section className="rounded-2xl border border-default bg-surface px-5 py-5">
-      <h3 className="text-[14px] font-semibold text-foreground">Begär komplettering — det bedömningen inte kan avgöra själv</h3>
-      <p className="mt-1 text-[12.5px] text-foreground-muted">
-        Skicka punkterna till <strong>coachen</strong> (som jobbar nära bolaget) eller direkt till <strong>bolaget</strong> (svarar under Mitt bolag).
-        Båda fyller i svaren i systemet; svaren hamnar i bolagets manuella svar och vägs in nästa gång bedömningen räknas om.
-        {!startupId && ' Bolaget finns inte i plattformen — då går det bara att kopiera listan som text.'}
-      </p>
+      <h3 className="text-[14px] font-semibold text-foreground">Begär komplettering</h3>
+      {!startupId && (
+        <p className="mt-1 text-[12.5px] text-foreground-muted">Bolaget finns inte i plattformen — kopiera listan som text.</p>
+      )}
 
       {/* Ett klick: alla punkter mottagaren kan svara på, med standardtext. */}
       {startupId && (
@@ -147,9 +145,7 @@ export function ScreeningRequestComposer({ assessment, coaches, senderName }: Pr
               </select>
             </label>
           ) : (
-            <p className="self-end pb-2 text-[12px] text-foreground-muted">
-              Bolagets inloggade medlemmar får en notis och svarar under Mitt bolag. Punkter som kräver coachens bedömning (Vinnova, IRL, excellens) går inte till bolaget.
-            </p>
+            <span aria-hidden />
           )}
           <label className="block">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-foreground-muted">Svar senast</span>

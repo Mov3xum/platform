@@ -8719,11 +8719,12 @@ en separat panel "Manuella svar" med dropdowns för samma punkter — två listo
 in. Nu är det **EN rapport** (`AssessmentReport.tsx`, ersätter
 `AssessmentView` + `ManualFactsPanel`) där varje punkt ändras på platsen:
 
-- **Punkter:** ett utfall som registret inte kan avgöra är en knapp (Ja/Nej/
-  Okänt med ▾). Klick öppnar svarsalternativen under punkten — alltid uttydda
-  ("Nej — inte börsnoterat" / "Ja — aktierna är upptagna till handel" /
-  "Vet inte" resp. "Inget eget svar (registret gäller)") + motivering. Ett
-  eget svar visas som raden "Ditt svar" tills det sparas. Gäller
+- **Punkter (2026-10-16):** svaret sitter till HÖGER i raden — en väljare
+  med uttydda alternativ ("Nej — inte börsnoterat" / "Ja — aktierna är
+  upptagna till handel" / "Ej besvarad" resp. "Registret gäller") och, när
+  ett svar valts, ett motiveringsfält under. Ingen utfällning under punkten
+  och ingen "Ditt svar"-rad; utfallschippen till vänster är bara visning.
+  Grundarpunkterna har länken "Ändra grundare". Gäller
   grundförutsättningarna per bolag (startup + anknutna med org-nr),
   "Fristående företag?", Vinnovas coachpunkter (inte marknadsredo,
   innovativt, övriga villkor) och excellens. Ålder/status/tröskel/de minimis
@@ -8747,10 +8748,15 @@ in. Nu är det **EN rapport** (`AssessmentReport.tsx`, ersätter
   med rapportens AKTUELLA svar (även osparade) så inget går förlorat när man
   hämtar mer mitt i en redigering. En ny körning/omräkning stänger alla
   redigeringar och laddar om svaren.
-- **Lugn som default:** en redigering i taget (`editing`-nyckel), tabellerna
-  är läsbara tills man klickar Ändra, "Behövs: …" döljs medan punkten
-  redigeras, och motorns hjälptexter pekar in i rapporten ("grundartabellen",
-  "svara på punkten") i stället för till en panel som inte finns.
+- **Lugn som default:** en tabell i taget redigeras (`editing`-nyckel),
+  tabellerna är läsbara tills man klickar Ändra, och raderna visar inte
+  "Behövs: …" (det står under Saknat underlag).
+- **Inga instruktioner i formuläret (2026-10-16):** alla förklaringar —
+  datadelar, kostnad, hur punkter besvaras, uppskattningar, aktieboken,
+  komplettering, var bedömningen sparas, PII — står i den hopfällda guiden
+  **"Så funkar det"** överst (`HowItWorks.tsx`). Formulär, rapport och
+  kompletteringsrutan bär bara rubriker, etiketter och status. Ny instruktion
+  ⇒ lägg den i guiden, inte som textstycke i rapporten.
 - Ingen ny dataväg, inga nya fält; samma skrivväg, samma personnummer-
   sanering och samma regel (manuellt Nej vinner, Ja fyller OKÄNT). Riskklass
   n/a.
