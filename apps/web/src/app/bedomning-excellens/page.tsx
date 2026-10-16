@@ -42,14 +42,6 @@ export default async function BedomningExcellensPage({
       }
     >
       <div className="space-y-5">
-        <p className="text-sm text-foreground-muted">
-          Följer tankemodellen för SMF-stöd och excellens: steg 1 utreder ägande, grundförutsättningar
-          och tröskelvärden för startup-bolaget och dess anknutna/partnerföretag, steg 2 Vinnovas
-          målgrupp och steg 3 excellensvillkoren. Varje punkt får Ja / Nej / Okänt med källa — inget
-          gissas och inget beslut fattas här. Registerdata från Roaring sparas inte på bolagskortet
-          (synka det separat när du vill behålla den) — men varje bedömning sparas som PDF i dina
-          Filer, i bolagets mapp, och kan laddas ned direkt.
-        </p>
         <ExcellenceWorkspace
           startups={startups}
           registries={registries}

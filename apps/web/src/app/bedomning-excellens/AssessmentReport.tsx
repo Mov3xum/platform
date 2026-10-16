@@ -461,55 +461,6 @@ function GroupCompanyFetch({
   );
 }
 
-const CHANGE_TONE: Record<'better' | 'worse' | 'neutral', string> = {
-  better: 'text-movexum-morkgron dark:text-movexum-pastell-gron',
-  worse: 'text-movexum-morkorange dark:text-movexum-pastell-orange',
-  neutral: 'text-foreground-muted'
-};
-
-function HistoryNote({ history, startupId }: { history: NonNullable<ExcellenceAssessment['history']>; startupId?: string }) {
-  if (history.error) {
-    return <p className={`rounded-xl px-3 py-2 text-[12.5px] ${WARN_TONE}`}>{history.error}</p>;
-  }
-  const cardHref = startupId ? `/startups/${startupId}/ekonomi#statsstod` : undefined;
-  return (
-    <div className="rounded-2xl border border-default bg-canvas-subtle px-4 py-3">
-      <p className="text-[12.5px] text-foreground">
-        <span className="font-semibold">Sparad på bolagskortet</span> under Statsstöd & Vinnova — kollegor ser samma utfall, PDF och historik.
-        {cardHref && (
-          <>
-            {' '}
-            <Link href={cardHref} className="font-semibold text-link hover:underline">
-              Öppna →
-            </Link>
-          </>
-        )}
-      </p>
-      {history.previous ? (
-        <div className="mt-2">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-foreground-subtle">
-            Sedan senaste bedömningen ({new Date(history.previous.assessedAt).toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm' })}
-            {history.previous.assessedBy ? `, ${history.previous.assessedBy}` : ''})
-          </p>
-          {!history.diff || history.diff.changes.length === 0 ? (
-            <p className="text-[12.5px] text-foreground-muted">Inga ändringar i utfall eller punkter.</p>
-          ) : (
-            <ul className="mt-1 space-y-0.5 text-[12.5px]">
-              {history.diff.changes.map((c, i) => (
-                <li key={i} className={CHANGE_TONE[c.tone]}>
-                  {c.text}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      ) : (
-        <p className="mt-1 text-[12px] text-foreground-muted">Första bedömningen av bolaget — nästa körning visar vad som ändrats.</p>
-      )}
-    </div>
-  );
-}
-
 /** Redigeringsläge per punkt/tabell — en i taget, så rapporten förblir lugn. */
 type EditKey = string | null;
 
@@ -1060,7 +1011,9 @@ export function AssessmentReport({ assessment, fetchMore, onUpdated }: Props) {
         </p>
       )}
 
-      {assessment.history && <HistoryNote history={assessment.history} startupId={subject.startupId} />}
+      {assessment.history?.error && (
+        <p className={`rounded-xl px-3 py-2 text-[12.5px] ${WARN_TONE}`}>{assessment.history.error}</p>
+      )}
 
       {assessment.lookupWarnings.length > 0 && (
         <ul className={`rounded-xl px-3 py-2 text-[12.5px] ${WARN_TONE}`}>

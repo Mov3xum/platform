@@ -1672,8 +1672,8 @@ den rena, enhetstestade `company-registry/pricing.ts`
 Visas **före** varje hämtning i kryssrutorna (`RegistryPartsPicker`: pris per
 del + "Vald hämtning: N bolag × M delar = K anrop · ≈ credits · ≈ kr") på
 "Testa mot org-nr" (1 bolag), portföljsynk (alla bolag med org-nr),
-bolagskortet (1 bolag) och Bedömning excellens (per bolag + att varje
-koncernbolag kostar lika mycket till, högst 1 + `MAX_RELATED_COMPANIES`), och
+bolagskortet (1 bolag) och Bedömning excellens (bara pris per del —
+summaraden visas inte där, 2026-10-16), och
 **efter** hämtningen i knappens svar, i synkloggen (`last_sync_summary`,
 "Kostnad: …"), i audit-raden (`activities`, PII-fri) och i bedömningens
 resultat ("Denna bedömning kostade … × uppslagna bolag"). Kostnaden räknas på
@@ -8525,9 +8525,9 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
 - **Kostnad:** varje koncernbolag är egna leverantörsanrop (de valda
   datadelarna × bolag) — kryssrutorna och taket på 6 bolag begränsar;
   samma rate-limit som "Testa mot org-nr". Enskild firma slås aldrig upp.
-  **Priset syns (2026-10-12):** kryssrutorna visar credits/kr per del och
-  "Vald hämtning" per bolag med noten att varje koncernbolag kostar lika
-  mycket till; resultatet visar "Denna bedömning kostade: N bolag × M delar
+  **Priset syns (2026-10-12):** kryssrutorna visar credits/kr per del
+  (raden "Vald hämtning" och sidans förklarande ingresser är borttagna
+  2026-10-16 — `RegistryPartsPicker showCost={false}`); resultatet visar "Denna bedömning kostade: N bolag × M delar
   = …" summerat över startup + faktiskt uppslagna koncernbolag
   (`ExcellenceAssessment.cost`, § 11.8 "Kostnad per anrop"). Priserna anges
   av ledningen per leverantör — saknas de visas "pris ej angivet", aldrig en
@@ -8819,8 +8819,8 @@ scopade proxyn `/api/screenings/<id>/pdf`, § 39.3-mönstret). Bolagskortet
 PDF-länk och **"Sedan föregående"** — `diffScreeningRuns` (ren, enhetstestad)
 jämför två körningar i rad: utfall (bättre/sämre), punkter som bytte utfall
 (med källa), underlag som kom på plats/tillkom, bolag som kom in i/föll ur
-koncernen, tröskelvärdets tal. Samma diff visas i bedömningsvyn direkt efter
-en körning (`ExcellenceAssessment.history`). Användarens egen PDF-kopia i
+koncernen, tröskelvärdets tal. Bedömningsvyn visar inte diffen (borttagen
+2026-10-16 — den finns på bolagskortet); bara `history.error` visas där. Användarens egen PDF-kopia i
 Filer finns kvar (§ 51.3). RLS: list/view staff/observer; create pinnad
 (`tenant` + `assessed_by` = inloggad, § 21.8); update/delete ledning.
 Fail-soft: kan raden inte skapas visas bedömningen ändå med `history.error`.
