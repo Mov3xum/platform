@@ -15,6 +15,11 @@ import { NotificationItem } from './NotificationItem';
  * sekund — inloggningscookien är httpOnly, så PocketBase-realtime kan inte
  * användas direkt från webbläsaren. I en installerad PWA (§ 35) speglas
  * siffran på hemskärmsikonen via `navigator.setAppBadge`.
+ *
+ * Panelen är `fixed` på ALLA skärmstorlekar: topplisten (`.mx-topbar`) har
+ * `overflow: hidden` (skyddar mot horisontell överbredd, § 35.2), så en
+ * `absolute`-panel inuti den klipptes bort — klockan "öppnade" men inget
+ * syntes på desktop (incident 2026-10-16).
  */
 
 const POLL_MS = 60_000;
@@ -167,7 +172,7 @@ export function NotificationBell({
         <div
           role="dialog"
           aria-label="Notiser"
-          className="fixed inset-x-3 top-[60px] z-50 flex max-h-[75dvh] flex-col overflow-hidden rounded-2xl border border-default bg-surface shadow-xl shadow-movexum-svart/20 sm:absolute sm:inset-x-auto sm:right-0 sm:top-11 sm:w-[400px]"
+          className="fixed inset-x-3 top-[calc(var(--mx-topbar-h)+4px)] z-50 flex max-h-[75dvh] flex-col overflow-hidden rounded-2xl border border-default bg-surface shadow-xl shadow-movexum-svart/20 sm:inset-x-auto sm:right-4 sm:w-[400px]"
         >
           <div className="flex items-center justify-between gap-2 border-b border-default px-4 py-3">
             <h2 className="font-heading text-[14px] font-semibold text-foreground">Notiser</h2>
