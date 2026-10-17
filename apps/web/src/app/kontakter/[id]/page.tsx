@@ -7,6 +7,7 @@ import { Icon } from '@/components/proto';
 import { escapeHtml, inlineMarkdown } from '@/lib/safe-html';
 import {
   getContact,
+  listContactGroups,
   listContactRequests,
   listStaffUsers,
   listStartupLinksForContact,
@@ -24,6 +25,7 @@ import {
 } from '@platform/shared';
 import { RequestPanel, type RequestView, type StartupOption } from './RequestPanel';
 import { DeleteContactButton } from './DeleteContactButton';
+import { ContactGroupsPanel } from './ContactGroupsPanel';
 import { BackLink, GdprBanner, Initials, OwnerChip, Panel, btnGhost, fmtDate } from '../ui';
 
 export const dynamic = 'force-dynamic';
@@ -53,7 +55,7 @@ export default async function KontaktPage({
   const isAdmin = isContactBookAdmin(user.roles);
   const isOwner = isContactOwner(contact, user.id);
 
-  const [staff, requests, links, startups] = await Promise.all([
+  const [staff, requests, links, startups, groupRes] = await Promise.all([
     listStaffUsers(pb, user.tenant),
     listContactRequests(pb, user.tenant, { contactId: contact.id }),
     listStartupLinksForContact(pb, contact.id),
@@ -65,7 +67,8 @@ export default async function KontaktPage({
         fields: 'id,name,status',
         batch: 300
       })
-      .catch(() => [] as StartupRow[])
+      .catch(() => [] as StartupRow[]),
+    listContactGroups(pb, user.tenant)
   ]);
   const names = staffNameMap(staff);
   const nameOf = (uid: string | null | undefined, expandName?: string) =>
@@ -206,6 +209,21 @@ export default async function KontaktPage({
               Ägaren är den kollega som har relationen till kontakten och som godkänner när någon annan vill använda den.
             </p>
           </Panel>
+
+          {!groupRes.missing && (
+            <Panel title="Grupper">
+              {groupRes.error ? (
+                <p className="text-sm text-movexum-morkorange dark:text-movexum-pastell-orange">{groupRes.error}</p>
+              ) : (
+                <ContactGroupsPanel
+                  contactId={contact.id}
+                  groups={groupRes.groups.map((g) => ({ id: g.id, name: g.name }))}
+                  selected={contact.groups}
+                  canEdit={canEdit}
+                />
+              )}
+            </Panel>
+          )}
 
           <Panel title="Kopplade bolag" meta={<span className="text-xs text-foreground-subtle mx-tnum">{links.length}</span>}>
             {links.length === 0 ? (

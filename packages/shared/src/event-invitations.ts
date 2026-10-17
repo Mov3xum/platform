@@ -207,3 +207,74 @@ export function groupInvitesByStatus<T extends InviteStatusRow>(rows: readonly T
     (g) => g.rows.length > 0
   );
 }
+
+/**
+ * Vilken lista inbjudningspanelen visar (dropdownen, § 53.5): alla personer
+ * (kontaktboken + plattformens användare — standard, så att en namnsökning
+ * hittar personen var den än finns), hela kontaktboken, en kategori, en egen
+ * grupp, Movexum-personalen, bolagsmedlemmarna eller bolagen. Okänt värde ⇒
+ * alla personer.
+ */
+export type InviteListRef =
+  | { kind: 'everyone' }
+  | { kind: 'contacts' }
+  | { kind: 'category'; category: string }
+  | { kind: 'group'; id: string }
+  | { kind: 'staff' }
+  | { kind: 'members' }
+  | { kind: 'startups' };
+
+const LIST_ID = /^[a-zA-Z0-9_-]{1,64}$/;
+
+export function parseInviteList(value: unknown, categories: readonly string[]): InviteListRef {
+  if (typeof value !== 'string') return { kind: 'everyone' };
+  if (value === 'contacts' || value === 'staff' || value === 'members' || value === 'startups') return { kind: value };
+  if (value.startsWith('cat:') && categories.includes(value.slice(4))) return { kind: 'category', category: value.slice(4) };
+  if (value.startsWith('group:') && LIST_ID.test(value.slice(6))) return { kind: 'group', id: value.slice(6) };
+  return { kind: 'everyone' };
+}
+
+export function inviteListValue(ref: InviteListRef): string {
+  switch (ref.kind) {
+    case 'category':
+      return `cat:${ref.category}`;
+    case 'group':
+      return `group:${ref.id}`;
+    default:
+      return ref.kind;
+  }
+}
+
+/** Ett val i panelen: `c:<id>` kontakt, `u:<id>` användare, `s:<id>` bolag. */
+export type InviteSelectionKind = 'contact' | 'user' | 'startup';
+
+export function inviteSelectionKey(kind: InviteSelectionKind, id: string): string {
+  return `${kind[0]}:${id}`;
+}
+
+/** Delar upp valen per sort; okända/ogiltiga nycklar släpps. */
+export function splitInviteSelection(keys: Iterable<string>): { contactIds: string[]; userIds: string[]; startupIds: string[] } {
+  const out = { contactIds: new Set<string>(), userIds: new Set<string>(), startupIds: new Set<string>() };
+  for (const key of keys) {
+    const id = key.slice(2);
+    if (!LIST_ID.test(id)) continue;
+    if (key.startsWith('c:')) out.contactIds.add(id);
+    else if (key.startsWith('u:')) out.userIds.add(id);
+    else if (key.startsWith('s:')) out.startupIds.add(id);
+  }
+  return { contactIds: [...out.contactIds], userIds: [...out.userIds], startupIds: [...out.startupIds] };
+}
+
+/**
+ * Varför en mottagare får inbjudan — styr mejlets text och om det har
+ * avregistrering: `contact` = kontaktnätet (berättigat intresse, avregistrering),
+ * `program` = bolag i inkubatorprogrammet (medlem eller bolagets adress),
+ * `team` = Movexums egen personal (användare utan bolag).
+ */
+export type InviteReason = 'contact' | 'program' | 'team';
+
+export function inviteReason(row: { contact?: string | null; user?: string | null; startup?: string | null }): InviteReason {
+  if (row.contact) return 'contact';
+  if (row.startup) return 'program';
+  return row.user ? 'team' : 'contact';
+}

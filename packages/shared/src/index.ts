@@ -1825,6 +1825,7 @@ export type {
 } from './compass-survey';
 export * from './procurement';
 export * from './contacts';
+export * from './contact-groups';
 export * from './feedback';
 export * from './agent-memory';
 export * from './funding';

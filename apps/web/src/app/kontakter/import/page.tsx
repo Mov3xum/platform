@@ -21,6 +21,7 @@ export default async function ImporteraKontakterPage() {
       title="Importera kontakter"
       tabs={[
         { id: 'alla', label: 'Kontakter', href: '/kontakter' },
+        { id: 'grupper', label: 'Grupper', href: '/kontakter/grupper' },
         { id: 'forfragningar', label: 'Förfrågningar', href: '/kontakter/forfragningar' },
         { id: 'import', label: 'Importera', href: '/kontakter/import' }
       ]}

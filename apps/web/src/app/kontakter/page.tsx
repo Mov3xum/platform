@@ -7,23 +7,25 @@ import { Icon } from '@/components/proto';
 import {
   STARTUP_CONTACTS,
   countPendingRequestsForOwner,
+  listContactGroups,
   listContactRequests,
   listContacts,
   listStaffUsers
 } from '@/lib/contacts/data';
 import { CONTACT_BOOK_ROLES } from '@platform/shared';
 import { ContactsBrowser, type BrowserContact } from './ContactsBrowser';
-import { GdprBanner, btnGhost, btnPrimary } from './ui';
+import { GdprBanner, Notice, btnGhost, btnPrimary } from './ui';
 
 export const dynamic = 'force-dynamic';
 
-export default async function KontakterPage() {
+export default async function KontakterPage({ searchParams }: { searchParams: Promise<{ grupp?: string }> }) {
+  const { grupp } = await searchParams;
   const user = await requireUser();
   if (!canAccessModuleForUser(user.roles, 'kontakter', user.enabledModules)) redirect('/hem');
   const canEdit = hasRole(user.roles, [...CONTACT_BOOK_ROLES]);
   const pb = await getServerPb();
 
-  const [contacts, staff, pending, myPending, links] = await Promise.all([
+  const [contacts, staff, pending, myPending, links, groupRes] = await Promise.all([
     listContacts(pb, user.tenant),
     listStaffUsers(pb, user.tenant),
     listContactRequests(pb, user.tenant, { status: 'pending', limit: 500 }),
@@ -35,7 +37,8 @@ export default async function KontakterPage() {
         fields: 'contact',
         batch: 500
       })
-      .catch(() => [] as { contact: string }[])
+      .catch(() => [] as { contact: string }[]),
+    listContactGroups(pb, user.tenant)
   ]);
 
   const linkCount = new Map<string, number>();
@@ -53,6 +56,7 @@ export default async function KontakterPage() {
     kommun: c.kommun,
     skills: c.skills,
     owners: c.owners,
+    groups: c.groups,
     linkedStartups: linkCount.get(c.id) ?? 0,
     pendingRequests: pendingCount.get(c.id) ?? 0,
     hasEmail: Boolean(c.email),
@@ -69,6 +73,7 @@ export default async function KontakterPage() {
       }
       tabs={[
         { id: 'alla', label: 'Kontakter', href: '/kontakter' },
+        { id: 'grupper', label: 'Grupper', href: '/kontakter/grupper' },
         { id: 'forfragningar', label: 'Förfrågningar', href: '/kontakter/forfragningar', badge: myPending },
         ...(canEdit ? [{ id: 'import', label: 'Importera', href: '/kontakter/import' }] : [])
       ]}
@@ -91,6 +96,7 @@ export default async function KontakterPage() {
           kontakt (t.ex. koppla ihop den med ett bolag) ber du ägaren om bekräftelse direkt på kontaktkortet, eller i
           chatten. Godkända förfrågningar delar kontakten med bolaget via systemet.
         </p>
+        {groupRes.error && <Notice kind="error">{groupRes.error}</Notice>}
         {rows.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-default p-12 text-center text-sm text-foreground-muted">
             Kontaktboken är tom.{' '}
@@ -108,7 +114,14 @@ export default async function KontakterPage() {
             )}
           </div>
         ) : (
-          <ContactsBrowser contacts={rows} owners={staff.map((s) => ({ id: s.id, name: s.name }))} meId={user.id} />
+          <ContactsBrowser
+            contacts={rows}
+            owners={staff.map((s) => ({ id: s.id, name: s.name }))}
+            meId={user.id}
+            groups={groupRes.groups.map((g) => ({ id: g.id, name: g.name }))}
+            initialGroup={typeof grupp === 'string' ? grupp : ''}
+            canEdit={canEdit}
+          />
         )}
         <GdprBanner />
       </div>

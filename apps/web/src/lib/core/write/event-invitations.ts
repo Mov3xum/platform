@@ -4,6 +4,7 @@ import type PocketBase from 'pocketbase';
 import {
   INVITE_MAX_RECIPIENTS,
   formatStockholmDateTime,
+  inviteReason,
   rsvpOpen,
   selectInviteRecipients,
   type InviteCandidate,
@@ -14,6 +15,7 @@ import { recomputeEventCounters } from '@/lib/events/counters';
 import {
   contactDisplayName,
   loadContactsByIds,
+  loadInviteUsers,
   loadStartupReach,
   type ContactRow
 } from '@/lib/events/invite-candidates';
@@ -28,7 +30,8 @@ import { fail, ok } from './types';
  * Inbjudningar till event (CLAUDE.md § 53.5) via det delade skrivlagret.
  *
  * En inbjudan är en rad i deltagarlistan (`event_signups`, stage
- * `invited`) med `contact` (kontaktboken), `user` (bolagsmedlem) och/eller
+ * `invited`) med `contact` (kontaktboken), `user` (bolagsmedlem eller
+ * Movexum-personal) och/eller
  * `startup` (bolaget den bjöds in via). Svarslänkens token
  * genereras vid varje utskick, lagras bara som SHA-256-hash och finns i
  * klartext enbart i mejlet — ett nytt utskick (påminnelse) roterar den.
@@ -118,7 +121,7 @@ function idList(raw: unknown, max: number): string[] | null {
 export async function inviteToEvent(
   pb: PocketBase,
   actor: Actor,
-  input: { eventId: string; contactIds?: unknown; startupIds?: unknown; baseUrl: string }
+  input: { eventId: string; contactIds?: unknown; userIds?: unknown; startupIds?: unknown; baseUrl: string }
 ): Promise<WriteResult<InviteResult>> {
   const denied = gate(actor);
   if (denied) return denied;
@@ -126,11 +129,14 @@ export async function inviteToEvent(
   if ('error' in ev) return ev.error;
 
   const contactIds = idList(input.contactIds, INVITE_MAX_RECIPIENTS);
+  const userIds = idList(input.userIds, INVITE_MAX_RECIPIENTS);
   const startupIds = idList(input.startupIds, MAX_STARTUPS);
-  if (!contactIds || !startupIds) {
-    return fail('INVALID_VALUE', `Välj högst ${INVITE_MAX_RECIPIENTS} kontakter och ${MAX_STARTUPS} bolag.`);
+  if (!contactIds || !userIds || !startupIds) {
+    return fail('INVALID_VALUE', `Välj högst ${INVITE_MAX_RECIPIENTS} personer och ${MAX_STARTUPS} bolag.`);
   }
-  if (contactIds.length === 0 && startupIds.length === 0) return fail('INVALID_VALUE', 'Välj minst en kontakt eller ett bolag.');
+  if (contactIds.length === 0 && userIds.length === 0 && startupIds.length === 0) {
+    return fail('INVALID_VALUE', 'Välj minst en mottagare.');
+  }
 
   const candidates: Candidate[] = [];
   let unreachableStartups = 0;
@@ -138,6 +144,21 @@ export async function inviteToEvent(
   try {
     if (contactIds.length > 0) {
       for (const c of await loadContactsByIds(pb, actor.tenant, contactIds)) candidates.push(contactCandidate(c));
+    }
+    if (userIds.length > 0) {
+      // Bara personal och rena bolagsmedlemmar i tenanten (loadInviteUsers
+      // filtrerar på roll och tenant); övriga id:n släpps tyst.
+      for (const u of await loadInviteUsers(pb, actor.tenant, { ids: userIds })) {
+        candidates.push({
+          id: u.id,
+          kind: 'user',
+          email: u.email,
+          name: u.name,
+          organization: u.kind === 'staff' ? 'Movexum' : u.startupName,
+          user: u.id,
+          ...(u.startup ? { startup: u.startup } : {})
+        });
+      }
     }
     if (startupIds.length > 0) {
       for (const reach of await loadStartupReach(pb, actor.tenant, startupIds)) {
@@ -199,7 +220,7 @@ export async function inviteToEvent(
     collection: 'event_signups',
     record_id: ev.id,
     field: 'invitations',
-    after_value: { title: ev.name ?? '', invited, startups: startupIds.length, skipped }
+    after_value: { title: ev.name ?? '', invited, users: userIds.length, startups: startupIds.length, skipped }
   });
 
   const sent = await sendEventInvitations(pb, actor, { eventId: ev.id, mode: 'pending', baseUrl: input.baseUrl });
@@ -267,14 +288,13 @@ export async function sendEventInvitations(
     }
     // Kontaktnätet (berättigat intresse) får avregistrering med en stabil
     // nyckel som fungerar från varje mejl; bolagsmedlemmar och bolagets egen
-    // adress bjuds in som del av programmet.
+    // adress bjuds in som del av programmet, personalen som medarbetare.
     const key = r.contact ? signUnsubscribeKey(r.contact, secret) : null;
-    const viaProgram = !r.contact && Boolean(r.user || r.startup);
     recipients.push({
       key: r.id,
       email: r.email as string,
       rsvpUrl: `${baseUrl}/e/svar?t=${token}`,
-      reason: viaProgram ? 'program' : 'contact',
+      reason: inviteReason(r),
       unsubscribeUrl: key ? `${baseUrl}/e/avregistrera?k=${key}` : null,
       oneClickUrl: key ? `${baseUrl}/api/public/e/unsubscribe?k=${key}` : null
     });

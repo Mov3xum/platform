@@ -4314,6 +4314,38 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
 });
 
+// Migration 1700000199: contact_groups — egna grupper i kontaktboken (§ 45.8)
+// + contacts.groups (multi-relation). list/view staff/observer-only; create
+// pinnar tenant + skapare (§ 21.8); update/delete Movexum-personal.
+await ensureCollection({
+  id: 'contact_groups_collection',
+  name: 'contact_groups',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'name', type: 'text', required: true, min: 1, max: 80 },
+    { name: 'description', type: 'text', required: false, max: 300 },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_contact_groups_tenant ON contact_groups (tenant)',
+    'CREATE UNIQUE INDEX idx_contact_groups_tenant_name ON contact_groups (tenant, name)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  createRule: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`
+});
+{
+  const contactGroupsCol = await pb.collections.getOne('contact_groups');
+  await patchCollection('contacts', [
+    { name: 'groups', type: 'relation', required: false, collectionId: contactGroupsCol.id, cascadeDelete: false, minSelect: 0, maxSelect: 50 }
+  ]);
+}
+
 // Migration 1700000176: feedback_items — Önskemål & buggar (§ 49). Intern
 // backlog med kort (bugg/ny funktion/ändring/fråga) per del av plattformen.
 // list/view staff/observer-only; createRule roll-lös (§ 21.3); update/delete:
@@ -5367,6 +5399,8 @@ const FORCE_CREATE_RULES = {
   surveys: `${ANY_AUTH} && @request.auth.tenant != ""`,
   // Kontaktboken (§ 45, migration 1700000157) — roll-enforcement i skrivlagret.
   contact_requests: `${ANY_AUTH} && @request.auth.tenant != ""`,
+  // Egna grupper i kontaktboken (§ 45.8, migration 1700000199) — pinnad skapare.
+  contact_groups: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
   // Önskemål & buggar (§ 49, migration 1700000176) — roll-enforcement i server-actionen.
   feedback_items: `${ANY_AUTH} && @request.auth.tenant != ""`,
   competence_tags: `${ANY_AUTH} && @request.auth.tenant != "" && @request.body.created_by = @request.auth.id && @request.body.status = "suggested" && @request.body.tenant = @request.auth.tenant`,

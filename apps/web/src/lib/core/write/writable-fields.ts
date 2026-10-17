@@ -489,6 +489,12 @@ const CREATE_POLICIES: Record<
     user: { kind: 'roles', roles: STAFF_FULL },
     agent: { kind: 'allow' }
   },
+  // Egna grupper i kontaktboken (§ 45.8) — personalen skapar, döper om och
+  // tar bort grupper och sätter medlemmar. Agenten har inget verktyg.
+  contact_groups: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'deny', reason: 'Grupper i kontaktboken hanteras av en människa under Kontaktbok → Grupper.' }
+  },
   // Bedömning excellens (§ 51.6) — begäran om komplettering skickas av
   // controllern (admin/incubator_lead/coach, finkontroll i skrivlagret);
   // agenten har inget verktyg (människa-i-loopen).
