@@ -556,7 +556,23 @@ function mapRow(
       if (after.deleted === true) {
         return { title: `${kindLabel} "${str(after.title) || ''}" borttaget`, href: year ? `/mal?ar=${year}` : '/mal', icon: 'target' };
       }
-      const field = str(row.field);
+      const GOAL_FIELD_LABELS: Record<string, string> = {
+        title: 'titel',
+        description: 'beskrivning',
+        owner_team: 'team',
+        focus_area: 'fokusområde',
+        kind: 'måltyp',
+        owner_user: 'ägare',
+        level: 'nivå',
+        parent_goal: 'överliggande mål',
+        responsible: 'ansvarig',
+        subteam: 'delteam'
+      };
+      const field = str(row.field)
+        .split(',')
+        .map((f) => GOAL_FIELD_LABELS[f.trim()] ?? f.trim())
+        .filter(Boolean)
+        .join(', ');
       return { title: `${kindLabel} "${str(after.title) || ''}": ${field || 'fält'} ${changedVerb}`, href, icon: 'target' };
     }
     case 'goal_indicators': {
@@ -715,9 +731,10 @@ function mapRow(
     case 'goal_import': {
       const created = typeof after.created === 'number' ? after.created : 0;
       const indicators = typeof after.indicators === 'number' ? after.indicators : 0;
+      const statuses = typeof after.statuses === 'number' ? after.statuses : 0;
       const year = str(after.year);
       return {
-        title: `Mål importerade${year ? ` till ${year}` : ''}: ${created} nya mål, ${indicators} indikatorer`,
+        title: `Mål importerade${year ? ` till ${year}` : ''}: ${created} nya mål, ${indicators} indikatorer${statuses ? `, ${statuses} kvartalsstatusar` : ''}`,
         href: year ? `/mal?ar=${year}` : '/mal',
         icon: 'upload'
       };

@@ -8,6 +8,8 @@ import {
   canCreateGoalOfKind,
   canManageGoal,
   goalKindOf,
+  goalLevelOf,
+  isGoalLevel,
   isAggregateOnlyIndicator,
   isGoalPeriodStatus,
   isSurveyModule,
@@ -24,6 +26,7 @@ import {
   type GoalPeriodStatus,
   type GoalStatusEntry,
   type GoalImportGoal,
+  type GoalImportIndicator,
   type IndicatorReading,
   type MetricKey
 } from '@platform/shared';
@@ -67,6 +70,11 @@ import { fail, ok } from './types';
  *    någon annan (`owner_user` agent-nekad). `canManageGoal`/
  *    `canCreateGoalOfKind` i @platform/shared är regeln; PB-reglerna
  *    (ledning ELLER ägare) är försvaret på djupet.
+ *  - OKR-struktur (migration 1700000198, § 42.5): nivå (`level`, styr
+ *    måltypen — Personligt mål ⇔ personligt), överliggande mål
+ *    (`parent_goal`, samma år, aldrig en cirkel), ansvarig (`responsible`,
+ *    Movexum-personal i tenanten — informativ, ger ingen rätt att ändra) och
+ *    delteam (`subteam`). Agenten kan inte välja ansvarig (`users` denylistad).
  *  - Radering: verksamhetsår (cascade → mål → indikatorer → status), mål och
  *    indikatorer tas bort av ledningen (personligt mål även av ägaren).
  *    Auditeras som `update` + `deleted: true` (§ 30.6-konventionen).
@@ -284,15 +292,59 @@ async function loadOpenPeriod(
  * Ägaren av ett personligt mål måste vara Movexum-personal i actorns tenant
  * (defense-in-depth; klienten är aldrig säkerhetsgränsen).
  */
-async function assertGoalOwnerInTenant(pb: PocketBase, actor: Actor, userId: string): Promise<WriteResult<string>> {
+async function assertGoalOwnerInTenant(
+  pb: PocketBase,
+  actor: Actor,
+  userId: string,
+  what: 'owner' | 'responsible' = 'owner'
+): Promise<WriteResult<string>> {
   if (userId === actor.id) return ok(userId);
+  const label = what === 'owner' ? 'Ägaren av det personliga målet' : 'Den ansvariga';
   const row = await getRecordInTenant<{ id: string; tenant?: string; roles?: string[] }>(pb, actor, 'users', userId, 'id,tenant,roles');
-  if (!row) return fail('NOT_FOUND', 'Ägaren av det personliga målet hittades inte i organisationen.');
+  if (!row) return fail('NOT_FOUND', `${label} hittades inte i organisationen.`);
   const roles = Array.isArray(row.roles) ? row.roles : [];
   if (!roles.some((r) => GOAL_STAFF_ROLES.includes(r))) {
-    return fail('INVALID_VALUE', 'Ägaren av ett personligt mål måste vara Movexum-personal.');
+    return fail('INVALID_VALUE', `${label} måste vara Movexum-personal.`);
   }
   return ok(row.id);
+}
+
+/**
+ * Det överliggande målet måste finnas i actorns tenant, i SAMMA verksamhetsår,
+ * och får inte ge en cirkel (målet självt eller ett mål som redan bidrar
+ * till det). `goalId` saknas när målet skapas (inget kan bidra till det än).
+ */
+async function assertParentGoal(
+  pb: PocketBase,
+  actor: Actor,
+  parentId: string,
+  periodId: string,
+  goalId?: string
+): Promise<WriteResult<Goal>> {
+  if (goalId && parentId === goalId) return fail('INVALID_VALUE', 'Ett mål kan inte bidra till sig självt.');
+  const parent = await getRecordInTenant<Goal>(pb, actor, GOALS, parentId, 'id,tenant,period,title,parent_goal');
+  if (!parent) return fail('NOT_FOUND', 'Det överliggande målet hittades inte.');
+  if (parent.period !== periodId) return fail('INVALID_VALUE', 'Det överliggande målet måste ligga i samma verksamhetsår.');
+  if (goalId) {
+    let cur = parent.parent_goal || null;
+    for (let hops = 0; cur && hops < 50; hops++) {
+      if (cur === goalId) return fail('INVALID_VALUE', `"${parent.title}" bidrar redan (direkt eller indirekt) till det här målet — det skulle bli en cirkel.`);
+      const next = await getRecordInTenant<Goal>(pb, actor, GOALS, cur, 'id,tenant,parent_goal');
+      cur = next?.parent_goal || null;
+    }
+  }
+  return ok(parent);
+}
+
+const OKR_MIGRATION_HINT = 'Instansen saknar fälten för nivå/överliggande mål/ansvarig/delteam (migration 1700000198)';
+
+/** Fält som skickades men inte fastnade (PB släpper okända fält tyst, § 24.4). */
+function droppedOkrFields(row: Goal, sent: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  for (const f of ['level', 'parent_goal', 'responsible', 'subteam'] as const) {
+    if (sent[f] && !(row as unknown as Record<string, unknown>)[f]) out.push(f);
+  }
+  return out;
 }
 
 export async function createGoal(
@@ -308,11 +360,26 @@ export async function createGoal(
     kind?: unknown;
     /** Bara personliga mål. Agenten får inte ange någon — målet blir den inloggades. */
     owner_user?: unknown;
+    /** Key result-nivå; `personal` ⇒ personligt mål. */
+    level?: unknown;
+    parent_goal?: unknown;
+    /** Ansvarig medarbetare (bara människa — agenten kan inte slå upp användare). */
+    responsible?: unknown;
+    subteam?: unknown;
   }
 ): Promise<WriteResult<Goal>> {
   const gate = canCreateRecord(actor, GOALS);
   if (!gate.ok) return fail('FORBIDDEN', gate.reason ?? 'Saknar behörighet.');
-  const kindRaw = input.kind === undefined || input.kind === null || input.kind === '' ? 'overall' : input.kind;
+  if (input.responsible) {
+    const r = canWriteField(actor, GOALS, 'responsible');
+    if (!r.ok) return fail('FIELD_NOT_WRITABLE', r.reason ?? 'Ansvarig väljs av en människa.');
+  }
+  const kindRaw =
+    input.kind === undefined || input.kind === null || input.kind === ''
+      ? input.level === 'personal'
+        ? 'personal'
+        : 'overall'
+      : input.kind;
   let ownerRaw: unknown = input.owner_user;
   if (kindRaw === 'personal') {
     if (actor.kind === 'agent') {
@@ -333,8 +400,16 @@ export async function createGoal(
     const owner = await assertGoalOwnerInTenant(pb, actor, v.value.owner_user);
     if (!owner.ok) return owner as WriteResult<Goal>;
   }
+  if (v.value.responsible) {
+    const resp = await assertGoalOwnerInTenant(pb, actor, v.value.responsible, 'responsible');
+    if (!resp.ok) return resp as WriteResult<Goal>;
+  }
   const period = await loadOpenPeriod(pb, actor, input.period);
   if ('error' in period) return period.error;
+  if (v.value.parent_goal) {
+    const parent = await assertParentGoal(pb, actor, v.value.parent_goal, period.id);
+    if (!parent.ok) return parent;
+  }
 
   let sortOrder = 0;
   try {
@@ -359,6 +434,12 @@ export async function createGoal(
         owner_team: v.value.owner_team,
         kind: v.value.kind,
         owner_user: v.value.owner_user ?? '',
+        // Skickas bara när de är satta — en instans utan 1700000198 svarar
+        // annars 400 på ett okänt select-värde i stället för att släppa fältet.
+        ...(v.value.level ? { level: v.value.level } : {}),
+        ...(v.value.parent_goal ? { parent_goal: v.value.parent_goal } : {}),
+        ...(v.value.responsible ? { responsible: v.value.responsible } : {}),
+        ...(v.value.subteam ? { subteam: sanitizePersonnummer(v.value.subteam) } : {}),
         sort_order: sortOrder,
         created_by: actor.id
       })
@@ -373,8 +454,12 @@ export async function createGoal(
         focus_area: v.value.focus_area,
         owner_team: v.value.owner_team,
         kind: v.value.kind,
-        // Intern användarrelation (aldrig namn/e-post i loggen).
+        // Interna användarrelationer (aldrig namn/e-post i loggen).
         owner_user: v.value.owner_user ?? undefined,
+        level: v.value.level ?? undefined,
+        parent_goal: v.value.parent_goal ?? undefined,
+        responsible: v.value.responsible ?? undefined,
+        subteam: v.value.subteam ?? undefined,
         year: period.year,
         description: v.value.description ? { length: v.value.description.length } : null
       }
@@ -386,15 +471,40 @@ export async function createGoal(
         'Målet sparades, men instansen saknar fälten för personliga mål (migration 1700000161) — det blev ett övergripande mål. Kör migrationen och försök igen.'
       );
     }
+    const dropped = droppedOkrFields(row, { level: v.value.level, parent_goal: v.value.parent_goal, responsible: v.value.responsible, subteam: v.value.subteam });
+    if (dropped.length) {
+      return fail('DB_ERROR', `Målet sparades utan ${dropped.join(', ')}. ${OKR_MIGRATION_HINT} — kör migrationen och redigera målet.`);
+    }
     return ok(row);
   } catch (err) {
     return fail('DB_ERROR', pbError(err, 'Kunde inte skapa målet.'));
   }
 }
 
-export type GoalWritableField = 'title' | 'description' | 'owner_team' | 'focus_area' | 'kind' | 'owner_user';
-const GOAL_FIELDS: readonly GoalWritableField[] = ['title', 'description', 'owner_team', 'focus_area', 'kind', 'owner_user'];
-const GOAL_READ_FIELDS = 'id,tenant,period,focus_area,title,description,owner_team,kind,owner_user';
+export type GoalWritableField =
+  | 'title'
+  | 'description'
+  | 'owner_team'
+  | 'focus_area'
+  | 'kind'
+  | 'owner_user'
+  | 'level'
+  | 'parent_goal'
+  | 'responsible'
+  | 'subteam';
+const GOAL_FIELDS: readonly GoalWritableField[] = [
+  'title',
+  'description',
+  'owner_team',
+  'focus_area',
+  'kind',
+  'owner_user',
+  'level',
+  'parent_goal',
+  'responsible',
+  'subteam'
+];
+const GOAL_READ_FIELDS = 'id,tenant,period,focus_area,title,description,owner_team,kind,owner_user,level,parent_goal,responsible,subteam';
 
 async function loadManageableGoal(
   pb: PocketBase,
@@ -442,8 +552,16 @@ export async function updateGoalFields(
   const { goal, period } = loaded;
   const lead = actor.roles.some((r) => GOAL_LEAD_ROLES.includes(r));
 
-  const merged: Record<string, unknown> = { ...goal, kind: goalKindOf(goal) };
+  const merged: Record<string, unknown> = { ...goal, kind: goalKindOf(goal), level: goalLevelOf(goal) };
   for (const field of fields) merged[field] = patch[field];
+  // Nivån styr måltypen när bara nivån ändras (Personligt mål ⇔ personligt).
+  if (patch.level !== undefined && patch.kind === undefined) {
+    if (patch.level === 'personal') merged.kind = 'personal';
+    else if (isGoalLevel(patch.level)) merged.kind = 'overall';
+  }
+  // Byte till övergripande utan angiven nivå: släpp den personliga nivån.
+  if (merged.kind === 'overall' && merged.level === 'personal') merged.level = null;
+  if (merged.kind === 'personal' && patch.level === undefined) merged.level = 'personal';
   // Byte till personligt utan angiven ägare ⇒ den som ändrar (ledningen kan peka ut någon annan).
   if (merged.kind === 'personal' && !merged.owner_user) merged.owner_user = actor.id;
   const v = validateGoalInput(merged);
@@ -461,6 +579,14 @@ export async function updateGoalFields(
     const owner = await assertGoalOwnerInTenant(pb, actor, v.value.owner_user);
     if (!owner.ok) return owner as WriteResult<Goal>;
   }
+  if (v.value.responsible && v.value.responsible !== (goal.responsible || null)) {
+    const resp = await assertGoalOwnerInTenant(pb, actor, v.value.responsible, 'responsible');
+    if (!resp.ok) return resp as WriteResult<Goal>;
+  }
+  if (v.value.parent_goal && v.value.parent_goal !== (goal.parent_goal || null)) {
+    const parent = await assertParentGoal(pb, actor, v.value.parent_goal, goal.period, goal.id);
+    if (!parent.ok) return parent;
+  }
 
   const payload: Record<string, unknown> = {};
   const before: Record<string, unknown> = {};
@@ -477,6 +603,13 @@ export async function updateGoalFields(
   put('focus_area', v.value.focus_area, goal.focus_area);
   put('kind', v.value.kind, goalKindOf(goal));
   put('owner_user', v.value.owner_user ?? '', goal.owner_user ?? '');
+  // Nivån skrivs bara när den (eller måltypen) faktiskt ändras — annars skulle
+  // varje redigering av ett äldre personligt mål skriva 'personal' till ett
+  // schema som kanske saknar fältet.
+  if (fields.includes('level') || fields.includes('kind')) put('level', v.value.level ?? '', goal.level || '');
+  put('parent_goal', v.value.parent_goal ?? '', goal.parent_goal || '');
+  put('responsible', v.value.responsible ?? '', goal.responsible || '');
+  put('subteam', v.value.subteam ? sanitizePersonnummer(v.value.subteam) : '', goal.subteam || '');
   if (Object.keys(payload).length === 0) return ok(goal);
 
   try {
@@ -496,6 +629,8 @@ export async function updateGoalFields(
     if (payload.kind === 'personal' && goalKindOf(row) !== 'personal') {
       return fail('DB_ERROR', 'Instansen saknar fälten för personliga mål (migration 1700000161) — måltypen sparades inte.');
     }
+    const dropped = droppedOkrFields(row, payload);
+    if (dropped.length) return fail('DB_ERROR', `${OKR_MIGRATION_HINT} — ${dropped.join(', ')} sparades inte.`);
     return ok(row);
   } catch (err) {
     return fail('DB_ERROR', pbError(err, 'Kunde inte uppdatera målet.'));
@@ -546,22 +681,52 @@ export interface ImportGoalsResult {
   created: number;
   /** Befintliga mål (samma fokusområde + titel + typ) som återanvändes. */
   reused: number;
+  /** Återanvända mål som fick saknad nivå/delteam/ansvarig ifylld. */
+  updated: number;
   skipped: number;
   indicatorsCreated: number;
-  /** PII-fria varningar (radnummer). */
+  /** Kvartalsstatusar ur filen som sparades. */
+  statusesCreated: number;
+  /** Kvartalsstatusar som redan var rapporterade i plattformen (lämnades orörda). */
+  statusesSkipped: number;
+  /** Mål som kopplades till sitt överliggande mål. */
+  parentsLinked: number;
+  /** PII-fria varningar (blad + radnummer). */
   warnings: string[];
 }
 
+function normPersonKey(s: string): string {
+  return s.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function normTitleKey(s: string): string {
+  return s.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/** Var en rad står i filen — "Bladet "X" rad N" eller "Rad N" (aldrig cellvärden). */
+function importRef(g: Pick<GoalImportGoal, 'ref' | 'line'>, line?: number): string {
+  const n = line ?? g.line;
+  if (g.ref) return g.ref.replace(/rad \d+$/, `rad ${n}`);
+  return `Rad ${n}`;
+}
+
 /**
- * Importerar tolkade mål (`parseGoalImportRows`, @platform/shared) till ett
- * verksamhetsår. Varje mål/indikator går genom SAMMA `createGoal`/
- * `createGoalIndicator` som UI:t och chatten — whitelist, validering,
- * behörighet per måltyp, tenant-stämpel och audit per rad. Idempotent:
- * ett mål som redan finns i året (samma fokusområde, titel och måltyp,
- * för personliga även ägare) återanvänds och får bara SAKNADE indikatorer
- * (matchade på etikett). Ägare för personliga mål matchas på e-post mot
- * Movexum-personal i tenanten; okänd e-post ⇒ importören blir ägare
- * (varning). En sammanfattningsrad loggas som `goal_import` (§ 32).
+ * Importerar tolkade mål (`parseGoalImportSheets`/`parseGoalImportRows`,
+ * @platform/shared) till ett verksamhetsår. Varje mål/indikator/status går
+ * genom SAMMA `createGoal`/`createGoalIndicator`/`recordGoalStatus`/
+ * `updateGoalFields` som UI:t och chatten — whitelist, validering,
+ * behörighet, tenant-stämpel och audit per rad.
+ *
+ * Idempotent: ett mål som redan finns i året (samma fokusområde, titel och
+ * måltyp, för personliga även ägare) återanvänds, får bara SAKNADE
+ * indikatorer (matchade på etikett) och fylls bara i där nivå/delteam/
+ * ansvarig saknas. Kvartalsstatus ur filen sparas bara för kvartal som inte
+ * redan rapporterats i plattformen — det som rapporterats i /mal skrivs
+ * aldrig över. Överliggande mål kopplas efteråt på titel (bara för mål som
+ * saknar koppling). Ansvarig/ägare matchas på e-post eller visningsnamn mot
+ * Movexum-personal i tenanten; okänd person ⇒ varning (ansvarig lämnas tom,
+ * ägaren av ett personligt mål blir importören). En sammanfattningsrad
+ * loggas som `goal_import` (§ 32).
  */
 export async function importGoals(
   pb: PocketBase,
@@ -575,53 +740,109 @@ export async function importGoals(
   const period = await loadOpenPeriod(pb, actor, periodId);
   if ('error' in period) return period.error;
   const warnings: string[] = [];
-  const result: ImportGoalsResult = { created: 0, reused: 0, skipped: 0, indicatorsCreated: 0, warnings };
+  const result: ImportGoalsResult = {
+    created: 0,
+    reused: 0,
+    updated: 0,
+    skipped: 0,
+    indicatorsCreated: 0,
+    statusesCreated: 0,
+    statusesSkipped: 0,
+    parentsLinked: 0,
+    warnings
+  };
 
-  // Movexum-personal per e-post (bara id — e-posten lagras aldrig i loggen).
-  const staffByEmail = new Map<string, string>();
-  const needsOwners = goals.some((g) => g.kind === 'personal' && g.owner_email);
-  if (needsOwners) {
+  // Movexum-personal per e-post och visningsnamn (bara id — namn/e-post når aldrig loggen).
+  const staffByKey = new Map<string, string>();
+  const needsPeople = goals.some((g) => (g.kind === 'personal' && g.owner_email) || g.responsible);
+  if (needsPeople) {
     try {
-      const res = await pb.collection('users').getList<{ id: string; email?: string; roles?: string[] }>(1, 200, {
+      const rows = await pb.collection('users').getFullList<{ id: string; email?: string; display_name?: string; roles?: string[] }>({
         filter: pb.filter('tenant = {:t}', { t: actor.tenant }),
-        fields: 'id,email,roles'
+        fields: 'id,email,display_name,roles',
+        batch: 200
       });
-      for (const u of res.items) {
-        if (u.email && Array.isArray(u.roles) && u.roles.some((r) => GOAL_STAFF_ROLES.includes(r))) {
-          staffByEmail.set(u.email.toLowerCase(), u.id);
+      for (const u of rows) {
+        if (!Array.isArray(u.roles) || !u.roles.some((r) => GOAL_STAFF_ROLES.includes(r))) continue;
+        if (u.email) staffByKey.set(u.email.toLowerCase(), u.id);
+        if (u.display_name) {
+          const key = normPersonKey(u.display_name);
+          // Två kollegor med samma namn ⇒ tvetydigt, matcha inte på namn.
+          staffByKey.set(key, staffByKey.has(key) && staffByKey.get(key) !== u.id ? '' : u.id);
         }
       }
     } catch {
-      warnings.push('Kunde inte läsa kollegor — personliga mål utan matchad ägare får importören som ägare.');
+      warnings.push('Kunde inte läsa kollegor — ansvariga lämnas tomma och personliga mål får importören som ägare.');
     }
   }
+  const findPerson = (raw: string | null | undefined): string | null => {
+    const v = String(raw ?? '').trim();
+    if (!v) return null;
+    return staffByKey.get(v.includes('@') ? v.toLowerCase() : normPersonKey(v)) || null;
+  };
 
-  // Befintliga mål i året (dubblettkontroll).
+  // Befintliga mål i året (dubblettkontroll + uppslag av överliggande mål).
   const existing = new Map<string, Goal>();
+  const yearGoals: Goal[] = [];
   try {
     const rows = await pb.collection(GOALS).getFullList<Goal>({
       filter: pb.filter('tenant = {:t} && period = {:p}', { t: actor.tenant, p: period.id }),
       fields: GOAL_READ_FIELDS,
       batch: 500
     });
-    for (const g of rows) existing.set(goalDedupeKey(g), g);
+    for (const g of rows) {
+      existing.set(goalDedupeKey(g), g);
+      yearGoals.push(g);
+    }
   } catch {
     warnings.push('Kunde inte läsa befintliga mål — dubblettkontrollen kan vara ofullständig.');
   }
 
-  for (const g of goals) {
+  const parentLinks: Array<{ goal: Goal; parentTitle: string; ref: string }> = [];
+
+  for (const raw of goals) {
+    // Raderna kommer från klienten — DATA, som valideras igen i createGoal m.fl.
+    const g: GoalImportGoal = {
+      ...raw,
+      title: String(raw.title ?? '').slice(0, 200),
+      subteam: raw.subteam ? String(raw.subteam).slice(0, 80) : null,
+      responsible: raw.responsible ? String(raw.responsible).slice(0, 120) : null,
+      parent_title: raw.parent_title ? String(raw.parent_title).slice(0, 200) : null,
+      indicators: Array.isArray(raw.indicators) ? raw.indicators : []
+    };
+    const ref = importRef(g);
     let ownerUser: string | null = null;
     if (g.kind === 'personal') {
-      ownerUser = g.owner_email ? (staffByEmail.get(g.owner_email.toLowerCase()) ?? null) : null;
+      ownerUser = findPerson(g.owner_email) ?? findPerson(g.responsible);
       if (!ownerUser) {
-        if (g.owner_email) warnings.push(`Rad ${g.line}: ägarens e-post matchar ingen Movexum-kollega — du blir ägare.`);
+        if (g.owner_email || g.responsible) warnings.push(`${ref}: ägaren matchar ingen Movexum-kollega — du blir ägare.`);
         ownerUser = actor.id;
       }
     }
+    let responsible: string | null = null;
+    if (g.kind !== 'personal' && g.responsible) {
+      responsible = findPerson(g.responsible);
+      if (!responsible) warnings.push(`${ref}: den ansvariga matchar ingen Movexum-kollega — lämnas tom.`);
+    }
+    const level = g.kind === 'personal' ? 'personal' : isGoalLevel(g.level) ? g.level : null;
+
     const key = goalDedupeKey({ focus_area: g.focus_area, title: g.title, kind: g.kind, owner_user: ownerUser });
     let goal = existing.get(key) ?? null;
     if (goal) {
       result.reused++;
+      // Fyll bara i det som saknas — det som satts i /mal skrivs aldrig över.
+      const patch: Partial<Record<GoalWritableField, unknown>> = {};
+      if (!goal.level && level && level !== 'personal') patch.level = level;
+      if (!goal.subteam && g.subteam) patch.subteam = g.subteam;
+      if (!goal.responsible && responsible) patch.responsible = responsible;
+      if (Object.keys(patch).length) {
+        const upd = await updateGoalFields(pb, actor, goal.id, patch);
+        if (upd.ok) {
+          goal = upd.value;
+          existing.set(key, goal);
+          result.updated++;
+        } else warnings.push(`${ref}: befintligt mål kunde inte kompletteras — ${upd.error}`);
+      }
     } else {
       const created = await createGoal(pb, actor, {
         period: period.id,
@@ -630,49 +851,77 @@ export async function importGoals(
         description: g.description,
         owner_team: g.owner_team,
         kind: g.kind,
-        owner_user: ownerUser ?? undefined
+        owner_user: ownerUser ?? undefined,
+        level: level ?? undefined,
+        responsible: responsible ?? undefined,
+        subteam: g.subteam ?? undefined
       });
       if (!created.ok) {
         result.skipped++;
-        warnings.push(`Rad ${g.line}: målet kunde inte skapas — ${created.error}`);
+        warnings.push(`${ref}: målet kunde inte skapas — ${created.error}`);
         continue;
       }
       goal = created.value;
       existing.set(key, goal);
+      yearGoals.push(goal);
       result.created++;
     }
+    if (g.parent_title && !goal.parent_goal) parentLinks.push({ goal, parentTitle: g.parent_title, ref });
 
     if (g.indicators.length === 0) continue;
-    let existingLabels = new Set<string>();
+    const existingByLabel = new Map<string, string>();
     try {
-      const inds = await pb.collection(GOAL_INDICATORS).getFullList<{ label: string }>({
+      const inds = await pb.collection(GOAL_INDICATORS).getFullList<{ id: string; label: string }>({
         filter: pb.filter('tenant = {:t} && goal = {:g}', { t: actor.tenant, g: goal.id }),
-        fields: 'label',
+        fields: 'id,label',
         batch: 200
       });
-      existingLabels = new Set(inds.map((i) => i.label.trim().toLowerCase()));
+      for (const i of inds) existingByLabel.set(i.label.trim().toLowerCase(), i.id);
     } catch {
       /* tom mängd — dubbletter fångas inte, men inget tappas */
     }
     for (const ind of g.indicators) {
-      if (existingLabels.has(ind.label.trim().toLowerCase())) {
-        warnings.push(`Rad ${ind.line}: indikatorn finns redan på målet — hoppas över.`);
+      const labelKey = String(ind.label ?? '').trim().toLowerCase();
+      let indicatorId = existingByLabel.get(labelKey) ?? null;
+      if (!indicatorId) {
+        const created = await createGoalIndicator(pb, actor, {
+          goal: goal.id,
+          label: ind.label,
+          source: ind.source,
+          metric_key: ind.metric_key ?? undefined,
+          target: ind.target,
+          target_text: ind.target_text ?? undefined,
+          unit: ind.unit
+        });
+        if (!created.ok) {
+          warnings.push(`${importRef(g, ind.line)}: indikatorn kunde inte skapas — ${created.error}`);
+          continue;
+        }
+        indicatorId = created.value.id;
+        existingByLabel.set(labelKey, indicatorId);
+        result.indicatorsCreated++;
+      }
+      await importIndicatorStatuses(pb, actor, indicatorId, ind, importRef(g, ind.line), result);
+    }
+  }
+
+  // Överliggande mål kopplas när alla mål finns (de kan stå senare i filen).
+  if (parentLinks.length) {
+    const byTitle = new Map<string, Goal[]>();
+    for (const yg of yearGoals) {
+      const k = normTitleKey(yg.title);
+      byTitle.set(k, [...(byTitle.get(k) ?? []), yg]);
+    }
+    for (const link of parentLinks) {
+      const candidates = (byTitle.get(normTitleKey(link.parentTitle)) ?? []).filter((c) => c.id !== link.goal.id);
+      const parent = candidates.find((c) => goalKindOf(c) === 'overall') ?? candidates[0];
+      if (!parent) {
+        warnings.push(`${link.ref}: det överliggande målet finns inte i året — kopplingen hoppades över.`);
         continue;
       }
-      const created = await createGoalIndicator(pb, actor, {
-        goal: goal.id,
-        label: ind.label,
-        source: ind.source,
-        metric_key: ind.metric_key ?? undefined,
-        target: ind.target,
-        unit: ind.unit
-      });
-      if (!created.ok) {
-        warnings.push(`Rad ${ind.line}: indikatorn kunde inte skapas — ${created.error}`);
-        continue;
-      }
-      existingLabels.add(ind.label.trim().toLowerCase());
-      result.indicatorsCreated++;
+      const upd = await updateGoalFields(pb, actor, link.goal.id, { parent_goal: parent.id });
+      if (upd.ok) result.parentsLinked++;
+      else warnings.push(`${link.ref}: kunde inte koppla till det överliggande målet — ${upd.error}`);
     }
   }
 
@@ -685,11 +934,56 @@ export async function importGoals(
       year: period.year,
       created: result.created,
       reused: result.reused,
+      updated: result.updated,
       skipped: result.skipped,
-      indicators: result.indicatorsCreated
+      indicators: result.indicatorsCreated,
+      statuses: result.statusesCreated,
+      parents: result.parentsLinked
     }
   });
   return ok(result);
+}
+
+/**
+ * Kvartalsstatus ur filen: bara kvartal som inte redan har en rapporterad
+ * status sparas. Kommentaren läggs på det senaste kvartalet som sparas.
+ */
+async function importIndicatorStatuses(
+  pb: PocketBase,
+  actor: Actor,
+  indicatorId: string,
+  ind: GoalImportIndicator,
+  ref: string,
+  result: ImportGoalsResult
+): Promise<void> {
+  const statuses = (Array.isArray(ind.statuses) ? ind.statuses : []).filter((st) => st && typeof st === 'object');
+  if (statuses.length === 0) return;
+  const reported = new Set<number>();
+  try {
+    const rows = await pb.collection(GOAL_STATUS_ENTRIES).getFullList<{ quarter: number }>({
+      filter: pb.filter('tenant = {:t} && indicator = {:i}', { t: actor.tenant, i: indicatorId }),
+      fields: 'quarter',
+      batch: 10
+    });
+    for (const r of rows) reported.add(Number(r.quarter));
+  } catch {
+    /* kan inte läsa — recordGoalStatus upsertar ändå per kvartal, men vi riskerar inte överskrivning */
+    result.warnings.push(`${ref}: kunde inte läsa tidigare status — statusarna ur filen hoppades över.`);
+    return;
+  }
+  const toWrite = statuses.filter((st) => !reported.has(Number(st.quarter)));
+  result.statusesSkipped += statuses.length - toWrite.length;
+  const lastQuarter = toWrite.length ? Math.max(...toWrite.map((st) => Number(st.quarter))) : null;
+  for (const st of toWrite) {
+    const res = await recordGoalStatus(pb, actor, {
+      indicator: indicatorId,
+      quarter: st.quarter,
+      status: st.status,
+      comment: Number(st.quarter) === lastQuarter && ind.comment ? String(ind.comment).slice(0, 2000) : undefined
+    });
+    if (res.ok) result.statusesCreated++;
+    else result.warnings.push(`${ref}: status för Q${st.quarter} kunde inte sparas — ${res.error}`);
+  }
 }
 
 function goalDedupeKey(g: Pick<Goal, 'focus_area' | 'title' | 'kind' | 'owner_user'>): string {
@@ -710,6 +1004,7 @@ export async function createGoalIndicator(
     survey_module?: unknown;
     activity_measure?: unknown;
     target?: unknown;
+    target_text?: unknown;
     unit?: unknown;
     direction?: unknown;
   }
@@ -720,6 +1015,10 @@ export async function createGoalIndicator(
   if (actor.kind === 'agent' && input.target !== undefined && input.target !== null && input.target !== '') {
     const t = canWriteField(actor, GOAL_INDICATORS, 'target');
     if (!t.ok) return fail('FIELD_NOT_WRITABLE', t.reason ?? 'Måltal sätts av en människa.');
+  }
+  if (actor.kind === 'agent' && input.target_text) {
+    const t = canWriteField(actor, GOAL_INDICATORS, 'target_text');
+    if (!t.ok) return fail('FIELD_NOT_WRITABLE', t.reason ?? 'Målvärden sätts av en människa.');
   }
   const v = validateGoalIndicatorInput(input);
   if (!v.ok) return fail('INVALID_VALUE', v.error);
@@ -758,6 +1057,7 @@ export async function createGoalIndicator(
         ...(v.value.activity_measure ? { activity_measure: v.value.activity_measure } : {}),
         target: v.value.target ?? 0,
         ...numberWithFlag(v.value.target, 'has_target'),
+        ...(v.value.target_text ? { target_text: sanitizePersonnummer(v.value.target_text) } : {}),
         unit: v.value.unit,
         direction: v.value.direction,
         sort_order: 0,
@@ -777,7 +1077,8 @@ export async function createGoalIndicator(
         metric_key: v.value.metric_key,
         survey_module: v.value.survey_module,
         activity_measure: v.value.activity_measure ?? undefined,
-        target: v.value.target
+        target: v.value.target,
+        target_text: v.value.target_text ? { length: v.value.target_text.length } : undefined
       }
     });
     return ok({ ...row, target: v.value.target });
@@ -795,12 +1096,13 @@ export async function updateGoalIndicator(
   pb: PocketBase,
   actor: Actor,
   indicatorId: string,
-  patch: { label?: unknown; target?: unknown }
+  patch: { label?: unknown; target?: unknown; target_text?: unknown }
 ): Promise<WriteResult<GoalIndicator>> {
   const wantsLabel = patch.label !== undefined;
   const wantsTarget = patch.target !== undefined;
-  if (!wantsLabel && !wantsTarget) return fail('INVALID_VALUE', 'Inget att ändra.');
-  for (const field of [wantsLabel ? 'label' : null, wantsTarget ? 'target' : null]) {
+  const wantsText = patch.target_text !== undefined;
+  if (!wantsLabel && !wantsTarget && !wantsText) return fail('INVALID_VALUE', 'Inget att ändra.');
+  for (const field of [wantsLabel ? 'label' : null, wantsTarget ? 'target' : null, wantsText ? 'target_text' : null]) {
     if (!field) continue;
     const gate = canWriteField(actor, GOAL_INDICATORS, field);
     if (!gate.ok) return fail('FIELD_NOT_WRITABLE', gate.reason ?? 'Fältet är inte skrivbart.');
@@ -810,7 +1112,7 @@ export async function updateGoalIndicator(
     actor,
     GOAL_INDICATORS,
     indicatorId,
-    'id,tenant,goal,label,source,metric_key,survey_module,target,has_target,unit,direction'
+    'id,tenant,goal,label,source,metric_key,survey_module,activity_measure,target,has_target,target_text,unit,direction'
   );
   if (!indicator) return fail('NOT_FOUND', 'Indikatorn hittades inte.');
   const goal = await getRecordInTenant<Goal>(pb, actor, GOALS, indicator.goal, 'id,tenant,period,title');
@@ -823,12 +1125,16 @@ export async function updateGoalIndicator(
     source: indicator.source,
     metric_key: indicator.metric_key || undefined,
     survey_module: indicator.survey_module || undefined,
+    activity_measure: indicator.activity_measure || undefined,
     target: wantsTarget ? patch.target : currentTarget,
+    target_text: wantsText ? patch.target_text : (indicator.target_text ?? ''),
     unit: indicator.unit,
     direction: indicator.direction
   });
   if (!v.ok) return fail('INVALID_VALUE', v.error);
   const payload: Record<string, unknown> = {};
+  const nextText = v.value.target_text ? sanitizePersonnummer(v.value.target_text) : '';
+  if (wantsText && nextText !== (indicator.target_text ?? '')) payload.target_text = nextText;
   const label = sanitizePersonnummer(v.value.label);
   if (wantsLabel && label !== indicator.label) payload.label = label;
   if (wantsTarget && v.value.target !== currentTarget) {
@@ -844,7 +1150,7 @@ export async function updateGoalIndicator(
       collection: GOAL_INDICATORS,
       record_id: indicatorId,
       field: Object.keys(payload).filter((k) => k !== 'has_target').join(','),
-      before_value: { label: indicator.label, target: currentTarget },
+      before_value: { label: indicator.label, target: currentTarget, target_text: indicator.target_text ? { length: indicator.target_text.length } : null },
       after_value: { label, target: wantsTarget ? v.value.target : currentTarget, goal_title: goal.title, goal: goal.id, year: period.year }
     });
     return ok({ ...row, target: wantsTarget ? v.value.target : currentTarget });

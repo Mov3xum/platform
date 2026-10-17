@@ -34,6 +34,7 @@ import {
   MAX_COMPASS_CHOICES,
   GOAL_FOCUS_AREAS,
   GOAL_KINDS,
+  GOAL_LEVELS,
   GOAL_OWNER_TEAMS,
   GOAL_STATUSES,
   GOAL_INDICATOR_UNITS,
@@ -1917,7 +1918,7 @@ export function buildChatTools(
         name: 'create_goal',
         description:
           'Lägger till ett mål i årets verksamhetsplan (/mal, § 42) under ett av ' +
-          'Movexums fem fokusområden, med ägande team. kind=overall = ÖVERGRIPANDE ' +
+          'Movexums fokusområden (eller projekt = Projektmål), med ägande team. kind=overall = ÖVERGRIPANDE ' +
           'mål (organisation/team, kräver admin/incubator_lead); kind=personal = ' +
           'användarens EGET personliga mål (målet blir alltid den inloggades — du ' +
           'kan inte sätta personliga mål åt andra). Indikatorer med måltal läggs ' +
@@ -1932,7 +1933,14 @@ export function buildChatTools(
             title: { type: 'string', description: 'Målet (max 200 tecken), t.ex. "Konvertering 50 % från ink till acc inom 8 månader".' },
             description: { type: 'string', description: 'Valfri beskrivning (max 2000, inga personuppgifter).' },
             owner_team: { type: 'string', enum: [...GOAL_OWNER_TEAMS], description: 'Ägande team (default gemensamt).' },
-            kind: { type: 'string', enum: [...GOAL_KINDS], description: 'overall = övergripande (default), personal = mitt personliga mål.' }
+            kind: { type: 'string', enum: [...GOAL_KINDS], description: 'overall = övergripande (default), personal = mitt personliga mål.' },
+            level: {
+              type: 'string',
+              enum: [...GOAL_LEVELS],
+              description: 'Key result-nivå: organisation, team, project, project_indicator eller personal (= personligt mål).'
+            },
+            subteam: { type: 'string', description: 'Delteam/projekt under teamet, t.ex. "Sprint-X 2 – Kapital" eller "EOI" (max 80).' },
+            parent_goal_id: { type: 'string', description: 'Id för det överliggande målet målet bidrar till (samma år; slå upp via query_collection på goals).' }
           },
           required: ['focus_area', 'title']
         }
@@ -1981,7 +1989,11 @@ export function buildChatTools(
           properties: {
             indicator_id: { type: 'string' },
             quarter: { type: 'integer', minimum: 1, maximum: 4, description: 'Default: innevarande kvartal.' },
-            status: { type: 'string', enum: [...GOAL_STATUSES], description: 'on_track = I fas, delayed = Försenad, not_started = Ej startad, done = Klar.' },
+            status: {
+              type: 'string',
+              enum: [...GOAL_STATUSES],
+              description: 'on_track = I fas, risk = Risk (riskerar att inte nås), delayed = Försenad, not_started = Ej startad, done = Klar.'
+            },
             comment: { type: 'string', description: 'Kort motivering (max 2000).' }
           },
           required: ['indicator_id', 'status']
@@ -5371,7 +5383,10 @@ async function runCreateGoal(args: Record<string, unknown>, ctx: ToolDispatchCon
     title: argStr(args, 'title'),
     description: argStr(args, 'description') || null,
     owner_team: argStr(args, 'owner_team') || undefined,
-    kind: argStr(args, 'kind') || undefined
+    kind: argStr(args, 'kind') || undefined,
+    level: argStr(args, 'level') || undefined,
+    subteam: argStr(args, 'subteam') || undefined,
+    parent_goal: argStr(args, 'parent_goal_id') || undefined
   });
   if (!result.ok) return { ok: false, error: result.error };
   return {

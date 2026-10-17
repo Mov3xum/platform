@@ -21,7 +21,11 @@ export const GOAL_FOCUS_AREAS = [
   'inflode_varumarke',
   'kundvarde_kvalitet',
   'organisation_digitalisering',
-  'tematisk_accelerator'
+  'tematisk_accelerator',
+  // Mål vars Objective är ett externt finansierat projekt (Sprint-X, EOI, GSAI …)
+  // snarare än ett av de fem fokusområdena (migration 1700000198). Projektets
+  // namn bärs av `subteam`.
+  'projekt'
 ] as const;
 export type GoalFocusArea = (typeof GOAL_FOCUS_AREAS)[number];
 
@@ -30,7 +34,8 @@ export const GOAL_FOCUS_AREA_LABELS: Record<GoalFocusArea, string> = {
   inflode_varumarke: 'Inflöde och varumärke',
   kundvarde_kvalitet: 'Kundvärde och kvalitetssäkring',
   organisation_digitalisering: 'Organisatorisk utveckling och digitalisering',
-  tematisk_accelerator: 'Tematisk accelerator med spets'
+  tematisk_accelerator: 'Tematisk accelerator med spets',
+  projekt: 'Projektmål'
 };
 
 export function isGoalFocusArea(v: unknown): v is GoalFocusArea {
@@ -67,6 +72,24 @@ export function isGoalKind(v: unknown): v is GoalKind {
   return (GOAL_KINDS as readonly string[]).includes(String(v));
 }
 
+/**
+ * Målets nivå (Key result-nivå i verksamhetsplanen, migration 1700000198).
+ * `personal` hör ihop med måltypen personligt; övriga nivåer är övergripande
+ * mål. Saknad nivå på ett övergripande mål = "Ej angiven" (vi gissar aldrig).
+ */
+export const GOAL_LEVELS = ['organisation', 'team', 'project', 'project_indicator', 'personal'] as const;
+export type GoalLevel = (typeof GOAL_LEVELS)[number];
+export const GOAL_LEVEL_LABELS: Record<GoalLevel, string> = {
+  organisation: 'Organisationsnivå',
+  team: 'Teamnivå',
+  project: 'Projektnivå',
+  project_indicator: 'Projektindikator',
+  personal: 'Personligt mål'
+};
+export function isGoalLevel(v: unknown): v is GoalLevel {
+  return (GOAL_LEVELS as readonly string[]).includes(String(v));
+}
+
 /** Saknat/okänt värde (rad från före migration 1700000161) ⇒ övergripande. */
 export function goalKindOf(goal: Pick<Goal, 'kind'>): GoalKind {
   return goal.kind === 'personal' ? 'personal' : 'overall';
@@ -88,11 +111,13 @@ export function isGoalPeriodStatus(v: unknown): v is GoalPeriodStatus {
   return (GOAL_PERIOD_STATUSES as readonly string[]).includes(String(v));
 }
 
-/** Samma fyra ord som i teamdagens uppföljning. */
-export const GOAL_STATUSES = ['on_track', 'delayed', 'not_started', 'done'] as const;
+/** Samma ord som i teamdagens uppföljning. */
+// `risk` (migration 1700000198): målet riskerar att inte nås — värre än försenad.
+export const GOAL_STATUSES = ['on_track', 'risk', 'delayed', 'not_started', 'done'] as const;
 export type GoalStatus = (typeof GOAL_STATUSES)[number];
 export const GOAL_STATUS_LABELS: Record<GoalStatus, string> = {
   on_track: 'I fas',
+  risk: 'Risk',
   delayed: 'Försenad',
   not_started: 'Ej startad',
   done: 'Klar'
@@ -135,6 +160,10 @@ export const GOAL_TITLE_MAX = 200;
 export const GOAL_DESCRIPTION_MAX = 2000;
 export const GOAL_COMMENT_MAX = 2000;
 export const GOAL_PERIOD_TITLE_MAX = 120;
+/** Delteam/projekt under det ägande teamet ("Sprint-X 2 – Kapital", "EOI"). */
+export const GOAL_SUBTEAM_MAX = 80;
+/** Målvärde som text när det inte är ett tal ("Ökning med 12 st i BC …", "TBD"). */
+export const GOAL_TARGET_TEXT_MAX = 200;
 
 // ─── Typer ──────────────────────────────────────────────────────────────────
 
@@ -158,6 +187,14 @@ export interface Goal {
   kind?: GoalKind | null;
   /** Ägaren av ett personligt mål (users-id). Tomt för övergripande mål. */
   owner_user?: string | null;
+  /** Key result-nivå (migration 1700000198). Tomt = ej angiven. */
+  level?: GoalLevel | '' | null;
+  /** Överliggande mål i samma år — målet bidrar till det (migration 1700000198). */
+  parent_goal?: string | null;
+  /** Ansvarig medarbetare för ett övergripande mål (informativ, ger ingen rätt att ändra). */
+  responsible?: string | null;
+  /** Delteam/projekt under `owner_team` (fri text). */
+  subteam?: string | null;
   sort_order?: number | null;
 }
 
@@ -173,6 +210,8 @@ export interface GoalIndicator {
   /** Vad som mäts för `source = activities` (migration 1700000196, § 53.4). */
   activity_measure?: string | null;
   target?: number | null;
+  /** Målvärdet i ord när det inte ryms i ett tal (migration 1700000198). */
+  target_text?: string | null;
   unit: GoalIndicatorUnit;
   direction: GoalDirection;
   sort_order?: number | null;
@@ -256,6 +295,11 @@ export interface GoalInput {
   kind: GoalKind;
   /** Bara för personliga mål; alltid null för övergripande. */
   owner_user: string | null;
+  /** `personal` för personliga mål; null = ej angiven (övergripande). */
+  level: GoalLevel | null;
+  parent_goal: string | null;
+  responsible: string | null;
+  subteam: string | null;
 }
 
 const RECORD_ID = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -267,6 +311,10 @@ export function validateGoalInput(raw: {
   owner_team?: unknown;
   kind?: unknown;
   owner_user?: unknown;
+  level?: unknown;
+  parent_goal?: unknown;
+  responsible?: unknown;
+  subteam?: unknown;
 }): GoalValidation<GoalInput> {
   if (!isGoalFocusArea(raw.focus_area)) {
     return { ok: false, error: `Ogiltigt fokusområde. Giltiga: ${GOAL_FOCUS_AREAS.join(', ')}.` };
@@ -282,9 +330,30 @@ export function validateGoalInput(raw: {
   if (!isGoalOwnerTeam(team)) {
     return { ok: false, error: `Ogiltigt team. Giltiga: ${GOAL_OWNER_TEAMS.join(', ')}.` };
   }
-  const kind = raw.kind === undefined || raw.kind === null || raw.kind === '' ? 'overall' : raw.kind;
+  const levelRaw = raw.level === undefined || raw.level === null || raw.level === '' ? null : raw.level;
+  if (levelRaw !== null && !isGoalLevel(levelRaw)) {
+    return { ok: false, error: `Ogiltig nivå. Giltiga: ${GOAL_LEVELS.join(', ')}.` };
+  }
+  const kindGiven = !(raw.kind === undefined || raw.kind === null || raw.kind === '');
+  // Nivån avgör måltypen när bara den anges: Personligt mål ⇔ personligt.
+  const kind = kindGiven ? raw.kind : levelRaw === 'personal' ? 'personal' : 'overall';
   if (!isGoalKind(kind)) {
     return { ok: false, error: `Ogiltig måltyp. Giltiga: ${GOAL_KINDS.join(', ')} (övergripande/personligt).` };
+  }
+  if (levelRaw === 'personal' && kind !== 'personal') {
+    return { ok: false, error: 'Nivån Personligt mål kräver måltypen personligt.' };
+  }
+  if (levelRaw !== null && levelRaw !== 'personal' && kind === 'personal') {
+    return { ok: false, error: 'Ett personligt mål har nivån Personligt mål.' };
+  }
+  const level: GoalLevel | null = kind === 'personal' ? 'personal' : (levelRaw as GoalLevel | null);
+  const parentRaw = String(raw.parent_goal ?? '').trim();
+  if (parentRaw && !RECORD_ID.test(parentRaw)) return { ok: false, error: 'Ogiltigt överliggande mål.' };
+  const responsibleRaw = String(raw.responsible ?? '').trim();
+  if (responsibleRaw && !RECORD_ID.test(responsibleRaw)) return { ok: false, error: 'Ogiltig ansvarig.' };
+  const subteam = String(raw.subteam ?? '').replace(/\s+/g, ' ').trim();
+  if (subteam.length > GOAL_SUBTEAM_MAX) {
+    return { ok: false, error: `Delteam/projekt får vara max ${GOAL_SUBTEAM_MAX} tecken.` };
   }
   const ownerRaw = String(raw.owner_user ?? '').trim();
   if (kind === 'personal') {
@@ -299,7 +368,11 @@ export function validateGoalInput(raw: {
       description: descriptionRaw || null,
       owner_team: team,
       kind,
-      owner_user: kind === 'personal' ? ownerRaw : null
+      owner_user: kind === 'personal' ? ownerRaw : null,
+      level,
+      parent_goal: parentRaw || null,
+      responsible: responsibleRaw || null,
+      subteam: subteam || null
     }
   };
 }
@@ -363,6 +436,7 @@ export interface GoalIndicatorInput {
   survey_module: string | null;
   activity_measure: ActivityMeasure | null;
   target: number | null;
+  target_text: string | null;
   unit: GoalIndicatorUnit;
   direction: GoalDirection;
 }
@@ -387,9 +461,29 @@ export function validateGoalIndicatorInput(raw: {
   survey_module?: unknown;
   activity_measure?: unknown;
   target?: unknown;
+  target_text?: unknown;
   unit?: unknown;
   direction?: unknown;
 }): GoalValidation<GoalIndicatorInput> {
+  const r = validateGoalIndicatorCore(raw);
+  if (!r.ok) return r;
+  const targetText = String(raw.target_text ?? '').replace(/\s+/g, ' ').trim();
+  if (targetText.length > GOAL_TARGET_TEXT_MAX) {
+    return { ok: false, error: `Målvärdet i text får vara max ${GOAL_TARGET_TEXT_MAX} tecken.` };
+  }
+  return { ok: true, value: { ...r.value, target_text: targetText || null } };
+}
+
+function validateGoalIndicatorCore(raw: {
+  label?: unknown;
+  source?: unknown;
+  metric_key?: unknown;
+  survey_module?: unknown;
+  activity_measure?: unknown;
+  target?: unknown;
+  unit?: unknown;
+  direction?: unknown;
+}): GoalValidation<Omit<GoalIndicatorInput, 'target_text'>> {
   const label = String(raw.label ?? '').trim();
   if (!label) return { ok: false, error: 'Indikatorn behöver en etikett.' };
   if (label.length > GOAL_TITLE_MAX) return { ok: false, error: `Etiketten får vara max ${GOAL_TITLE_MAX} tecken.` };
@@ -563,6 +657,8 @@ export interface GoalFocusAreaNode {
 
 export interface GoalTree {
   areas: GoalFocusAreaNode[];
+  /** Alla mål i årets ordning (fokusområde, sedan sortering) — underlag för filter/gruppering. */
+  nodes: GoalNode[];
   indicatorCount: number;
 }
 
@@ -613,24 +709,217 @@ export function buildGoalTree(
     const personal = nodes.filter((n) => goalKindOf(n.goal) === 'personal');
     return { area, label: GOAL_FOCUS_AREA_LABELS[area], goals: [...overall, ...personal], overall, personal };
   });
-  return { areas, indicatorCount };
+  return { areas, nodes: areas.flatMap((a) => a.goals), indicatorCount };
 }
 
 export type GoalStatusRollup = Record<GoalStatus | 'unreported', number>;
 
 /** Antal indikatorer per status för ett kvartal — trafikljuset i cockpitens topp. */
-export function rollupGoalStatuses(tree: GoalTree, quarter: Quarter): GoalStatusRollup {
-  const out: GoalStatusRollup = { on_track: 0, delayed: 0, not_started: 0, done: 0, unreported: 0 };
-  for (const area of tree.areas) {
-    for (const g of area.goals) {
-      for (const node of g.indicators) {
-        const e = node.byQuarter[quarter];
-        if (e) out[e.status]++;
-        else out.unreported++;
-      }
+export function rollupGoalStatuses(tree: GoalTree | readonly GoalNode[], quarter: Quarter): GoalStatusRollup {
+  const nodes = Array.isArray(tree) ? (tree as readonly GoalNode[]) : (tree as GoalTree).nodes;
+  const out: GoalStatusRollup = { on_track: 0, risk: 0, delayed: 0, not_started: 0, done: 0, unreported: 0 };
+  for (const g of nodes) {
+    for (const node of g.indicators) {
+      const e = node.byQuarter[quarter];
+      if (e && isGoalStatus(e.status)) out[e.status]++;
+      else out.unreported++;
     }
   }
   return out;
+}
+
+// ─── Nivå, ansvar, hierarki, filter och gruppering ──────────────────────────
+
+/** Nivån på ett mål: sparad nivå, annars Personligt mål för personliga, annars null (ej angiven). */
+export function goalLevelOf(goal: Pick<Goal, 'level' | 'kind'>): GoalLevel | null {
+  if (isGoalLevel(goal.level)) return goal.level;
+  return goalKindOf(goal) === 'personal' ? 'personal' : null;
+}
+
+/** Ansvarig medarbetare: `responsible`, annars ägaren av ett personligt mål. */
+export function goalResponsibleId(goal: Pick<Goal, 'responsible' | 'owner_user' | 'kind'>): string | null {
+  if (goal.responsible) return goal.responsible;
+  return goalKindOf(goal) === 'personal' && goal.owner_user ? goal.owner_user : null;
+}
+
+/** Teametikett: delteam/projekt när det finns, annars det ägande teamet. */
+export function goalTeamLabel(goal: Pick<Goal, 'owner_team' | 'subteam'>): string {
+  const sub = String(goal.subteam ?? '').trim();
+  if (sub) return sub;
+  return isGoalOwnerTeam(goal.owner_team) ? GOAL_OWNER_TEAM_LABELS[goal.owner_team] : String(goal.owner_team ?? '');
+}
+
+/**
+ * Skulle `parentId` som överliggande mål till `goalId` ge en cirkel?
+ * `parentOf` slår upp ett måls nuvarande överliggande mål (null = inget).
+ */
+export function wouldCreateGoalCycle(goalId: string, parentId: string, parentOf: (id: string) => string | null | undefined): boolean {
+  if (parentId === goalId) return true;
+  const seen = new Set<string>();
+  let cur: string | null | undefined = parentId;
+  while (cur) {
+    if (cur === goalId) return true;
+    if (seen.has(cur)) return true;
+    seen.add(cur);
+    cur = parentOf(cur);
+  }
+  return false;
+}
+
+/** Mål som bidrar till varje överliggande mål (barn per förälder-id). */
+export function goalChildrenMap(nodes: readonly GoalNode[]): Map<string, GoalNode[]> {
+  const out = new Map<string, GoalNode[]>();
+  for (const n of nodes) {
+    const p = n.goal.parent_goal;
+    if (!p) continue;
+    const list = out.get(p) ?? [];
+    list.push(n);
+    out.set(p, list);
+  }
+  return out;
+}
+
+export interface GoalFilter {
+  /** `owner_team`-nyckel, eller `team:<owner_team>|<delteam>` för ett specifikt delteam. */
+  team?: string | null;
+  /** Nivå, eller `none` för ej angiven. */
+  level?: GoalLevel | 'none' | null;
+  /** Ansvarig (users-id), eller `none` för mål utan ansvarig. */
+  responsible?: string | null;
+  /** Mål med minst en indikator i den statusen för kvartalet (`unreported` = inte rapporterad). */
+  status?: GoalStatus | 'unreported' | null;
+  focusArea?: GoalFocusArea | null;
+  /** Fritext mot titel, beskrivning, delteam och indikatorer. */
+  query?: string | null;
+}
+
+/** Nyckel för ett delteam (team + delteam), används av filter och gruppering. */
+export function goalTeamKey(goal: Pick<Goal, 'owner_team' | 'subteam'>): string {
+  const sub = String(goal.subteam ?? '').trim().toLowerCase();
+  return sub ? `team:${goal.owner_team}|${sub}` : String(goal.owner_team);
+}
+
+function normText(s: string): string {
+  return s.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+}
+
+export function goalMatchesFilter(node: GoalNode, filter: GoalFilter, quarter: Quarter): boolean {
+  const g = node.goal;
+  if (filter.focusArea && g.focus_area !== filter.focusArea) return false;
+  if (filter.team) {
+    if (filter.team.startsWith('team:')) {
+      if (goalTeamKey(g) !== filter.team) return false;
+    } else if (g.owner_team !== filter.team) return false;
+  }
+  if (filter.level) {
+    const level = goalLevelOf(g);
+    if (filter.level === 'none' ? level !== null : level !== filter.level) return false;
+  }
+  if (filter.responsible) {
+    const r = goalResponsibleId(g);
+    if (filter.responsible === 'none' ? r !== null : r !== filter.responsible) return false;
+  }
+  if (filter.status) {
+    const hit = node.indicators.some((i) => {
+      const e = i.byQuarter[quarter];
+      return filter.status === 'unreported' ? !e : e?.status === filter.status;
+    });
+    if (!hit) return false;
+  }
+  const q = normText(String(filter.query ?? '').trim());
+  if (q) {
+    const hay = normText(
+      [g.title, g.description ?? '', g.subteam ?? '', ...node.indicators.map((i) => i.indicator.label)].join(' \n ')
+    );
+    if (!q.split(/\s+/).every((word) => hay.includes(word))) return false;
+  }
+  return true;
+}
+
+export function filterGoalNodes(nodes: readonly GoalNode[], filter: GoalFilter, quarter: Quarter): GoalNode[] {
+  return nodes.filter((n) => goalMatchesFilter(n, filter, quarter));
+}
+
+export function isGoalFilterActive(filter: GoalFilter): boolean {
+  return !!(filter.team || filter.level || filter.responsible || filter.status || filter.focusArea || String(filter.query ?? '').trim());
+}
+
+export const GOAL_GROUPINGS = ['focus', 'team', 'level', 'responsible'] as const;
+export type GoalGrouping = (typeof GOAL_GROUPINGS)[number];
+export const GOAL_GROUPING_LABELS: Record<GoalGrouping, string> = {
+  focus: 'Fokusområde',
+  team: 'Team',
+  level: 'Nivå',
+  responsible: 'Ansvarig'
+};
+export function isGoalGrouping(v: unknown): v is GoalGrouping {
+  return (GOAL_GROUPINGS as readonly string[]).includes(String(v));
+}
+
+export interface GoalGroup {
+  key: string;
+  label: string;
+  /** Sekundär etikett (t.ex. det ägande teamet under ett delteam). */
+  sublabel?: string;
+  nodes: GoalNode[];
+}
+
+/**
+ * Grupperar mål efter fokusområde, team (delteam under sitt team), nivå
+ * eller ansvarig. Grupperna kommer i fast ordning (vokabulärens ordning,
+ * delteam och personer alfabetiskt); "ej angiven"/"ingen ansvarig" sist.
+ * Tomma grupper tas inte med.
+ */
+export function groupGoalNodes(
+  nodes: readonly GoalNode[],
+  by: GoalGrouping,
+  opts: { personName?: (id: string) => string | null } = {}
+): GoalGroup[] {
+  const groups = new Map<string, GoalGroup & { order: string }>();
+  const add = (key: string, label: string, order: string, node: GoalNode, sublabel?: string) => {
+    const g = groups.get(key) ?? { key, label, sublabel, order, nodes: [] };
+    g.nodes.push(node);
+    groups.set(key, g);
+  };
+  const pad = (i: number) => String(i).padStart(3, '0');
+  for (const node of nodes) {
+    const g = node.goal;
+    if (by === 'focus') {
+      const i = GOAL_FOCUS_AREAS.indexOf(g.focus_area);
+      add(g.focus_area, GOAL_FOCUS_AREA_LABELS[g.focus_area] ?? String(g.focus_area), pad(i < 0 ? 999 : i), node);
+    } else if (by === 'team') {
+      const teamIdx = GOAL_OWNER_TEAMS.indexOf(g.owner_team);
+      const teamLabel = isGoalOwnerTeam(g.owner_team) ? GOAL_OWNER_TEAM_LABELS[g.owner_team] : String(g.owner_team ?? '');
+      const sub = String(g.subteam ?? '').trim();
+      add(goalTeamKey(g), sub || teamLabel, `${pad(teamIdx < 0 ? 999 : teamIdx)}|${sub ? '1' : '0'}|${normText(sub)}`, node, sub ? teamLabel : undefined);
+    } else if (by === 'level') {
+      const level = goalLevelOf(g);
+      const i = level ? GOAL_LEVELS.indexOf(level) : 999;
+      add(level ?? 'none', level ? GOAL_LEVEL_LABELS[level] : 'Nivå ej angiven', pad(i), node);
+    } else {
+      const id = goalResponsibleId(g);
+      const name = id ? (opts.personName?.(id) ?? 'Okänd medarbetare') : 'Ingen ansvarig';
+      add(id ?? 'none', name, id ? `0|${normText(name)}` : '1|', node);
+    }
+  }
+  return [...groups.values()]
+    .sort((a, b) => a.order.localeCompare(b.order, 'sv'))
+    .map(({ order: _o, ...rest }) => {
+      void _o;
+      return rest;
+    });
+}
+
+/** Sämsta status bland indikatorerna för kvartalet (risk värst); `unreported` när ingen rapporterats. */
+export function goalStatusForQuarter(node: GoalNode, quarter: Quarter): GoalStatus | 'unreported' {
+  const rank: Record<GoalStatus, number> = { risk: 5, delayed: 4, not_started: 3, on_track: 2, done: 1 };
+  let worst: GoalStatus | null = null;
+  for (const i of node.indicators) {
+    const e = i.byQuarter[quarter];
+    if (!e || !isGoalStatus(e.status)) continue;
+    if (!worst || rank[e.status] > rank[worst]) worst = e.status;
+  }
+  return worst ?? 'unreported';
 }
 
 /** Metriknycklar som används av beräknade indikatorer (unika) — det registret ska räkna. */

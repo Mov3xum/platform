@@ -8,7 +8,10 @@ import {
   GOAL_FOCUS_AREA_LABELS,
   GOAL_INDICATOR_UNITS,
   GOAL_INDICATOR_UNIT_LABELS,
-  GOAL_KIND_LABELS,
+  GOAL_GROUPINGS,
+  GOAL_GROUPING_LABELS,
+  GOAL_LEVELS,
+  GOAL_LEVEL_LABELS,
   GOAL_OWNER_TEAMS,
   GOAL_OWNER_TEAM_LABELS,
   GOAL_PERIOD_STATUS_LABELS,
@@ -21,12 +24,24 @@ import {
   METRIC_KEYS,
   QUARTERS,
   canManageGoal,
+  filterGoalNodes,
   formatMetricValue,
+  goalChildrenMap,
   goalKindOf,
+  goalLevelOf,
+  goalResponsibleId,
+  goalStatusForQuarter,
+  goalTeamKey,
+  goalTeamLabel,
+  groupGoalNodes,
+  isGoalFilterActive,
+  wouldCreateGoalCycle,
   isAggregateOnlyIndicator,
   progressTowardsTarget,
   rollupGoalStatuses,
   suggestStatusFromValue,
+  type GoalFilter,
+  type GoalGrouping,
   type GoalIndicatorNode,
   type GoalKind,
   type GoalNode,
@@ -104,10 +119,27 @@ function personName(people: PersonOption[], id: string | null | undefined): stri
   return people.find((p) => p.id === id)?.name ?? null;
 }
 
+/** Hierarki- och navigeringsstöd som delas av alla målkort. */
+interface TreeCtx {
+  goalIndex: Map<string, GoalNode>;
+  children: Map<string, GoalNode[]>;
+  /** Alla mål i året — val av överliggande mål. */
+  allGoals: GoalNode[];
+  /** Delteam som redan används (förslag i formulären). */
+  subteams: string[];
+  quarter: Quarter;
+  highlight: string | null;
+  onJump: (goalId: string) => void;
+}
+
+const EMPTY_FILTER: GoalFilter = {};
+
 export function GoalsView({
   workspace,
   quarter,
   focusGoal,
+  initialGrouping = 'focus',
+  initialFilter = EMPTY_FILTER,
   currentUserId,
   canReport,
   canManage
@@ -115,6 +147,8 @@ export function GoalsView({
   workspace: GoalWorkspace;
   quarter: Quarter;
   focusGoal: string | null;
+  initialGrouping?: GoalGrouping;
+  initialFilter?: GoalFilter;
   currentUserId: string;
   /** Movexum-personal: rapporterar status och sätter egna personliga mål. */
   canReport: boolean;
@@ -122,10 +156,39 @@ export function GoalsView({
   canManage: boolean;
 }) {
   const { periods, period, tree, metrics, surveys, activities, surveyModules, people, schemaMissing } = workspace;
-  const rollup = rollupGoalStatuses(tree, quarter);
-  const yearHref = (y: number, q: Quarter = quarter) => `/mal?ar=${y}&q=${q}`;
+  const [grouping, setGrouping] = useState<GoalGrouping>(initialGrouping);
+  const [filter, setFilter] = useState<GoalFilter>(initialFilter);
+  const [highlight, setHighlight] = useState<string | null>(focusGoal);
+  const filtered = filterGoalNodes(tree.nodes, filter, quarter);
+  const filterActive = isGoalFilterActive(filter);
+  const rollup = rollupGoalStatuses(filtered, quarter);
+  const yearHref = (y: number, q: Quarter = quarter) => `/mal?${filterQuery({ ar: y, q }, grouping, filter)}`;
   const open = !!period && period.status !== 'closed';
   const actor = { id: currentUserId, roles: canManage ? ['admin'] : canReport ? ['coach'] : [] };
+
+  // Filter och gruppering speglas i URL:en (delbar länk) utan serverrunda.
+  useEffect(() => {
+    if (!period) return;
+    const qs = filterQuery({ ar: period.year, q: quarter }, grouping, filter);
+    window.history.replaceState(window.history.state, '', `/mal?${qs}`);
+  }, [period, quarter, grouping, filter]);
+
+  const goalIndex = new Map(tree.nodes.map((n) => [n.goal.id, n]));
+  const ctx: TreeCtx = {
+    goalIndex,
+    children: goalChildrenMap(tree.nodes),
+    allGoals: tree.nodes,
+    subteams: [...new Set(tree.nodes.map((n) => String(n.goal.subteam ?? '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'sv')),
+    quarter,
+    highlight,
+    onJump: (goalId) => {
+      setHighlight(goalId);
+      // Målet kan vara bortfiltrerat — släpp filtret så det syns.
+      if (!filtered.some((n) => n.goal.id === goalId)) setFilter(EMPTY_FILTER);
+      window.setTimeout(() => document.getElementById(`mal-${goalId}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 60);
+    }
+  };
+  const personName = (id: string) => people.find((p) => p.id === id)?.name ?? null;
 
   if (schemaMissing) {
     return (
@@ -136,9 +199,24 @@ export function GoalsView({
     );
   }
 
+  const cardProps = {
+    quarter,
+    metrics,
+    surveys,
+    activities,
+    surveyModules,
+    people,
+    focusGoal: highlight,
+    actor,
+    canReport: canReport && open,
+    canManage: canManage && open,
+    currentUserId,
+    ctx
+  };
+
   return (
     <div className="mx-auto w-full max-w-6xl space-y-8">
-      {/* Årsrad + kvartal + trafikljus */}
+      {/* Årsrad + kvartal */}
       <section className="flex flex-wrap items-end justify-between gap-4 border-b border-default pb-4">
         <div className="flex flex-wrap items-center gap-2">
           {periods.map((p) => (
@@ -182,74 +260,266 @@ export function GoalsView({
         </p>
       ) : (
         <>
-          <section className="grid grid-cols-2 gap-4 sm:grid-cols-5">
-            {(['on_track', 'delayed', 'not_started', 'done', 'unreported'] as const).map((s) => (
-              <div key={s} className="border-t border-default pt-3">
-                <div className="font-heading text-2xl font-semibold tabular-nums text-foreground">{rollup[s]}</div>
-                <div className="mt-1">
-                  <StatusChip status={s} small />
-                </div>
-              </div>
-            ))}
+          {/* Trafikljus — följer filtret; klick filtrerar på statusen. */}
+          <section className="grid grid-cols-3 gap-4 sm:grid-cols-6">
+            {(['on_track', 'risk', 'delayed', 'not_started', 'done', 'unreported'] as const).map((st) => {
+              const active = filter.status === st;
+              return (
+                <button
+                  key={st}
+                  type="button"
+                  onClick={() => setFilter((f) => ({ ...f, status: active ? null : st }))}
+                  aria-pressed={active}
+                  title={active ? 'Visa alla statusar' : `Visa mål med status ${st === 'unreported' ? 'Ej rapporterad' : GOAL_STATUS_LABELS[st]} i Q${quarter}`}
+                  className={`rounded-lg border-t pt-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-movexum-pastell-lila dark:focus-visible:ring-movexum-morklila ${
+                    active ? 'border-brand' : 'border-default hover:bg-canvas-subtle'
+                  }`}
+                >
+                  <div className="font-heading text-2xl font-semibold tabular-nums text-foreground">{rollup[st]}</div>
+                  <div className="mt-1">
+                    <StatusChip status={st} small />
+                  </div>
+                </button>
+              );
+            })}
           </section>
+
+          <GoalFilterBar
+            nodes={tree.nodes}
+            grouping={grouping}
+            onGrouping={setGrouping}
+            filter={filter}
+            onFilter={setFilter}
+            people={people}
+            quarter={quarter}
+            shown={filtered.length}
+          />
 
           {canManage && <PeriodControls period={period} />}
 
-          {tree.areas.map((area) => (
-            <section key={area.area} className="space-y-5 border-t border-default pt-6">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="font-heading text-lg font-semibold text-foreground">{area.label}</h2>
-                <span className="text-xs text-foreground-subtle">
-                  {area.goals.length === 0
-                    ? 'Inga mål satta'
-                    : `${area.overall.length} övergripande · ${area.personal.length} personliga`}
-                </span>
-              </div>
+          {filterActive && filtered.length === 0 && (
+            <p className="text-sm text-foreground-muted">
+              Inga mål matchar filtret.{' '}
+              <button type="button" className="font-semibold text-link hover:underline" onClick={() => setFilter(EMPTY_FILTER)}>
+                Rensa filtret
+              </button>
+            </p>
+          )}
 
-              {/* Övergripande mål */}
-              <GoalGroup
-                kind="overall"
-                nodes={area.overall}
-                quarter={quarter}
-                metrics={metrics}
-                surveys={surveys}
-                activities={activities}
-                surveyModules={surveyModules}
-                people={people}
-                focusGoal={focusGoal}
-                actor={actor}
-                canReport={canReport && open}
-                canManage={canManage && open}
-                canAdd={canManage && open}
-                periodId={period.id}
-                area={area.area}
-                currentUserId={currentUserId}
-              />
-
-              {/* Personliga mål */}
-              <GoalGroup
-                kind="personal"
-                nodes={area.personal}
-                quarter={quarter}
-                metrics={metrics}
-                surveys={surveys}
-                activities={activities}
-                surveyModules={surveyModules}
-                people={people}
-                focusGoal={focusGoal}
-                actor={actor}
-                canReport={canReport && open}
-                canManage={canManage && open}
-                canAdd={canReport && open}
-                periodId={period.id}
-                area={area.area}
-                currentUserId={currentUserId}
-              />
-            </section>
-          ))}
+          {grouping === 'focus' ? (
+            tree.areas.map((area) => {
+              const inArea = filtered.filter((n) => n.goal.focus_area === area.area);
+              const overall = inArea.filter((n) => goalKindOf(n.goal) === 'overall');
+              const personal = inArea.filter((n) => goalKindOf(n.goal) === 'personal');
+              // Med filter: bara områden med träffar. Utan filter visas Projektmål först när det används.
+              if (filterActive ? inArea.length === 0 : area.area === 'projekt' && area.goals.length === 0) return null;
+              return (
+                <section key={area.area} className="space-y-5 border-t border-default pt-6">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <h2 className="font-heading text-lg font-semibold text-foreground">{area.label}</h2>
+                    <span className="text-xs text-foreground-subtle">
+                      {area.goals.length === 0 ? 'Inga mål satta' : `${overall.length} övergripande · ${personal.length} personliga`}
+                    </span>
+                  </div>
+                  <GoalGroup kind="overall" nodes={overall} {...cardProps} canAdd={canManage && open} periodId={period.id} area={area.area} />
+                  <GoalGroup kind="personal" nodes={personal} {...cardProps} canAdd={canReport && open} periodId={period.id} area={area.area} />
+                </section>
+              );
+            })
+          ) : (
+            <>
+              <p className="text-xs text-foreground-subtle">Nya mål läggs till i vyn Fokusområde.</p>
+              {groupGoalNodes(filtered, grouping, { personName }).map((group) => (
+                <section key={group.key} className="space-y-5 border-t border-default pt-6">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <h2 className="font-heading text-lg font-semibold text-foreground">
+                      {group.label}
+                      {group.sublabel && <span className="ml-2 text-sm font-normal text-foreground-subtle">{group.sublabel}</span>}
+                    </h2>
+                    <span className="text-xs text-foreground-subtle">
+                      {group.nodes.length} mål · {groupStatusSummary(group.nodes, quarter)}
+                    </span>
+                  </div>
+                  <div className="space-y-6">
+                    {group.nodes.map((node) => (
+                      <GoalCard
+                        key={node.goal.id}
+                        node={node}
+                        quarter={quarter}
+                        metrics={metrics}
+                        surveys={surveys}
+                        activities={activities}
+                        surveyModules={surveyModules}
+                        people={people}
+                        ctx={ctx}
+                        canReport={canReport && open}
+                        focused={highlight === node.goal.id}
+                        canManageIndicators={canManage && open}
+                        canEdit={((canManage && open) || (canReport && open)) && canManageGoal(node.goal, actor)}
+                        isLead={canManage}
+                        showFocusArea={true}
+                      />
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </>
+          )}
         </>
       )}
     </div>
+  );
+}
+
+/** Query-sträng för /mal med år, kvartal, gruppering och filter (tomma värden utelämnas). */
+function filterQuery(base: { ar: number; q: Quarter }, grouping: GoalGrouping, filter: GoalFilter): string {
+  const p = new URLSearchParams({ ar: String(base.ar), q: String(base.q) });
+  if (grouping !== 'focus') p.set('grupp', grouping);
+  if (filter.team) p.set('team', filter.team);
+  if (filter.level) p.set('niva', filter.level);
+  if (filter.responsible) p.set('ansvarig', filter.responsible);
+  if (filter.status) p.set('status', filter.status);
+  if (filter.focusArea) p.set('fokus', filter.focusArea);
+  if (filter.query?.trim()) p.set('sok', filter.query.trim());
+  return p.toString();
+}
+
+function groupStatusSummary(nodes: GoalNode[], quarter: Quarter): string {
+  const r = rollupGoalStatuses(nodes, quarter);
+  const parts = (['risk', 'delayed', 'on_track', 'done'] as const).filter((st) => r[st] > 0).map((st) => `${r[st]} ${GOAL_STATUS_LABELS[st].toLowerCase()}`);
+  return parts.length ? parts.join(' · ') : `inget rapporterat Q${quarter}`;
+}
+
+// ── Filter & gruppering ─────────────────────────────────────────────────────
+
+function GoalFilterBar({
+  nodes,
+  grouping,
+  onGrouping,
+  filter,
+  onFilter,
+  people,
+  quarter,
+  shown
+}: {
+  nodes: GoalNode[];
+  grouping: GoalGrouping;
+  onGrouping: (g: GoalGrouping) => void;
+  filter: GoalFilter;
+  onFilter: (f: GoalFilter | ((prev: GoalFilter) => GoalFilter)) => void;
+  people: PersonOption[];
+  quarter: Quarter;
+  shown: number;
+}) {
+  // Team + delteam som faktiskt används i året.
+  const teamOptions: { value: string; label: string; indent: boolean }[] = [];
+  for (const t of GOAL_OWNER_TEAMS) {
+    const inTeam = nodes.filter((n) => n.goal.owner_team === t);
+    if (inTeam.length === 0) continue;
+    teamOptions.push({ value: t, label: GOAL_OWNER_TEAM_LABELS[t], indent: false });
+    const subs = new Map<string, string>();
+    for (const n of inTeam) {
+      const sub = String(n.goal.subteam ?? '').trim();
+      if (sub) subs.set(goalTeamKey(n.goal), sub);
+    }
+    for (const [value, label] of [...subs].sort((a, b) => a[1].localeCompare(b[1], 'sv'))) teamOptions.push({ value, label, indent: true });
+  }
+  const responsibleIds = [...new Set(nodes.map((n) => goalResponsibleId(n.goal)).filter((id): id is string => !!id))];
+  const responsibleOptions = responsibleIds
+    .map((id) => ({ id, name: people.find((p) => p.id === id)?.name ?? 'Okänd medarbetare' }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'sv'));
+  const usedLevels = GOAL_LEVELS.filter((l) => nodes.some((n) => goalLevelOf(n.goal) === l));
+  const anyWithoutLevel = nodes.some((n) => goalLevelOf(n.goal) === null);
+  const set = (patch: Partial<GoalFilter>) => onFilter((f) => ({ ...f, ...patch }));
+  const selectClass = `${inputClass} py-1.5`;
+
+  return (
+    <section className="space-y-3 rounded-2xl border border-default bg-canvas-subtle p-3" aria-label="Filtrera och gruppera mål">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-foreground-subtle">Gruppera</span>
+        <div className="inline-flex flex-wrap rounded-full border border-default bg-surface p-0.5">
+          {GOAL_GROUPINGS.map((g) => (
+            <button
+              key={g}
+              type="button"
+              onClick={() => onGrouping(g)}
+              aria-pressed={grouping === g}
+              className={`rounded-full px-3 py-1 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-movexum-pastell-lila dark:focus-visible:ring-movexum-morklila ${
+                grouping === g ? 'bg-brand text-brand-foreground' : 'text-foreground-muted hover:bg-canvas-muted'
+              }`}
+            >
+              {GOAL_GROUPING_LABELS[g]}
+            </button>
+          ))}
+        </div>
+        <span className="ml-auto text-xs text-foreground-subtle mx-tnum">
+          Visar {shown} av {nodes.length} mål
+        </span>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr_1fr_1fr_auto]">
+        <input
+          type="search"
+          className={selectClass}
+          placeholder="Sök mål, beskrivning eller indikator…"
+          value={filter.query ?? ''}
+          onChange={(e) => set({ query: e.target.value || null })}
+          aria-label="Sök mål"
+        />
+        <select className={selectClass} value={filter.team ?? ''} onChange={(e) => set({ team: e.target.value || null })} aria-label="Team">
+          <option value="">Alla team</option>
+          {teamOptions.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.indent ? `— ${o.label}` : o.label}
+            </option>
+          ))}
+        </select>
+        <select
+          className={selectClass}
+          value={filter.level ?? ''}
+          onChange={(e) => set({ level: (e.target.value || null) as GoalFilter['level'] })}
+          aria-label="Nivå"
+        >
+          <option value="">Alla nivåer</option>
+          {usedLevels.map((l) => (
+            <option key={l} value={l}>
+              {GOAL_LEVEL_LABELS[l]}
+            </option>
+          ))}
+          {anyWithoutLevel && <option value="none">Nivå ej angiven</option>}
+        </select>
+        <select
+          className={selectClass}
+          value={filter.responsible ?? ''}
+          onChange={(e) => set({ responsible: e.target.value || null })}
+          aria-label="Ansvarig"
+        >
+          <option value="">Alla ansvariga</option>
+          {responsibleOptions.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.name}
+            </option>
+          ))}
+          <option value="none">Ingen ansvarig</option>
+        </select>
+        <select
+          className={selectClass}
+          value={filter.status ?? ''}
+          onChange={(e) => set({ status: (e.target.value || null) as GoalFilter['status'] })}
+          aria-label={`Status Q${quarter}`}
+        >
+          <option value="">Alla statusar Q{quarter}</option>
+          {GOAL_STATUSES.map((st) => (
+            <option key={st} value={st}>
+              {GOAL_STATUS_LABELS[st]}
+            </option>
+          ))}
+          <option value="unreported">Ej rapporterad</option>
+        </select>
+        <button type="button" className={btnGhost} onClick={() => onFilter(EMPTY_FILTER)} disabled={!isGoalFilterActive(filter)}>
+          Rensa
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -271,7 +541,8 @@ function GoalGroup({
   canAdd,
   periodId,
   area,
-  currentUserId
+  currentUserId,
+  ctx
 }: {
   kind: GoalKind;
   nodes: GoalNode[];
@@ -289,6 +560,7 @@ function GoalGroup({
   periodId: string;
   area: (typeof GOAL_FOCUS_AREAS)[number];
   currentUserId: string;
+  ctx: TreeCtx;
 }) {
   if (nodes.length === 0 && !canAdd) return null;
   return (
@@ -309,6 +581,7 @@ function GoalGroup({
           activities={activities}
           surveyModules={surveyModules}
           people={people}
+          ctx={ctx}
           focused={focusGoal === node.goal.id}
           canReport={canReport}
           canManageIndicators={canManage}
@@ -317,7 +590,7 @@ function GoalGroup({
         />
       ))}
       {canAdd && (
-        <NewGoalForm periodId={periodId} area={area} kind={kind} isLead={canManage} people={people} currentUserId={currentUserId} />
+        <NewGoalForm periodId={periodId} area={area} kind={kind} isLead={canManage} people={people} currentUserId={currentUserId} ctx={ctx} />
       )}
     </div>
   );
@@ -337,7 +610,9 @@ function GoalCard({
   canReport,
   canManageIndicators,
   canEdit,
-  isLead
+  isLead,
+  ctx,
+  showFocusArea = false
 }: {
   node: GoalNode;
   quarter: Quarter;
@@ -351,6 +626,9 @@ function GoalCard({
   canManageIndicators: boolean;
   canEdit: boolean;
   isLead: boolean;
+  ctx: TreeCtx;
+  /** I gruppering efter team/nivå/ansvarig visas fokusområdet som chip. */
+  showFocusArea?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const router = useRouter();
@@ -362,6 +640,11 @@ function GoalCard({
   }, [focused]);
   const kind = goalKindOf(node.goal);
   const owner = personName(people, node.goal.owner_user);
+  const level = goalLevelOf(node.goal);
+  const responsible = kind === 'overall' ? personName(people, node.goal.responsible) : null;
+  const parent = node.goal.parent_goal ? ctx.goalIndex.get(node.goal.parent_goal) : undefined;
+  const contributors = ctx.children.get(node.goal.id) ?? [];
+  const [showContributors, setShowContributors] = useState(false);
 
   const remove = () => {
     if (!window.confirm(`Ta bort målet "${node.goal.title}" med alla indikatorer och kvartalsstatusar?`)) return;
@@ -375,13 +658,29 @@ function GoalCard({
   return (
     <div ref={ref} id={`mal-${node.goal.id}`} className={`space-y-3 ${focused ? 'rounded-xl ring-2 ring-movexum-pastell-lila dark:ring-movexum-morklila' : ''}`}>
       {editing ? (
-        <GoalEditForm node={node} isLead={isLead} people={people} onDone={() => setEditing(false)} />
+        <GoalEditForm node={node} isLead={isLead} people={people} ctx={ctx} onDone={() => setEditing(false)} />
       ) : (
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <h4 className="text-[15px] font-semibold text-foreground">{node.goal.title}</h4>
-          <span className="rounded-full bg-canvas-muted px-2 py-0.5 text-[11px] font-semibold text-foreground-muted">
-            {GOAL_OWNER_TEAM_LABELS[node.goal.owner_team]}
+          <span
+            className="rounded-full bg-canvas-muted px-2 py-0.5 text-[11px] font-semibold text-foreground-muted"
+            title={node.goal.subteam ? GOAL_OWNER_TEAM_LABELS[node.goal.owner_team] : undefined}
+          >
+            {goalTeamLabel(node.goal)}
           </span>
+          {level && level !== 'personal' && (
+            <span className="rounded-full border border-default px-2 py-0.5 text-[11px] font-semibold text-foreground-muted">{GOAL_LEVEL_LABELS[level]}</span>
+          )}
+          {showFocusArea && (
+            <span className="rounded-full border border-default px-2 py-0.5 text-[11px] text-foreground-subtle">
+              {GOAL_FOCUS_AREA_LABELS[node.goal.focus_area]}
+            </span>
+          )}
+          {responsible && (
+            <span className="inline-flex items-center gap-1 text-[11px] text-foreground-muted">
+              <Icon name="user" size={10} /> Ansvarig: {responsible}
+            </span>
+          )}
           {kind === 'personal' && (
             <span className="inline-flex items-center gap-1 rounded-full bg-movexum-pastell-lila px-2 py-0.5 text-[11px] font-semibold text-movexum-morklila dark:bg-movexum-morklila/40 dark:text-movexum-pastell-lila">
               <Icon name="user" size={10} /> {owner ?? 'Personligt mål'}
@@ -397,7 +696,41 @@ function GoalCard({
               </button>
             </span>
           )}
-          {node.goal.description && <p className="w-full text-sm text-foreground-muted">{node.goal.description}</p>}
+          {parent && (
+            <p className="w-full text-xs text-foreground-subtle">
+              ↳ Bidrar till{' '}
+              <button type="button" className="font-semibold text-link hover:underline" onClick={() => ctx.onJump(parent.goal.id)}>
+                {parent.goal.title}
+              </button>
+              <span className="ml-1">({goalTeamLabel(parent.goal)})</span>
+            </p>
+          )}
+          {node.goal.description && <p className="w-full whitespace-pre-line text-sm text-foreground-muted">{node.goal.description}</p>}
+          {contributors.length > 0 && (
+            <div className="w-full text-xs">
+              <button
+                type="button"
+                className="font-semibold text-link hover:underline"
+                onClick={() => setShowContributors((v) => !v)}
+                aria-expanded={showContributors}
+              >
+                {contributors.length} {contributors.length === 1 ? 'mål bidrar' : 'mål bidrar'} hit {showContributors ? '▴' : '▾'}
+              </button>
+              {showContributors && (
+                <ul className="mt-1 space-y-1 border-l border-default pl-3">
+                  {contributors.map((c) => (
+                    <li key={c.goal.id} className="flex flex-wrap items-center gap-2">
+                      <StatusChip status={goalStatusForQuarter(c, ctx.quarter)} small />
+                      <button type="button" className="text-left text-foreground hover:underline" onClick={() => ctx.onJump(c.goal.id)}>
+                        {c.goal.title}
+                      </button>
+                      <span className="text-foreground-subtle">{goalTeamLabel(c.goal)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
           {state?.error && (
             <div className="w-full">
               <Notice state={state} />
@@ -443,15 +776,67 @@ function GoalCard({
   );
 }
 
+/** Mål som kan väljas som överliggande: alla i året utom målet självt och de som (indirekt) bidrar till det. */
+function parentCandidates(ctx: TreeCtx, goalId?: string): GoalNode[] {
+  if (!goalId) return ctx.allGoals;
+  return ctx.allGoals.filter(
+    (n) => !wouldCreateGoalCycle(goalId, n.goal.id, (id) => ctx.goalIndex.get(id)?.goal.parent_goal ?? null)
+  );
+}
+
+function ParentGoalSelect({ ctx, goalId, value, onChange }: { ctx: TreeCtx; goalId?: string; value: string; onChange: (v: string) => void }) {
+  const candidates = parentCandidates(ctx, goalId);
+  return (
+    <select className={inputClass} value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">Inget överliggande mål</option>
+      {GOAL_FOCUS_AREAS.map((a) => {
+        const inArea = candidates.filter((n) => n.goal.focus_area === a);
+        if (inArea.length === 0) return null;
+        return (
+          <optgroup key={a} label={GOAL_FOCUS_AREA_LABELS[a]}>
+            {inArea.map((n) => (
+              <option key={n.goal.id} value={n.goal.id}>
+                {n.goal.title.length > 90 ? `${n.goal.title.slice(0, 89)}…` : n.goal.title} · {goalTeamLabel(n.goal)}
+              </option>
+            ))}
+          </optgroup>
+        );
+      })}
+    </select>
+  );
+}
+
+function SubteamInput({ ctx, value, onChange, id }: { ctx: TreeCtx; value: string; onChange: (v: string) => void; id: string }) {
+  return (
+    <>
+      <input
+        className={inputClass}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        maxLength={80}
+        list={`${id}-subteams`}
+        placeholder="t.ex. Sprint-X 2 – Kapital"
+      />
+      <datalist id={`${id}-subteams`}>
+        {ctx.subteams.map((t) => (
+          <option key={t} value={t} />
+        ))}
+      </datalist>
+    </>
+  );
+}
+
 function GoalEditForm({
   node,
   isLead,
   people,
+  ctx,
   onDone
 }: {
   node: GoalNode;
   isLead: boolean;
   people: PersonOption[];
+  ctx: TreeCtx;
   onDone: () => void;
 }) {
   const router = useRouter();
@@ -459,21 +844,28 @@ function GoalEditForm({
   const [title, setTitle] = useState(g.title);
   const [description, setDescription] = useState(g.description ?? '');
   const [team, setTeam] = useState<string>(g.owner_team);
+  const [subteam, setSubteam] = useState<string>(g.subteam ?? '');
   const [area, setArea] = useState<string>(g.focus_area);
-  const [kind, setKind] = useState<GoalKind>(goalKindOf(g));
+  const [level, setLevel] = useState<string>(goalLevelOf(g) ?? '');
   const [owner, setOwner] = useState<string>(g.owner_user ?? '');
+  const [responsible, setResponsible] = useState<string>(g.responsible ?? '');
+  const [parent, setParent] = useState<string>(g.parent_goal ?? '');
   const [state, setState] = useState<GoalActionState | null>(null);
   const [pending, start] = useTransition();
+  const personal = level === 'personal';
   return (
     <form
-      className="grid gap-3 rounded-xl border border-default p-3 sm:grid-cols-[1fr_180px_180px]"
+      className="grid gap-3 rounded-xl border border-default p-3 sm:grid-cols-3"
       onSubmit={(e) => {
         e.preventDefault();
         start(async () => {
-          const patch: Record<string, string> = { title, description, owner_team: team, focus_area: area };
+          const patch: Record<string, string> = { title, description, owner_team: team, focus_area: area, subteam, parent_goal: parent };
           if (isLead) {
-            patch.kind = kind;
-            patch.owner_user = kind === 'personal' ? owner : '';
+            // Nivån styr måltypen (Personligt mål ⇔ personligt) — skrivlagret validerar.
+            patch.level = level;
+            patch.kind = personal ? 'personal' : 'overall';
+            patch.owner_user = personal ? owner : '';
+            patch.responsible = personal ? '' : responsible;
           }
           const res = await updateGoalAction({ goalId: g.id, patch });
           setState(res);
@@ -484,9 +876,19 @@ function GoalEditForm({
         });
       }}
     >
-      <div>
+      <div className="sm:col-span-3">
         <label className={labelClass}>Mål</label>
         <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} required />
+      </div>
+      <div>
+        <label className={labelClass}>Fokusområde</label>
+        <select className={inputClass} value={area} onChange={(e) => setArea(e.target.value)}>
+          {GOAL_FOCUS_AREAS.map((a) => (
+            <option key={a} value={a}>
+              {GOAL_FOCUS_AREA_LABELS[a]}
+            </option>
+          ))}
+        </select>
       </div>
       <div>
         <label className={labelClass}>Ägande team</label>
@@ -499,27 +901,25 @@ function GoalEditForm({
         </select>
       </div>
       <div>
-        <label className={labelClass}>Fokusområde</label>
-        <select className={inputClass} value={area} onChange={(e) => setArea(e.target.value)}>
-          {GOAL_FOCUS_AREAS.map((a) => (
-            <option key={a} value={a}>
-              {GOAL_FOCUS_AREA_LABELS[a]}
-            </option>
-          ))}
-        </select>
+        <label className={labelClass}>Delteam / projekt (valfritt)</label>
+        <SubteamInput ctx={ctx} value={subteam} onChange={setSubteam} id={`edit-${g.id}`} />
       </div>
       {isLead && (
         <>
           <div>
-            <label className={labelClass}>Måltyp</label>
-            <select className={inputClass} value={kind} onChange={(e) => setKind(e.target.value as GoalKind)}>
-              <option value="overall">{GOAL_KIND_LABELS.overall}</option>
-              <option value="personal">{GOAL_KIND_LABELS.personal}</option>
+            <label className={labelClass}>Nivå</label>
+            <select className={inputClass} value={level} onChange={(e) => setLevel(e.target.value)}>
+              <option value="">Ej angiven</option>
+              {GOAL_LEVELS.map((l) => (
+                <option key={l} value={l}>
+                  {GOAL_LEVEL_LABELS[l]}
+                </option>
+              ))}
             </select>
           </div>
-          {kind === 'personal' && (
-            <div>
-              <label className={labelClass}>Ägare (medarbetare)</label>
+          <div>
+            <label className={labelClass}>{personal ? 'Ägare (medarbetare)' : 'Ansvarig'}</label>
+            {personal ? (
               <select className={inputClass} value={owner} onChange={(e) => setOwner(e.target.value)} required>
                 <option value="">Välj…</option>
                 {people.map((p) => (
@@ -528,13 +928,26 @@ function GoalEditForm({
                   </option>
                 ))}
               </select>
-            </div>
-          )}
+            ) : (
+              <select className={inputClass} value={responsible} onChange={(e) => setResponsible(e.target.value)}>
+                <option value="">Ingen ansvarig</option>
+                {people.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
         </>
       )}
+      <div className={isLead ? '' : 'sm:col-span-3'}>
+        <label className={labelClass}>Bidrar till (överliggande mål)</label>
+        <ParentGoalSelect ctx={ctx} goalId={g.id} value={parent} onChange={setParent} />
+      </div>
       <div className="sm:col-span-3">
         <label className={labelClass}>Beskrivning (valfri, inga personuppgifter)</label>
-        <input className={inputClass} value={description} onChange={(e) => setDescription(e.target.value)} maxLength={2000} />
+        <textarea className={inputClass} rows={2} value={description} onChange={(e) => setDescription(e.target.value)} maxLength={2000} />
       </div>
       <div className="flex items-end gap-2 sm:col-span-3">
         <button type="submit" className={btnPrimary} disabled={pending}>
@@ -653,7 +1066,8 @@ function IndicatorRow({
           )}
         </td>
         <td className="py-2 pr-3 tabular-nums text-foreground">
-          {indicator.unit === 'bool' ? 'Ja' : indicator.target === null || indicator.target === undefined ? '–' : formatMetricValue(unit, indicator.target)}
+          {indicator.unit === 'bool' ? 'Ja' : indicator.target === null || indicator.target === undefined ? (indicator.target_text ? '' : '–') : formatMetricValue(unit, indicator.target)}
+          {indicator.target_text && <div className="max-w-[16rem] text-[11px] font-normal text-foreground-subtle">{indicator.target_text}</div>}
         </td>
         <td className="py-2 pr-3">
           <div className="flex items-center gap-2 tabular-nums text-foreground">
@@ -740,15 +1154,16 @@ function IndicatorEditForm({ node, onDone }: { node: GoalIndicatorNode; onDone: 
   const { indicator } = node;
   const [label, setLabel] = useState(indicator.label);
   const [target, setTarget] = useState(indicator.target === null || indicator.target === undefined ? '' : String(indicator.target));
+  const [targetText, setTargetText] = useState(indicator.target_text ?? '');
   const [state, setState] = useState<GoalActionState | null>(null);
   const [pending, start] = useTransition();
   return (
     <form
-      className="grid gap-3 sm:grid-cols-[1fr_140px_auto]"
+      className="grid gap-3 sm:grid-cols-[1fr_140px_1fr_auto]"
       onSubmit={(e) => {
         e.preventDefault();
         start(async () => {
-          const res = await updateGoalIndicatorAction({ indicatorId: indicator.id, label, target });
+          const res = await updateGoalIndicatorAction({ indicatorId: indicator.id, label, target, target_text: targetText });
           setState(res);
           if (res.ok) {
             router.refresh();
@@ -765,6 +1180,10 @@ function IndicatorEditForm({ node, onDone }: { node: GoalIndicatorNode; onDone: 
         <label className={labelClass}>Måltal</label>
         <input className={inputClass} inputMode="decimal" value={target} onChange={(e) => setTarget(e.target.value)} placeholder="–" />
       </div>
+      <div>
+        <label className={labelClass}>Målvärde i text (valfritt)</label>
+        <input className={inputClass} value={targetText} onChange={(e) => setTargetText(e.target.value)} maxLength={200} placeholder="t.ex. Över 40 %" />
+      </div>
       <div className="flex items-end gap-2">
         <button type="submit" className={btnPrimary} disabled={pending}>
           Spara
@@ -773,10 +1192,10 @@ function IndicatorEditForm({ node, onDone }: { node: GoalIndicatorNode; onDone: 
           Avbryt
         </button>
       </div>
-      <p className="text-[11px] text-foreground-subtle sm:col-span-3">
+      <p className="text-[11px] text-foreground-subtle sm:col-span-4">
         Mätkälla och metrik byts inte i efterhand — ta bort indikatorn och skapa en ny om källan ska ändras.
       </p>
-      <div className="sm:col-span-3">
+      <div className="sm:col-span-4">
         <Notice state={state} />
       </div>
     </form>
@@ -1056,7 +1475,8 @@ function NewGoalForm({
   kind,
   isLead,
   people,
-  currentUserId
+  currentUserId,
+  ctx
 }: {
   periodId: string;
   area: (typeof GOAL_FOCUS_AREAS)[number];
@@ -1064,6 +1484,7 @@ function NewGoalForm({
   isLead: boolean;
   people: PersonOption[];
   currentUserId: string;
+  ctx: TreeCtx;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -1071,6 +1492,10 @@ function NewGoalForm({
   const [description, setDescription] = useState('');
   const [team, setTeam] = useState<string>('gemensamt');
   const [owner, setOwner] = useState<string>(currentUserId);
+  const [level, setLevel] = useState<string>(kind === 'personal' ? 'personal' : 'team');
+  const [subteam, setSubteam] = useState('');
+  const [responsible, setResponsible] = useState('');
+  const [parent, setParent] = useState('');
   const [state, setState] = useState<GoalActionState | null>(null);
   const [pending, start] = useTransition();
   if (!open) {
@@ -1094,12 +1519,19 @@ function NewGoalForm({
             description,
             owner_team: team,
             kind,
-            owner_user: kind === 'personal' ? (isLead ? owner : currentUserId) : undefined
+            owner_user: kind === 'personal' ? (isLead ? owner : currentUserId) : undefined,
+            level: kind === 'personal' ? 'personal' : level,
+            subteam,
+            parent_goal: parent,
+            responsible: kind === 'overall' ? responsible : undefined
           });
           setState(res);
           if (res.ok) {
             setTitle('');
             setDescription('');
+            setSubteam('');
+            setParent('');
+            setResponsible('');
             setOpen(false);
             router.refresh();
           }
@@ -1151,6 +1583,46 @@ function NewGoalForm({
           )}
         </div>
       )}
+      {kind === 'overall' && (
+        <div className="grid gap-3 sm:col-span-3 sm:grid-cols-3">
+          <div>
+            <label className={labelClass}>Nivå</label>
+            <select className={inputClass} value={level} onChange={(e) => setLevel(e.target.value)}>
+              <option value="">Ej angiven</option>
+              {GOAL_LEVELS.filter((l) => l !== 'personal').map((l) => (
+                <option key={l} value={l}>
+                  {GOAL_LEVEL_LABELS[l]}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className={labelClass}>Ansvarig</label>
+            <select className={inputClass} value={responsible} onChange={(e) => setResponsible(e.target.value)}>
+              <option value="">Ingen ansvarig</option>
+              {people.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className={labelClass}>Delteam / projekt (valfritt)</label>
+            <SubteamInput ctx={ctx} value={subteam} onChange={setSubteam} id={`new-${area}-${kind}`} />
+          </div>
+        </div>
+      )}
+      {kind === 'personal' && (
+        <div className="sm:col-span-3">
+          <label className={labelClass}>Delteam / projekt (valfritt)</label>
+          <SubteamInput ctx={ctx} value={subteam} onChange={setSubteam} id={`new-${area}-${kind}`} />
+        </div>
+      )}
+      <div className="sm:col-span-3">
+        <label className={labelClass}>Bidrar till (överliggande mål, valfritt)</label>
+        <ParentGoalSelect ctx={ctx} value={parent} onChange={setParent} />
+      </div>
       <div className="sm:col-span-3">
         <label className={labelClass}>Beskrivning (valfri, inga personuppgifter)</label>
         <input className={inputClass} value={description} onChange={(e) => setDescription(e.target.value)} maxLength={2000} />
@@ -1171,6 +1643,7 @@ function NewIndicatorForm({ goalId, surveyModules }: { goalId: string; surveyMod
   const [surveyModule, setSurveyModule] = useState<string>(surveyModules[0]?.id ?? '');
   const [metricKey, setMetricKey] = useState<string>(METRIC_KEYS.find((k) => METRIC_DEFINITIONS[k].scope === 'tenant') ?? 'active_startups');
   const [target, setTarget] = useState('');
+  const [targetText, setTargetText] = useState('');
   const [unit, setUnit] = useState<string>('bool');
   const [state, setState] = useState<GoalActionState | null>(null);
   const [pending, start] = useTransition();
@@ -1198,12 +1671,14 @@ function NewIndicatorForm({ goalId, surveyModules }: { goalId: string; surveyMod
             survey_module: source === 'survey' ? surveyModule : undefined,
             activity_measure: source === 'activities' ? measure : undefined,
             target,
+            target_text: targetText,
             unit: source === 'manual' ? unit : undefined
           });
           setState(res);
           if (res.ok) {
             setLabel('');
             setTarget('');
+            setTargetText('');
             setOpen(false);
             router.refresh();
           }
@@ -1292,6 +1767,10 @@ function NewIndicatorForm({ goalId, surveyModules }: { goalId: string; surveyMod
         <button type="button" className={btnGhost} onClick={() => setOpen(false)}>
           Avbryt
         </button>
+      </div>
+      <div className="sm:col-span-5">
+        <label className={labelClass}>Målvärde i text (valfritt — när målet inte ryms i ett tal)</label>
+        <input className={inputClass} value={targetText} onChange={(e) => setTargetText(e.target.value)} maxLength={200} placeholder="t.ex. Ökning med 12 st i BC och 5 st ink/acc" />
       </div>
       <div className="sm:col-span-5">
         <Notice state={state} />
