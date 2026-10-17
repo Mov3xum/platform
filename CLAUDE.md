@@ -7341,8 +7341,12 @@ annars hoppas raden över som förut. Målvärdet tolkas av
 indikator med målets namn som bär målvärde och status. Skrivlagret
 (`importGoals`):
 - matchar **ansvarig på e-post eller visningsnamn** mot Movexum-personal
-  (tvetydiga namn matchas inte); omatchad ⇒ ansvarig tom / importören äger
-  ett personligt mål, med varning;
+  (tvetydiga namn matchas inte, informativt fält); **ägaren av ett personligt
+  mål matchas bara på e-post** — ägarskap ger redigeringsrätt och
+  visningsnamnet är självredigerbart. Utan e-post blir importören ägare och
+  den namngivna personen ansvarig (ledningen byter ägare i `/mal`);
+- tvingar formen på klientdatan (icke-objekt släpps, ≤ 50 indikatorer och
+  ≤ 4 statusar per mål);
 - sparar **status Q1–Q4 bara för kvartal som inte redan rapporterats** —
   det som rapporterats i `/mal` skrivs aldrig över; kommentaren läggs på
   det senaste importerade kvartalet (utan status hamnar den i beskrivningen);

@@ -723,9 +723,11 @@ function importRef(g: Pick<GoalImportGoal, 'ref' | 'line'>, line?: number): stri
  * ansvarig saknas. Kvartalsstatus ur filen sparas bara för kvartal som inte
  * redan rapporterats i plattformen — det som rapporterats i /mal skrivs
  * aldrig över. Överliggande mål kopplas efteråt på titel (bara för mål som
- * saknar koppling). Ansvarig/ägare matchas på e-post eller visningsnamn mot
- * Movexum-personal i tenanten; okänd person ⇒ varning (ansvarig lämnas tom,
- * ägaren av ett personligt mål blir importören). En sammanfattningsrad
+ * saknar koppling). Ansvarig matchas på e-post eller visningsnamn mot
+ * Movexum-personal i tenanten (informativ). Ägaren av ett personligt mål
+ * matchas BARA på e-post (ägarskap ger redigeringsrätt och visningsnamnet
+ * är självredigerbart); annars blir importören ägare. Okänd person ⇒
+ * varning. En sammanfattningsrad
  * loggas som `goal_import` (§ 32).
  */
 export async function importGoals(
@@ -801,28 +803,54 @@ export async function importGoals(
   const parentLinks: Array<{ goal: Goal; parentTitle: string; ref: string }> = [];
 
   for (const raw of goals) {
-    // Raderna kommer från klienten — DATA, som valideras igen i createGoal m.fl.
+    // Raderna kommer från klienten — DATA. Formen tvingas här (icke-objekt
+    // släpps, listor kapas); innehållet valideras igen i createGoal m.fl.
+    if (!raw || typeof raw !== 'object') {
+      result.skipped++;
+      continue;
+    }
     const g: GoalImportGoal = {
       ...raw,
+      line: Number.isInteger(raw.line) ? raw.line : 0,
+      ref: raw.ref ? String(raw.ref).slice(0, 120) : undefined,
       title: String(raw.title ?? '').slice(0, 200),
+      owner_email: raw.owner_email ? String(raw.owner_email).slice(0, 200) : null,
       subteam: raw.subteam ? String(raw.subteam).slice(0, 80) : null,
       responsible: raw.responsible ? String(raw.responsible).slice(0, 120) : null,
       parent_title: raw.parent_title ? String(raw.parent_title).slice(0, 200) : null,
-      indicators: Array.isArray(raw.indicators) ? raw.indicators : []
+      indicators: (Array.isArray(raw.indicators) ? raw.indicators : [])
+        .filter((i): i is GoalImportIndicator => !!i && typeof i === 'object')
+        .slice(0, 50)
+        .map((i) => ({
+          ...i,
+          label: String(i.label ?? '').slice(0, 200),
+          statuses: Array.isArray(i.statuses) ? i.statuses.slice(0, 4) : undefined,
+          comment: i.comment ? String(i.comment).slice(0, 2000) : null
+        }))
     };
     const ref = importRef(g);
+    // Ägarskap ger redigeringsrätt (canManageGoal) — därför matchas ägaren av
+    // ett personligt mål BARA på e-post (fältlåst), aldrig på visningsnamn som
+    // användaren själv kan ändra. Namnmatchningen sätter bara den informativa
+    // ansvariga; ledningen byter ägare i /mal vid behov.
     let ownerUser: string | null = null;
     if (g.kind === 'personal') {
-      ownerUser = findPerson(g.owner_email) ?? findPerson(g.responsible);
+      const email = g.owner_email ?? (g.responsible?.includes('@') ? g.responsible : null);
+      ownerUser = email ? findPerson(email) : null;
       if (!ownerUser) {
-        if (g.owner_email || g.responsible) warnings.push(`${ref}: ägaren matchar ingen Movexum-kollega — du blir ägare.`);
+        warnings.push(
+          g.responsible
+            ? `${ref}: personligt mål utan ägarens e-post — du blir ägare och den angivna personen sätts som ansvarig; byt ägare i /mal.`
+            : `${ref}: ägaren matchar ingen Movexum-kollega — du blir ägare.`
+        );
         ownerUser = actor.id;
       }
     }
     let responsible: string | null = null;
-    if (g.kind !== 'personal' && g.responsible) {
+    if (g.responsible) {
       responsible = findPerson(g.responsible);
       if (!responsible) warnings.push(`${ref}: den ansvariga matchar ingen Movexum-kollega — lämnas tom.`);
+      else if (responsible === ownerUser) responsible = null;
     }
     const level = g.kind === 'personal' ? 'personal' : isGoalLevel(g.level) ? g.level : null;
 

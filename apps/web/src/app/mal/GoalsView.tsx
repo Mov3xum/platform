@@ -641,7 +641,8 @@ function GoalCard({
   const kind = goalKindOf(node.goal);
   const owner = personName(people, node.goal.owner_user);
   const level = goalLevelOf(node.goal);
-  const responsible = kind === 'overall' ? personName(people, node.goal.responsible) : null;
+  // Ett personligt mål kan ha en ansvarig som inte är ägaren (t.ex. efter import utan e-post).
+  const responsible = node.goal.responsible && node.goal.responsible !== node.goal.owner_user ? personName(people, node.goal.responsible) : null;
   const parent = node.goal.parent_goal ? ctx.goalIndex.get(node.goal.parent_goal) : undefined;
   const contributors = ctx.children.get(node.goal.id) ?? [];
   const [showContributors, setShowContributors] = useState(false);
@@ -865,7 +866,8 @@ function GoalEditForm({
             patch.level = level;
             patch.kind = personal ? 'personal' : 'overall';
             patch.owner_user = personal ? owner : '';
-            patch.responsible = personal ? '' : responsible;
+            // Ett personligt mål behåller sin ansvariga (sätts vid import); övergripande styrs av valet.
+            if (!personal) patch.responsible = responsible;
           }
           const res = await updateGoalAction({ goalId: g.id, patch });
           setState(res);
