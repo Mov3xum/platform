@@ -1,5 +1,6 @@
 'use client';
 
+import { actionErrorMessage } from '@/lib/action-error';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useActionState, useEffect, useState, useTransition } from 'react';
@@ -93,7 +94,12 @@ function GroupRow({ group, canEdit }: { group: ManagedGroup; canEdit: boolean })
     if (!window.confirm(`Ta bort gruppen "${group.name}"? ${members} lämnar gruppen men finns kvar i kontaktboken.`)) return;
     setDeleteError(null);
     startDelete(async () => {
-      const res = await deleteContactGroupAction(group.id);
+      let res: Awaited<ReturnType<typeof deleteContactGroupAction>>;
+      try {
+        res = await deleteContactGroupAction(group.id);
+      } catch (err) {
+        res = { error: actionErrorMessage(err, 'Gruppen kunde inte tas bort. Ladda om sidan och försök igen.') };
+      }
       if (res.error) setDeleteError(res.error);
       router.refresh();
     });

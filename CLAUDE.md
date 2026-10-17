@@ -9391,6 +9391,15 @@ på eventsidan ("Bjud in" i deltagarpanelen) väljer staff mottagare i
     (RFC 8058 — Gmail/Yahoo kräver en-klick för massutskick). Länkarna går
     till appens konfigurerade adress (`APP_URL`, § 47.5), aldrig en
     URL-förkortare. Ett mejl per mottagare, i batchar om 10.
+- **Utan e-posttjänst kastar inget (incident 2026-10-17):** saknades
+  `RESEND_API_KEY` kastade `sendEventInvites` mitt i "Bjud in" — raderna var
+  redan skapade och sidan föll i "Server Components render" (500). Nu
+  kontrollerar `inviteToEvent`/`sendEventInvitations` och enkätutskicket
+  (§ 47.5) `isEmailConfigured()` INNAN något skrivs och svarar med ett tydligt
+  fel; ett misslyckat utskick efter att raderna skapats redovisas
+  (`sendError`) i stället för att kasta. Klientkomponenter som anropar server
+  actions direkt fångar kastade fel med `actionErrorMessage`
+  (`lib/action-error.ts`) — en action får aldrig riva sidan.
 - **Dataminimering:** e-postadressen kopieras till deltagarraden (som för en
   manuellt inlagd deltagare) och visas aldrig i inbjudningsvyn; loggar och
   audit (`agent_actions`, feeden: "Inbjudan skickad till "X" · N mejl")

@@ -8,10 +8,18 @@ const FROM_EMAIL = resolveSender(process.env, 'default');
 const INVITE_FROM_EMAIL = resolveSender(process.env, 'invite');
 const REPLY_TO = resolveReplyTo(process.env);
 
+export const EMAIL_NOT_CONFIGURED_MESSAGE =
+  'E-posttjänsten är inte konfigurerad (RESEND_API_KEY saknas på web-appen). Kontakta administratören.';
+
+/** Finns en Resend-nyckel? Utskicksflöden kontrollerar detta INNAN de skriver något. */
+export function isEmailConfigured(): boolean {
+  return Boolean(process.env.RESEND_API_KEY);
+}
+
 function getResendApiKey(): string {
   const key = process.env.RESEND_API_KEY;
   if (!key) {
-    throw new Error('E-posttjänsten är inte konfigurerad. Kontakta administratören.');
+    throw new Error(EMAIL_NOT_CONFIGURED_MESSAGE);
   }
   return key;
 }

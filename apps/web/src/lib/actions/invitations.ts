@@ -263,20 +263,30 @@ export async function inviteToEventAction(input: {
 }): Promise<InvitationState> {
   const { contactIds, userIds, startupIds } = splitInviteSelection(Array.isArray(input.selection) ? input.selection : []);
   const user = await requireUser();
-  const res = await inviteToEvent(
-    await getServerPb(),
-    { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Role[] },
-    {
-      eventId: String(input.eventId || ''),
-      contactIds,
-      userIds,
-      startupIds,
-      baseUrl: await requestOrigin()
-    }
-  );
+  let res: Awaited<ReturnType<typeof inviteToEvent>>;
+  try {
+    res = await inviteToEvent(
+      await getServerPb(),
+      { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Role[] },
+      {
+        eventId: String(input.eventId || ''),
+        contactIds,
+        userIds,
+        startupIds,
+        baseUrl: await requestOrigin()
+      }
+    );
+  } catch (err) {
+    // Ett kast blir annars en 500 som river hela sidan (CLAUDE.md § 53.5).
+    console.error('[invitations] invite failed', err instanceof Error ? err.message : 'unknown');
+    return { error: 'Inbjudan kunde inte genomföras. Ladda om sidan och försök igen.' };
+  }
   if (!res.ok) return { error: res.error };
   revalidateEvent(input.eventId);
-  const { invited, sent, failed, skipped, unreachableStartups } = res.value;
+  const { invited, sent, failed, skipped, unreachableStartups, sendError } = res.value;
+  if (sendError) {
+    return { error: `${invited} lades till på listan men inget mejl skickades: ${sendError}` };
+  }
   const notes = [
     skipped.already ? `${skipped.already} fanns redan på listan` : '',
     skipped.optOut ? `${skipped.optOut} har avregistrerat sig` : '',
@@ -293,11 +303,17 @@ export async function inviteToEventAction(input: {
 
 export async function sendInvitationsAction(input: { eventId: string; mode: 'pending' | 'reminder' }): Promise<InvitationState> {
   const user = await requireUser();
-  const res = await sendEventInvitations(
-    await getServerPb(),
-    { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Role[] },
-    { eventId: input.eventId, mode: input.mode === 'reminder' ? 'reminder' : 'pending', baseUrl: await requestOrigin() }
-  );
+  let res: Awaited<ReturnType<typeof sendEventInvitations>>;
+  try {
+    res = await sendEventInvitations(
+      await getServerPb(),
+      { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Role[] },
+      { eventId: String(input.eventId || ''), mode: input.mode === 'reminder' ? 'reminder' : 'pending', baseUrl: await requestOrigin() }
+    );
+  } catch (err) {
+    console.error('[invitations] send failed', err instanceof Error ? err.message : 'unknown');
+    return { error: 'Inbjudningarna kunde inte skickas. Ladda om sidan och försök igen.' };
+  }
   if (!res.ok) return { error: res.error };
   revalidateEvent(input.eventId);
   const { sent, failed, optedOut } = res.value;

@@ -1,5 +1,6 @@
 'use client';
 
+import { actionErrorMessage } from '@/lib/action-error';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
@@ -46,7 +47,12 @@ export function ContactGroupsPanel({
   const save = () => {
     setMessage(null);
     start(async () => {
-      const res = await setContactGroupsAction(contactId, value);
+      let res: Awaited<ReturnType<typeof setContactGroupsAction>>;
+      try {
+        res = await setContactGroupsAction(contactId, value);
+      } catch (err) {
+        res = { error: actionErrorMessage(err, 'Grupperna kunde inte sparas. Ladda om sidan och försök igen.') };
+      }
       setMessage(res.error ? { kind: 'error', text: res.error } : { kind: 'notice', text: res.notice ?? 'Sparat.' });
       router.refresh();
     });

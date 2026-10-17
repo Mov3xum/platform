@@ -1,5 +1,6 @@
 'use client';
 
+import { actionErrorMessage } from '@/lib/action-error';
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { Icon } from '@/components/proto';
@@ -129,7 +130,12 @@ export function InvitePanel({ eventId, onDone }: { eventId: string; onDone?: () 
     const timer = setTimeout(
       () =>
         startLoading(async () => {
-          const res = await listInviteOptionsAction({ eventId, list, q, withMeta: needMeta.current });
+          let res: InviteOptionsResult;
+          try {
+            res = await listInviteOptionsAction({ eventId, list, q, withMeta: needMeta.current });
+          } catch (err) {
+            res = { error: actionErrorMessage(err, 'Kunde inte läsa listan. Ladda om sidan och försök igen.'), items: [], total: 0 };
+          }
           if (id !== req.current) return;
           setResult(res);
           if (res.meta) {
@@ -173,7 +179,12 @@ export function InvitePanel({ eventId, onDone }: { eventId: string; onDone?: () 
   const submit = () => {
     if (!window.confirm(`Skicka inbjudan till ${summary.join(', ')} nu?`)) return;
     startSending(async () => {
-      const res = await inviteToEventAction({ eventId, selection: [...picked.keys()] });
+      let res: InvitationState;
+      try {
+        res = await inviteToEventAction({ eventId, selection: [...picked.keys()] });
+      } catch (err) {
+        res = { error: actionErrorMessage(err, 'Inbjudan kunde inte skickas. Ladda om sidan och försök igen.') };
+      }
       setState(res);
       if (res.ok) {
         setPicked(new Map());

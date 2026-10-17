@@ -1,5 +1,6 @@
 'use client';
 
+import { actionErrorMessage } from '@/lib/action-error';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMemo, useState, useTransition } from 'react';
@@ -118,7 +119,12 @@ export function ContactsBrowser({
     if (!target || selected.size === 0) return;
     setMessage(null);
     startTransition(async () => {
-      const res = await changeContactGroupMembersAction({ groupId: target, contactIds: [...selected], mode });
+      let res: Awaited<ReturnType<typeof changeContactGroupMembersAction>>;
+      try {
+        res = await changeContactGroupMembersAction({ groupId: target, contactIds: [...selected], mode });
+      } catch (err) {
+        res = { error: actionErrorMessage(err, 'Grupperna kunde inte sparas. Ladda om sidan och försök igen.') };
+      }
       if (res.error) setMessage({ kind: 'error', text: res.notice ? `${res.error} ${res.notice}` : res.error });
       else {
         setMessage({ kind: 'notice', text: res.notice ?? 'Klart.' });

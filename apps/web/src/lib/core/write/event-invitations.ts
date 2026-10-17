@@ -10,7 +10,7 @@ import {
   type InviteCandidate,
   type InviteSkipped
 } from '@platform/shared';
-import { sendEventInvites, type EventInviteRecipient } from '@/lib/email';
+import { EMAIL_NOT_CONFIGURED_MESSAGE, isEmailConfigured, sendEventInvites, type EventInviteRecipient } from '@/lib/email';
 import { recomputeEventCounters } from '@/lib/events/counters';
 import {
   contactDisplayName,
@@ -81,6 +81,8 @@ export interface InviteResult {
   skipped: InviteSkipped;
   /** Bolag som saknar både medlemmar, huvudkontakter och e-post. */
   unreachableStartups: number;
+  /** Raderna skapades men utskicket gick inte — orsaken (PII-fri). */
+  sendError?: string;
 }
 
 const MAX_STARTUPS = 200;
@@ -125,6 +127,8 @@ export async function inviteToEvent(
 ): Promise<WriteResult<InviteResult>> {
   const denied = gate(actor);
   if (denied) return denied;
+  // Utan e-posttjänst kan ingen inbjudan nå fram — stoppa innan något skrivs.
+  if (!isEmailConfigured()) return fail('STATE_TRANSITION', EMAIL_NOT_CONFIGURED_MESSAGE);
   const ev = await loadOpenEvent(pb, actor, input.eventId);
   if ('error' in ev) return ev.error;
 
@@ -223,8 +227,10 @@ export async function inviteToEvent(
     after_value: { title: ev.name ?? '', invited, users: userIds.length, startups: startupIds.length, skipped }
   });
 
+  // Raderna finns nu — ett misslyckat utskick redovisas, det rullar inte
+  // tillbaka listan ("Skicka ej utskickade" tar dem senare).
   const sent = await sendEventInvitations(pb, actor, { eventId: ev.id, mode: 'pending', baseUrl: input.baseUrl });
-  if (!sent.ok) return sent;
+  if (!sent.ok) return ok({ invited, sent: 0, failed: 0, skipped, unreachableStartups, sendError: sent.error });
   return ok({ invited, sent: sent.value.sent, failed: sent.value.failed, skipped, unreachableStartups });
 }
 
@@ -246,6 +252,7 @@ export async function sendEventInvitations(
 ): Promise<WriteResult<SendInvitationsResult>> {
   const denied = gate(actor);
   if (denied) return denied;
+  if (!isEmailConfigured()) return fail('STATE_TRANSITION', EMAIL_NOT_CONFIGURED_MESSAGE);
   const ev = await loadOpenEvent(pb, actor, input.eventId);
   if ('error' in ev) return ev.error;
   const baseUrl = input.baseUrl.replace(/\/+$/, '');
@@ -301,13 +308,20 @@ export async function sendEventInvitations(
   }
 
   const startsAt = ev.starts_at ? formatStockholmDateTime(ev.starts_at) : '';
-  const { sent, failed } = await sendEventInvites(recipients, {
-    eventName: ev.name || 'Event',
-    when: startsAt || 'Tid meddelas',
-    location: ev.location || undefined,
-    intro: ev.description ? ev.description.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 600) : undefined,
-    reminder: input.mode === 'reminder'
-  });
+  let sent: string[];
+  let failed: number;
+  try {
+    ({ sent, failed } = await sendEventInvites(recipients, {
+      eventName: ev.name || 'Event',
+      when: startsAt || 'Tid meddelas',
+      location: ev.location || undefined,
+      intro: ev.description ? ev.description.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 600) : undefined,
+      reminder: input.mode === 'reminder'
+    }));
+  } catch (err) {
+    console.error('[invitations] send failed', err instanceof Error ? err.message : 'unknown');
+    return fail('DB_ERROR', 'Inbjudningarna kunde inte skickas. Försök igen med "Skicka ej utskickade".');
+  }
   const sentAt = new Date().toISOString();
   for (const id of sent) {
     await writeWithFallback(pb, (c) => c.collection('event_signups').update(id, { invite_sent_at: sentAt })).catch(() => undefined);
