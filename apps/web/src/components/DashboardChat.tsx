@@ -1,21 +1,17 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { ChatAttachment } from '@/lib/actions/chat';
+import type { ChatAttachment } from '@/lib/ai/chat-input';
 import type {
   AgentActionReceipt,
   AgentActivityStep,
   ApprovalRequestRef,
+  ChatMessageAttachment,
   GeneratedFileRef,
   InlineVisualRef,
   MeetingRequestRef,
   WebSearchSourceRef
 } from '@platform/shared';
-import {
-  extractPdfFromDataUrlAction,
-  extractXlsxFromDataUrlAction
-} from '@/lib/actions/chat-attachments';
-import { isStaleDeploymentError, STALE_DEPLOYMENT_MESSAGE } from '@/lib/action-error';
 import { Icon } from '@/components/proto/Icon';
 import VoiceInputButton from '@/components/VoiceInputButton';
 import ChatHelpGuide from '@/components/ChatHelpGuide';
@@ -27,6 +23,12 @@ import {
 } from '@/lib/ai/models';
 import type { Role } from '@platform/shared';
 import { chatMarkdownToHtml } from '@/lib/safe-html';
+import {
+  CHAT_ATTACHMENT_MAX_FILE_BYTES,
+  CHAT_ATTACHMENT_MAX_FILES,
+  CHAT_IMAGE_ATTACHMENT_MIMES,
+  chatAttachmentTypeLabel
+} from '@platform/shared';
 
 // Markör som visas i slutet av den streamande texten. Injiceras i den redan
 // säkert renderade HTML:en (chatMarkdownToHtml escapar all modell-text).
@@ -39,18 +41,24 @@ function withStreamCursor(html: string): string {
     : html + STREAM_CURSOR;
 }
 
-const MAX_ATTACHMENTS = 5;
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
-const ACCEPT_IMAGE = ['image/png', 'image/jpeg', 'image/webp'];
+const MAX_ATTACHMENTS = CHAT_ATTACHMENT_MAX_FILES;
+const MAX_FILE_BYTES = CHAT_ATTACHMENT_MAX_FILE_BYTES;
+// Format som skickas oförändrade till modellen. Andra bildformat (HEIC från
+// iPhone, GIF, BMP, AVIF …) konverteras till JPEG i webbläsaren när den kan
+// avkoda dem.
+const SEND_IMAGE_MIMES: readonly string[] = CHAT_IMAGE_ATTACHMENT_MIMES;
 const ACCEPT_TEXT = ['text/plain', 'text/markdown', 'text/csv', 'application/csv'];
-const ACCEPT_PDF = ['application/pdf'];
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-const ACCEPT_XLSX = [XLSX_MIME, 'application/vnd.ms-excel'];
-const ACCEPT_IMAGE_ATTR = 'image/png,image/jpeg,image/webp';
-const ACCEPT_TEXT_ATTR =
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+// Extraheras server-side via /api/chat/attachments.
+const EXTRACT_MIMES = ['application/pdf', XLSX_MIME, 'application/vnd.ms-excel', DOCX_MIME, PPTX_MIME];
+const ACCEPT_IMAGE_ATTR = 'image/*,.heic,.heif';
+const ACCEPT_FILE_ATTR =
   'text/plain,text/markdown,text/csv,application/pdf,' +
-  XLSX_MIME +
-  ',.md,.csv,.txt,.pdf,.xlsx';
+  [XLSX_MIME, DOCX_MIME, PPTX_MIME].join(',') +
+  ',.md,.csv,.txt,.pdf,.xlsx,.docx,.pptx,' +
+  ACCEPT_IMAGE_ATTR;
 
 interface UploadedFile extends ChatAttachment {
   uid: string;
@@ -62,6 +70,8 @@ interface UploadedFile extends ChatAttachment {
 export interface UiMessage {
   role: 'user' | 'assistant';
   content: string;
+  /** Bilagor användaren laddade upp i turen (namn/typ — aldrig texten). */
+  attachments?: Array<Pick<ChatMessageAttachment, 'name' | 'mime' | 'kind' | 'truncated' | 'text_dropped'>>;
   generated_files?: GeneratedFileRef[];
   visuals?: InlineVisualRef[];
   steps?: AgentActivityStep[];
@@ -282,27 +292,69 @@ function ActivityTrail({
   );
 }
 
-function detectMime(file: File): string | null {
+type DetectedKind = 'image' | 'text' | 'extract';
+
+function detectFile(file: File): { mime: string; kind: DetectedKind } | null {
   const mime = (file.type || '').toLowerCase();
-  if (mime && [...ACCEPT_IMAGE, ...ACCEPT_TEXT, ...ACCEPT_PDF, ...ACCEPT_XLSX].includes(mime)) {
-    return mime;
+  const ext = file.name.toLowerCase().split('.').pop() ?? '';
+  if (mime.startsWith('image/') || ext === 'heic' || ext === 'heif') {
+    return { mime: mime || `image/${ext}`, kind: 'image' };
   }
-  const ext = file.name.toLowerCase().split('.').pop();
-  if (ext === 'md' || ext === 'markdown') return 'text/markdown';
-  if (ext === 'csv') return 'text/csv';
-  if (ext === 'txt') return 'text/plain';
-  if (ext === 'pdf') return 'application/pdf';
-  if (ext === 'xlsx') return XLSX_MIME;
+  // Filändelsen först för textformat: Windows rapporterar .csv som
+  // application/vnd.ms-excel när Excel är installerat.
+  if (ext === 'md' || ext === 'markdown') return { mime: 'text/markdown', kind: 'text' };
+  if (ext === 'csv') return { mime: 'text/csv', kind: 'text' };
+  if (ext === 'txt') return { mime: 'text/plain', kind: 'text' };
+  if (EXTRACT_MIMES.includes(mime)) return { mime, kind: 'extract' };
+  if (ACCEPT_TEXT.includes(mime)) return { mime, kind: 'text' };
+  if (ext === 'pdf') return { mime: 'application/pdf', kind: 'extract' };
+  if (ext === 'xlsx') return { mime: XLSX_MIME, kind: 'extract' };
+  if (ext === 'docx') return { mime: DOCX_MIME, kind: 'extract' };
+  if (ext === 'pptx') return { mime: PPTX_MIME, kind: 'extract' };
   return null;
 }
 
-function readAsText(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onerror = () => reject(r.error || new Error('Kunde inte läsa filen'));
-    r.onload = () => resolve(String(r.result || ''));
-    r.readAsText(file);
-  });
+/**
+ * PDF/Excel/Word/PowerPoint → text via route-handlern (fetch, inte server
+ * action — fungerar även i en flik som laddades före en deploy).
+ */
+async function extractOnServer(
+  file: File
+): Promise<{ text: string; mime: string; truncated: boolean } | { error: string }> {
+  const form = new FormData();
+  form.append('file', file, file.name);
+  let res: Response;
+  try {
+    res = await fetch('/api/chat/attachments', { method: 'POST', body: form });
+  } catch {
+    return { error: `${file.name}: kunde inte nå servern — kontrollera uppkopplingen.` };
+  }
+  let body: { text?: string; mime?: string; truncated?: boolean; error?: string } = {};
+  try {
+    body = (await res.json()) as typeof body;
+  } catch {
+    return {
+      error:
+        res.status === 413
+          ? `${file.name} är för stor att ladda upp.`
+          : `${file.name}: kunde inte läsa filen (HTTP ${res.status}).`
+    };
+  }
+  if (!res.ok || !body.text) return { error: body.error || `${file.name}: kunde inte läsa filen.` };
+  return { text: body.text, mime: body.mime || file.type, truncated: body.truncated === true };
+}
+
+/**
+ * Läser en textfil som UTF-8, med Windows-1252 som reserv — svenska
+ * CSV-exporter från Excel är ofta inte UTF-8, och å/ä/ö blev då "�".
+ */
+async function readAsText(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buf).replace(/^\uFEFF/, '');
+  } catch {
+    return new TextDecoder('windows-1252').decode(buf);
+  }
 }
 
 function readAsDataUrl(file: Blob): Promise<string> {
@@ -326,32 +378,54 @@ async function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-async function compressImage(file: File): Promise<{ dataUrl: string; size: number }> {
-  if (file.size <= IMAGE_COMPRESS_THRESHOLD) {
+/**
+ * Gör bilden redo för modellen: små PNG/JPEG/WebP skickas som de är; stora
+ * skalas ned, och andra format (HEIC, GIF, BMP …) konverteras till JPEG.
+ * Mime-typen följer ALLTID det som faktiskt skickas (servern avvisar en
+ * data-URL vars typ inte stämmer). Transparens läggs mot vit bakgrund så en
+ * PNG-logotyp inte blir svart i JPEG.
+ */
+async function prepareImage(
+  file: File,
+  mime: string
+): Promise<{ dataUrl: string; size: number; mime: string }> {
+  if (SEND_IMAGE_MIMES.includes(mime) && file.size <= IMAGE_COMPRESS_THRESHOLD) {
     const dataUrl = await readAsDataUrl(file);
-    return { dataUrl, size: file.size };
+    return { dataUrl, size: file.size, mime };
   }
   const objectUrl = URL.createObjectURL(file);
   try {
-    const img = await loadImage(objectUrl);
-    const scale = Math.min(1, IMAGE_MAX_DIM / Math.max(img.width, img.height));
-    const w = Math.round(img.width * scale);
-    const h = Math.round(img.height * scale);
+    let img: HTMLImageElement;
+    try {
+      img = await loadImage(objectUrl);
+    } catch {
+      throw new Error(
+        `${file.name}: webbläsaren kan inte öppna bildformatet. Spara den som JPG eller PNG och försök igen.`
+      );
+    }
+    const scale = Math.min(1, IMAGE_MAX_DIM / Math.max(img.naturalWidth || img.width, img.naturalHeight || img.height));
+    const w = Math.max(1, Math.round((img.naturalWidth || img.width) * scale));
+    const h = Math.max(1, Math.round((img.naturalHeight || img.height) * scale));
     const canvas = document.createElement('canvas');
     canvas.width = w;
     canvas.height = h;
     const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Kunde inte processa bilden');
+    if (!ctx) throw new Error(`${file.name}: kunde inte bearbeta bilden.`);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
     ctx.drawImage(img, 0, 0, w, h);
     const blob: Blob = await new Promise((resolve, reject) => {
       canvas.toBlob(
-        (b) => (b ? resolve(b) : reject(new Error('Komprimering misslyckades'))),
+        (b) => (b ? resolve(b) : reject(new Error(`${file.name}: komprimeringen misslyckades.`))),
         'image/jpeg',
         0.85
       );
     });
-    const dataUrl = await readAsDataUrl(blob);
-    return { dataUrl, size: blob.size };
+    // Behåll originalet om det redan är ett skickbart format och mindre.
+    if (SEND_IMAGE_MIMES.includes(mime) && blob.size >= file.size && file.size <= MAX_FILE_BYTES) {
+      return { dataUrl: await readAsDataUrl(file), size: file.size, mime };
+    }
+    return { dataUrl: await readAsDataUrl(blob), size: blob.size, mime: 'image/jpeg' };
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
@@ -605,6 +679,7 @@ export default function DashboardChat({
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
   const [localError, setLocalError] = useState<string | null>(null);
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   // Fullskärmsvy för en inline-visualisering (stort över hela ytan).
   const [lightbox, setLightbox] = useState<InlineVisualRef | null>(null);
   // Aktivitetsloggen visar de fem senaste; "Visa fler" utökar stegvis så att
@@ -698,88 +773,60 @@ export default function DashboardChat({
       return;
     }
     const accepted = list.slice(0, remaining);
+    const errors: string[] = [];
     if (list.length > remaining) {
-      setLocalError(`Endast ${remaining} fil(er) till — max ${MAX_ATTACHMENTS} totalt.`);
+      errors.push(`Endast ${remaining} fil(er) till — max ${MAX_ATTACHMENTS} totalt.`);
     }
 
     setIsProcessingFiles(true);
     try {
       const next: UploadedFile[] = [];
       for (const file of accepted) {
-        const mime = detectMime(file);
-        if (!mime) {
-          setLocalError(`${file.name}: filformatet stöds inte.`);
+        const detected = detectFile(file);
+        if (!detected) {
+          errors.push(`${file.name}: filformatet stöds inte (PDF, Word, PowerPoint, Excel, text, CSV eller bild).`);
           continue;
         }
         if (file.size > MAX_FILE_BYTES) {
-          setLocalError(`${file.name} är större än 10 MB.`);
+          errors.push(`${file.name} är större än 10 MB.`);
           continue;
         }
+        const uid = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        // Inklistrade skärmdumpar heter ofta bara "image.png" — ge dem ett läsbart namn.
+        const name = file.name && file.name !== 'image.png' ? file.name : `Skärmdump ${next.length + 1}.png`;
         try {
-          if (ACCEPT_IMAGE.includes(mime)) {
-            const { dataUrl, size } = await compressImage(file);
-            const effectiveMime = size < file.size ? 'image/jpeg' : mime;
-            next.push({
-              uid: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-              name: file.name,
-              mime: effectiveMime,
-              kind: 'image',
-              size,
-              dataUrl
-            });
-          } else if (mime === 'application/pdf') {
-            const dataUrl = await readAsDataUrl(file);
-            const result = await extractPdfFromDataUrlAction(dataUrl, file.name);
-            if (result.error || !result.text) {
-              setLocalError(result.error || `${file.name}: kunde inte läsa PDF.`);
+          if (detected.kind === 'image') {
+            const img = await prepareImage(file, detected.mime);
+            next.push({ uid, name, mime: img.mime, kind: 'image', size: img.size, dataUrl: img.dataUrl });
+          } else if (detected.kind === 'extract') {
+            const result = await extractOnServer(file);
+            if ('error' in result) {
+              errors.push(result.error);
               continue;
             }
             next.push({
-              uid: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-              name: file.name,
-              mime: 'application/pdf',
+              uid,
+              name,
+              mime: result.mime,
               kind: 'text',
               size: file.size,
-              text: result.text
-            });
-          } else if (ACCEPT_XLSX.includes(mime)) {
-            const dataUrl = await readAsDataUrl(file);
-            const result = await extractXlsxFromDataUrlAction(dataUrl, file.name);
-            if (result.error || !result.text) {
-              setLocalError(result.error || `${file.name}: kunde inte läsa Excel-filen.`);
-              continue;
-            }
-            next.push({
-              uid: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-              name: file.name,
-              mime: XLSX_MIME,
-              kind: 'text',
-              size: file.size,
-              text: result.text
+              text: result.text,
+              truncated: result.truncated || undefined
             });
           } else {
             const text = await readAsText(file);
-            next.push({
-              uid: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-              name: file.name,
-              mime,
-              kind: 'text',
-              size: file.size,
-              text
-            });
+            if (!text.trim()) {
+              errors.push(`${file.name} är tom.`);
+              continue;
+            }
+            next.push({ uid, name, mime: detected.mime, kind: 'text', size: file.size, text });
           }
         } catch (err) {
-          // PDF-/Excel-extraktionen går via server actions — efter en deploy
-          // kastar en stale flik UnrecognizedActionError; säg då "ladda om"
-          // i stället för det missvisande "kunde inte läsa filen".
-          setLocalError(
-            isStaleDeploymentError(err)
-              ? STALE_DEPLOYMENT_MESSAGE
-              : `${file.name}: kunde inte läsa filen.`
-          );
+          errors.push(err instanceof Error && err.message ? err.message : `${file.name}: kunde inte läsa filen.`);
           console.error('[DashboardChat] file read failed', err);
         }
       }
+      if (errors.length > 0) setLocalError(errors.join(' '));
       if (next.length > 0) setAttachments((prev) => [...prev, ...next]);
     } finally {
       setIsProcessingFiles(false);
@@ -825,8 +872,10 @@ export default function DashboardChat({
       name: a.name,
       mime: a.mime,
       kind: a.kind,
+      size: a.size,
       text: a.text,
-      dataUrl: a.dataUrl
+      dataUrl: a.dataUrl,
+      truncated: a.truncated
     }));
     setInput('');
     setAttachments([]);
@@ -850,7 +899,29 @@ export default function DashboardChat({
   const willQueue = isPending || queued.length > 0;
 
   const inputPill = (
-    <div className="rounded-2xl border border-default bg-surface px-4 py-3 shadow-sm shadow-movexum-svart/5 transition focus-within:border-strong focus-within:ring-2 focus-within:ring-movexum-pastell-lila dark:focus-within:ring-movexum-morklila">
+    <div
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes('Files')) return;
+        e.preventDefault();
+        setIsDraggingFiles(true);
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        setIsDraggingFiles(false);
+      }}
+      onDrop={(e) => {
+        if (e.dataTransfer.files.length === 0) return;
+        e.preventDefault();
+        setIsDraggingFiles(false);
+        void addFiles(e.dataTransfer.files);
+      }}
+      className={`rounded-2xl border bg-surface px-4 py-3 shadow-sm shadow-movexum-svart/5 transition focus-within:border-strong focus-within:ring-2 focus-within:ring-movexum-pastell-lila dark:focus-within:ring-movexum-morklila ${
+        isDraggingFiles ? 'border-brand ring-2 ring-movexum-pastell-lila dark:ring-movexum-morklila' : 'border-default'
+      }`}
+    >
+      {isDraggingFiles && (
+        <p className="mb-2 text-[12px] font-medium text-foreground-muted">Släpp filerna för att bifoga dem</p>
+      )}
       {attachments.length > 0 && (
         <ul className="mb-2 flex flex-wrap gap-2">
           {attachments.map((a) => (
@@ -886,6 +957,13 @@ export default function DashboardChat({
         value={input}
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={handleKey}
+        onPaste={(e) => {
+          // Inklistrad skärmdump/fil → bifoga den (text klistras in som vanligt).
+          const files = Array.from(e.clipboardData.files);
+          if (files.length === 0) return;
+          e.preventDefault();
+          void addFiles(files);
+        }}
         placeholder={
           willQueue
             ? 'Skriv ett meddelande — det köas och körs när det pågående svaret är klart…'
@@ -901,7 +979,7 @@ export default function DashboardChat({
         ref={fileInputRef}
         type="file"
         multiple
-        accept={ACCEPT_TEXT_ATTR}
+        accept={ACCEPT_FILE_ATTR}
         className="hidden"
         onChange={(e) => {
           if (e.target.files && e.target.files.length > 0) addFiles(e.target.files);
@@ -945,7 +1023,7 @@ export default function DashboardChat({
             onClick={() => fileInputRef.current?.click()}
             disabled={isProcessingFiles || attachments.length >= MAX_ATTACHMENTS}
             className="inline-flex h-8 w-8 items-center justify-center rounded-full text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-            title={`Bifoga fil (PNG, JPG, WebP, PDF, XLSX, TXT, MD, CSV · max ${MAX_ATTACHMENTS} filer · 10 MB/fil)`}
+            title={`Bifoga fil (PDF, Word, PowerPoint, Excel, text, CSV eller bild · max ${MAX_ATTACHMENTS} filer · 10 MB/fil). Du kan också dra in filer eller klistra in en skärmdump.`}
             aria-label="Bifoga fil"
           >
             <Icon name="paperclip" size={14} />
@@ -958,7 +1036,7 @@ export default function DashboardChat({
             onClick={() => imageInputRef.current?.click()}
             disabled={attachments.length >= MAX_ATTACHMENTS}
             className="inline-flex h-8 w-8 items-center justify-center rounded-full text-foreground-subtle transition hover:bg-canvas-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-            title={`Bifoga bild (PNG, JPG, WebP · max ${MAX_ATTACHMENTS} bilagor · 10 MB/fil)`}
+            title={`Bifoga bild (JPG, PNG, WebP, HEIC m.fl. · max ${MAX_ATTACHMENTS} bilagor · 10 MB/fil)`}
             aria-label="Bifoga bild"
           >
             <Icon name="image" size={14} />
@@ -1692,7 +1770,35 @@ export default function DashboardChat({
 
               {messages.map((msg, i) =>
                 msg.role === 'user' ? (
-                  <div key={i} className="flex justify-end">
+                  <div key={i} className="flex flex-col items-end gap-1.5">
+                    {msg.attachments && msg.attachments.length > 0 && (
+                      <ul className="flex max-w-[78%] flex-wrap justify-end gap-1.5" aria-label="Bifogade filer">
+                        {msg.attachments.map((a, j) => (
+                          <li
+                            key={j}
+                            className="inline-flex items-center gap-1.5 rounded-xl border border-default bg-canvas-subtle py-1 pl-1.5 pr-2.5 text-[12px] text-foreground"
+                            title={
+                              a.text_dropped
+                                ? 'Innehållet sparas inte längre i chatten (tråden blev för lång) — bifoga filen igen om du vill fråga om den.'
+                                : a.truncated
+                                  ? 'Filen var för lång — bara början kunde läsas av chatten.'
+                                  : a.kind === 'image'
+                                    ? 'Bilden visades för chatten i det här meddelandet.'
+                                    : 'Chatten kan läsa filen i resten av samtalet.'
+                            }
+                          >
+                            <span className="flex h-5 w-5 items-center justify-center rounded-md bg-movexum-pastell-bla text-movexum-djupbla">
+                              <Icon name={a.kind === 'image' ? 'image' : 'doc'} size={11} />
+                            </span>
+                            <span className="max-w-[180px] truncate font-medium">{a.name}</span>
+                            <span className="text-foreground-subtle">
+                              {chatAttachmentTypeLabel(a.mime)}
+                              {a.truncated ? ' · kapad' : ''}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                     <div className="max-w-[78%] rounded-2xl rounded-tr-md bg-brand px-4 py-2.5 text-[14.5px] leading-relaxed text-brand-foreground">
                       {msg.content}
                     </div>

@@ -10,7 +10,16 @@ import {
 } from './staff-chat';
 import { normalizeAttachments, type ChatAttachment } from './chat-input';
 import type { AgentLoopStep } from './agent-runtime';
-import type { AgentActivityStep, ChatThread, ToolRunMessage } from '@platform/shared';
+import {
+  applyChatAttachmentPersistBudget,
+  buildChatPromptMessages,
+  readChatMessageAttachments,
+  withoutChatAttachmentText,
+  type AgentActivityStep,
+  type ChatHistoryEntry,
+  type ChatThread,
+  type ToolRunMessage
+} from '@platform/shared';
 
 // Delad kärna för en persistent chatt-turn (köra staff-chatt + spara i
 // `chat_threads`). Bor i ett rent server-only-modul (INTE 'use server') så att
@@ -130,20 +139,31 @@ export async function executeThreadTurn(
   if (att.error) return { error: att.error };
 
   const typed = String(userText || '').trim();
-  if (!typed && att.images.length === 0 && !att.textBlock) {
+  if (!typed && att.attachments.length === 0) {
     return { error: 'Meddelandet är tomt.' };
   }
 
-  // Historik → user/assistant-turer (systemet byggs färskt i motorn).
-  const history = existing
-    .filter((m) => m.role === 'user' || m.role === 'assistant')
-    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content.slice(0, 4000) }));
-
   const displayText =
-    typed || (att.images.length + (att.textBlock ? 1 : 0) > 1 ? '(bilagor skickade)' : '(bilaga skickad)');
-  // Text-bilagor injiceras i modell-prompten men persisteras inte som filer.
-  const promptText = displayText + att.textBlock;
-  const userMessages = [...history, { role: 'user' as const, content: promptText }];
+    typed || (att.attachments.length > 1 ? '(bilagor skickade)' : '(bilaga skickad)');
+
+  // Historik → user/assistant-turer (systemet byggs färskt i motorn). Bilagor
+  // som laddats upp i chatten tidigare matas in igen ur meddelandets sparade
+  // `chat_attachments` — annars "glömde" modellen filen efter första svaret och
+  // letade i Filer i stället. Aktuell tur prioriteras i prompt-budgeten.
+  const entries: ChatHistoryEntry[] = existing
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .map((m) => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content,
+      attachments: m.role === 'user' ? readChatMessageAttachments(m.chat_attachments) : undefined
+    }));
+  entries.push({ role: 'user', content: displayText, attachments: att.attachments });
+  const userMessages = buildChatPromptMessages(entries);
+  // Ämnes-/verktygsskopning och modellval utgår från det användaren SKREV —
+  // inte från en bifogad fils hela text (som annars drog in allt).
+  const scopeMessages = entries.map((e) => ({ role: e.role, content: e.content }));
+  const titleBasis =
+    typed || att.attachments.map((a) => a.name).join(', ') || displayText;
 
   // "Webbkällor" = riktig internetsökning (verktyget `web_search`, § 9.8) PLUS
   // ett litet block med aktuella EU-RSS-rubriker som billig omvärldskontext.
@@ -157,7 +177,7 @@ export async function executeThreadTurn(
   // sväljer egna fel (returnerar null) → ingen unhandled rejection vid early return.
   const needsTitle = !(thread.title && thread.title.trim());
   const titlePromise = needsTitle
-    ? generateChatTitle(pb, user, typed || displayText)
+    ? generateChatTitle(pb, user, titleBasis)
     : Promise.resolve<string | null>(null);
 
   // Ackumulera verktygsstegen (per tool_call-id) för persistens och forwarda
@@ -179,6 +199,8 @@ export async function executeThreadTurn(
     includeWebSearch: options.includeWebContext === true,
     agentBlock,
     images: att.images,
+    scopeMessages,
+    hasAttachments: att.attachments.length > 0,
     agentId: thread.agent,
     includeDocuments: true,
     ownerUserId: user.id,
@@ -193,7 +215,12 @@ export async function executeThreadTurn(
 
   const steps = Array.from(stepMap.values());
   const nowIso = new Date().toISOString();
-  const userMsg: ToolRunMessage = { role: 'user', content: displayText, at: nowIso };
+  const userMsg: ToolRunMessage = {
+    role: 'user',
+    content: displayText,
+    chat_attachments: att.attachments.length > 0 ? att.attachments : undefined,
+    at: nowIso
+  };
   const assistantMsg: ToolRunMessage = {
     role: 'assistant',
     content: turn.result.text,
@@ -217,11 +244,13 @@ export async function executeThreadTurn(
     at: new Date().toISOString()
   };
 
-  const updatedMessages = [...existing, userMsg, assistantMsg];
+  // Tråden får inte växa förbi `chat_threads.messages`-taket (2 MB): äldsta
+  // bilagornas text rensas först, metadata (namn/typ) finns kvar.
+  const updatedMessages = applyChatAttachmentPersistBudget([...existing, userMsg, assistantMsg]);
   let title = thread.title && thread.title.trim() ? thread.title : '';
   if (needsTitle) {
     const aiTitle = await titlePromise;
-    const basis = typed || displayText;
+    const basis = titleBasis;
     title = aiTitle || basis.replace(/\s+/g, ' ').trim().slice(0, 80);
   }
   if (!title) title = 'Ny chatt';
@@ -241,5 +270,6 @@ export async function executeThreadTurn(
     return { error: err instanceof Error ? err.message : 'Kunde inte spara svaret.' };
   }
 
-  return { messages: updatedMessages };
+  // Klienten behöver inte bilagornas text (bara namn/typ) — skicka den inte.
+  return { messages: withoutChatAttachmentText(updatedMessages) };
 }

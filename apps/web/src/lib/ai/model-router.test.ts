@@ -5,6 +5,7 @@ import {
   modelChainForTier,
   routeChatModels
 } from './model-router';
+import { isAllowedModel, modelSupportsVision } from './models';
 
 test('classifyComplexity: enkel hälsning/uppslag → low', () => {
   assert.equal(classifyComplexity('hej'), 'low');
@@ -44,8 +45,20 @@ test('modelChainForTier: rätt startmodell per tier, faller uppåt + small sist'
 
 test('routeChatModels: bilder → vision-kedja oavsett text', () => {
   assert.deepEqual(routeChatModels({ hasImages: true, message: 'analysera allt' }), [
-    'pixtral-12b-2409'
+    'mistral-medium-latest',
+    'pixtral-large-latest'
   ]);
+});
+
+test('routeChatModels: vision-kedjan består bara av registrerade vision-modeller', () => {
+  for (const m of routeChatModels({ hasImages: true })) {
+    assert.ok(isAllowedModel(m), `${m} saknas i modellregistret`);
+    assert.ok(modelSupportsVision(m), `${m} saknar vision`);
+  }
+});
+
+test('routeChatModels: bifogade filer → minst Medium även för en kort fråga', () => {
+  assert.equal(routeChatModels({ message: 'hej', hasAttachments: true })[0], 'mistral-medium-latest');
 });
 
 test('routeChatModels: textfråga route:ar på komplexitet', () => {
@@ -72,10 +85,11 @@ test('routeChatModels: okänt modell-id ignoreras → automatiskt val', () => {
 
 test('routeChatModels: bilder + vald vision-modell → den valda först', () => {
   const chain = routeChatModels({ hasImages: true, preferredModel: 'pixtral-large-latest' });
-  assert.equal(chain[0], 'pixtral-large-latest');
+  assert.deepEqual(chain, ['pixtral-large-latest', 'mistral-medium-latest']);
   // Vald modell utan vision-stöd får inte tyst bli vision-kedjan här (avvisas
   // uppströms) — men routern faller ändå säkert till standard-vision.
   assert.deepEqual(routeChatModels({ hasImages: true, preferredModel: 'mistral-large-latest' }), [
-    'pixtral-12b-2409'
+    'mistral-medium-latest',
+    'pixtral-large-latest'
   ]);
 });

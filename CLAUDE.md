@@ -770,6 +770,44 @@ prompt-explosion). Bilder skickas inline som data-URL till Mistral —
 vi cachar dem inte i tredjepartstjänst. Originalfilerna lagras
 tenant-isolerade på `tool_runs.attachments` (PB file-fält).
 
+**Bilagor i dashboardchatten (`/chatt`, 2026-10).** Incident: en fil som
+laddades upp i chatten syntes bara för modellen i SAMMA tur (texten sparades
+aldrig på meddelandet och bilageblocket sa inte att filen redan stod i
+samtalet), så följdfrågor fick modellen att leta i Filer (`read_my_file`/
+`search_my_files`) där filen aldrig fanns. Nu, med logiken i den rena,
+enhetstestade `packages/shared/src/chat-attachments.ts`:
+- **Format:** PDF, Word (.docx), PowerPoint (.pptx), Excel (.xlsx), TXT, MD,
+  CSV och bilder. PDF/Office extraheras via route-handlern
+  `/api/chat/attachments` (staff-only, rate-limitad, magic bytes, ingen
+  lagring; fetch-baserad så en flik från före en deploy fungerar — ersätter
+  server-actionerna i `lib/actions/chat-attachments.ts`). Text läses i
+  webbläsaren (UTF-8 med Windows-1252-reserv för svenska Excel-CSV;
+  filändelsen avgör för `.csv`, som Windows märker `application/vnd.ms-excel`).
+  Bilder i andra format (HEIC, GIF, BMP …) konverteras till JPEG i
+  webbläsaren; mime följer alltid det som faktiskt skickas, transparens mot
+  vit bakgrund. Bifoga via gem/bild-knapp, dra-och-släpp eller klistra in.
+- **Kapning i stället för fel:** 60 000 tecken/fil, 150 000/meddelande; en
+  kapad fil märks i prompten och som "kapad" på chipet.
+- **Sparas på meddelandet:** `ToolRunMessage.chat_attachments` (namn, typ,
+  storlek, antal tecken, sanerad text) i den ägaren-bara `chat_threads`;
+  tråden håller sparad bilagetext under 600 000 tecken (äldsta rensas först,
+  `text_dropped`, metadata kvar). Varje tur matar in tidigare bilagor igen
+  (`buildChatPromptMessages`: aktuell tur först, sedan nyast bakåt, tak
+  150 000 tecken) med ett block som säger att filen är bifogad i chatten och
+  INTE ligger i Filer; `KNOWLEDGE_GUIDANCE` och verktygsbeskrivningarna för
+  `read_my_file`/`search_my_files` säger detsamma. Texten skickas aldrig
+  tillbaka till webbläsaren (`withoutChatAttachmentText`).
+- **Bilder:** sparas aldrig (bara namn/typ), så modellen får en not om att
+  bilden bara syntes i sin tur. Bildturer kör nu MED verktyg på
+  vision-kedjan Mistral Medium → Pixtral Large (`model-router.ts`; tidigare en
+  oregistrerad `pixtral-12b` helt utan verktyg — en skärmdump kunde varken
+  slås upp mot databasen eller läggas in i årshjulet).
+- **Modellval/skopning** utgår från det användaren skrev, inte från filens
+  text; bifogade filer ger minst Medium.
+- **GDPR § 5:** texten personnummer-saneras (§ 15.6-regexen) och styrtecken
+  rensas innan den når modellen eller sparas; `chat_threads` är denylistad
+  för AI-läsning (§ 17.2). Loggar bär aldrig filnamn. Riskklass oförändrad.
+
 **Per-turn metadata.** Varje turn i `messages[]` har egen `model`,
 `tokens_in/out`, `cost_usd` och `at`-tidsstämpel. Aggregat
 (`tool_runs.tokens_in/out/cost_estimate_usd`) summeras över hela
@@ -2680,8 +2718,9 @@ siffrorna ska komma från verktygssvar i samma konversation.
 - `chat_threads.summary` (auto-sammanfattning per turn) är reserverat men
   inte aktiverat (full historik skickas ändå upp till 20 turer); cross-
   konversationsminne sker via `agent_memory` (§16.4), inkopplat i trådchatten.
-- Chatt-input-bilagor persisteras inte som filer (injiceras i prompten, som
-  förut); genererade dokument persisteras däremot i `user_files`.
+- Chatt-input-bilagor sparas inte som filer i Filer; deras extraherade text
+  sparas på user-meddelandet (`chat_attachments`, § 9.9) så senare turer kan
+  läsa dem. Genererade dokument persisteras i `user_files`.
 - **Auto-titel:** vid första turen i en tråd sätts en kort, beskrivande titel
   utifrån första prompten via `generateChatTitle` (`staff-chat.ts`) — ett litet
   `mistral-small`-anrop som körs parallellt med svaret (ingen serie-latens),
@@ -4692,8 +4731,8 @@ exponering** (best practice), utan att kvalitet tappas:
 - **Enum-duplicering borttagen:** de fem läsverktygens scheman bär inte
   längre alla kollektionsnamn som `enum` (namnen finns i indexet; Mistral
   gör ingen constrained decoding på enum — det var bara prompt-tokens).
-- **Vision-turer bantade:** bild-turer kör verktygslöst (§ 13.5) →
-  verktygsguide + schema-sammanfattning utelämnas helt ur deras prompt.
+- **Vision-turer:** bild-turer kör sedan 2026-10 med samma skopade
+  verktygsyta som textturer (Mistral Medium → Pixtral Large, § 9.9).
 - **Djupjobb:** planeraren + varje subtask skopar schemat mot
   instruktionen/delmålet (`buildReadToolSurface({ scopeText })`).
   Toolbox-/schemalagda körningar behåller den fulla sammanfattningen

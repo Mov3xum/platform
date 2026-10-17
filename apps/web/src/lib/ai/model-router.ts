@@ -17,8 +17,10 @@ import { isAllowedModel, modelSupportsVision } from './models';
 const SMALL = 'mistral-small-latest';
 const MEDIUM = 'mistral-medium-latest';
 const LARGE = 'mistral-large-latest';
-// Vision-kapabel modell när bilder bifogas (stödjer även function calling).
-const VISION = 'pixtral-12b-2409';
+// Vision-kedja när bilder bifogas: båda är registrerade (lib/ai/models.ts),
+// multimodala och stödjer function calling. Medium först (billigare, bra på
+// skärmdumpar + verktyg), Pixtral Large som reserv vid kapacitetstak.
+const VISION_CHAIN = [MEDIUM, 'pixtral-large-latest'];
 
 export type ComplexityTier = 'low' | 'medium' | 'high';
 
@@ -29,6 +31,8 @@ export interface RouteSignals {
   hasAgent?: boolean;
   /** Antal turer i historiken (lång tråd → mer kontext att resonera kring). */
   historyTurns?: number;
+  /** Filer bifogade i turen → minst Medium (Small läser långa dokument dåligt). */
+  hasAttachments?: boolean;
 }
 
 // Ord som signalerar analys/aggregering/flerstegsarbete (hög komplexitet).
@@ -101,7 +105,9 @@ export function classifyComplexity(message: string, signals: RouteSignals = {}):
   const veryLongThread = (signals.historyTurns ?? 0) >= 8;
 
   if (high >= 1 || (medium >= 2 && longMsg)) return 'high';
-  if (medium >= 1 || longMsg || signals.hasAgent || veryLongThread) return 'medium';
+  if (medium >= 1 || longMsg || signals.hasAgent || veryLongThread || signals.hasAttachments) {
+    return 'medium';
+  }
   return 'low';
 }
 
@@ -146,8 +152,10 @@ export function routeChatModels(input: RouteInput = {}): string[] {
     // En vald vision-kapabel modell respekteras; annars standard-vision-kedjan.
     // (En vald modell UTAN vision avvisas uppströms med tydligt fel, § 9.9 —
     // aldrig tyst fallback.)
-    if (preferred && modelSupportsVision(preferred)) return [preferred, VISION];
-    return [VISION];
+    if (preferred && modelSupportsVision(preferred)) {
+      return [preferred, ...VISION_CHAIN.filter((m) => m !== preferred)];
+    }
+    return [...VISION_CHAIN];
   }
   const tier = classifyComplexity(input.message ?? '', input);
   const chain = modelChainForTier(tier);

@@ -69,7 +69,21 @@ export const SEARCH_STRATEGY_GUIDANCE =
  * m.fl.) i samma resonemang. Delas av alla chatt-ytor.
  */
 export const KNOWLEDGE_GUIDANCE =
-  '\n\nKUNSKAPSBAS (uppladdat Movexum-material) — när och hur:\n' +
+  '\n\nFILER BIFOGADE I CHATTEN — läs dem först:\n' +
+  '- När ett meddelande har ett block "BIFOGADE FILER I DETTA MEDDELANDE" (eller ' +
+  '"FILER SOM BIFOGADES I DETTA TIDIGARE MEDDELANDE") står filens extraherade ' +
+  'text redan i samtalet. Läs, citera och analysera den direkt. Säger användaren ' +
+  '"filen", "dokumentet", "bilagan", "det jag laddade upp" eller nämner filens ' +
+  'namn menas den bifogade filen — anropa då INTE read_my_file, search_my_files ' +
+  'eller search_knowledge för att leta efter den: chattens bilagor ligger inte i ' +
+  'Filer eller kunskapsbasen.\n' +
+  '- Står det att innehållet inte ryms eller inte längre sparas: säg det rakt ut ' +
+  'och be användaren bifoga filen igen (eller fråga om en avgränsad del). Hitta ' +
+  'aldrig på innehåll.\n' +
+  '- Bifogade bilder visas för dig i det meddelande där de bifogades. Beskriv och ' +
+  'tolka dem; du kan använda verktygen (t.ex. läsa databasen eller lägga in det ' +
+  'bilden visar) i samma svar.\n' +
+  '\nKUNSKAPSBAS (uppladdat Movexum-material) — när och hur:\n' +
   '- `search_knowledge` söker i organisationens uppladdade dokument ' +
   '(processbeskrivningar, mallar, policys, rapporter, presentationer). Använd ' +
   'det när frågan rör HUR Movexum arbetar, interna rutiner, bakgrund eller vad ' +
@@ -91,13 +105,13 @@ export const KNOWLEDGE_GUIDANCE =
   'internationalisering, rapporter, affärsplan): sätt `topic` så blir sökningen ' +
   'snabbare och mer precis. Är du osäker — lämna `topic` tomt och sök brett.\n' +
   '- `search_my_files` söker i ANVÄNDARENS EGNA uppladdade filer (den personliga ' +
-  'Filer-ytan). Använd det när användaren säger "mina filer", "dokumentet jag ' +
-  'laddade upp" eller vill att du kör mot eget material — till skillnad från ' +
+  'Filer-ytan). Använd det när användaren säger "mina filer", "i Filer" eller vill ' +
+  'att du kör mot eget sparat material OCH filen inte är bifogad i chatten — till skillnad från ' +
   '`search_knowledge` som är hela organisationens delade kunskapsbas.\n' +
   '- `read_my_file` LISTAR användarens Filer-yta eller läser HELA en namngiven ' +
   'fil. search_my_files matchar ALDRIG på filnamn — så när användaren nämner en ' +
-  'fil vid namn ("Idebeskrivning.pptx", "pitchdecket"), säger att den "ligger i ' +
-  'Filer", eller vill att du bygger/analyserar något utifrån hela filen: kör ' +
+  'fil vid namn som INTE är bifogad i samtalet ("Idebeskrivning.pptx", ' +
+  '"pitchdecket"), säger att den "ligger i Filer", eller vill att du bygger/analyserar något utifrån hela filen: kör ' +
   'read_my_file (matcha på namn, eller lista med tom query och läs via ' +
   '`file_id`). Säg ALDRIG att en fil saknas förrän du listat filerna; finns ' +
   'filen men utan text (`has_text: false`) — säg exakt det och vad användaren ' +

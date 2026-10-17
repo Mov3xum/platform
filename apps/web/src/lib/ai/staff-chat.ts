@@ -50,8 +50,9 @@ export const CHAT_FALLBACK_MODELS = [
   'mistral-medium-latest',
   'mistral-large-latest'
 ];
-// Vision-kapabel modell när bilder bifogas (stödjer även function calling).
-export const VISION_FALLBACK_MODELS = ['pixtral-12b-2409'];
+// Vision-kapabla modeller när bilder bifogas (båda stödjer function calling).
+// Bara registrerade modeller (lib/ai/models.ts) — pris och etikett blir rätt.
+export const VISION_FALLBACK_MODELS = ['mistral-medium-latest', 'pixtral-large-latest'];
 // Interaktiv staff-chatt: ett intent-flöde blir lätt search_records →
 // describe_collection → query → aggregate → svar — och kräver ibland ett par
 // självkorrigeringar (fel kollektion/fält först). Taket höjs därför rejält
@@ -361,6 +362,14 @@ export interface RunStaffChatTurnOptions {
   includeWebSearch?: boolean;
   agentBlock?: string;
   images?: Array<{ dataUrl: string }>;
+  /**
+   * Samtalet UTAN bilagornas text — styr schema-/verktygsskopning och
+   * modellval så en bifogad fils innehåll inte avgör vilka verktyg som laddas.
+   * Utelämnad = `userMessages`.
+   */
+  scopeMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  /** Användaren bifogade filer/bilder i turen (modellval minst Medium). */
+  hasAttachments?: boolean;
   /** Agent-id (persona) — sätts på actorn för audit. */
   agentId?: string;
   /** Exponera generate_document (interaktiv yta med människa-i-loopen). */
@@ -427,16 +436,16 @@ export async function runStaffChatTurn(
     agentId: opts.agentId
   };
 
-  // Vision-körningar kör verktygslöst (pixtral saknar tool-stöd, § 13.5).
-  const useTools = images.length === 0;
-  const fullTools = useTools
-    ? buildChatTools(collections, {
-        actor,
-        includeMemory: true,
-        includeDocuments: opts.includeDocuments,
-        includeWebSearch: opts.includeWebSearch
-      })
-    : undefined;
+  // Bild-turer kör MED verktyg: vision-kedjan (Mistral Medium → Pixtral
+  // Large) stödjer function calling, så "lägg in det här i årshjulet" med en
+  // skärmdump fungerar. (Tidigare kördes bildturer verktygslöst på en
+  // oregistrerad pixtral-12b — modellen kunde då varken läsa data eller agera.)
+  const fullTools = buildChatTools(collections, {
+    actor,
+    includeMemory: true,
+    includeDocuments: opts.includeDocuments,
+    includeWebSearch: opts.includeWebSearch
+  });
 
   const today = new Date().toISOString().slice(0, 10);
   const identityBlock =
@@ -449,36 +458,33 @@ export async function runStaffChatTurn(
 
   // Skopad schema-sammanfattning (§ 28.4): fulla fältlistor bara för kärnset +
   // kollektioner relevanta för de senaste användarturerna; resten som kompakt
-  // namnindex (describe_collection täcker detaljerna). Vision-turer kör
-  // verktygslöst (§ 13.5) → verktygsguide + schema utelämnas helt där.
-  const scopeText = opts.userMessages
+  // namnindex (describe_collection täcker detaljerna).
+  const scopeSource = opts.scopeMessages ?? opts.userMessages;
+  const scopeText = scopeSource
     .filter((m) => m.role === 'user')
     .slice(-3)
     .map((m) => m.content)
     .join('\n');
-  const schemaBlock = useTools
-    ? `\n\n${buildScopedSchemaSummary(collections, selectRelevantCollections(collections, scopeText))}`
-    : '';
+  const schemaBlock = `\n\n${buildScopedSchemaSummary(collections, selectRelevantCollections(collections, scopeText))}`;
   // Skopad verktygsyta (§ 28.4, `tool-scope.ts`): domänspecifika skrivverktyg
   // skickas bara när de senaste turerna eller agentens persona matchar
   // domänen; övriga laddas vid behov via `resolveTool` i loopen. Halverar
   // ungefär prompt-tokens per anrop utan att någon funktion försvinner.
   const toolScopeText = [
     scopeText,
-    opts.userMessages.filter((m) => m.role === 'assistant').at(-1)?.content ?? '',
+    scopeSource.filter((m) => m.role === 'assistant').at(-1)?.content ?? '',
     opts.agentBlock ?? ''
   ].join('\n');
-  const tools = fullTools ? scopeTools(fullTools, toolScopeText) : undefined;
-  const toolGuidanceBlocks = useTools
-    ? STAFF_TOOL_GUIDANCE +
-      WRITE_HONESTY_GUIDANCE +
-      APPROVAL_GUIDANCE +
-      AUTHORING_GUIDANCE +
-      MEETING_GUIDANCE +
-      SEARCH_STRATEGY_GUIDANCE +
-      KNOWLEDGE_GUIDANCE +
-      (opts.includeWebSearch ? WEB_SEARCH_GUIDANCE : WEB_SEARCH_OFF_HINT)
-    : '';
+  const tools = scopeTools(fullTools, toolScopeText);
+  const toolGuidanceBlocks =
+    STAFF_TOOL_GUIDANCE +
+    WRITE_HONESTY_GUIDANCE +
+    APPROVAL_GUIDANCE +
+    AUTHORING_GUIDANCE +
+    MEETING_GUIDANCE +
+    SEARCH_STRATEGY_GUIDANCE +
+    KNOWLEDGE_GUIDANCE +
+    (opts.includeWebSearch ? WEB_SEARCH_GUIDANCE : WEB_SEARCH_OFF_HINT);
 
   const systemContent =
     BASE_SYSTEM_PROMPT +
@@ -510,8 +516,9 @@ export async function runStaffChatTurn(
   // Modellval efter komplexitet (ej längre default small). Bilder → vision.
   const models = routeChatModels({
     hasImages: images.length > 0,
-    message: latestUserMessage(opts.userMessages),
+    message: latestUserMessage(scopeSource),
     hasAgent: Boolean(opts.agentId),
+    hasAttachments: opts.hasAttachments,
     historyTurns: opts.userMessages.length,
     preferredModel
   });
@@ -534,7 +541,7 @@ export async function runStaffChatTurn(
         webSources
       },
       maxIterations: MAX_TOOL_ITERATIONS,
-      resolveTool: fullTools ? makeToolResolver(fullTools) : undefined,
+      resolveTool: makeToolResolver(fullTools),
       onStep: opts.onStep,
       onToken: opts.onToken,
       onUsage: (u) => {
