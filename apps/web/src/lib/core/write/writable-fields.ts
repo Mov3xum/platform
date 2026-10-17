@@ -444,13 +444,19 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
     // Agenten kan inte slå upp användar-id:n (`users` denylistad § 9.3); ett
     // personligt mål via chatten blir alltid den inloggades eget (skrivlagret
     // sätter ägaren), aldrig någon annans.
-    owner_user: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Ägaren av ett personligt mål väljs av en människa i /mal — via chatten blir målet ditt eget.' } }
+    owner_user: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Ägaren av ett personligt mål väljs av en människa i /mal — via chatten blir målet ditt eget.' } },
+    // OKR-struktur (§ 42.5, migration 1700000198).
+    level: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    parent_goal: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    subteam: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    responsible: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Ansvarig väljs av en människa i /mal — agenten kan inte slå upp användare.' } }
   },
   goal_indicators: {
     label: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
     source: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
     metric_key: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
     target: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Måltal beslutas av ledningen i /mal — agenten föreslår i text.' } },
+    target_text: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Målvärden beslutas av ledningen i /mal — agenten föreslår i text.' } },
     unit: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
     direction: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } }
   },

@@ -4177,13 +4177,17 @@ await ensureCollection({
     { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
     { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
     { name: 'period', type: 'relation', required: true, collectionId: 'goal_periods_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
-    { name: 'focus_area', type: 'select', required: true, maxSelect: 1, values: ['partner_finansiering', 'inflode_varumarke', 'kundvarde_kvalitet', 'organisation_digitalisering', 'tematisk_accelerator'] },
+    { name: 'focus_area', type: 'select', required: true, maxSelect: 1, values: ['partner_finansiering', 'inflode_varumarke', 'kundvarde_kvalitet', 'organisation_digitalisering', 'tematisk_accelerator', 'projekt'] },
     { name: 'title', type: 'text', required: true, min: 1, max: 200 },
     { name: 'description', type: 'text', required: false, max: 2000 },
     { name: 'owner_team', type: 'select', required: true, maxSelect: 1, values: ['ledning', 'marknad', 'projekt', 'coach', 'gemensamt'] },
     // Migration 1700000161: övergripande vs personligt mål + ägare.
     { name: 'kind', type: 'select', required: false, maxSelect: 1, values: ['overall', 'personal'] },
     { name: 'owner_user', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    // Migration 1700000198: OKR-struktur (parent_goal läggs av patchCollection nedan — self-relation).
+    { name: 'level', type: 'select', required: false, maxSelect: 1, values: ['organisation', 'team', 'project', 'project_indicator', 'personal'] },
+    { name: 'responsible', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'subteam', type: 'text', required: false, max: 80 },
     { name: 'sort_order', type: 'number', required: false, onlyInt: true, min: 0, max: 100000 },
     { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
   ],
@@ -4214,6 +4218,8 @@ await ensureCollection({
     { name: 'survey_module', type: 'relation', required: false, collectionId: 'compass_modules_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'target', type: 'number', required: false },
     { name: 'has_target', type: 'bool', required: false },
+    // Migration 1700000198: målvärdet i ord.
+    { name: 'target_text', type: 'text', required: false, max: 200 },
     { name: 'unit', type: 'select', required: true, maxSelect: 1, values: ['count', 'pct', 'days', 'bool'] },
     { name: 'direction', type: 'select', required: true, maxSelect: 1, values: ['higher', 'lower'] },
     { name: 'sort_order', type: 'number', required: false, onlyInt: true, min: 0, max: 100000 },
@@ -4239,7 +4245,7 @@ await ensureCollection({
     { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
     { name: 'indicator', type: 'relation', required: true, collectionId: 'goal_indicators_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
     { name: 'quarter', type: 'number', required: true, onlyInt: true, min: 1, max: 4 },
-    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['on_track', 'delayed', 'not_started', 'done'] },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['on_track', 'risk', 'delayed', 'not_started', 'done'] },
     { name: 'value', type: 'number', required: false },
     // Migration 1700000160: känt-flagga för värdet (PB lagrar null som 0).
     { name: 'has_value', type: 'bool', required: false },
@@ -4945,6 +4951,24 @@ await patchCollection('goals', [
   { name: 'kind', type: 'select', required: false, maxSelect: 1, values: ['overall', 'personal'] },
   { name: 'owner_user', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
 ]);
+// Migration 1700000198: OKR-struktur — nivå, överliggande mål (self-relation,
+// id slås upp på namnet), ansvarig, delteam; focus_area += 'projekt',
+// status += 'risk', målvärde i text. patchCollection ERSÄTTER values → hela listorna.
+{
+  const goalsCol = await pb.collections.getOne('goals');
+  await patchCollection(
+    'goals',
+    [
+      { name: 'level', type: 'select', required: false, maxSelect: 1, values: ['organisation', 'team', 'project', 'project_indicator', 'personal'] },
+      { name: 'parent_goal', type: 'relation', required: false, collectionId: goalsCol.id, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+      { name: 'responsible', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+      { name: 'subteam', type: 'text', required: false, max: 80 }
+    ],
+    { focus_area: { values: ['partner_finansiering', 'inflode_varumarke', 'kundvarde_kvalitet', 'organisation_digitalisering', 'tematisk_accelerator', 'projekt'] } }
+  );
+  await patchCollection('goal_indicators', [{ name: 'target_text', type: 'text', required: false, max: 200 }]);
+  await patchCollection('goal_status_entries', [], { status: { values: ['on_track', 'risk', 'delayed', 'not_started', 'done'] } });
+}
 // Migration 1700000152: tasks.link_kind += 'procurement' + relationer +
 // rule_key (idempotensnyckel för regelgenererade uppföljningar). Union över
 // hela values-listan (patchCollection ERSÄTTER values) — därför bär listan

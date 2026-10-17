@@ -7285,6 +7285,89 @@ Domäntangenter: ← → kvartal, Shift ← → år. Sökvägarna som slipper ra
 ligger i `PRESENTATION_PATHS` (`lib/auth-paths.ts`) — lägg en ny
 presentationsyta där, inte i `layout.tsx`.
 
+### 42.5 OKR-struktur: nivå, överliggande mål, ansvarig, delteam, risk (2026-10)
+
+**Underlag.** Verksamhetsplanens uppföljning ("Key Results 2026", ett
+Excel-blad per team: Coacher, Marknad, Ledningsgrupp, Sprint-X, EOI, GSAI)
+har kolumnerna Key result · Beskrivning · Övergripande mål (Objective) ·
+Överliggande mål · Ansvarigt team · Ansvarig roll · Key result-nivå ·
+Målvärde 2026 · Status Q1–Q4 · Kommentar. Modellen saknade koppling mellan
+mål, nivåerna, ansvarig för övergripande mål, projektteam och statusen
+"Risk", och `/mal` gick bara att läsa per fokusområde. Migration
+**1700000198** (speglad i `setup-via-api.mjs`, asserterad i
+`verify-baseline.mjs` — fält + select-värden) lägger till:
+
+| Fält | Betydelse |
+|------|-----------|
+| `goals.level` | `organisation` / `team` / `project` / `project_indicator` / `personal` (MÅSTE spegla `GOAL_LEVELS`). Tomt = ej angiven — vi gissar aldrig. `personal` ⇔ måltypen personligt (`validateGoalInput` avvisar motsägelser; ändras bara nivån följer måltypen med). Befintliga personliga mål backfillas. |
+| `goals.parent_goal` | Överliggande mål (self-relation, ingen cascade). Samma verksamhetsår, aldrig en cirkel (`assertParentGoal` i skrivlagret; `wouldCreateGoalCycle` i @platform/shared för UI:t). Kopplingen går fritt mellan team — Marknads NPS-mål kan bidra till Coachernas "Kundnöjdhet". |
+| `goals.responsible` | Ansvarig medarbetare för ett övergripande mål (Movexum-personal i tenanten). **Informativ — ger ingen rätt att ändra målet** (update-regeln är oförändrad: ledning eller ägaren av ett personligt mål). Agent-nekad (`users` denylistad). För personliga mål är ägaren ansvarig (`goalResponsibleId`). |
+| `goals.subteam` | Delteam/projekt under `owner_team`, fri text ≤ 80 ("Sprint-X 2 – Kapital", "EOI", "GSAI"). Visas i stället för teamnamnet (`goalTeamLabel`). |
+| `goals.focus_area` += `projekt` | **Projektmål** — mål vars Objective är ett projekt snarare än ett av de fem fokusområdena. Sektionen syns i fokusvyn först när den används. |
+| `goal_indicators.target_text` | Målvärdet i ord när det inte ryms i ett tal ("Över 40 %", "TBD", "Ökning med 12 st i BC och 5 st ink/acc"). Agent-nekat (målvärden är VP-beslut). |
+| `goal_status_entries.status` += `risk` | **Risk** — riskerar att inte nås, värre än försenad. Orange chip (§ 2.3: ingen röd); gul = försenad. |
+
+**`/mal` — filter, gruppering, hierarki (`GoalsView.tsx`).** Filterrad med
+sök (titel/beskrivning/delteam/indikator, diakritik-tolerant), team (med
+delteam), nivå, ansvarig och status för valt kvartal; gruppering efter
+**Fokusområde** (som förut, med "Nytt mål"-formulären), **Team**, **Nivå**
+eller **Ansvarig**. Trafikljuset räknar det filtrerade urvalet och är
+klickbart (filtrerar på statusen). Filter och gruppering speglas i URL:en
+(`?grupp=team&team=marknad&niva=team&ansvarig=<id>&status=risk&sok=…`,
+`history.replaceState` — ingen serverrunda) så en vy kan delas. Varje
+målkort visar nivå, team/delteam, ansvarig, "↳ Bidrar till …" (hopp till
+målet; släpper filtret om det döljer målet) och "N mål bidrar hit" med
+varje bidragande måls status. All filter-/grupperingslogik är ren och
+enhetstestad i `packages/shared/src/goals.ts` (`filterGoalNodes`,
+`groupGoalNodes`, `goalStatusForQuarter`, `goalChildrenMap`,
+`rollupGoalStatuses` tar även en nodlista); `GoalTree.nodes` är den platta
+listan.
+
+**Import av verksamhetsplanen (`/mal/import`).** `readTableFileSheets`
+(`lib/import/table-file.ts`) läser **alla blad**; `parseGoalImportSheets`
+(`goals-import.ts`, ren + enhetstestad) letar upp rubrikraden per blad
+(`findGoalImportHeaderRow` — bladen har en titelrad först) och känner
+igen verksamhetsplanens rubriker (exakta alias + prefix: "Målvärde 2026",
+"Status Q3", "Beskrivning och definition av målet"). Värden: nivå
+("Organisationsnivå" … "Personligt mål"), status ("I fas", "Försenad",
+"Klar", "Ej startad", "Risk"), fokusområde via nyckelord ("Stärka varumärke &
+inflöde"), team ("Coacher" ⇒ coach; okänt team som "Sprint-X 2 – Kapital" ⇒
+Projektgrupp + delteam). Ett projekt som Objective (Sprint-X 2.0, EOI, GSAI)
+ger Projektmål när raden är ett projekt (projektnivå eller projektteam) —
+annars hoppas raden över som förut. Målvärdet tolkas av
+`parseGoalTargetCell`: "Ja" ⇒ ja/nej, ett ensamt tal ⇒ måltal (+ ev. text),
+**flera tal eller inget tal ⇒ inget måltal** (vi gissar inte vilket tal som
+är målet) och texten sparas. En rad utan indikatorkolumn får EN manuell
+indikator med målets namn som bär målvärde och status. Skrivlagret
+(`importGoals`):
+- matchar **ansvarig på e-post eller visningsnamn** mot Movexum-personal
+  (tvetydiga namn matchas inte, informativt fält); **ägaren av ett personligt
+  mål matchas bara på e-post** — ägarskap ger redigeringsrätt och
+  visningsnamnet är självredigerbart. Utan e-post blir importören ägare och
+  den namngivna personen ansvarig (ledningen byter ägare i `/mal`);
+- tvingar formen på klientdatan (icke-objekt släpps, ≤ 50 indikatorer och
+  ≤ 4 statusar per mål);
+- sparar **status Q1–Q4 bara för kvartal som inte redan rapporterats** —
+  det som rapporterats i `/mal` skrivs aldrig över; kommentaren läggs på
+  det senaste importerade kvartalet (utan status hamnar den i beskrivningen);
+- kopplar **överliggande mål på titel** efter att alla mål skapats (bara mål
+  som saknar koppling; ett mål som pekar på sig självt ignoreras);
+- återanvänder befintliga mål och fyller bara i saknad nivå/delteam/ansvarig
+  → importen kan köras om. Varningar är PII-fria (blad + radnummer).
+Hela Key Results 2026-filen (6 blad, 49 mål) tolkas utan varningar.
+
+**Chatten:** `create_goal` tar `level`, `subteam`, `parent_goal_id`;
+`set_goal_status` tar `risk`. Ansvarig och målvärden sätts av en människa.
+
+**Regelefterlevnad.** Riskklass n/a (ingen AI-inferens). GDPR § 5: nivå,
+delteam och målvärde är verksamhetsdata; `responsible` är en intern
+användarrelation (visningsnamn, aldrig e-post; når inte `lib/ai/context.ts`).
+Namnen i importfilens "Ansvarig roll" används bara för matchningen och
+lagras aldrig som text. Fritext (delteam, målvärde, kommentar)
+personnummer-saneras och auditeras bara som längd. RLS oförändrad
+(staff/observer läser; § 21.3). Schema-drift: ett OKR-fält som inte fastnar
+ger ett tydligt fel som namnger migration 1700000198.
+
 ---
 
 ## 43. Startupkompassen som enkätmotor — kundnöjdhet, NPS, partnerenkät, medarbetarindex

@@ -7,6 +7,7 @@ import {
   GOAL_IMPORT_FIELD_LABELS,
   GOAL_INDICATOR_SOURCE_LABELS,
   GOAL_KIND_LABELS,
+  GOAL_LEVEL_LABELS,
   GOAL_OWNER_TEAM_LABELS,
   METRIC_DEFINITIONS,
   buildGoalImportTemplateCsv,
@@ -15,6 +16,7 @@ import {
 } from '@platform/shared';
 import { commitGoalImportAction, previewGoalImportAction, type GoalImportState } from '@/lib/actions/goals';
 import { Icon } from '@/components/proto';
+import { StatusChip } from '../ui';
 
 const idle: GoalImportState = { status: 'idle' };
 const inputClass =
@@ -69,8 +71,10 @@ export function GoalImportForm({
     return (
       <div className="space-y-4">
         <Notice kind="notice">
-          Import klar för {state.year}: {r.created} nya mål, {r.reused} befintliga återanvända, {r.indicatorsCreated} indikatorer
-          tillagda{r.skipped > 0 ? `, ${r.skipped} överhoppade` : ''}.
+          Import klar för {state.year}: {r.created} nya mål, {r.reused} befintliga återanvända
+          {r.updated > 0 ? ` (${r.updated} kompletterade)` : ''}, {r.indicatorsCreated} indikatorer, {r.statusesCreated} kvartalsstatusar
+          {r.statusesSkipped > 0 ? ` (${r.statusesSkipped} fanns redan och lämnades orörda)` : ''}, {r.parentsLinked} kopplingar till
+          överliggande mål{r.skipped > 0 ? `, ${r.skipped} överhoppade` : ''}.
         </Notice>
         {r.warnings.length > 0 && (
           <details className="rounded-2xl border border-default bg-surface p-4 text-sm">
@@ -129,9 +133,11 @@ export function GoalImportForm({
           </div>
         </div>
         <p className="text-xs text-foreground-subtle">
-          Första raden ska vara rubriker. Kända kolumner: {Object.values(GOAL_IMPORT_FIELD_LABELS).join(' · ')}. Fokusområde,
-          måltyp, team, mätkälla och metrik skrivs som i plattformen (t.ex. &quot;Inflöde och varumärke&quot;, &quot;Personligt&quot;,
-          &quot;Beräknas ur data&quot;, &quot;Nya leads&quot;). Personliga mål anger ägarens e-post. Okända kolumner ignoreras. Skriv inga
+          Alla blad i Excel-filen läses, och rubrikraden hittas även om bladet börjar med en titelrad. Verksamhetsplanens kolumner
+          (Key result, Övergripande mål – Objective, Överliggande mål, Ansvarigt team, Ansvarig roll, Key result nivå, Målvärde 2026,
+          Status Q1–Q4, Kommentar om resultatet) känns igen, liksom: {Object.values(GOAL_IMPORT_FIELD_LABELS).join(' · ')}. Ett projekt
+          som Objective (t.ex. Sprint-X eller EOI) hamnar under Projektmål. Ansvarig matchas på namn eller e-post mot kollegorna.
+          Kvartalsstatus som redan rapporterats i plattformen skrivs aldrig över. Okända kolumner ignoreras. Skriv inga
           personuppgifter i mål eller beskrivningar.
         </p>
         <div className="flex flex-wrap gap-2">
@@ -153,7 +159,7 @@ export function GoalImportForm({
             <h2 className="text-base font-semibold text-foreground">Förhandsgranskning · {preview.preview.year}</h2>
             <span className="text-sm text-foreground-muted mx-tnum">
               {preview.preview.goals.length} mål · {preview.preview.goals.reduce((n, g) => n + g.indicators.length, 0)} indikatorer
-              {preview.preview.sheet ? ` · ark "${preview.preview.sheet}"` : ''}
+              {preview.preview.sheets && preview.preview.sheets.length > 1 ? ` · ${preview.preview.sheets.length} blad` : ''}
             </span>
           </div>
           <div className="flex flex-wrap gap-1 text-xs">
@@ -187,24 +193,31 @@ export function GoalImportForm({
                 <tr>
                   <th className="px-3 py-2">Fokusområde</th>
                   <th className="px-3 py-2">Mål</th>
-                  <th className="px-3 py-2">Typ</th>
+                  <th className="px-3 py-2">Nivå</th>
                   <th className="px-3 py-2">Team</th>
-                  <th className="px-3 py-2">Indikatorer</th>
+                  <th className="px-3 py-2">Ansvarig</th>
+                  <th className="px-3 py-2">Målvärde & status</th>
                 </tr>
               </thead>
               <tbody>
                 {(showAll ? preview.preview.goals : preview.preview.goals.slice(0, 25)).map((g) => (
-                  <tr key={g.line} className="border-t border-default align-top">
+                  <tr key={`${g.ref ?? ''}${g.line}`} className="border-t border-default align-top">
                     <td className="px-3 py-1.5 text-foreground-muted">{GOAL_FOCUS_AREA_LABELS[g.focus_area]}</td>
                     <td className="px-3 py-1.5 text-foreground">
                       <div className="font-medium">{g.title}</div>
-                      {g.description && <div className="text-foreground-subtle">{g.description}</div>}
+                      {g.parent_title && <div className="text-foreground-subtle">↳ bidrar till: {g.parent_title}</div>}
+                      {g.description && <div className="line-clamp-2 text-foreground-subtle">{g.description}</div>}
                     </td>
                     <td className="px-3 py-1.5 text-foreground-muted">
-                      {GOAL_KIND_LABELS[g.kind]}
-                      {g.kind === 'personal' && <div className="text-foreground-subtle">{g.owner_email ?? 'du'}</div>}
+                      {g.level ? GOAL_LEVEL_LABELS[g.level] : GOAL_KIND_LABELS[g.kind]}
                     </td>
-                    <td className="px-3 py-1.5 text-foreground-muted">{GOAL_OWNER_TEAM_LABELS[g.owner_team]}</td>
+                    <td className="px-3 py-1.5 text-foreground-muted">
+                      {g.subteam || GOAL_OWNER_TEAM_LABELS[g.owner_team]}
+                      {g.subteam && <div className="text-foreground-subtle">{GOAL_OWNER_TEAM_LABELS[g.owner_team]}</div>}
+                    </td>
+                    <td className="px-3 py-1.5 text-foreground-muted">
+                      {g.responsible ?? (g.kind === 'personal' ? (g.owner_email ?? 'du') : '–')}
+                    </td>
                     <td className="px-3 py-1.5 text-foreground-muted">
                       {g.indicators.length === 0 ? (
                         <span className="text-foreground-subtle">–</span>
@@ -212,12 +225,22 @@ export function GoalImportForm({
                         <ul className="space-y-0.5">
                           {g.indicators.map((i) => (
                             <li key={i.line}>
-                              {i.label}
-                              {i.target !== null ? ` · mål ${i.target}` : ''}
+                              {i.label !== g.title && <span>{i.label} · </span>}
+                              {i.target_text ? `mål: ${i.target_text}` : i.target !== null ? `mål ${i.target}${i.unit === 'pct' ? ' %' : ''}` : i.unit === 'bool' ? 'mål: ja' : 'inget måltal'}
                               <span className="text-foreground-subtle">
                                 {' '}
                                 · {i.source === 'computed' && i.metric_key ? `${METRIC_DEFINITIONS[i.metric_key as MetricKey]?.label ?? i.metric_key}` : GOAL_INDICATOR_SOURCE_LABELS[i.source]}
                               </span>
+                              {i.statuses && i.statuses.length > 0 && (
+                                <span className="mt-0.5 flex flex-wrap gap-1">
+                                  {i.statuses.map((st) => (
+                                    <span key={st.quarter} className="inline-flex items-center gap-0.5">
+                                      <span className="text-[10px] text-foreground-subtle">Q{st.quarter}</span>
+                                      <StatusChip status={st.status} small />
+                                    </span>
+                                  ))}
+                                </span>
+                              )}
                             </li>
                           ))}
                         </ul>

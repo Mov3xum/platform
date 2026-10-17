@@ -148,8 +148,8 @@ export function GoalsPresentation({
         ) : (
           <div className="mx-auto max-w-6xl space-y-8">
             {/* Trafikljus */}
-            <section className="grid grid-cols-5 gap-6">
-              {(['on_track', 'delayed', 'not_started', 'done', 'unreported'] as const).map((s) => (
+            <section className="grid grid-cols-6 gap-6">
+              {(['on_track', 'risk', 'delayed', 'not_started', 'done', 'unreported'] as const).map((s) => (
                 <div key={s} className="border-t-2 border-default pt-3">
                   <div className="font-heading text-[40px] font-semibold leading-none tabular-nums text-foreground">{rollup[s]}</div>
                   <div className="mt-2">

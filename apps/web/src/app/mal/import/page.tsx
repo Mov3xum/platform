@@ -37,9 +37,10 @@ export default async function ImporteraMalPage({
     >
       <div className="mx-auto w-full max-w-4xl space-y-4">
         <p className="text-sm text-foreground-muted">
-          Ladda upp mål från Excel eller CSV. En rad per mål, eller en rad per indikator med målet upprepat — rader med samma
-          fokusområde och titel slås ihop till ett mål med flera indikatorer. Mål som redan finns i året återanvänds och får
-          bara nya indikatorer, så importen kan köras om.
+          Ladda upp mål från Excel eller CSV — t.ex. verksamhetsplanens Key Results-fil med ett blad per team. En rad per mål,
+          eller en rad per indikator med målet upprepat. Nivå, team/delteam, ansvarig, överliggande mål, målvärde och status
+          Q1–Q4 följer med. Mål som redan finns i året återanvänds och kompletteras bara där något saknas, så importen kan köras
+          om.
         </p>
         <GoalImportForm periods={openPeriods.map((p) => ({ id: p.id, year: p.year, title: p.title ?? null }))} preselected={preselected} />
       </div>

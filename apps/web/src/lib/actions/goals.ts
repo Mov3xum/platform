@@ -20,8 +20,8 @@ import {
   type GoalWritableField,
   type ImportGoalsResult
 } from '@/lib/core/write';
-import { readTableFile } from '@/lib/import/table-file';
-import { GOAL_IMPORT_MAX_ROWS, parseGoalImportRows, type GoalImportField, type GoalImportGoal, type Role } from '@platform/shared';
+import { readTableFileSheets } from '@/lib/import/table-file';
+import { GOAL_IMPORT_MAX_ROWS, parseGoalImportSheets, type GoalImportField, type GoalImportGoal, type Role } from '@platform/shared';
 
 /**
  * Server actions för målstyrningen (CLAUDE.md § 42). Tunna skal: RBAC här,
@@ -102,6 +102,10 @@ export async function createGoalAction(input: {
   /** `overall` (ledning) eller `personal` (eget mål; ledningen kan sätta åt andra). */
   kind?: string;
   owner_user?: string;
+  level?: string;
+  parent_goal?: string;
+  responsible?: string;
+  subteam?: string;
 }): Promise<GoalActionState> {
   // Övergripande vs personligt avgörs i skrivlagret (`canCreateGoalOfKind`).
   const g = await gate(STAFF_ROLES, 'Bara Movexum-personal kan lägga till mål.');
@@ -142,10 +146,19 @@ export async function deleteGoalAction(input: { goalId: string }): Promise<GoalA
   return { ok: true, id: res.value.id, notice: `Målet "${res.value.title}" är borttaget.` };
 }
 
-export async function updateGoalIndicatorAction(input: { indicatorId: string; label?: string; target?: string }): Promise<GoalActionState> {
+export async function updateGoalIndicatorAction(input: {
+  indicatorId: string;
+  label?: string;
+  target?: string;
+  target_text?: string;
+}): Promise<GoalActionState> {
   const g = await gate(LEAD_ROLES, 'Bara admin/incubator_lead kan ändra indikatorer.');
   if ('error' in g) return { error: g.error };
-  const res = await updateGoalIndicator(await getServerPb(), g.actor, input.indicatorId, { label: input.label, target: input.target });
+  const res = await updateGoalIndicator(await getServerPb(), g.actor, input.indicatorId, {
+    label: input.label,
+    target: input.target,
+    target_text: input.target_text
+  });
   if (!res.ok) return { error: res.error };
   revalidate();
   return { ok: true, id: res.value.id, notice: 'Indikatorn är uppdaterad.' };
@@ -168,6 +181,7 @@ export async function createGoalIndicatorAction(input: {
   survey_module?: string;
   activity_measure?: string;
   target?: string;
+  target_text?: string;
   unit?: string;
   direction?: string;
 }): Promise<GoalActionState> {
@@ -211,7 +225,8 @@ export type GoalImportPreview = {
   mappedFields: GoalImportField[];
   unmappedHeaders: string[];
   warnings: string[];
-  sheet?: string;
+  /** Blad som lästes (när filen har flera). */
+  sheets?: string[];
 };
 
 export type GoalImportState =
@@ -242,9 +257,9 @@ export async function previewGoalImportAction(_prev: GoalImportState, fd: FormDa
   if (period.status === 'closed') return { status: 'error', message: `Verksamhetsåret ${period.year} är avslutat — återöppna det först.` };
   const file = fd.get('file');
   if (!(file instanceof File)) return { status: 'error', message: 'Ingen fil bifogad.' };
-  const read = await readTableFile(file, { maxRows: GOAL_IMPORT_MAX_ROWS, rowNoun: 'målrad' });
+  const read = await readTableFileSheets(file, { maxRows: GOAL_IMPORT_MAX_ROWS, rowNoun: 'målrad' });
   if ('error' in read) return { status: 'error', message: read.error };
-  const parsed = parseGoalImportRows(read.headers, read.rows);
+  const parsed = parseGoalImportSheets(read.sheets);
   return {
     status: 'preview',
     preview: {
@@ -254,7 +269,7 @@ export async function previewGoalImportAction(_prev: GoalImportState, fd: FormDa
       mappedFields: parsed.mappedFields,
       unmappedHeaders: parsed.unmappedHeaders,
       warnings: parsed.warnings,
-      sheet: read.sheet
+      sheets: parsed.sheets
     }
   };
 }

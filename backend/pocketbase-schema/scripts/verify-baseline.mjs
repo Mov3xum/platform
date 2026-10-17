@@ -1125,6 +1125,9 @@ const REQUIRED_APP_FIELDS = [
   // Måltyp + ägare (migration 1700000161): utan fälten "sparas" ett personligt
   // mål tyst som övergripande utan ägare.
   { collection: 'goals', fields: ['kind', 'owner_user'] },
+  // Migration 1700000198: OKR-struktur (§ 42.5).
+  { collection: 'goals', fields: ['level', 'parent_goal', 'responsible', 'subteam'] },
+  { collection: 'goal_indicators', fields: ['target_text'] },
   // Kompetens-hashtags (§ 29.7, migration 1700000178): utan fälten "sparas"
   // taggar/nivåer tyst bort från Min profil och teammatchningen ser bara områden.
   { collection: 'users', fields: ['competence_tags', 'development_interests', 'competence_updated_at'] },
@@ -1174,6 +1177,8 @@ const REQUIRED_APP_FIELDS = [
 const REQUIRED_SELECT_VALUES = [
   { collection: 'org_posts', field: 'audience', values: ['staff', 'all', 'startups'], migration: '1700000171' },
   { collection: 'goal_indicators', field: 'source', values: ['computed', 'manual', 'survey', 'activities'], migration: '1700000196' },
+  { collection: 'goals', field: 'focus_area', values: ['projekt'], migration: '1700000198' },
+  { collection: 'goal_status_entries', field: 'status', values: ['risk'], migration: '1700000198' },
   { collection: 'event_signups', field: 'stage', values: ['invited', 'declined'], migration: '1700000197' }
 ];
 
