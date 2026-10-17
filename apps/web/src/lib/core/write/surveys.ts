@@ -66,6 +66,8 @@ export interface CreateSurveyParams {
   /** Valfri källa enkäten följer upp (§ 47.4). */
   linkKind?: string;
   linkId?: string;
+  /** Egen mall (§ 53.3) att utgå från i stället för den inbyggda för `kind`. */
+  templateId?: string | null;
 }
 
 export interface CreatedSurveyResult {
@@ -91,6 +93,67 @@ function sanitizeQuestions(questions: SurveyQuestion[]): SurveyQuestion[] {
 
 export function surveyPath(id: string): string {
   return `/inflode/utvardering/${id}`;
+}
+
+/** Utgångsinnehållet för en ny enkät — ur en egen mall eller en inbyggd. */
+export interface SurveySeed {
+  kind: SurveyKind;
+  description: string;
+  welcome_title: string;
+  welcome_body: string;
+  thank_you_message: string;
+  questions: SurveyQuestion[];
+}
+
+/**
+ * Löser mallen en ny enkät utgår från (§ 53.3). En egen mall slås upp
+ * tenant-verifierat och MÅSTE vara en mall (`is_template`) — ett id till en
+ * vanlig enkät eller en annan tenants mall avvisas, aldrig en tyst fallback
+ * till den inbyggda. Utan `templateId` används `SURVEY_TEMPLATES[kind]`.
+ * Delas av UI-actionen, eventskapandet och chatt-agenten.
+ */
+export async function resolveSurveySeed(
+  pb: PocketBase,
+  actor: Actor,
+  opts: { templateId?: string | null; kind: SurveyKind }
+): Promise<WriteResult<SurveySeed>> {
+  const templateId = String(opts.templateId ?? '').trim();
+  if (!templateId) {
+    const tpl = SURVEY_TEMPLATES[opts.kind];
+    return ok({
+      kind: opts.kind,
+      description: tpl.description,
+      welcome_title: tpl.welcome_title,
+      welcome_body: tpl.welcome_body,
+      thank_you_message: tpl.thank_you_message,
+      questions: tpl.questions
+    });
+  }
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(templateId)) return fail('INVALID_VALUE', 'Ogiltig mall.');
+  const row = await getRecordInTenant<{
+    id: string;
+    tenant?: string;
+    is_template?: boolean;
+    kind?: string;
+    description?: string;
+    welcome_title?: string;
+    welcome_body?: string;
+    thank_you_message?: string;
+    questions?: unknown;
+  }>(pb, actor, COLLECTION, templateId, 'id,tenant,is_template,kind,description,welcome_title,welcome_body,thank_you_message,questions');
+  if (!row || row.is_template !== true) {
+    return fail('NOT_FOUND', 'Mallen hittades inte i er organisation.');
+  }
+  const questions = normalizeSurveyQuestions(row.questions);
+  if (questions.length === 0) return fail('INVALID_VALUE', 'Mallen har inga frågor ännu — lägg till frågor i mallen först.');
+  return ok({
+    kind: isSurveyKind(row.kind) ? row.kind : 'custom',
+    description: row.description || '',
+    welcome_title: row.welcome_title || '',
+    welcome_body: row.welcome_body || '',
+    thank_you_message: row.thank_you_message || '',
+    questions
+  });
 }
 
 /**
@@ -120,8 +183,10 @@ export async function createSurvey(
       `Ogiltig enkättyp "${kindRaw}". Giltiga: ${SURVEY_KINDS.join(', ')}.`
     );
   }
-  const kind: SurveyKind = kindRaw;
-  const tpl = SURVEY_TEMPLATES[kind];
+  const seed = await resolveSurveySeed(pb, actor, { templateId: params.templateId, kind: kindRaw });
+  if (!seed.ok) return seed;
+  const tpl = seed.value;
+  const kind: SurveyKind = tpl.kind;
 
   const description = validateOptionalText(params.description, 'description', 500);
   if (!description.ok) return fail('INVALID_VALUE', description.error);

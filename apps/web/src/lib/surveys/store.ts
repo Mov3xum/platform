@@ -6,6 +6,8 @@ import { errorStatus, isRuleDenialStatus, mapWithConcurrency } from '@/lib/read-
 import {
   aggregateSurvey,
   normalizeSurveyQuestions,
+  normalizeSurveyTemplateTargets,
+  type EventType,
   type SurveyAnswers,
   isSurveyLinkKind,
   type SurveyKind,
@@ -41,6 +43,10 @@ export interface Survey {
   sent_at: string;
   sent_count: number;
   send_base_url: string;
+  /** Mall (§ 53.3) — publiceras/skickas aldrig. */
+  is_template: boolean;
+  /** Eventtyper mallen är standard för. */
+  template_for: EventType[];
   created: string;
   updated: string;
 }
@@ -64,6 +70,8 @@ interface SurveyRecord {
   sent_at?: string;
   sent_count?: number;
   send_base_url?: string;
+  is_template?: boolean;
+  template_for?: unknown;
   created?: string;
   updated?: string;
 }
@@ -88,6 +96,8 @@ export function toSurvey(r: SurveyRecord): Survey {
     sent_at: r.sent_at || '',
     sent_count: typeof r.sent_count === 'number' ? r.sent_count : 0,
     send_base_url: r.send_base_url || '',
+    is_template: r.is_template === true,
+    template_for: normalizeSurveyTemplateTargets(r.template_for),
     created: r.created || '',
     updated: r.updated || ''
   };
@@ -175,6 +185,28 @@ export async function listSurveys(
     }
   });
   return { surveys: rows.map(toSurvey), counts };
+}
+
+/**
+ * Tenantens egna mallar (§ 53.3), i namnordning. Fail-soft: en instans utan
+ * migration 1700000195 (okänt fält i filtret → 400) ger en tom lista, så
+ * inbyggda mallar och eventskapande fungerar som förut.
+ */
+export async function listSurveyTemplates(pb: PocketBase, tenant: string): Promise<Survey[]> {
+  try {
+    const rows = await withFallback(
+      pb,
+      (c) =>
+        c.collection('surveys').getFullList<SurveyRecord>({
+          filter: c.filter('tenant = {:t} && is_template = true', { t: tenant }),
+          sort: 'name'
+        }),
+      (r) => r.length === 0
+    );
+    return rows.map(toSurvey);
+  } catch {
+    return [];
+  }
 }
 
 /** Enkäter som följer upp en given källa (visas på källans sida). Fail-soft. */

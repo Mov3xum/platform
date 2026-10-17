@@ -7,9 +7,12 @@ import { ShareModule } from '@/components/compass/ShareModule';
 import { SurveyRunner } from './SurveyRunner';
 import { saveSurveyAction } from '@/lib/actions/surveys';
 import {
+  EVENT_TYPES,
+  EVENT_TYPE_LABEL,
   SURVEY_MAX_QUESTIONS,
   SURVEY_QUESTION_TYPES,
   SURVEY_QUESTION_TYPE_LABEL,
+  type EventType,
   type SurveyQuestion,
   type SurveyQuestionType
 } from '@platform/shared';
@@ -29,6 +32,9 @@ interface Props {
     questions: SurveyQuestion[];
     is_active: boolean;
     public_slug: string;
+    /** Mall (§ 53.3): ingen publicering/delning, i stället eventtyper den gäller. */
+    is_template: boolean;
+    template_for: EventType[];
   };
 }
 
@@ -43,6 +49,7 @@ export function SurveyBuilder({ survey }: Props) {
   const [welcomeBody, setWelcomeBody] = useState(survey.welcome_body);
   const [thankYou, setThankYou] = useState(survey.thank_you_message);
   const [isActive, setIsActive] = useState(survey.is_active);
+  const [templateFor, setTemplateFor] = useState<EventType[]>(survey.template_for);
   const [questions, setQuestions] = useState<SurveyQuestion[]>(survey.questions);
   // Frågornas val redigeras som text (en rad per alternativ) — råtexten hålls
   // separat så att en tom rad mitt i skrivandet inte försvinner.
@@ -105,7 +112,8 @@ export function SurveyBuilder({ survey }: Props) {
         welcome_body: welcomeBody,
         thank_you_message: thankYou,
         questions: effective(),
-        is_active: nextActive
+        is_active: survey.is_template ? false : nextActive,
+        template_for: templateFor
       });
       if (res.ok) {
         setIsActive(nextActive);
@@ -289,6 +297,35 @@ export function SurveyBuilder({ survey }: Props) {
         </div>
       </Card>
 
+      {survey.is_template ? (
+        <Card>
+          <CardHead label="Mallen används för" />
+          <div style={{ padding: 16, display: 'grid', gap: 12 }}>
+            <div className="mx-flex mx-gap-3 mx-wrap" role="group" aria-label="Eventtyper">
+              {EVENT_TYPES.map((t) => (
+                <label key={t} className="mx-t-13 mx-flex mx-items-c mx-gap-2">
+                  <input
+                    type="checkbox"
+                    checked={templateFor.includes(t)}
+                    onChange={(e) =>
+                      setTemplateFor((cur) =>
+                        e.target.checked ? [...cur, t] : cur.filter((x) => x !== t)
+                      )
+                    }
+                    style={{ accentColor: 'var(--movexum-morkbla)' }}
+                  />
+                  {EVENT_TYPE_LABEL[t]}
+                </label>
+              ))}
+            </div>
+            <div className="mx-t-12 mx-muted">
+              När ett event av en vald typ skapas läggs en utvärdering från mallen upp som utkast,
+              kopplad till eventet. Ni granskar och publicerar den själva. En mall tar aldrig emot
+              svar.
+            </div>
+          </div>
+        </Card>
+      ) : (
       <Card>
         <CardHead label="Publicering" />
         <div style={{ padding: 16, display: 'grid', gap: 12 }}>
@@ -307,6 +344,7 @@ export function SurveyBuilder({ survey }: Props) {
           </div>
         </div>
       </Card>
+      )}
 
       {message && (
         <div
@@ -330,9 +368,11 @@ export function SurveyBuilder({ survey }: Props) {
         <button type="button" className="mx-btn" onClick={() => setShowPreview((v) => !v)}>
           {showPreview ? 'Dölj förhandsgranskning' : 'Förhandsgranska'}
         </button>
-        <Link href={`/inflode/utvardering/${survey.id}?vy=resultat`} className="mx-btn">
-          Se resultat
-        </Link>
+        {!survey.is_template && (
+          <Link href={`/inflode/utvardering/${survey.id}?vy=resultat`} className="mx-btn">
+            Se resultat
+          </Link>
+        )}
       </div>
 
       {showPreview && (
@@ -355,14 +395,16 @@ export function SurveyBuilder({ survey }: Props) {
         </Card>
       )}
 
-      <ShareModule
-        slug={survey.id}
-        name={name}
-        publicSlug={survey.public_slug}
-        isPublished={isActive}
-        basePath="/u"
-        noun="enkäten"
-      />
+      {!survey.is_template && (
+        <ShareModule
+          slug={survey.id}
+          name={name}
+          publicSlug={survey.public_slug}
+          isPublished={isActive}
+          basePath="/u"
+          noun="enkäten"
+        />
+      )}
     </div>
   );
 }

@@ -6,7 +6,15 @@ import { hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { escFilter } from '@/lib/pb-filter';
 import { getRecordInTenant } from '@/lib/core/write/helpers';
-import { eventSignupCounters, isEventSignupStage, parseDateTimeInput } from '@platform/shared';
+import { createSurvey } from '@/lib/core/write/surveys';
+import { listSurveyTemplates } from '@/lib/surveys/store';
+import {
+  eventSignupCounters,
+  isEventSignupStage,
+  isEventType,
+  parseDateTimeInput,
+  pickSurveyTemplateForEventType
+} from '@platform/shared';
 import type {
   Role,
   EventSignup,
@@ -18,23 +26,20 @@ import type {
 
 const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach'];
 
-const VALID_EVENT_TYPES: EventType[] = [
-  'pitch',
-  'conference',
-  'matching',
-  'hack',
-  'mingle',
-  'workshop',
-  'other'
-];
 const VALID_EVENT_STATUS: EventStatus[] = ['planned', 'live', 'completed', 'cancelled'];
+
+export type EventCreateWarning = 'arshjul' | 'utvardering';
 
 export type EventActionState = {
   error?: string;
   eventId?: string;
   signupId?: string;
-  /** Schema-drift: kopplingen till årshjulet kunde inte sparas (migration 1700000194). */
-  warning?: 'arshjul';
+  /**
+   * Icke-blockerande varningar efter att eventet skapats: `arshjul` =
+   * kopplingen kunde inte sparas (migration 1700000194), `utvardering` =
+   * utkastet till utvärdering kunde inte skapas (§ 53.3).
+   */
+  warnings?: EventCreateWarning[];
   /** Antal deltagare som markerades närvarande. */
   updated?: number;
 };
@@ -50,8 +55,8 @@ export async function createEventAction(
   const name = String(formData.get('name') || '').trim();
   if (!name) return { error: 'Namn krävs.' };
 
-  const typeRaw = String(formData.get('type') || 'other') as EventType;
-  const type = VALID_EVENT_TYPES.includes(typeRaw) ? typeRaw : 'other';
+  const typeRaw = String(formData.get('type') || 'other');
+  const type: EventType = isEventType(typeRaw) ? typeRaw : 'other';
   const statusRaw = String(formData.get('status') || 'planned') as EventStatus;
   const status = VALID_EVENT_STATUS.includes(statusRaw) ? statusRaw : 'planned';
 
@@ -109,13 +114,56 @@ export async function createEventAction(
       admitted_count: 0
     });
     revalidatePath('/events');
+    const eventId = String(record.id);
+    const warnings: EventCreateWarning[] = [];
     // PB släpper okända fält tyst (§ 24.4) — saknas kopplingen på den skapade
     // posten körs instansen utan migration 1700000194.
-    const warning = wheelItem && !record.wheel_item ? ('arshjul' as const) : undefined;
-    return { eventId: String(record.id), warning };
+    if (wheelItem && !record.wheel_item) warnings.push('arshjul');
+    const evaluation = await createEvaluationDraft(
+      pb,
+      user,
+      { id: eventId, name, type },
+      String(formData.get('evaluation') || 'auto')
+    );
+    if (!evaluation) warnings.push('utvardering');
+    return { eventId, warnings };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte skapa event.' };
   }
+}
+
+/**
+ * Utvärdering som UTKAST för ett nytt event (§ 53.3): från vald mall, eller
+ * — med `auto` — tenantens mall för eventtypen. Ingen mall ⇒ ingenting
+ * skapas (true). Skapas via det delade skrivlagret (tenant-verifierad mall
+ * och källa, audit) och alltid opublicerad: en människa granskar, publicerar
+ * och schemalägger utskicket. Returnerar false när något gick fel, så
+ * eventet ändå skapas och staff ser en varning.
+ */
+async function createEvaluationDraft(
+  pb: Awaited<ReturnType<typeof getServerPb>>,
+  user: Awaited<ReturnType<typeof requireUser>>,
+  event: { id: string; name: string; type: EventType },
+  choice: string
+): Promise<boolean> {
+  if (choice === 'none') return true;
+  const templates = await listSurveyTemplates(pb, user.tenant);
+  const templateId =
+    choice === 'auto'
+      ? pickSurveyTemplateForEventType(templates, event.type)
+      : templates.find((t) => t.id === choice)?.id ?? null;
+  if (!templateId) return choice === 'auto';
+  const res = await createSurvey(
+    pb,
+    { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Role[] },
+    { name: `Utvärdering: ${event.name}`.slice(0, 160), templateId, linkKind: 'event', linkId: event.id }
+  );
+  if (!res.ok) {
+    console.error('[events] evaluation draft failed', { code: res.code });
+    return false;
+  }
+  revalidatePath('/inflode/utvardering');
+  return true;
 }
 
 export async function addSignupAction(
@@ -280,8 +328,8 @@ export async function updateEventAction(
   const name = String(formData.get('name') || '').trim();
   if (!name) return { error: 'Namn krävs.' };
 
-  const typeRaw = String(formData.get('type') || event.type) as EventType;
-  const type = VALID_EVENT_TYPES.includes(typeRaw) ? typeRaw : event.type;
+  const typeRaw = String(formData.get('type') || event.type);
+  const type: EventType = isEventType(typeRaw) ? typeRaw : event.type;
   const statusRaw = String(formData.get('status') || event.status) as EventStatus;
   const status = VALID_EVENT_STATUS.includes(statusRaw) ? statusRaw : event.status;
 

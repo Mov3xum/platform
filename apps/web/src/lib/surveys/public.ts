@@ -22,7 +22,9 @@ export async function resolvePublicSurvey(
       .collection('surveys')
       .getFirstListItem(su.pb.filter('public_slug = {:s} && is_active = true', { s }));
     const survey = toSurvey(rec as never);
-    if (!survey.tenant || survey.questions.length === 0) return null;
+    // En mall (§ 53.3) tar aldrig emot svar — även om is_active skulle ha
+    // satts förbi skrivlagret.
+    if (!survey.tenant || survey.questions.length === 0 || survey.is_template) return null;
     return { pb: su.pb, survey };
   } catch {
     return null;

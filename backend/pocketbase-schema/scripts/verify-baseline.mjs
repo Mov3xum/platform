@@ -1085,6 +1085,9 @@ const REQUIRED_APP_FIELDS = [
   // Event ↔ årshjul (§ 53, migration 1700000194): utan fältet "sparas"
   // kopplingen tyst bort och eventet tappar sin plan.
   { collection: 'incubator_events', fields: ['wheel_item'] },
+  // Utvärderingsmallar (§ 53.3, migration 1700000195): utan fälten "sparas"
+  // en mall tyst som en vanlig (publicerbar) enkät.
+  { collection: 'surveys', fields: ['is_template', 'template_for'] },
   // Upphandlingar (§ 39): regelgenererade uppföljningar = tasks med
   // procurement-länk + rule_key (migration 1700000152). Saknas fälten
   // skapas korten utan idempotensnyckel → dubbletter vid varje synk.

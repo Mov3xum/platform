@@ -13,6 +13,8 @@ import {
   defaultSurveySendAt,
   surveyLinkHref,
   surveyLinkRefParam,
+  normalizeSurveyTemplateTargets,
+  pickSurveyTemplateForEventType,
   type SurveyQuestion
 } from './survey.ts';
 
@@ -125,4 +127,22 @@ test('utskickstid: 09:00 svensk tid dagen efter eventets slut', () => {
   assert.equal(w?.toISOString(), '2026-01-21T08:00:00.000Z');
   assert.equal(defaultSurveySendAt({}), null);
   assert.equal(defaultSurveySendAt({ starts_at: 'nej' }), null);
+});
+
+test('normalizeSurveyTemplateTargets behåller bara kända eventtyper i fast ordning', () => {
+  assert.deepEqual(normalizeSurveyTemplateTargets(['mingle', 'pitch', 'okänd', 'pitch']), ['pitch', 'mingle']);
+  assert.deepEqual(normalizeSurveyTemplateTargets('workshop'), ['workshop']);
+  assert.deepEqual(normalizeSurveyTemplateTargets(null), []);
+});
+
+test('pickSurveyTemplateForEventType väljer första matchande mallen i namnordning', () => {
+  const templates = [
+    { id: 'b', name: 'Öppet hus', template_for: ['mingle'] },
+    { id: 'a', name: 'Frukostträff', template_for: ['mingle', 'pitch'] },
+    { id: 'c', name: 'Workshop', template_for: ['workshop'] }
+  ];
+  assert.equal(pickSurveyTemplateForEventType(templates, 'mingle'), 'a');
+  assert.equal(pickSurveyTemplateForEventType(templates, 'workshop'), 'c');
+  assert.equal(pickSurveyTemplateForEventType(templates, 'hack'), null);
+  assert.equal(pickSurveyTemplateForEventType(templates, 'nope'), null);
 });

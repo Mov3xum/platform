@@ -1,4 +1,6 @@
 import { parseStockholmLocalDateTime, stockholmDateKey } from './event-time';
+import { EVENT_TYPES, isEventType } from './event-participants';
+import type { EventType } from './index';
 
 // Marknadsverktyg → Utvärdering — digitala enkäter (ren, server/React-fri logik).
 //
@@ -552,4 +554,40 @@ export function defaultSurveySendAt(event: {
   const nextDay = new Date(Date.UTC(y, m - 1, d + 1));
   const nextKey = nextDay.toISOString().slice(0, 10);
   return parseStockholmLocalDateTime(`${nextKey}T09:00`);
+}
+
+// ─── Egna mallar (§ 53.3) ────────────────────────────────────────────────────
+//
+// En mall är en vanlig `surveys`-rad med `is_template = true`: den byggs i
+// samma byggare, kan aldrig publiceras eller skickas, och anger vilka
+// eventtyper den är standard för (`template_for`). De inbyggda
+// `SURVEY_TEMPLATES` är fortsatt startpunkten när tenanten saknar egen mall.
+
+export interface SurveyTemplateCandidate {
+  id: string;
+  name: string;
+  template_for: readonly string[];
+}
+
+/** Normaliserar `template_for` till kända eventtyper (dedupe, ordning som `EVENT_TYPES`). */
+export function normalizeSurveyTemplateTargets(raw: unknown): EventType[] {
+  const values = Array.isArray(raw) ? raw : typeof raw === 'string' && raw ? [raw] : [];
+  const set = new Set(values.filter(isEventType));
+  return EVENT_TYPES.filter((t) => set.has(t));
+}
+
+/**
+ * Tenantens standardmall för en eventtyp: den första (i namnordning) som
+ * anger typen i `template_for`. Null ⇒ ingen egen mall — då skapas ingen
+ * utvärdering automatiskt (inbyggda mallar väljs bara uttryckligen).
+ */
+export function pickSurveyTemplateForEventType(
+  templates: ReadonlyArray<SurveyTemplateCandidate>,
+  type: unknown
+): string | null {
+  if (!isEventType(type)) return null;
+  const match = [...templates]
+    .filter((t) => t.template_for.includes(type))
+    .sort((a, b) => a.name.localeCompare(b.name, 'sv'));
+  return match[0]?.id ?? null;
 }

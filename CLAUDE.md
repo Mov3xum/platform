@@ -9127,6 +9127,42 @@ Mål/indikator ◄─(bidrar till)── Årshjulsaktivitet (PLAN)
   inte). Allt är server actions med rollkontroll (admin/incubator_lead/coach)
   och tenant-verifiering; e-post valideras server-side.
 
+### 53.3 Egna utvärderingsmallar
+
+Personalen bygger egna mallar för sina aktiviteter i samma byggare som
+enkäterna (`/inflode/utvardering` → "Ny mall", `new?mall=1`). En mall är en
+vanlig `surveys`-rad med `is_template = true` och `template_for` (eventtyper
+den är standard för) — migration **1700000195**. Ingen ny kollektion eller
+motor.
+
+- **En mall tar aldrig emot svar:** `saveSurveyAction` tvingar
+  `is_active = false` för mallar, den publika resolvningen (`lib/surveys/public.ts`)
+  avvisar mallar även om flaggan skulle sättas förbi skrivlagret, och mallar
+  saknar källa så utskick/schemaläggning aldrig är möjligt. Byggaren visar
+  "Mallen används för" i stället för publicering/delning.
+- **En väg för mallinnehåll:** `resolveSurveySeed` i `lib/core/write/surveys.ts`
+  löser antingen en egen mall (tenant-verifierad via `getRecordInTenant`,
+  MÅSTE vara `is_template`, annars fel — aldrig en tyst fallback) eller den
+  inbyggda `SURVEY_TEMPLATES[kind]`. UI-actionen, eventskapandet och
+  chatt-verktygets skrivlager (`createSurvey({ templateId })`) använder den.
+- **Utkast först (beslut 2026-10):** när ett event skapas väljer formuläret
+  "Utvärdering efter eventet" — standardmallen för eventtypen
+  (`pickSurveyTemplateForEventType`: första matchande mallen i namnordning,
+  ren + enhetstestad), en specifik mall eller ingen. Utvärderingen skapas
+  via skrivlagret som **opublicerat utkast** kopplat till eventet
+  (`link_kind = event`); en människa granskar, publicerar och schemalägger
+  (§ 47.5). Finns ingen mall för typen skapas ingenting. Misslyckas utkastet
+  skapas eventet ändå och eventsidan visar `?varning=utvardering`.
+- **"Skapa uppföljning"** på ett event förväljer tenantens mall för
+  eventtypen; egna mallar listas före de inbyggda.
+- **Eventtyper** (`EVENT_TYPES`, `EVENT_TYPE_LABEL`, `isEventType`) bor i
+  `event-participants.ts` och delas av formuläret, actions, skrivlagret och
+  mallarna — `template_for`-värdena MÅSTE spegla dem.
+- **Schema-drift:** `listSurveyTemplates` är fail-soft (instans utan
+  1700000195 ⇒ inga mallar, allt annat som förut); att skapa en mall mot en
+  sådan instans ger `?varning=mall`. Fälten speglas i `setup-via-api.mjs` och
+  asserteras i `verify-baseline.mjs`.
+
 ### 53.2 Säkerhet och regelefterlevnad
 
 - **Tenant:** `wheel_item` från klienten litas aldrig på — `createEventAction`

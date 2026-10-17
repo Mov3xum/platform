@@ -3943,7 +3943,10 @@ await ensureCollection({
     { name: 'send_at', type: 'date', required: false },
     { name: 'sent_at', type: 'date', required: false },
     { name: 'sent_count', type: 'number', required: false, min: 0 },
-    { name: 'send_base_url', type: 'text', required: false, max: 300 }
+    { name: 'send_base_url', type: 'text', required: false, max: 300 },
+    // 1700000195 — egna mallar (§ 53.3). Mallar publiceras/skickas aldrig.
+    { name: 'is_template', type: 'bool', required: false },
+    { name: 'template_for', type: 'select', required: false, maxSelect: 7, values: ['pitch', 'conference', 'matching', 'hack', 'mingle', 'workshop', 'other'] }
   ],
   indexes: [
     'CREATE INDEX idx_surveys_tenant ON surveys (tenant)',

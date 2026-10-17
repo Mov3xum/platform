@@ -32,7 +32,8 @@ export default async function SurveyDetailPage({
   const survey = await getSurvey(pb, user.tenant, id);
   if (!survey) notFound();
 
-  const showResults = vy === 'resultat';
+  // En mall (§ 53.3) har inga svar och inget utskick — bara byggaren.
+  const showResults = vy === 'resultat' && !survey.is_template;
   const results = showResults ? await getSurveyResults(pb, survey) : null;
 
   // Utskick (§ 47.5) — bara för event-kopplade enkäter. Antalet räknas
@@ -61,11 +62,13 @@ export default async function SurveyDetailPage({
       tabs={buildInflodeTabs()}
       meta={
         <span className="mx-flex mx-items-c mx-gap-2 text-[12px] text-foreground-subtle">
-          Utvärdering / {survey.name}
+          Utvärdering / {survey.is_template ? 'Mall / ' : ''}
+          {survey.name}
           <SurveyLinkChip kind={survey.link_kind} id={survey.link_id} label={survey.link_label} />
         </span>
       }
       actions={
+        survey.is_template ? undefined : (
         <>
           <Link
             href={`/inflode/utvardering/${survey.id}`}
@@ -80,6 +83,7 @@ export default async function SurveyDetailPage({
             Resultat
           </Link>
         </>
+        )
       }
     >
       {varning === 'koppling' && (
@@ -97,6 +101,23 @@ export default async function SurveyDetailPage({
         >
           Enkäten skapades, men kopplingen till källan kunde inte sparas — PocketBase saknar
           fälten från migration 1700000150. Kör migrationen och skapa uppföljningen igen.
+        </div>
+      )}
+      {varning === 'mall' && (
+        <div
+          role="alert"
+          className="mx-t-13"
+          style={{
+            padding: '10px 12px',
+            borderRadius: 10,
+            marginBottom: 12,
+            maxWidth: 820,
+            background: 'var(--movexum-pastell-gul)',
+            color: 'var(--movexum-morkgul)'
+          }}
+        >
+          Enkäten skapades, men kunde inte sparas som mall — PocketBase saknar fälten från
+          migration 1700000195. Kör migrationen och skapa mallen igen.
         </div>
       )}
       {results ? (

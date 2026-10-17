@@ -6,7 +6,32 @@
 // "närvarande" aldrig betyder olika saker på olika ställen. Ren logik,
 // enhetstestad (`event-participants.test.ts`).
 
-import type { EventSignupStage } from './index';
+import type { EventSignupStage, EventType } from './index';
+
+/** Eventtyper — måste spegla select-värdena på `incubator_events.type` (1700000032). */
+export const EVENT_TYPES: readonly EventType[] = [
+  'pitch',
+  'conference',
+  'matching',
+  'hack',
+  'mingle',
+  'workshop',
+  'other'
+];
+
+export const EVENT_TYPE_LABEL: Record<EventType, string> = {
+  pitch: 'Pitch',
+  conference: 'Konferens',
+  matching: 'Matching',
+  hack: 'Hackathon',
+  mingle: 'Mingel',
+  workshop: 'Workshop',
+  other: 'Annat'
+};
+
+export function isEventType(value: unknown): value is EventType {
+  return typeof value === 'string' && (EVENT_TYPES as readonly string[]).includes(value);
+}
 
 /** Trattens ordning — ett senare steg innebär alla tidigare. */
 export const EVENT_SIGNUP_STAGES: readonly EventSignupStage[] = [

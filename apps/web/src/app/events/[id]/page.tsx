@@ -54,6 +54,7 @@ export default async function EventDetailPage({
 }) {
   const { id } = await params;
   const { varning } = (await searchParams) ?? {};
+  const warnings = new Set((varning || '').split(','));
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'observer'])) {
     redirect('/chatt');
@@ -154,7 +155,17 @@ export default async function EventDetailPage({
         }
       />
 
-      {varning === 'arshjul' && (
+      {warnings.has('utvardering') && (
+        <div
+          role="status"
+          className="mx-t-13 mx-flex mx-items-c mx-gap-2"
+          style={{ marginTop: 12, padding: '8px 12px', borderRadius: 10, background: 'var(--movexum-pastell-gul)', color: 'var(--movexum-morkgul)' }}
+        >
+          <Icon name="alert" size={13} /> Eventet skapades, men utvärderingen från mallen kunde inte
+          skapas. Skapa den under Uppföljning nedan.
+        </div>
+      )}
+      {warnings.has('arshjul') && (
         <div
           role="status"
           className="mx-t-13 mx-flex mx-items-c mx-gap-2"

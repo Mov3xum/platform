@@ -1,18 +1,17 @@
 'use client';
 
-import { useActionState } from 'react';
-import { toStockholmDateTimeInputValue, type EventStatus, type EventType } from '@platform/shared';
+import { useActionState, useState } from 'react';
+import {
+  EVENT_TYPES,
+  EVENT_TYPE_LABEL,
+  pickSurveyTemplateForEventType,
+  toStockholmDateTimeInputValue,
+  type EventStatus,
+  type EventType
+} from '@platform/shared';
 import type { EventActionState } from '@/lib/actions/events';
 
-const TYPE_OPTIONS: Array<{ value: EventType; label: string }> = [
-  { value: 'pitch', label: 'Pitch' },
-  { value: 'conference', label: 'Konferens' },
-  { value: 'matching', label: 'Matching' },
-  { value: 'hack', label: 'Hackathon' },
-  { value: 'mingle', label: 'Mingel' },
-  { value: 'workshop', label: 'Workshop' },
-  { value: 'other', label: 'Annat' }
-];
+const TYPE_OPTIONS = EVENT_TYPES.map((value) => ({ value, label: EVENT_TYPE_LABEL[value] }));
 
 const STATUS_OPTIONS: Array<{ value: EventStatus; label: string }> = [
   { value: 'planned', label: 'Planerat' },
@@ -46,6 +45,11 @@ interface Props {
   submitLabel?: string;
   /** Årshjulsaktiviteten eventet genomför (§ 53) — skickas som dolt fält och verifieras server-side. */
   wheelItem?: { id: string; title: string; when: string };
+  /**
+   * Tenantens utvärderingsmallar (§ 53.3). Anges bara när ett event skapas —
+   * valet ger ett utkast till utvärdering kopplat till eventet.
+   */
+  evaluationTemplates?: { id: string; name: string; template_for: EventType[] }[];
 }
 
 // Formuläret visar och tar emot SVENSK tid (Europe/Stockholm) oavsett var
@@ -54,8 +58,13 @@ function toLocalDateTimeValue(iso?: string): string {
   return toStockholmDateTimeInputValue(iso);
 }
 
-export function EventForm({ action, initial, submitLabel = 'Spara', wheelItem }: Props) {
+export function EventForm({ action, initial, submitLabel = 'Spara', wheelItem, evaluationTemplates }: Props) {
   const [state, formAction, pending] = useActionState(action, {} as EventActionState);
+  const [type, setType] = useState<EventType>(initial?.type ?? 'other');
+  const autoTemplate = evaluationTemplates
+    ? pickSurveyTemplateForEventType(evaluationTemplates, type)
+    : null;
+  const autoName = evaluationTemplates?.find((t) => t.id === autoTemplate)?.name;
   const inputClass =
     'block w-full rounded-xl border border-default bg-surface px-3 py-2 text-sm text-foreground outline-none transition focus:border-brand focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila';
 
@@ -75,7 +84,12 @@ export function EventForm({ action, initial, submitLabel = 'Spara', wheelItem }:
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <label className="block text-sm font-medium text-foreground-muted">Typ</label>
-          <select name="type" defaultValue={initial?.type ?? 'other'} className={`mt-1 ${inputClass}`}>
+          <select
+            name="type"
+            value={type}
+            onChange={(e) => setType(e.target.value as EventType)}
+            className={`mt-1 ${inputClass}`}
+          >
             {TYPE_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
@@ -131,6 +145,27 @@ export function EventForm({ action, initial, submitLabel = 'Spara', wheelItem }:
           className={`mt-1 ${inputClass}`}
         />
       </div>
+
+      {evaluationTemplates ? (
+        <div>
+          <label className="block text-sm font-medium text-foreground-muted">Utvärdering efter eventet</label>
+          <select name="evaluation" defaultValue="auto" className={`mt-1 ${inputClass}`}>
+            <option value="auto">
+              {autoName ? `Standardmallen för typen (${autoName})` : 'Standardmallen för typen (ingen finns — skapas inte)'}
+            </option>
+            {evaluationTemplates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+            <option value="none">Ingen utvärdering</option>
+          </select>
+          <p className="mt-1 text-xs text-foreground-subtle">
+            Utvärderingen skapas som utkast kopplat till eventet. Ni granskar och publicerar den
+            själva; den skickas bara till dem som markerats närvarande.
+          </p>
+        </div>
+      ) : null}
 
       <div>
         <label className="block text-sm font-medium text-foreground-muted">Accent</label>

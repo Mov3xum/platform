@@ -5,6 +5,7 @@ import { hasRole } from '@/lib/rbac';
 import { createEventAction, type EventActionState } from '@/lib/actions/events';
 import { EventForm, type EventFormInitial } from '@/components/EventForm';
 import { getRecordInTenant } from '@/lib/core/write/helpers';
+import { listSurveyTemplates } from '@/lib/surveys/store';
 import {
   annualWheelEventStartInput,
   annualWheelRangeLabel,
@@ -19,7 +20,8 @@ async function createEventAndRedirect(
   'use server';
   const result = await createEventAction({}, formData);
   if (result.eventId) {
-    redirect(`/events/${result.eventId}${result.warning ? `?varning=${result.warning}` : ''}`);
+    const warnings = result.warnings?.length ? `?varning=${result.warnings.join(',')}` : '';
+    redirect(`/events/${result.eventId}${warnings}`);
   }
   return result;
 }
@@ -50,9 +52,10 @@ export default async function NewEventPage({
   // "Skapa event" från en årshjulsaktivitet (§ 53): posten slås upp
   // tenant-verifierat och förifyller namn, datum och beskrivning. Kopplingen
   // verifieras igen i createEventAction — det här är bara förifyllning.
+  const pb = await getServerPb();
+  const templates = await listSurveyTemplates(pb, user.tenant);
   let wheelItem: WheelItemRow | null = null;
   if (fran && /^[a-zA-Z0-9_-]{1,64}$/.test(fran)) {
-    const pb = await getServerPb();
     wheelItem = await getRecordInTenant<WheelItemRow>(
       pb,
       { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Role[] },
@@ -99,6 +102,11 @@ export default async function NewEventPage({
           action={createEventAndRedirect}
           submitLabel="Skapa event"
           initial={initial}
+          evaluationTemplates={templates.map((t) => ({
+            id: t.id,
+            name: t.name,
+            template_for: t.template_for
+          }))}
           wheelItem={
             wheelItem
               ? {
