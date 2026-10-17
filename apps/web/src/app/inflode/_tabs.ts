@@ -3,8 +3,9 @@ import type { PageTab } from '@/components/PageShell';
 /**
  * Horisontell sektionsmeny för Marknadsverktyg (`/inflode`): **Dashboard**,
  * **Analys**, **Leads**, **Startupkompassen** (intag-moduler: formulär, quiz och
- * AI-chattar för startups och inflöde) och **Utvärdering** (digitala enkäter,
- * § 39). Leads-fliken kan visa en badge med antal leads kvar i tratten.
+ * AI-chattar för startups och inflöde), **Inbjudningar** (inbjudningar till
+ * event med svar, § 53.5) och **Utvärdering** (digitala enkäter, § 47).
+ * Leads-fliken kan visa en badge med antal leads kvar i tratten.
  */
 export function buildInflodeTabs(opts: { leadsBadge?: number } = {}): PageTab[] {
   return [
@@ -12,6 +13,7 @@ export function buildInflodeTabs(opts: { leadsBadge?: number } = {}): PageTab[] 
     { id: 'analys', label: 'Analys', href: '/inflode/analysis' },
     { id: 'leads', label: 'Leads', href: '/inflode/leads', badge: opts.leadsBadge },
     { id: 'startupkompassen', label: 'Startupkompassen', href: '/inflode/admin/modules' },
+    { id: 'inbjudningar', label: 'Inbjudningar', href: '/inflode/inbjudningar' },
     { id: 'utvardering', label: 'Utvärdering', href: '/inflode/utvardering' }
   ];
 }

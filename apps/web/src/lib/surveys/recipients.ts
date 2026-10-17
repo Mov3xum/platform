@@ -1,10 +1,10 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
-import { collectSurveyRecipients, isAttendedStage } from '@platform/shared';
+import { collectSurveyRecipients, isAttendedStage, isInviteStage } from '@platform/shared';
 
 export interface SurveyRecipientCounts {
-  /** Anmälda (alla steg) med giltig e-post. */
+  /** Anmälda (alla steg utom inbjuden/avböjt) med giltig e-post. */
   registered: number;
   /** Närvarande (eller längre i tratten) med giltig e-post — de som får enkäten. */
   attended: number;
@@ -43,7 +43,7 @@ export async function countSurveyRecipients(
     }
   }
   return {
-    registered: collectSurveyRecipients(rows).length,
+    registered: collectSurveyRecipients(rows.filter((r) => !isInviteStage(r.stage))).length,
     attended: collectSurveyRecipients(rows.filter((r) => isAttendedStage(r.stage))).length
   };
 }

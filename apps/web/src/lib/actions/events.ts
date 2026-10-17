@@ -7,9 +7,9 @@ import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { escFilter } from '@/lib/pb-filter';
 import { getRecordInTenant } from '@/lib/core/write/helpers';
 import { createSurvey } from '@/lib/core/write/surveys';
+import { recomputeEventCounters } from '@/lib/events/counters';
 import { listSurveyTemplates } from '@/lib/surveys/store';
 import {
-  eventSignupCounters,
   isEventSignupStage,
   isEventType,
   parseDateTimeInput,
@@ -292,21 +292,6 @@ export async function markSignupsAttendedAction(eventId: string): Promise<EventA
   return { eventId, updated };
 }
 
-async function recomputeEventCounters(
-  pb: Awaited<ReturnType<typeof getServerPb>>,
-  tenant: string,
-  eventId: string
-) {
-  try {
-    const all = await pb.collection(PB_COLLECTIONS.eventSignups).getFullList<EventSignup>({
-      filter: `tenant = "${escFilter(tenant)}" && event = "${escFilter(eventId)}"`,
-      fields: 'id,stage'
-    });
-    await pb.collection(PB_COLLECTIONS.events).update(eventId, eventSignupCounters(all));
-  } catch {
-    /* ignore */
-  }
-}
 
 export async function updateEventAction(
   id: string,

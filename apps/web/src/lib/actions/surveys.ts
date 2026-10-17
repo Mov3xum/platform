@@ -2,12 +2,11 @@
 
 import type PocketBase from 'pocketbase';
 import { revalidatePath } from 'next/cache';
-import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { hasRole } from '@/lib/rbac';
-import { configuredAppUrl } from '@/lib/app-integrations/app-url';
+import { requestOrigin } from '@/lib/request-origin';
 import { getSurvey, newPublicSlug } from '@/lib/surveys/store';
 import { dispatchSurveyInvites } from '@/lib/surveys/dispatch';
 import { describePbError, pbFieldCodes, pbStatus } from '@/lib/pb-error';
@@ -277,18 +276,6 @@ export async function deleteSurveyAction(formData: FormData) {
 }
 
 // ── Utskick till deltagare (§ 47.5) ──────────────────────────────────────────
-
-/** Origin för enkätlänken — från staffs egen request (proxy-headers först). */
-async function requestOrigin(): Promise<string> {
-  // Konfigurerad app-URL vinner — `x-forwarded-host` kan i värsta fall vara
-  // klientstyrd (mejlade enkätlänkar får aldrig peka på en främmande host).
-  const configured = configuredAppUrl();
-  if (configured) return configured;
-  const h = await headers();
-  const proto = (h.get('x-forwarded-proto') || 'https').split(',')[0]!.trim();
-  const host = h.get('x-forwarded-host') || h.get('host') || '';
-  return host ? `${proto}://${host}` : '';
-}
 
 export type SendSurveyState = { ok: true; message: string } | { ok: false; error: string };
 

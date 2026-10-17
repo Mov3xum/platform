@@ -471,6 +471,13 @@ const CREATE_POLICIES: Record<
     user: { kind: 'any-role' },
     agent: { kind: 'allow' }
   },
+  // Inbjudningar till event (§ 53.5): rader i deltagarlistan med en
+  // svarstoken. Mejl till externa personer är ett mänskligt beslut — agenten
+  // bjuder aldrig in (samma princip som enkätutskicket, § 47.5).
+  event_signups: {
+    user: { kind: 'roles', roles: EVENT_MANAGE },
+    agent: { kind: 'deny', reason: 'Inbjudningar skickas av en människa under Marknadsverktyg → Inbjudningar.' }
+  },
   // Kontaktboken (§ 45) — hela staff-kretsen lägger in kontakter och skickar
   // förfrågningar; agenten ärver rollen. Ägare/kön får agenten aldrig sätta
   // (fältpolicyn ovan); GDPR-samtycke krävs i skrivlagret.

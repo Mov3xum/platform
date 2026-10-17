@@ -1317,7 +1317,14 @@ export interface IncubatorEvent {
   updated: string;
 }
 
-export type EventSignupStage = 'signup' | 'attended' | 'meeting' | 'application' | 'admitted';
+export type EventSignupStage =
+  | 'invited'
+  | 'declined'
+  | 'signup'
+  | 'attended'
+  | 'meeting'
+  | 'application'
+  | 'admitted';
 
 export interface EventSignup {
   id: string;
@@ -1329,6 +1336,11 @@ export interface EventSignup {
   stage: EventSignupStage;
   startup?: string;
   notes?: string;
+  /** Kontakt i kontaktboken (§ 15.2) — mottagare av en inbjudan (§ 53.5). */
+  contact?: string;
+  invited_at?: string;
+  invite_sent_at?: string;
+  responded_at?: string;
   created: string;
   updated: string;
   expand?: {
@@ -1771,6 +1783,7 @@ export function resolveUserModules(input: {
 }
 export * from './event-time';
 export * from './event-participants';
+export * from './event-invitations';
 export * from './org-posts';
 export * from './home';
 export * from './followup-rules';

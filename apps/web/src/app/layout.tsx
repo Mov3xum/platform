@@ -76,7 +76,9 @@ export default async function RootLayout({
     pathname.startsWith('/m/') ||
     // Publika enkäter (§ 39) är likaså fristående ytor.
     pathname === '/u' ||
-    pathname.startsWith('/u/');
+    pathname.startsWith('/u/') ||
+    // Svar på inbjudningar (§ 53.5) — likaså fristående.
+    pathname.startsWith('/e/');
 
   // Inloggningssidan är en fristående, helsides split-screen-yta (bild +
   // formulär) som bär sin egen branding — den ska aldrig visa den utloggade

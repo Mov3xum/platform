@@ -5822,7 +5822,7 @@ aktivitetsloggen (§ 32) med klickbar länk.
 | `assign_workshop` | Tilldelar workshop → bolag (+ activities-rad som UI:t) | Dubbeltilldelning stoppas; medarbetare/möte kopplas av människa i /education |
 | `assign_education_document` | Tilldelar utbildningsdokument → bolag (idempotent upsert) | — |
 | `create_task` / `move_task` | Kanban-kort på bolags-/uppdragstavla + kolumnflytt | `assignees` agent-nekad (kan inte slå upp användar-id:n, `users` denylistad § 9.3) |
-| `create_event` | Event i kalendern (status `planned`, roller admin/incubator_lead/coach) | Inbjudningar (`event_signups`) görs av människa i /events |
+| `create_event` | Event i kalendern (status `planned`, roller admin/incubator_lead/coach) | Inbjudningar (`event_signups`) görs av människa under Marknadsverktyg → Inbjudningar (§ 53.5) |
 | `create_mission` | Uppdrag som **UTKAST** (status `draft`, actor = lead) | Team/recipients sätts av människa (AI-teamförslaget finns i /uppdrag-formuläret, § 29.3) |
 | `register_de_minimis_support` | De minimis-stöd med lazy enhet (§ 20.5) | **`kanBevilja` server-side, fail-closed** — enhetsupplösningen superuser-dubbelkollas (en tyst RLS-miss får aldrig ge en tom dubblett-enhet), takunderlaget läses som superuser och ett läsfel AVBRYTER registreringen; personnummer-sanering av `syfte` |
 | `add_startup_kpi` | KPI-rad; äldre `is_current` med samma namn avmarkeras | — |
@@ -7863,7 +7863,8 @@ finansieringsblocket. "Ny ansökan" finns för staff och länkad medlem.
 ### 47.1 Översikt
 
 `/inflode` (Marknadsverktyg) har flikarna Dashboard · Analys · Leads ·
-**Startupkompassen** (intag-moduler, § 23) · **Utvärdering**. Utvärdering låter
+**Startupkompassen** (intag-moduler, § 23) · **Inbjudningar** (§ 53.5) ·
+**Utvärdering**. Utvärdering låter
 admin/incubator_lead/coach bygga **digitala enkäter i webbläsaren** för
 uppföljning (workshop-/event-utvärdering, inkubatorprogram, alumni) och dela dem
 på en publik, oinloggad länk `/u/<public_slug>` med QR-kod. Svaren är
@@ -9222,6 +9223,59 @@ fylls aldrig i för hand. Migration **1700000196**.
   väljs i `/mal`).
 - **Riskklass:** n/a — deterministisk beräkning, ingen AI-inferens. Ingen ny
   PII; nya fält når inte AI-kontexten.
+
+### 53.5 Inbjudningar — fliken under Marknadsverktyget
+
+`/inflode/inbjudningar` (flik mellan Startupkompassen och Utvärdering) visar
+kommande event (och de senaste 30 dagarna) med läget inbjudna / kommer /
+avböjt / ej utskickade. Per event (`/inflode/inbjudningar/<id>`) söker staff
+i **kontaktboken** (namn, organisation, e-post, kategori — högst 50 träffar),
+bjuder in och följer svaren. Migration **1700000197**.
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/event-invitations.ts` (+ `.test.ts`) | `selectInviteRecipients` (e-post, avregistrering, dubbletter, tak 500), `rsvpOpen`, `stageForRsvp`, tokenformat |
+| `apps/web/src/lib/core/write/event-invitations.ts` | Skrivlagret: `inviteContactsToEvent`, `sendEventInvitations` (pending/påminnelse), `hashRsvpToken` |
+| `apps/web/src/lib/email.ts` | `sendEventInvites` — ett mejl per mottagare med personlig svarslänk + avregistrering |
+| `apps/web/src/lib/events/rsvp.ts` + `app/e/svar/page.tsx` + `app/api/public/e/rsvp/route.ts` | Publik bekräftelsesida och svarsroute |
+| `apps/web/src/lib/events/counters.ts` | `recomputeEventCounters` — delad av eventsidan, inbjudningarna och svarsvägen |
+
+- **En deltagarlista:** en inbjudan är en rad i `event_signups` med
+  `stage = invited` (nytt steg före tratten, liksom `declined`), `contact`
+  och `invited_at`. Ja ⇒ `signup` (raden står direkt i eventets
+  deltagarlista), nej ⇒ `declined`. Inbjudna/avböjda räknas inte som anmälda
+  (`eventSignupCounters`, `EVENT_INVITE_STAGES`) och syns inte i tratten.
+  Ett svar nedgraderar aldrig en närvarande/antagen.
+- **Svarslänken:** 32 slumpbytes (base64url) per utskick; bara SHA-256-hashen
+  lagras (`rsvp_token_hash`, indexerad) — klartexten finns enbart i mejlet
+  och ett nytt utskick/påminnelse roterar den. Länken går till en
+  **bekräftelsesida** (GET svarar aldrig — mejlskannrar förhandsläser
+  länkar); svaret skickas med POST till `/api/public/e/rsvp` (rate-limit
+  20/min och IP, transient). Uppslaget sker via superuser (ingen session);
+  tenant härleds ur raden och eventet MÅSTE tillhöra samma tenant. Svar tas
+  emot till eventets slut (`rsvpOpen`); avregistrering gäller alltid. `/e/`
+  är publik i middleware och renderas utan AppShell (layout + SessionGuard).
+- **Rättslig grund (beslut 2026-10): berättigat intresse** — även kontakter
+  utan samtycke kan bjudas in, med avregistrering i varje mejl (GDPR art. 21).
+  "Avregistrera mig" sätter `contacts.invite_opt_out` (+ `_at`); avregistrerade
+  kan inte väljas och hoppas över vid **varje** utskick, även påminnelser.
+  Kontrolleras mot marknadsföringslagen innan utskick till privatpersoner i
+  stor skala (inbjudningar till B2B-kontakter i kontaktnätet är huvudfallet).
+- **Dataminimering:** e-postadressen kopieras till deltagarraden (som för en
+  manuellt inlagd deltagare) och visas aldrig i inbjudningsvyn; loggar och
+  audit (`agent_actions`, feeden: "Inbjudan skickad till "X" · N mejl")
+  innehåller bara antal. `event_signups` cascade-raderas med eventet och är
+  fortsatt denylistad för AI.
+- **Människa-i-loopen:** att bjuda in och skicka är mänskliga klick med
+  bekräftelse (`CREATE_POLICIES.event_signups`: agent nekad); chattens
+  `create_event` skapar fortfarande bara eventet.
+- **Schema-drift:** saknade fält efter skrivning ⇒ fel som namnger
+  migrationen; `verify-baseline.mjs` asserterar fälten och select-värdena
+  `invited`/`declined`; allt speglas i `setup-via-api.mjs` (inklusive
+  `event_signups.contact` från 1700000073, som saknades där).
+- **Inte byggt (YAGNI):** publik självanmälan för okända, inbjudan av
+  bolagsmedlemmar/personal som användare, kalenderfil (.ics) och automatiska
+  påminnelser — nästa steg om behovet visar sig.
 
 ### 53.2 Säkerhet och regelefterlevnad
 

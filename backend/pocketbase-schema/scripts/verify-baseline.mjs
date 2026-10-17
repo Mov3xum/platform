@@ -1093,6 +1093,10 @@ const REQUIRED_APP_FIELDS = [
   { collection: 'goal_indicators', fields: ['activity_measure'] },
   { collection: 'annual_wheel_items', fields: ['goal_indicators', 'planned_participants', 'completed_at', 'outcome_verdict'] },
   { collection: 'incubator_events', fields: ['goal_indicators', 'planned_participants', 'completed_at', 'outcome_verdict'] },
+  // Inbjudningar (§ 53.5, migration 1700000197): utan fälten "sparas"
+  // svarstoken/avregistrering tyst bort och svarslänkarna slutar fungera.
+  { collection: 'event_signups', fields: ['contact', 'rsvp_token_hash', 'invited_at', 'invite_sent_at', 'responded_at'] },
+  { collection: 'contacts', fields: ['invite_opt_out', 'invite_opt_out_at'] },
   // Upphandlingar (§ 39): regelgenererade uppföljningar = tasks med
   // procurement-länk + rule_key (migration 1700000152). Saknas fälten
   // skapas korten utan idempotensnyckel → dubbletter vid varje synk.
@@ -1169,7 +1173,8 @@ const REQUIRED_APP_FIELDS = [
  */
 const REQUIRED_SELECT_VALUES = [
   { collection: 'org_posts', field: 'audience', values: ['staff', 'all', 'startups'], migration: '1700000171' },
-  { collection: 'goal_indicators', field: 'source', values: ['computed', 'manual', 'survey', 'activities'], migration: '1700000196' }
+  { collection: 'goal_indicators', field: 'source', values: ['computed', 'manual', 'survey', 'activities'], migration: '1700000196' },
+  { collection: 'event_signups', field: 'stage', values: ['invited', 'declined'], migration: '1700000197' }
 ];
 
 const MUST_NOT_BE_REQUIRED = [

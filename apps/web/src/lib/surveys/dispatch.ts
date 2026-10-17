@@ -1,7 +1,7 @@
 import 'server-only';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { sendSurveyInvites } from '@/lib/email';
-import { collectSurveyRecipients, isAttendedStage } from '@platform/shared';
+import { collectSurveyRecipients, isAttendedStage, isInviteStage } from '@platform/shared';
 import { toSurvey, type Survey } from './store';
 
 // Utskick av enkät till eventets deltagare (CLAUDE.md § 47.5). Delad kärna
@@ -74,7 +74,8 @@ export async function dispatchSurveyInvites(
     return { ok: false, error: 'Kunde inte läsa deltagarlistan.' };
   }
   const attended = signups.filter((s) => isAttendedStage(s.stage));
-  if (signups.length > 0 && attended.length === 0) {
+  const registered = signups.filter((s) => !isInviteStage(s.stage));
+  if (registered.length > 0 && attended.length === 0) {
     // Närvaron är inte markerad än. Felet (i stället för ett tomt utskick)
     // gör att cron-vägen försöker igen nästa timme (provisoriskt lås) och
     // att staff ser orsaken — utvärderingen går aldrig tyst förlorad.

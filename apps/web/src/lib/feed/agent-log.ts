@@ -396,6 +396,25 @@ function mapRow(
       };
     }
 
+    case 'event_signups': {
+      // Inbjudningar (§ 53.5) — bara antal, aldrig mottagare.
+      const title = str(after.title);
+      const name = title ? `"${title}"` : 'ett event';
+      const href = row.record_id ? `/inflode/inbjudningar/${row.record_id}` : '/inflode/inbjudningar';
+      if (row.field === 'invitations') {
+        return { title: `Inbjudningar till ${name}: ${Number(after.invited) || 0} inbjudna`, href, icon: 'send' };
+      }
+      if (row.field === 'invitation_sent' || row.field === 'invitation_reminder') {
+        return {
+          title: `${row.field === 'invitation_reminder' ? 'Påminnelse' : 'Inbjudan'} skickad till ${name}`,
+          detail: `${Number(after.sent) || 0} mejl`,
+          href,
+          icon: 'send'
+        };
+      }
+      return null;
+    }
+
     case 'incubator_events': {
       const goalEntry = activityGoalEntry(row, after, 'Event', row.record_id ? `/events/${row.record_id}` : '/events');
       if (goalEntry) return goalEntry;

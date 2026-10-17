@@ -30,12 +30,12 @@ import {
   isActivityOutcome,
   isEventSignupStage,
   type EventSignup,
-  type EventSignupStage,
+  type EventFunnelStage,
   type IncubatorEvent,
   type Role
 } from '@platform/shared';
 
-const STAGE_ACCENT: Record<EventSignupStage, string> = {
+const STAGE_ACCENT: Record<EventFunnelStage, string> = {
   signup: '#005470',
   attended: '#00a8de',
   meeting: '#6138b5',

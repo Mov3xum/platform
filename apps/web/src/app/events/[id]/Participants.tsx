@@ -10,6 +10,7 @@ import {
   type EventActionState
 } from '@/lib/actions/events';
 import {
+  EVENT_ALL_SIGNUP_STAGES,
   EVENT_SIGNUP_STAGES,
   EVENT_SIGNUP_STAGE_LABEL,
   isEventSignupStage,
@@ -31,6 +32,8 @@ export interface ParticipantRow {
 }
 
 const STAGE_VARIANT: Record<EventSignupStage, 'default' | 'cyan' | 'purple' | 'copper' | 'green'> = {
+  invited: 'default',
+  declined: 'default',
   signup: 'cyan',
   attended: 'default',
   meeting: 'purple',
@@ -175,7 +178,7 @@ export function Participants({
                   className="mx-input"
                   style={{ width: 'auto', padding: '2px 8px' }}
                 >
-                  {EVENT_SIGNUP_STAGES.map((st) => (
+                  {EVENT_ALL_SIGNUP_STAGES.map((st) => (
                     <option key={st} value={st}>
                       {EVENT_SIGNUP_STAGE_LABEL[st]}
                     </option>

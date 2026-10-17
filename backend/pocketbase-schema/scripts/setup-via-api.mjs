@@ -5059,6 +5059,27 @@ await patchCollection('annual_wheel_items', [
   tags: { values: ANNUAL_WHEEL_TAG_VALUES, maxSelect: ANNUAL_WHEEL_TAG_VALUES.length }
 });
 
+// Migration 1700000197: inbjudningar (§ 53.5) — inbjudans steg, hashad
+// svarstoken och tidsstämplar på event_signups (+ kontaktrelationen från
+// 1700000073, som saknades här) och avregistrering på contacts.
+// patchCollection ERSÄTTER select-värdena — hela listan.
+{
+  const contactsCol = await pb.collections.getOne('contacts');
+  await patchCollection('event_signups', [
+    { name: 'contact', type: 'relation', required: false, collectionId: contactsCol.id, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'rsvp_token_hash', type: 'text', required: false, max: 64 },
+    { name: 'invited_at', type: 'date', required: false },
+    { name: 'invite_sent_at', type: 'date', required: false },
+    { name: 'responded_at', type: 'date', required: false }
+  ], {
+    stage: { values: ['invited', 'declined', 'signup', 'attended', 'meeting', 'application', 'admitted'] }
+  });
+  await patchCollection('contacts', [
+    { name: 'invite_opt_out', type: 'bool', required: false },
+    { name: 'invite_opt_out_at', type: 'date', required: false }
+  ]);
+}
+
 // Migration 1700000194: incubator_events.wheel_item — eventet genomför en
 // årshjulsaktivitet (§ 53). Målkollektionens id slås upp på namnet (§ 30.4 p. 1).
 const annualWheelItemsCol = await pb.collections.getOne('annual_wheel_items');
