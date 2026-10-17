@@ -44,30 +44,56 @@ export function rsvpOpen(
   return end !== null && now.getTime() <= end;
 }
 
+/**
+ * Vem en inbjudan går till: en kontakt i kontaktboken, ett användarkonto
+ * (bolagsmedlem) eller bara bolagets egen e-postadress. Avgör både
+ * dubblettkontrollen och vilken text/avregistrering mejlet får.
+ */
+export type InviteRecipientKind = 'contact' | 'user' | 'startup';
+
 export interface InviteCandidate {
   id: string;
   email?: string | null;
   invite_opt_out?: boolean | null;
+  /** Standard `contact`. */
+  kind?: InviteRecipientKind;
+}
+
+export interface ExistingInvite {
+  contact?: string | null;
+  user?: string | null;
+  email?: string | null;
+}
+
+export interface InviteSkipped {
+  optOut: number;
+  noEmail: number;
+  already: number;
+  overCap: number;
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
- * Vilka kontakter som faktiskt kan bjudas in: giltig e-post, inte
- * avregistrerade och inte redan på listan (samma kontakt eller adress).
- * Behåller ordningen; kapar vid `INVITE_MAX_RECIPIENTS`.
+ * Vilka mottagare som faktiskt kan bjudas in: giltig e-post, inte
+ * avregistrerade och inte redan på listan (samma kontakt, samma
+ * användarkonto eller samma adress). Behåller ordningen; kapar vid
+ * `INVITE_MAX_RECIPIENTS` per utskick.
  */
 export function selectInviteRecipients<T extends InviteCandidate>(
   candidates: readonly T[],
-  existing: ReadonlyArray<{ contact?: string | null; email?: string | null }>
-): { invite: T[]; skipped: { optOut: number; noEmail: number; already: number; overCap: number } } {
+  existing: ReadonlyArray<ExistingInvite>
+): { invite: T[]; skipped: InviteSkipped } {
   const contactIds = new Set(existing.map((e) => e.contact).filter((v): v is string => Boolean(v)));
+  const userIds = new Set(existing.map((e) => e.user).filter((v): v is string => Boolean(v)));
   const emails = new Set(existing.map((e) => (e.email || '').trim().toLowerCase()).filter(Boolean));
-  const skipped = { optOut: 0, noEmail: 0, already: 0, overCap: 0 };
+  const skipped: InviteSkipped = { optOut: 0, noEmail: 0, already: 0, overCap: 0 };
   const invite: T[] = [];
   for (const c of candidates) {
+    const kind = c.kind ?? 'contact';
     const email = (c.email || '').trim().toLowerCase();
-    if (contactIds.has(c.id) || (email && emails.has(email))) {
+    const sameRecord = (kind === 'contact' && contactIds.has(c.id)) || (kind === 'user' && userIds.has(c.id));
+    if (sameRecord || (email && emails.has(email))) {
       skipped.already++;
       continue;
     }
@@ -83,9 +109,32 @@ export function selectInviteRecipients<T extends InviteCandidate>(
       skipped.overCap++;
       continue;
     }
-    contactIds.add(c.id);
+    if (kind === 'contact') contactIds.add(c.id);
+    if (kind === 'user') userIds.add(c.id);
     emails.add(email);
     invite.push(c);
   }
   return { invite, skipped };
+}
+
+/**
+ * Sökord ur en fritextsökning i kontaktboken: varje ord måste matcha något
+ * fält (namn, organisation, e-post), så "anna svensson" hittar Anna Svensson
+ * fast för- och efternamn ligger i olika fält. Max 5 ord à 40 tecken.
+ */
+export function contactSearchWords(q: unknown): string[] {
+  if (typeof q !== 'string') return [];
+  const words = q
+    .toLowerCase()
+    .split(/[\s,;]+/)
+    .map((w) => w.trim().slice(0, 40))
+    .filter(Boolean);
+  return [...new Set(words)].slice(0, 5);
+}
+
+/** Matchar en rad alla sökord (i något av fälten)? Samma regel som serverfiltret. */
+export function matchesContactSearch(fields: ReadonlyArray<string | null | undefined>, words: readonly string[]): boolean {
+  if (words.length === 0) return true;
+  const hay = fields.map((f) => (f || '').toLowerCase());
+  return words.every((w) => hay.some((h) => h.includes(w)));
 }

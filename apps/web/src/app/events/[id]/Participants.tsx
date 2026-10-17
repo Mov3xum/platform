@@ -16,6 +16,7 @@ import {
   isEventSignupStage,
   type EventSignupStage
 } from '@platform/shared';
+import { InvitePanel } from '@/components/invitations/InvitePanel';
 import { SignupDeleteButton } from './SignupDeleteButton';
 
 // Deltagarlistan på eventsidan (§ 53.1). Närvaro är det som styr vem som får
@@ -44,15 +45,19 @@ const STAGE_VARIANT: Record<EventSignupStage, 'default' | 'cyan' | 'purple' | 'c
 export function Participants({
   eventId,
   rows,
-  canEdit
+  canEdit,
+  inviteOpen
 }: {
   eventId: string;
   rows: ParticipantRow[];
   canEdit: boolean;
+  /** Eventet tar fortfarande emot svar — då kan fler bjudas in (§ 53.5). */
+  inviteOpen: boolean;
 }) {
   const [pending, start] = useTransition();
   const [state, setState] = useState<EventActionState | null>(null);
   const [adding, setAdding] = useState(false);
+  const [inviting, setInviting] = useState(false);
   const notAttended = rows.filter((r) => r.stage === 'signup').length;
 
   const changeStage = (id: string, value: string) => {
@@ -88,13 +93,43 @@ export function Participants({
                   <Icon name="check" size={12} /> Alla närvarande
                 </button>
               )}
-              <button type="button" className="mx-btn mx-sm mx-primary" onClick={() => setAdding((v) => !v)}>
+              {inviteOpen && (
+                <button
+                  type="button"
+                  className={`mx-btn mx-sm${inviting ? ' mx-primary' : ''}`}
+                  aria-expanded={inviting}
+                  onClick={() => {
+                    setInviting((v) => !v);
+                    setAdding(false);
+                  }}
+                  title="Bjud in bolag eller kontakter ur kontaktboken"
+                >
+                  <Icon name="send" size={12} /> Bjud in
+                </button>
+              )}
+              <button
+                type="button"
+                className={`mx-btn mx-sm${adding ? '' : ' mx-primary'}`}
+                onClick={() => {
+                  setAdding((v) => !v);
+                  setInviting(false);
+                }}
+              >
                 <Icon name="plus" size={12} /> Lägg till
               </button>
             </span>
           ) : undefined
         }
       />
+
+      {inviting && canEdit && inviteOpen && (
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--mx-line-soft)', display: 'grid', gap: 8 }}>
+          <InvitePanel eventId={eventId} />
+          <Link href={`/inflode/inbjudningar/${eventId}`} className="mx-t-12 text-link hover:underline">
+            Följ svaren och skicka påminnelser under Marknadsverktyg → Inbjudningar
+          </Link>
+        </div>
+      )}
 
       {adding && canEdit && (
         <form

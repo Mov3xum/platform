@@ -6,22 +6,26 @@ import { PageShell } from '@/components/PageShell';
 import { Card, CardHead, Chip, Icon } from '@/components/proto';
 import { getRecordInTenant } from '@/lib/core/write/helpers';
 import {
-  CONTACT_CATEGORIES,
-  CONTACT_CATEGORY_LABELS,
   EVENT_SIGNUP_STAGE_LABEL,
+  SURVEY_STARTER_TEMPLATES,
+  defaultEvaluationTemplateRef,
   formatStockholmDateTime,
-  isContactCategory,
+  getSurveyStarterTemplate,
   isEventSignupStage,
   rsvpOpen,
+  starterTemplateRef,
   type Role
 } from '@platform/shared';
+import { InvitePanel } from '@/components/invitations/InvitePanel';
+import { FollowUpSurveys } from '@/components/surveys/FollowUpSurveys';
+import { createEventEvaluationAction } from '@/lib/actions/events';
+import { listSurveyTemplates } from '@/lib/surveys/store';
 import { buildInflodeTabs } from '../../_tabs';
-import { InvitePicker, SendButtons, type ContactOption } from './InviteControls';
+import { SendButtons } from './InviteControls';
 
 export const dynamic = 'force-dynamic';
 
 const MANAGE_ROLES = ['admin', 'incubator_lead', 'coach'] as const;
-const SEARCH_LIMIT = 50;
 
 type Invitee = {
   id: string;
@@ -34,20 +38,12 @@ type Invitee = {
   responded_at?: string;
 };
 
-type ContactRow = {
-  id: string;
-  first_name?: string;
-  last_name?: string;
-  organization?: string;
-  email?: string;
-  invite_opt_out?: boolean;
-};
-
 /**
- * Inbjudningar för ett event (CLAUDE.md § 53.5): sök kontakter i
- * kontaktboken, bjud in (mejlet går direkt) och följ svaren. Inbjudna ligger
- * i eventets deltagarlista — samma rader som närvaron och utvärderingen
- * bygger på. Personuppgifter visas bara för staff (samma krets som
+ * Inbjudningar för ett event (CLAUDE.md § 53.5): kryssa i kontakter per
+ * kategori eller hela bolag, bjud in (mejlet går direkt) och följ svaren.
+ * Inbjudna ligger i eventets deltagarlista — samma rader som närvaron och
+ * utvärderingen bygger på. Här väljs också mallen för utvärderingen efter
+ * eventet. Personuppgifter visas bara för staff (samma krets som
  * kontaktboken); e-postadresser visas aldrig här.
  */
 export default async function EventInvitationsPage({
@@ -55,21 +51,29 @@ export default async function EventInvitationsPage({
   searchParams
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ q?: string; kategori?: string }>;
+  searchParams: Promise<{ fel?: string }>;
 }) {
   const { id } = await params;
-  const { q: qRaw, kategori } = await searchParams;
+  const { fel } = await searchParams;
   const user = await requireUser();
   if (!hasRole(user.roles, [...MANAGE_ROLES])) redirect('/inflode');
   if (!/^[a-zA-Z0-9_-]{1,64}$/.test(id)) notFound();
   const pb = await getServerPb();
 
-  const event = await getRecordInTenant<{ id: string; tenant?: string; name?: string; starts_at?: string; ends_at?: string; location?: string }>(
+  const event = await getRecordInTenant<{
+    id: string;
+    tenant?: string;
+    name?: string;
+    type?: string;
+    starts_at?: string;
+    ends_at?: string;
+    location?: string;
+  }>(
     pb,
     { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Role[] },
     'incubator_events',
     id,
-    'id,tenant,name,starts_at,ends_at,location'
+    'id,tenant,name,type,starts_at,ends_at,location'
   );
   if (!event) notFound();
   const open = rsvpOpen(event, new Date(), 'yes');
@@ -89,40 +93,12 @@ export default async function EventInvitationsPage({
   const coming = invitees.filter((i) => i.stage !== 'invited' && i.stage !== 'declined').length;
   const declined = invitees.filter((i) => i.stage === 'declined').length;
 
-  // Sök i kontaktboken (§ 45) — bundna filtervärden, högst 50 träffar.
-  const q = (qRaw || '').trim().slice(0, 80);
-  const category = isContactCategory(kategori) ? kategori : '';
-  let contacts: ContactOption[] = [];
-  if (open && (q || category)) {
-    const parts = ['tenant = {:t}'];
-    const p: Record<string, string> = { t: user.tenant };
-    if (q) {
-      parts.push('(first_name ~ {:q} || last_name ~ {:q} || organization ~ {:q} || email ~ {:q})');
-      p.q = q;
-    }
-    if (category) {
-      parts.push('category = {:c}');
-      p.c = category;
-    }
-    try {
-      const res = await pb.collection('contacts').getList<ContactRow>(1, SEARCH_LIMIT, {
-        filter: pb.filter(parts.join(' && '), p),
-        fields: 'id,first_name,last_name,organization,email,invite_opt_out',
-        sort: 'last_name,first_name'
-      });
-      const onList = new Set(invitees.map((i) => i.contact).filter(Boolean));
-      contacts = res.items.map((c) => ({
-        id: c.id,
-        name: `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || 'Kontakt',
-        organization: c.organization || '',
-        hasEmail: Boolean(c.email),
-        optedOut: c.invite_opt_out === true,
-        alreadyInvited: onList.has(c.id)
-      }));
-    } catch {
-      contacts = [];
-    }
-  }
+  // Utvärderingen efter eventet (§ 53.3): egen mall för typen, annars
+  // Movexums standardmall — samma val som när eventet skapas.
+  const templates = await listSurveyTemplates(pb, user.tenant);
+  const defaultTemplate = defaultEvaluationTemplateRef(templates, event.type);
+  const defaultTemplateName =
+    getSurveyStarterTemplate(defaultTemplate)?.name ?? templates.find((t) => t.id === defaultTemplate)?.name ?? '';
 
   return (
     <PageShell
@@ -171,37 +147,9 @@ export default async function EventInvitationsPage({
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 16 }}>
         {open && (
           <Card style={{ padding: 0, overflow: 'hidden' }}>
-            <CardHead label="Bjud in från kontaktboken" />
-            <div style={{ padding: 16, display: 'grid', gap: 12 }}>
-              <form method="get" className="mx-flex mx-gap-2 mx-wrap" style={{ alignItems: 'end' }}>
-                <label className="mx-t-12 mx-muted" style={{ flex: '1 1 180px' }}>
-                  Sök (namn, organisation, e-post)
-                  <input name="q" defaultValue={q} maxLength={80} className="mx-input" />
-                </label>
-                <label className="mx-t-12 mx-muted" style={{ flex: '0 1 160px' }}>
-                  Kategori
-                  <select name="kategori" defaultValue={category} className="mx-input">
-                    <option value="">Alla</option>
-                    {CONTACT_CATEGORIES.map((c) => (
-                      <option key={c} value={c}>
-                        {CONTACT_CATEGORY_LABELS[c]}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button type="submit" className="mx-btn">
-                  Sök
-                </button>
-              </form>
-              {q || category ? (
-                <InvitePicker eventId={event.id} contacts={contacts} />
-              ) : (
-                <div className="mx-muted mx-t-13">Sök eller välj en kategori för att hitta kontakter att bjuda in (högst {SEARCH_LIMIT} per sökning).</div>
-              )}
-              <div className="mx-t-12 mx-muted">
-                Rättslig grund: berättigat intresse. Varje mejl har en personlig svarslänk och en
-                avregistreringslänk; den som avregistrerat sig kan inte väljas.
-              </div>
+            <CardHead label="Bjud in" />
+            <div style={{ padding: 16 }}>
+              <InvitePanel eventId={event.id} />
             </div>
           </Card>
         )}
@@ -236,6 +184,54 @@ export default async function EventInvitationsPage({
           )}
         </Card>
       </div>
+
+      <Card style={{ padding: 0, overflow: 'hidden', marginTop: 16 }}>
+        <CardHead label="Utvärdering efter eventet" />
+        <div style={{ padding: 16, display: 'grid', gap: 12 }}>
+          {fel === 'utvardering' && (
+            <div
+              role="alert"
+              className="mx-t-13"
+              style={{ padding: '8px 12px', borderRadius: 10, background: 'var(--movexum-pastell-orange)', color: 'var(--movexum-morkorange)' }}
+            >
+              Utvärderingen kunde inte skapas. Försök igen eller skapa den under Utvärdering.
+            </div>
+          )}
+          <form action={createEventEvaluationAction} className="mx-flex mx-gap-2 mx-wrap" style={{ alignItems: 'end' }}>
+            <input type="hidden" name="event" value={event.id} />
+            <label className="mx-t-12 mx-muted" style={{ flex: '1 1 260px' }}>
+              Mall
+              <select name="evaluation" defaultValue="auto" className="mx-input">
+                <option value="auto">{`Mallen för eventtypen (${defaultTemplateName || 'saknas'})`}</option>
+                {templates.length > 0 && (
+                  <optgroup label="Era mallar">
+                    {templates.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                <optgroup label="Movexums standardmallar">
+                  {SURVEY_STARTER_TEMPLATES.map((t) => (
+                    <option key={t.key} value={starterTemplateRef(t.key)}>
+                      {t.name}
+                    </option>
+                  ))}
+                </optgroup>
+              </select>
+            </label>
+            <button type="submit" className="mx-btn mx-primary">
+              <Icon name="plus" size={12} /> Skapa utvärdering
+            </button>
+          </form>
+          <div className="mx-t-12 mx-muted">
+            Skapas som utkast kopplat till eventet. Ni granskar, publicerar och schemalägger utskicket — det går
+            bara till dem som markerats närvarande.
+          </div>
+          <FollowUpSurveys pb={pb} tenant={user.tenant} kind="event" id={event.id} canCreate={false} compact />
+        </div>
+      </Card>
     </PageShell>
   );
 }

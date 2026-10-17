@@ -6,6 +6,8 @@ import {
   isRsvpAnswer,
   isRsvpToken,
   rsvpOpen,
+  contactSearchWords,
+  matchesContactSearch,
   selectInviteRecipients,
   stageForRsvp
 } from './event-invitations.ts';
@@ -56,4 +58,29 @@ test('selectInviteRecipients kapar vid taket', () => {
   const { invite, skipped } = selectInviteRecipients(many, []);
   assert.equal(invite.length, INVITE_MAX_RECIPIENTS);
   assert.equal(skipped.overCap, 3);
+});
+
+test('selectInviteRecipients: bolagsmedlemmar dedupliceras på konto och adress', () => {
+  const { invite, skipped } = selectInviteRecipients(
+    [
+      { id: 'u1', email: 'a@bolag.se', kind: 'user' as const },
+      { id: 'u2', email: 'b@bolag.se', kind: 'user' as const },
+      // Samma person som kontakt med samma adress — redan med.
+      { id: 'c1', email: 'B@bolag.se', kind: 'contact' as const },
+      { id: 's1', email: 'info@bolag.se', kind: 'startup' as const }
+    ],
+    [{ user: 'u1' }]
+  );
+  assert.deepEqual(invite.map((c) => c.id), ['u2', 's1']);
+  assert.equal(skipped.already, 2);
+});
+
+test('contactSearchWords delar upp i ord så att fullt namn matchar', () => {
+  assert.deepEqual(contactSearchWords('  Anna  Svensson '), ['anna', 'svensson']);
+  assert.deepEqual(contactSearchWords('a, a; b'), ['a', 'b']);
+  assert.deepEqual(contactSearchWords(undefined), []);
+  assert.equal(contactSearchWords('a b c d e f g').length, 5);
+  assert.equal(matchesContactSearch(['Anna', 'Svensson', 'Bolag AB'], ['anna', 'svensson']), true);
+  assert.equal(matchesContactSearch(['Anna', 'Berg'], ['anna', 'svensson']), false);
+  assert.equal(matchesContactSearch(['x'], []), true);
 });

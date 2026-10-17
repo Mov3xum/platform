@@ -101,11 +101,19 @@ export default async function RsvpPage({
               ) : (
                 <p className="mx-compass-body">{ERROR_TEXT.stangd}</p>
               )}
-              <div style={{ borderTop: '1px solid var(--mx-line-soft)', paddingTop: 12 }}>
-                <button type="submit" name="svar" value="unsubscribe" className={`mx-btn mx-sm${preselected === 'unsubscribe' ? ' mx-primary' : ''}`}>
-                  Avregistrera mig från fler inbjudningar
-                </button>
-              </div>
+              {/* Avregistrering gäller kontaktnätet; bolagsmedlemmar bjuds in som del av programmet. */}
+              {resolved.signup.contact && (
+                <div style={{ borderTop: '1px solid var(--mx-line-soft)', paddingTop: 12 }}>
+                  <button
+                    type="submit"
+                    name="svar"
+                    value="unsubscribe"
+                    className={`mx-btn mx-sm${preselected === 'unsubscribe' ? ' mx-primary' : ''}`}
+                  >
+                    Avregistrera mig från fler inbjudningar
+                  </button>
+                </div>
+              )}
             </form>
           </section>
         )}

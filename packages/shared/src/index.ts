@@ -1745,6 +1745,7 @@ export * from './file-topics';
 export * from './competences';
 export * from './competence-tags';
 export * from './survey';
+export * from './survey-starters';
 // ─── AI-miljöpåverkan (tokens → CO₂e/vatten, ren logik, enhetstestad) ────────
 export * from './ai-impact';
 export * from './voice';
