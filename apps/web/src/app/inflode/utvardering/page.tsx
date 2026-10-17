@@ -5,7 +5,7 @@ import { hasRole } from '@/lib/rbac';
 import { PageShell } from '@/components/PageShell';
 import { Card, Chip, Icon } from '@/components/proto';
 import { listSurveys } from '@/lib/surveys/store';
-import { SURVEY_KIND_LABEL } from '@platform/shared';
+import { EVENT_TYPE_LABEL, SURVEY_KIND_LABEL } from '@platform/shared';
 import { SurveyLinkChip } from '@/components/surveys/SurveyLinkChip';
 import { buildInflodeTabs } from '../_tabs';
 
@@ -15,7 +15,11 @@ export default async function SurveysPage() {
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) redirect('/inflode');
   const pb = await getServerPb();
-  const { surveys, counts } = await listSurveys(pb, user.tenant);
+  const all = await listSurveys(pb, user.tenant);
+  const counts = all.counts;
+  // Mallar (§ 53.3) listas för sig — de tar aldrig emot svar.
+  const templates = all.surveys.filter((s) => s.is_template);
+  const surveys = all.surveys.filter((s) => !s.is_template);
 
   return (
     <PageShell
@@ -27,9 +31,14 @@ export default async function SurveysPage() {
         </span>
       }
       actions={
-        <Link href="/inflode/utvardering/new" className="mx-btn mx-primary">
-          <Icon name="plus" size={13} /> Ny enkät
-        </Link>
+        <>
+          <Link href="/inflode/utvardering/new?mall=1" className="mx-btn">
+            <Icon name="plus" size={13} /> Ny mall
+          </Link>
+          <Link href="/inflode/utvardering/new" className="mx-btn mx-primary">
+            <Icon name="plus" size={13} /> Ny enkät
+          </Link>
+        </>
       }
     >
       <Card style={{ padding: 12, marginBottom: 16, background: 'var(--mx-paper-2)' }}>
@@ -43,6 +52,37 @@ export default async function SurveysPage() {
           </span>
         </div>
       </Card>
+
+      {templates.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div className="mx-t-12 mx-muted mx-fw-6" style={{ marginBottom: 8 }}>
+            Mallar · utvärdering skapas som utkast när ett event av vald typ skapas
+          </div>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {templates.map((t) => (
+              <Card key={t.id} style={{ padding: 12 }}>
+                <div className="mx-flex mx-items-c mx-gap-2">
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="mx-flex mx-items-c mx-gap-2">
+                      <span className="mx-disp mx-fw-6 mx-t-13 mx-truncate">{t.name}</span>
+                      <Chip mono>MALL</Chip>
+                    </div>
+                    <div className="mx-t-12 mx-muted mx-truncate" style={{ marginTop: 4 }}>
+                      {t.template_for.length > 0
+                        ? `Standard för ${t.template_for.map((x) => EVENT_TYPE_LABEL[x].toLowerCase()).join(', ')}`
+                        : 'Ingen eventtyp vald — används bara när den väljs uttryckligen'}{' '}
+                      · {t.questions.length} frågor
+                    </div>
+                  </div>
+                  <Link href={`/inflode/utvardering/${t.id}`} className="mx-btn mx-sm mx-primary">
+                    <Icon name="gear" size={12} /> Redigera
+                  </Link>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
 
       {surveys.length === 0 ? (
         <Card style={{ padding: 32, textAlign: 'center' }}>

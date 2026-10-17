@@ -1082,6 +1082,21 @@ const REQUIRED_APP_FIELDS = [
   // Årshjul (§ 30): day = migration 1700000138, tags/responsible = 1700000139.
   // day = 1700000138, tags/responsible = 1700000139, end_* = 1700000141.
   { collection: 'annual_wheel_items', fields: ['day', 'tags', 'responsible', 'end_month', 'end_day'] },
+  // Event ↔ årshjul (§ 53, migration 1700000194): utan fältet "sparas"
+  // kopplingen tyst bort och eventet tappar sin plan.
+  { collection: 'incubator_events', fields: ['wheel_item'] },
+  // Utvärderingsmallar (§ 53.3, migration 1700000195): utan fälten "sparas"
+  // en mall tyst som en vanlig (publicerbar) enkät.
+  { collection: 'surveys', fields: ['is_template', 'template_for'] },
+  // Mål som drivs av aktiviteter (§ 53.4, migration 1700000196): utan fälten
+  // "sparas" koppling/plan/utfall tyst bort och målen uppdateras aldrig.
+  { collection: 'goal_indicators', fields: ['activity_measure'] },
+  { collection: 'annual_wheel_items', fields: ['goal_indicators', 'planned_participants', 'completed_at', 'outcome_verdict'] },
+  { collection: 'incubator_events', fields: ['goal_indicators', 'planned_participants', 'completed_at', 'outcome_verdict'] },
+  // Inbjudningar (§ 53.5, migration 1700000197): utan fälten "sparas"
+  // svarstoken/avregistrering tyst bort och svarslänkarna slutar fungera.
+  { collection: 'event_signups', fields: ['contact', 'rsvp_token_hash', 'invited_at', 'invite_sent_at', 'responded_at'] },
+  { collection: 'contacts', fields: ['invite_opt_out', 'invite_opt_out_at'] },
   // Upphandlingar (§ 39): regelgenererade uppföljningar = tasks med
   // procurement-länk + rule_key (migration 1700000152). Saknas fälten
   // skapas korten utan idempotensnyckel → dubbletter vid varje synk.
@@ -1157,7 +1172,9 @@ const REQUIRED_APP_FIELDS = [
  * bolagen" (§ 37.2, migration 1700000171) med "audience: Invalid value".
  */
 const REQUIRED_SELECT_VALUES = [
-  { collection: 'org_posts', field: 'audience', values: ['staff', 'all', 'startups'], migration: '1700000171' }
+  { collection: 'org_posts', field: 'audience', values: ['staff', 'all', 'startups'], migration: '1700000171' },
+  { collection: 'goal_indicators', field: 'source', values: ['computed', 'manual', 'survey', 'activities'], migration: '1700000196' },
+  { collection: 'event_signups', field: 'stage', values: ['invited', 'declined'], migration: '1700000197' }
 ];
 
 const MUST_NOT_BE_REQUIRED = [

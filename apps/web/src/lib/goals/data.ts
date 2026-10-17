@@ -20,6 +20,7 @@ import {
 import { computeMetrics } from '@/lib/metrics/registry';
 import { listSurveyModules, loadSurveyAggregate } from '@/lib/compass/survey';
 import { listAssignableResourcesForTenant } from '@/lib/assignments/collaboration';
+import { loadActivityIndicatorResults, type ActivityIndicatorLive } from './activities';
 import type { AssignableResource } from '@/lib/assignments/types';
 import type { CompassModule } from '@/lib/compass/types';
 
@@ -53,6 +54,8 @@ export interface GoalWorkspace {
   metrics: Partial<Record<MetricKey, MetricValue>>;
   /** Live-aggregat per enkätindikator (indikator-id → värde). */
   surveys: Record<string, SurveyIndicatorValue>;
+  /** Live-resultat per aktivitetsindikator (§ 53.4, indikator-id → värde + statusförslag). */
+  activities: Record<string, ActivityIndicatorLive>;
   /** Enkätmoduler att välja i indikatorformuläret. */
   surveyModules: Pick<CompassModule, 'id' | 'name' | 'slug'>[];
   /** Movexum-personal (id + visningsnamn, aldrig e-post) — ägare av personliga mål. */
@@ -109,7 +112,7 @@ export async function loadGoalWorkspace(
   const [surveyModulesRaw, people] = await Promise.all([listSurveyModules(pb, tenantId), listAssignableResourcesForTenant(pb, tenantId)]);
   const surveyModules = surveyModulesRaw.map((m) => ({ id: m.id, name: m.name, slug: m.slug }));
   if (!period) {
-    return { periods, period: null, tree: buildGoalTree([], [], []), metrics: {}, surveys: {}, surveyModules, people, schemaMissing };
+    return { periods, period: null, tree: buildGoalTree([], [], []), metrics: {}, surveys: {}, activities: {}, surveyModules, people, schemaMissing };
   }
 
   let goals: Goal[] = [];
@@ -166,7 +169,9 @@ export async function loadGoalWorkspace(
     })
   );
 
-  return { periods, period, tree, metrics, surveys, surveyModules, people, schemaMissing };
+  const activities = await loadActivityIndicatorResults(pb, tenantId, period.year, indicators);
+
+  return { periods, period, tree, metrics, surveys, activities, surveyModules, people, schemaMissing };
 }
 
 export { isMetricKey };

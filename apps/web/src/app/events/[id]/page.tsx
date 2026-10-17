@@ -15,47 +15,32 @@ import {
 } from '@/components/proto';
 import { deleteEventFormAction } from '@/lib/actions/events';
 import { ConfirmDeleteButton } from '@/components/ConfirmDeleteButton';
-import { SignupDeleteButton } from './SignupDeleteButton';
+import { Participants, type ParticipantRow } from './Participants';
 import { FollowUpSurveys } from '@/components/surveys/FollowUpSurveys';
+import { getRecordInTenant } from '@/lib/core/write/helpers';
+import { listActivityIndicatorOptions } from '@/lib/goals/activities';
+import { ActivityGoalPanel } from '@/components/activities/ActivityGoalPanel';
 import {
   EVENT_PHASE_LABEL,
+  EVENT_SIGNUP_STAGE_LABEL,
+  annualWheelRangeLabel,
   eventPhase,
+  eventSignupFunnel,
   formatStockholmDateTime,
+  isActivityOutcome,
+  isEventSignupStage,
   type EventSignup,
-  type EventSignupStage,
-  type IncubatorEvent
+  type EventFunnelStage,
+  type IncubatorEvent,
+  type Role
 } from '@platform/shared';
 
-const STAGE_ORDER: EventSignupStage[] = [
-  'signup',
-  'attended',
-  'meeting',
-  'application',
-  'admitted'
-];
-const STAGE_LABEL: Record<EventSignupStage, string> = {
-  signup: 'Anmäld',
-  attended: 'Närvarande',
-  meeting: 'Möte bokat',
-  application: 'Ansökan',
-  admitted: 'Antagen'
-};
-const STAGE_ACCENT: Record<EventSignupStage, string> = {
+const STAGE_ACCENT: Record<EventFunnelStage, string> = {
   signup: '#005470',
   attended: '#00a8de',
   meeting: '#6138b5',
   application: '#d67e47',
   admitted: '#4a7d4a'
-};
-const STAGE_VARIANT: Record<
-  EventSignupStage,
-  'default' | 'cyan' | 'purple' | 'copper' | 'green'
-> = {
-  signup: 'cyan',
-  attended: 'default',
-  meeting: 'purple',
-  application: 'copper',
-  admitted: 'green'
 };
 
 /** Alltid svensk tid — servern kör i UTC. */
@@ -64,11 +49,15 @@ function formatDateTime(iso: string): string {
 }
 
 export default async function EventDetailPage({
-  params
+  params,
+  searchParams
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ varning?: string }>;
 }) {
   const { id } = await params;
+  const { varning } = (await searchParams) ?? {};
+  const warnings = new Set((varning || '').split(','));
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'observer'])) {
     redirect('/chatt');
@@ -97,25 +86,46 @@ export default async function EventDetailPage({
     /* ignore */
   }
 
-  // Funnel cumulative counts
-  const stageCounts: Record<EventSignupStage, number> = {
-    signup: 0,
-    attended: 0,
-    meeting: 0,
-    application: 0,
-    admitted: 0
-  };
-  for (const s of signups) {
-    const idx = STAGE_ORDER.indexOf(s.stage);
-    for (let i = 0; i <= idx; i++) stageCounts[STAGE_ORDER[i]] += 1;
-  }
-  const funnelData = STAGE_ORDER.map((stage) => ({
-    stage,
-    label: STAGE_LABEL[stage],
-    count: stageCounts[stage],
-    color: STAGE_ACCENT[stage]
+  const canEdit = hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
+
+  // Årshjulsaktiviteten eventet genomför (§ 53). Tenant-verifierad läsning;
+  // en raderad post visas helt enkelt inte.
+  const wheelItem = event.wheel_item
+    ? await getRecordInTenant<{
+        id: string;
+        tenant?: string;
+        title?: string;
+        year?: number;
+        month?: number;
+        day?: number;
+        end_month?: number;
+        end_day?: number;
+        goal_indicators?: string[];
+        planned_participants?: number;
+      }>(
+        pb,
+        { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Role[] },
+        'annual_wheel_items',
+        event.wheel_item,
+        'id,tenant,title,year,month,day,end_month,end_day,goal_indicators,planned_participants'
+      )
+    : null;
+  const goalOptions = await listActivityIndicatorOptions(pb, user.tenant);
+
+  const funnelData = eventSignupFunnel(signups).map((f) => ({
+    ...f,
+    label: EVENT_SIGNUP_STAGE_LABEL[f.stage],
+    color: STAGE_ACCENT[f.stage]
   }));
   const maxCount = Math.max(1, ...funnelData.map((f) => f.count));
+
+  const participantRows: ParticipantRow[] = signups.map((s) => ({
+    id: s.id,
+    name: s.name,
+    detail: s.organization || s.email || '',
+    stage: isEventSignupStage(s.stage) ? s.stage : 'signup',
+    startup: s.expand?.startup ? { id: s.expand.startup.id, name: s.expand.startup.name } : undefined
+  }));
 
   return (
     <div className="mx-view-pad mx-wide">
@@ -133,14 +143,11 @@ export default async function EventDetailPage({
                 LIVE
               </Chip>
             )}
-            {hasRole(user.roles, ['admin', 'incubator_lead', 'coach']) && (
+            {canEdit && (
               <>
                 <Link href={`/events/${event.id}/edit`} className="mx-btn">
                   Redigera
                 </Link>
-                <button className="mx-btn mx-primary">
-                  <Icon name="plus" size={13} /> Lägg till anmäld
-                </button>
                 <ConfirmDeleteButton
                   action={deleteEventFormAction}
                   hiddenField={{ name: 'event_id', value: event.id }}
@@ -153,6 +160,27 @@ export default async function EventDetailPage({
           </>
         }
       />
+
+      {warnings.has('utvardering') && (
+        <div
+          role="status"
+          className="mx-t-13 mx-flex mx-items-c mx-gap-2"
+          style={{ marginTop: 12, padding: '8px 12px', borderRadius: 10, background: 'var(--movexum-pastell-gul)', color: 'var(--movexum-morkgul)' }}
+        >
+          <Icon name="alert" size={13} /> Eventet skapades, men utvärderingen från mallen kunde inte
+          skapas. Skapa den under Uppföljning nedan.
+        </div>
+      )}
+      {warnings.has('arshjul') && (
+        <div
+          role="status"
+          className="mx-t-13 mx-flex mx-items-c mx-gap-2"
+          style={{ marginTop: 12, padding: '8px 12px', borderRadius: 10, background: 'var(--movexum-pastell-gul)', color: 'var(--movexum-morkgul)' }}
+        >
+          <Icon name="alert" size={13} /> Eventet skapades, men kopplingen till årshjulet kunde inte sparas —
+          PocketBase saknar fältet. Kör migration 1700000194 (eller &ldquo;Sync PocketBase&rdquo;).
+        </div>
+      )}
 
       {/* ── Metadata ─────────────────────────────────────── */}
       <Card style={{ padding: 16, marginTop: 12 }}>
@@ -172,6 +200,20 @@ export default async function EventDetailPage({
           )}
           {event.location && (
             <Meta label="Plats" value={<span className="mx-t-13 mx-fw-6">{event.location}</span>} />
+          )}
+          {wheelItem && (
+            <Meta
+              label="Årshjulet"
+              value={
+                <Link
+                  href={`/arshjul?item=${encodeURIComponent(wheelItem.id)}`}
+                  className="mx-t-13 mx-fw-6"
+                  title={annualWheelRangeLabel({ ...wheelItem, year: wheelItem.year ?? new Date().getFullYear() })}
+                >
+                  {wheelItem.title || 'Aktivitet'} →
+                </Link>
+              }
+            />
           )}
           <Meta label="Typ" value={<Chip mono>{event.type}</Chip>} />
           <Meta
@@ -195,6 +237,10 @@ export default async function EventDetailPage({
             value={<span className="mx-disp mx-fw-6 mx-t-15">{event.signups_count || 0}</span>}
           />
           <Meta
+            label="Närvarande"
+            value={<span className="mx-disp mx-fw-6 mx-t-15">{event.attended_count || 0}</span>}
+          />
+          <Meta
             label="Antagna"
             value={<span className="mx-disp mx-fw-6 mx-t-15">{event.admitted_count || 0}</span>}
           />
@@ -204,59 +250,8 @@ export default async function EventDetailPage({
       <div
         style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 16, marginTop: 12 }}
       >
-        {/* ── Signups list ──────────────────────────────── */}
-        <Card style={{ padding: 0, overflow: 'hidden' }}>
-          <CardHead
-            label={`Anmälda · ${signups.length}`}
-            right={
-              <span className="mx-mono mx-t-xs mx-muted">{signups.length} totalt</span>
-            }
-          />
-          {signups.length === 0 ? (
-            <div
-              className="mx-muted mx-t-13"
-              style={{ padding: 24, textAlign: 'center' }}
-            >
-              Inga anmälningar registrerade än.
-            </div>
-          ) : (
-            <div>
-              {signups.map((s, i) => (
-                <div
-                  key={s.id}
-                  className="mx-flex mx-items-c mx-gap-3"
-                  style={{
-                    padding: '12px 16px',
-                    borderBottom:
-                      i < signups.length - 1 ? '1px solid var(--mx-line-soft)' : 'none'
-                  }}
-                >
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="mx-t-13 mx-fw-6 mx-truncate">{s.name}</div>
-                    <div className="mx-mono mx-t-xs mx-muted mx-truncate">
-                      {s.organization || s.email || '—'}
-                    </div>
-                  </div>
-                  {s.expand?.startup && (
-                    <Link
-                      href={`/startups/${s.expand.startup.id}`}
-                      className="mx-mono mx-t-xs mx-muted"
-                      style={{ textDecoration: 'none' }}
-                    >
-                      → {s.expand.startup.name}
-                    </Link>
-                  )}
-                  <Chip variant={STAGE_VARIANT[s.stage]} mono>
-                    {STAGE_LABEL[s.stage]}
-                  </Chip>
-                  {hasRole(user.roles, ['admin', 'incubator_lead', 'coach']) && (
-                    <SignupDeleteButton signupId={s.id} signupName={s.name} />
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
+        {/* ── Deltagare ────────────────────────────────── */}
+        <Participants eventId={event.id} rows={participantRows} canEdit={canEdit} />
 
         {/* ── Funnel ────────────────────────────────────── */}
         <Card style={{ padding: 0, overflow: 'hidden' }}>
@@ -309,13 +304,30 @@ export default async function EventDetailPage({
         </Card>
       </div>
 
+      <SectionHead title="Mål & genomförande" label="verksamhetsplan" />
+      <Card style={{ padding: 16 }}>
+        <ActivityGoalPanel
+          kind="event"
+          id={event.id}
+          options={goalOptions}
+          selected={event.goal_indicators ?? []}
+          inherited={wheelItem?.goal_indicators ?? []}
+          plannedParticipants={event.planned_participants && event.planned_participants > 0 ? event.planned_participants : null}
+          inheritedPlanned={wheelItem?.planned_participants && wheelItem.planned_participants > 0 ? wheelItem.planned_participants : null}
+          outcome={isActivityOutcome(event.outcome_verdict) ? event.outcome_verdict : null}
+          completedAt={event.completed_at || undefined}
+          attended={event.attended_count || 0}
+          canEdit={canEdit}
+        />
+      </Card>
+
       <SectionHead title="Uppföljning" label="enkät" />
       <FollowUpSurveys
         pb={pb}
         tenant={user.tenant}
         kind="event"
         id={event.id}
-        canCreate={hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])}
+        canCreate={canEdit}
       />
 
       <SectionHead title="Notes" label="metadata" />

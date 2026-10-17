@@ -2,17 +2,17 @@
 
 import type PocketBase from 'pocketbase';
 import { revalidatePath } from 'next/cache';
-import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { hasRole } from '@/lib/rbac';
-import { configuredAppUrl } from '@/lib/app-integrations/app-url';
+import { requestOrigin } from '@/lib/request-origin';
 import { getSurvey, newPublicSlug } from '@/lib/surveys/store';
 import { dispatchSurveyInvites } from '@/lib/surveys/dispatch';
 import { describePbError, pbFieldCodes, pbStatus } from '@/lib/pb-error';
 import { resolveSurveyLink, type ResolvedSurveyLink } from '@/lib/surveys/link';
 import { getRecordInTenant } from '@/lib/core/write/helpers';
+import { resolveSurveySeed } from '@/lib/core/write/surveys';
 import type { Role } from '@platform/shared';
 import {
   SURVEY_LINK_DEFAULT_KIND,
@@ -20,6 +20,7 @@ import {
   defaultSurveySendAt,
   isSurveyKind,
   normalizeSurveyQuestions,
+  normalizeSurveyTemplateTargets,
   parseSurveyLinkRef,
   type SurveyQuestion
 } from '@platform/shared';
@@ -61,7 +62,11 @@ function cap(v: FormDataEntryValue | null, max: number): string {
  * Felkoder som `createSurveyAction` skickar tillbaka till `/inflode/utvardering/new`
  * via `?error=` (+ `?detail=` med PB:s fältdetaljer). Texterna bor i sidan.
  */
-export type CreateSurveyErrorCode = 'link_missing' | 'collection_missing' | 'create_failed';
+export type CreateSurveyErrorCode =
+  | 'link_missing'
+  | 'template_missing'
+  | 'collection_missing'
+  | 'create_failed';
 
 /**
  * Skapar en enkät från en mall och skickar staff vidare till byggaren.
@@ -80,8 +85,10 @@ export async function createSurveyAction(formData: FormData) {
 
   // Valfri källa (§ 47.4). En referens som inte kan verifieras avvisas —
   // aldrig en tyst fristående enkät när staff trodde den var kopplad.
+  // "Skapa som mall" (§ 53.3): en mall följer aldrig upp en källa.
+  const asTemplate = formData.get('as_template') === '1';
   const forRaw = formData.get('for');
-  const forParam = typeof forRaw === 'string' && forRaw ? forRaw : '';
+  const forParam = !asTemplate && typeof forRaw === 'string' && forRaw ? forRaw : '';
   let link: ResolvedSurveyLink | null = null;
   if (forParam) {
     link = await resolveSurveyLink(pb, user, forParam);
@@ -90,10 +97,32 @@ export async function createSurveyAction(formData: FormData) {
     }
   }
 
-  const kindRaw = String(formData.get('kind') || (link ? SURVEY_LINK_DEFAULT_KIND[link.kind] : 'custom'));
-  const kind = isSurveyKind(kindRaw) ? kindRaw : 'custom';
-  const tpl = SURVEY_TEMPLATES[kind];
-  const name = cap(formData.get('name'), 160) || (link ? `Uppföljning: ${link.label}` : tpl.label);
+  // Mallvalet är antingen en inbyggd typ (`kind:<typ>`) eller en egen mall
+  // (`template:<id>`, tenant-verifierad i resolveSurveySeed).
+  const choice = String(formData.get('template') || '');
+  const templateId = choice.startsWith('template:') ? choice.slice('template:'.length) : '';
+  const kindRaw = choice.startsWith('kind:')
+    ? choice.slice('kind:'.length)
+    : String(formData.get('kind') || (link ? SURVEY_LINK_DEFAULT_KIND[link.kind] : 'custom'));
+  const seed = await resolveSurveySeed(
+    pb,
+    { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Role[] },
+    { templateId, kind: isSurveyKind(kindRaw) ? kindRaw : 'custom' }
+  );
+  if (!seed.ok) {
+    const qs = new URLSearchParams({ error: 'template_missing', detail: seed.error.slice(0, 400) });
+    if (forParam) qs.set('for', forParam);
+    redirect(`/inflode/utvardering/new?${qs.toString()}`);
+  }
+  const tpl = seed.value;
+  const kind = tpl.kind;
+  const defaultName = asTemplate
+    ? `Mall: ${SURVEY_TEMPLATES[kind].label}`
+    : link
+      ? `Uppföljning: ${link.label}`
+      : SURVEY_TEMPLATES[kind].label;
+  const name = cap(formData.get('name'), 160) || defaultName;
+  const templateFor = asTemplate ? normalizeSurveyTemplateTargets(formData.getAll('template_for')) : [];
   let created: { id: string } | null = null;
   let createError: { code: CreateSurveyErrorCode; detail: string } | null = null;
   // Den slumpade sluggen kolliderar i praktiken aldrig; ett unikt-index-fel
@@ -113,7 +142,8 @@ export async function createSurveyAction(formData: FormData) {
       created_by: user.id,
       link_kind: link?.kind ?? '',
       link_id: link?.id ?? '',
-      link_label: link?.label ?? ''
+      link_label: link?.label ?? '',
+      ...(asTemplate ? { is_template: true, template_for: templateFor } : {})
     };
     try {
       created = await writeWithFallback(pb, (c) =>
@@ -156,6 +186,13 @@ export async function createSurveyAction(formData: FormData) {
     redirect(`/inflode/utvardering/new?${qs.toString()}`);
   }
   revalidatePath('/inflode/utvardering');
+  if (asTemplate) {
+    // Schema-drift: utan migration 1700000195 blev raden en vanlig enkät.
+    const back = await getSurvey(pb, user.tenant, created.id);
+    if (back && !back.is_template) {
+      redirect(`/inflode/utvardering/${created.id}?varning=mall`);
+    }
+  }
   if (link) {
     // Schema-drift (§ 24.4-invarianten): PB släpper okända fält tyst. Läs
     // tillbaka och varna i stället för att låtsas att kopplingen finns.
@@ -176,6 +213,8 @@ export interface SaveSurveyInput {
   thank_you_message: string;
   questions: SurveyQuestion[];
   is_active: boolean;
+  /** Bara för mallar (§ 53.3) — ignoreras för vanliga enkäter. */
+  template_for?: string[];
 }
 
 export type SaveSurveyResult = { ok: true; questions: SurveyQuestion[] } | { ok: false; error: string };
@@ -192,7 +231,9 @@ export async function saveSurveyAction(input: SaveSurveyInput): Promise<SaveSurv
   // Frågornas id:n är stabila — svaren lagras under dem. Normaliseringen
   // behåller inskickade id:n; nya frågor får härledda.
   const questions = normalizeSurveyQuestions(input.questions);
-  if (input.is_active && questions.length === 0) {
+  // En mall publiceras aldrig (§ 53.3) — oavsett vad klienten skickar.
+  const isActive = existing.is_template ? false : input.is_active === true;
+  if (isActive && questions.length === 0) {
     return { ok: false, error: 'Lägg till minst en fråga innan du publicerar.' };
   }
 
@@ -203,7 +244,8 @@ export async function saveSurveyAction(input: SaveSurveyInput): Promise<SaveSurv
     welcome_body: String(input.welcome_body || '').trim().slice(0, 2000),
     thank_you_message: String(input.thank_you_message || '').trim().slice(0, 500),
     questions,
-    is_active: input.is_active === true
+    is_active: isActive,
+    ...(existing.is_template ? { template_for: normalizeSurveyTemplateTargets(input.template_for) } : {})
   };
   try {
     await writeWithFallback(pb, (c) => c.collection('surveys').update(existing.id, payload));
@@ -234,18 +276,6 @@ export async function deleteSurveyAction(formData: FormData) {
 }
 
 // ── Utskick till deltagare (§ 47.5) ──────────────────────────────────────────
-
-/** Origin för enkätlänken — från staffs egen request (proxy-headers först). */
-async function requestOrigin(): Promise<string> {
-  // Konfigurerad app-URL vinner — `x-forwarded-host` kan i värsta fall vara
-  // klientstyrd (mejlade enkätlänkar får aldrig peka på en främmande host).
-  const configured = configuredAppUrl();
-  if (configured) return configured;
-  const h = await headers();
-  const proto = (h.get('x-forwarded-proto') || 'https').split(',')[0]!.trim();
-  const host = h.get('x-forwarded-host') || h.get('host') || '';
-  return host ? `${proto}://${host}` : '';
-}
 
 export type SendSurveyState = { ok: true; message: string } | { ok: false; error: string };
 

@@ -1,7 +1,7 @@
 import 'server-only';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { sendSurveyInvites } from '@/lib/email';
-import { collectSurveyRecipients } from '@platform/shared';
+import { collectSurveyRecipients, isAttendedStage, isInviteStage } from '@platform/shared';
 import { toSurvey, type Survey } from './store';
 
 // Utskick av enkät till eventets deltagare (CLAUDE.md § 47.5). Delad kärna
@@ -9,6 +9,9 @@ import { toSurvey, type Survey } from './store';
 // Körs med superuser eftersom cron saknar användarsession; därför verifieras
 // tenant-likhet mellan enkät och event uttryckligen. Deltagarnas e-post läses
 // TRANSIENT (aldrig lagrad på enkäten, aldrig loggad) — bara antal skrivs.
+// Mottagare är de som DELTOG (närvarande eller längre i tratten, § 53.1) —
+// aldrig anmälda som inte kom.
+
 
 export type DispatchResult =
   | { ok: true; sent: number; failed: number; recipients: number }
@@ -61,16 +64,24 @@ export async function dispatchSurveyInvites(
     return { ok: false, error: 'Eventet som enkäten följer upp finns inte längre.' };
   }
 
-  let signups: { email?: string }[] = [];
+  let signups: { email?: string; stage?: string }[] = [];
   try {
-    signups = await pb.collection('event_signups').getFullList<{ email?: string }>({
+    signups = await pb.collection('event_signups').getFullList<{ email?: string; stage?: string }>({
       filter: pb.filter('event = {:e} && tenant = {:t}', { e: survey.link_id, t: survey.tenant }),
-      fields: 'id,email'
+      fields: 'id,email,stage'
     });
   } catch {
     return { ok: false, error: 'Kunde inte läsa deltagarlistan.' };
   }
-  const recipients = collectSurveyRecipients(signups);
+  const attended = signups.filter((s) => isAttendedStage(s.stage));
+  const registered = signups.filter((s) => !isInviteStage(s.stage));
+  if (registered.length > 0 && attended.length === 0) {
+    // Närvaron är inte markerad än. Felet (i stället för ett tomt utskick)
+    // gör att cron-vägen försöker igen nästa timme (provisoriskt lås) och
+    // att staff ser orsaken — utvärderingen går aldrig tyst förlorad.
+    return { ok: false, error: 'Ingen närvaro är markerad på eventet — markera vilka som deltog först.' };
+  }
+  const recipients = collectSurveyRecipients(attended);
   if (recipients.length === 0) {
     // Inget att skicka — men markera så cron inte försöker varje timme.
     await pb.collection('surveys').update(survey.id, { send_at: '', sent_at: new Date().toISOString(), sent_count: 0 }).catch(() => undefined);

@@ -10,7 +10,7 @@ import { deleteSurveyAction } from '@/lib/actions/surveys';
 import { getSurvey, getSurveyResults } from '@/lib/surveys/store';
 import { SurveyLinkChip } from '@/components/surveys/SurveyLinkChip';
 import { SurveySendPanel } from '@/components/surveys/SurveySendPanel';
-import { countSurveyRecipients } from '@/lib/surveys/recipients';
+import { countSurveyRecipients, type SurveyRecipientCounts } from '@/lib/surveys/recipients';
 import { getRecordInTenant } from '@/lib/core/write/helpers';
 import { defaultSurveySendAt, type Role } from '@platform/shared';
 import { buildInflodeTabs } from '../../_tabs';
@@ -32,12 +32,13 @@ export default async function SurveyDetailPage({
   const survey = await getSurvey(pb, user.tenant, id);
   if (!survey) notFound();
 
-  const showResults = vy === 'resultat';
+  // En mall (§ 53.3) har inga svar och inget utskick — bara byggaren.
+  const showResults = vy === 'resultat' && !survey.is_template;
   const results = showResults ? await getSurveyResults(pb, survey) : null;
 
   // Utskick (§ 47.5) — bara för event-kopplade enkäter. Antalet räknas
   // server-side; adresserna når aldrig klienten.
-  let send: { recipientCount: number; defaultSendAt: string } | null = null;
+  let send: { recipients: SurveyRecipientCounts; eventId: string; defaultSendAt: string } | null = null;
   if (!showResults && survey.link_kind === 'event' && survey.link_id) {
     const ev = await getRecordInTenant<{ id: string; tenant?: string; starts_at?: string; ends_at?: string }>(
       pb,
@@ -48,7 +49,8 @@ export default async function SurveyDetailPage({
     );
     if (ev) {
       send = {
-        recipientCount: await countSurveyRecipients(pb, user.tenant, survey.link_id),
+        recipients: await countSurveyRecipients(pb, user.tenant, survey.link_id),
+        eventId: ev.id,
         defaultSendAt: defaultSurveySendAt(ev)?.toISOString() ?? ''
       };
     }
@@ -60,11 +62,13 @@ export default async function SurveyDetailPage({
       tabs={buildInflodeTabs()}
       meta={
         <span className="mx-flex mx-items-c mx-gap-2 text-[12px] text-foreground-subtle">
-          Utvärdering / {survey.name}
+          Utvärdering / {survey.is_template ? 'Mall / ' : ''}
+          {survey.name}
           <SurveyLinkChip kind={survey.link_kind} id={survey.link_id} label={survey.link_label} />
         </span>
       }
       actions={
+        survey.is_template ? undefined : (
         <>
           <Link
             href={`/inflode/utvardering/${survey.id}`}
@@ -79,6 +83,7 @@ export default async function SurveyDetailPage({
             Resultat
           </Link>
         </>
+        )
       }
     >
       {varning === 'koppling' && (
@@ -98,6 +103,23 @@ export default async function SurveyDetailPage({
           fälten från migration 1700000150. Kör migrationen och skapa uppföljningen igen.
         </div>
       )}
+      {varning === 'mall' && (
+        <div
+          role="alert"
+          className="mx-t-13"
+          style={{
+            padding: '10px 12px',
+            borderRadius: 10,
+            marginBottom: 12,
+            maxWidth: 820,
+            background: 'var(--movexum-pastell-gul)',
+            color: 'var(--movexum-morkgul)'
+          }}
+        >
+          Enkäten skapades, men kunde inte sparas som mall — PocketBase saknar fälten från
+          migration 1700000195. Kör migrationen och skapa mallen igen.
+        </div>
+      )}
       {results ? (
         <SurveyResults summary={results.summary} total={results.total} incomplete={results.incomplete} />
       ) : (
@@ -108,7 +130,9 @@ export default async function SurveyDetailPage({
               <SurveySendPanel
                 surveyId={survey.id}
                 isActive={survey.is_active}
-                recipientCount={send.recipientCount}
+                registeredCount={send.recipients.registered}
+                attendedCount={send.recipients.attended}
+                eventId={send.eventId}
                 sendAt={survey.send_at}
                 sentAt={survey.sent_at}
                 sentCount={survey.sent_count}

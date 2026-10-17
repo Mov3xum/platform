@@ -5822,7 +5822,7 @@ aktivitetsloggen (§ 32) med klickbar länk.
 | `assign_workshop` | Tilldelar workshop → bolag (+ activities-rad som UI:t) | Dubbeltilldelning stoppas; medarbetare/möte kopplas av människa i /education |
 | `assign_education_document` | Tilldelar utbildningsdokument → bolag (idempotent upsert) | — |
 | `create_task` / `move_task` | Kanban-kort på bolags-/uppdragstavla + kolumnflytt | `assignees` agent-nekad (kan inte slå upp användar-id:n, `users` denylistad § 9.3) |
-| `create_event` | Event i kalendern (status `planned`, roller admin/incubator_lead/coach) | Inbjudningar (`event_signups`) görs av människa i /events |
+| `create_event` | Event i kalendern (status `planned`, roller admin/incubator_lead/coach) | Inbjudningar (`event_signups`) görs av människa under Marknadsverktyg → Inbjudningar (§ 53.5) |
 | `create_mission` | Uppdrag som **UTKAST** (status `draft`, actor = lead) | Team/recipients sätts av människa (AI-teamförslaget finns i /uppdrag-formuläret, § 29.3) |
 | `register_de_minimis_support` | De minimis-stöd med lazy enhet (§ 20.5) | **`kanBevilja` server-side, fail-closed** — enhetsupplösningen superuser-dubbelkollas (en tyst RLS-miss får aldrig ge en tom dubblett-enhet), takunderlaget läses som superuser och ett läsfel AVBRYTER registreringen; personnummer-sanering av `syfte` |
 | `add_startup_kpi` | KPI-rad; äldre `is_current` med samma namn avmarkeras | — |
@@ -7863,7 +7863,8 @@ finansieringsblocket. "Ny ansökan" finns för staff och länkad medlem.
 ### 47.1 Översikt
 
 `/inflode` (Marknadsverktyg) har flikarna Dashboard · Analys · Leads ·
-**Startupkompassen** (intag-moduler, § 23) · **Utvärdering**. Utvärdering låter
+**Startupkompassen** (intag-moduler, § 23) · **Inbjudningar** (§ 53.5) ·
+**Utvärdering**. Utvärdering låter
 admin/incubator_lead/coach bygga **digitala enkäter i webbläsaren** för
 uppföljning (workshop-/event-utvärdering, inkubatorprogram, alumni) och dela dem
 på en publik, oinloggad länk `/u/<public_slug>` med QR-kod. Svaren är
@@ -8018,7 +8019,7 @@ skapade uppföljningar med status + länkar till resultat/redigering
 ### 47.5 Utskick till deltagare (e-post efter ett event)
 
 En enkät som följer upp ett **event** (§ 47.4, `link_kind = 'event'`) kan
-skickas till eventets anmälda deltagare — antingen direkt ("Skicka nu") eller
+skickas till eventets deltagare (bara de som markerats närvarande, § 53.1) — antingen direkt ("Skicka nu") eller
 **automatiskt** vid en vald tidpunkt (förslag: 09:00 svensk tid dagen efter
 eventet, `defaultSurveySendAt`, ren + enhetstestad, § 38-dygnsgränser). Panelen
 `SurveySendPanel` ligger under byggaren på `/inflode/utvardering/<id>` och visar
@@ -9083,3 +9084,210 @@ team (TMRL), affär (BRL), IPR (IPRL), finansiering (FRL), teknik (TRL)**.
 - **Riskklass (EU AI Act):** n/a — mänsklig bedömning + deterministisk
   presentation, ingen AI-inferens.
 
+
+---
+
+## 53. Aktivitet → deltagare → utvärdering → mål (2026-10)
+
+### 53.1 Översikt och principer
+
+Marknadsverktygets kedja knyts ihop så att en aktivitet planeras **en** gång
+och följs hela vägen till målen utan manuell inmatning:
+
+```
+Mål/indikator ◄─(bidrar till)── Årshjulsaktivitet (PLAN)
+      ▲                                │ genomförs som (incubator_events.wheel_item)
+      │ live-värde                     ▼
+      │                          Event (GENOMFÖRANDE) ──► Deltagarlista (event_signups)
+      │                                                   anmäld → närvarande → …
+      └─── aggregat (k ≥ 5) ◄── Utvärdering (§ 47) ◄── utskick till närvarande
+```
+
+- **Årshjulet är planen, eventet genomförandet.** Ett event skapas från
+  årshjulsposten ("Skapa event" i årshjulets dialog →
+  `/events/new?fran=<id>`, namn/datum/beskrivning förifylls via
+  `annualWheelEventStartInput`) och pekar på den med `wheel_item`
+  (migration **1700000194**, relation på eventet så flera event kan genomföra
+  samma aktivitet). Ingen kopia — eventsidan visar planen med länk tillbaka.
+- **Deltagarlistan är `event_signups`, ingen parallell lista.** Steg, etiketter
+  och vad som räknas som närvaro bor i `packages/shared/src/event-participants.ts`
+  (`EVENT_SIGNUP_STAGES`, `EVENT_ATTENDED_STAGES`, `eventSignupCounters`,
+  `eventSignupFunnel` — rena, enhetstestade). Räknarna på eventet, eventsidans
+  tratt och utvärderingsutskicket läser alla därifrån; lägg aldrig en egen
+  steglista inline.
+- **Närvaro styr utvärderingen.** `dispatchSurveyInvites` skickar bara till
+  närvarande (eller längre i tratten) — mejlet tackar för att man *deltog*.
+  Har eventet anmälda men ingen markerad närvaro svarar utskicket med ett
+  tydligt fel i stället för ett tomt utskick: cron-vägen försöker igen varje
+  timme (provisoriskt lås, § 47.5) och panelen visar "Närvaron är inte
+  markerad än" med länk till eventet. Schemaläggning går bra innan eventet
+  (räknas mot anmälda); "Skicka nu" kräver närvarande mottagare.
+- **Deltagarlistan hanteras på eventsidan** (`app/events/[id]/Participants.tsx`):
+  lägg till deltagare, byt steg per rad och "Alla närvarande"
+  (`markSignupsAttendedAction` — bara `signup` → `attended`, senare steg rörs
+  inte). Allt är server actions med rollkontroll (admin/incubator_lead/coach)
+  och tenant-verifiering; e-post valideras server-side.
+
+### 53.3 Egna utvärderingsmallar
+
+Personalen bygger egna mallar för sina aktiviteter i samma byggare som
+enkäterna (`/inflode/utvardering` → "Ny mall", `new?mall=1`). En mall är en
+vanlig `surveys`-rad med `is_template = true` och `template_for` (eventtyper
+den är standard för) — migration **1700000195**. Ingen ny kollektion eller
+motor.
+
+- **En mall tar aldrig emot svar:** `saveSurveyAction` tvingar
+  `is_active = false` för mallar, den publika resolvningen (`lib/surveys/public.ts`)
+  avvisar mallar även om flaggan skulle sättas förbi skrivlagret, och mallar
+  saknar källa så utskick/schemaläggning aldrig är möjligt. Byggaren visar
+  "Mallen används för" i stället för publicering/delning.
+- **En väg för mallinnehåll:** `resolveSurveySeed` i `lib/core/write/surveys.ts`
+  löser antingen en egen mall (tenant-verifierad via `getRecordInTenant`,
+  MÅSTE vara `is_template`, annars fel — aldrig en tyst fallback) eller den
+  inbyggda `SURVEY_TEMPLATES[kind]`. UI-actionen, eventskapandet och
+  chatt-verktygets skrivlager (`createSurvey({ templateId })`) använder den.
+- **Utkast först (beslut 2026-10):** när ett event skapas väljer formuläret
+  "Utvärdering efter eventet" — standardmallen för eventtypen
+  (`pickSurveyTemplateForEventType`: första matchande mallen i namnordning,
+  ren + enhetstestad), en specifik mall eller ingen. Utvärderingen skapas
+  via skrivlagret som **opublicerat utkast** kopplat till eventet
+  (`link_kind = event`); en människa granskar, publicerar och schemalägger
+  (§ 47.5). Finns ingen mall för typen skapas ingenting. Misslyckas utkastet
+  skapas eventet ändå och eventsidan visar `?varning=utvardering`.
+- **"Skapa uppföljning"** på ett event förväljer tenantens mall för
+  eventtypen; egna mallar listas före de inbyggda.
+- **Eventtyper** (`EVENT_TYPES`, `EVENT_TYPE_LABEL`, `isEventType`) bor i
+  `event-participants.ts` och delas av formuläret, actions, skrivlagret och
+  mallarna — `template_for`-värdena MÅSTE spegla dem.
+- **Schema-drift:** `listSurveyTemplates` är fail-soft (instans utan
+  1700000195 ⇒ inga mallar, allt annat som förut); att skapa en mall mot en
+  sådan instans ger `?varning=mall`. Fälten speglas i `setup-via-api.mjs` och
+  asserteras i `verify-baseline.mjs`.
+
+### 53.4 Mål som drivs av aktiviteter — VP live mot aktiviteterna
+
+En indikator i `/mal` kan ha källan **`activities`** ("Kopplade
+aktiviteter") med ett **mått** (`activity_measure`): antal genomförda,
+antal genomförda enligt plan, antal deltagare (närvarande), utvärderingens
+snittbetyg (1–5) eller NPS. Aktiviteter — årshjulsposter och event —
+kopplas till sådana indikatorer, får en plan (planerat antal deltagare) och
+markeras genomförda. Värdet **och statusförslaget** räknas live; mål och VP
+fylls aldrig i för hand. Migration **1700000196**.
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/goal-activities.ts` (+ `.test.ts`) | Vokabulär (`ACTIVITY_MEASURES`, `ACTIVITY_OUTCOMES`), `eventOutcomeFromAttendance`, `parsePlannedParticipants`, `evaluateActivityIndicator` (värde + status mot plan hittills) |
+| `apps/web/src/lib/core/write/activity-goals.ts` | Skrivlagret: `setActivityGoals` (koppling + plan), `completeActivity` (genomförd/inställd/öppna igen) |
+| `apps/web/src/lib/goals/activities.ts` | Läsvägen: `loadActivityIndicatorResults` (årets aktiviteter + utvärderingssvar → resultat per indikator), `listActivityIndicatorOptions` |
+| `apps/web/src/components/activities/ActivityGoalPanel.tsx` | "Mål & genomförande" — samma panel på eventsidan och i årshjulets dialog |
+| `apps/web/src/lib/actions/activity-goals.ts` | Tunna server actions → skrivlagret |
+
+- **En aktivitet räknas en gång:** ett event är en aktivitet; en
+  årshjulspost utan event är en aktivitet; en post som genomförs via event
+  (`wheel_item`) representeras av sina event och avslutas där. Eventets
+  koppling = egna indikatorer ∪ årshjulspostens; planen ärvs från posten
+  när eventet saknar egen.
+- **Utfall:** ett event räknar utfallet **server-side** ur närvaron mot planen
+  (`eventOutcomeFromAttendance`: minst så många närvarande som planerat =
+  enligt plan; utan plan räcker genomförandet). Närvaron räknas om ur
+  deltagarlistan vid avslut — räknarna på eventet litas inte på. En
+  årshjulspost utan event saknar deltagardata; där väljer människan
+  "enligt plan" / "under plan". Inställda räknas varken som planerade eller
+  sena.
+- **Status mot planen hittills** (`evaluateActivityIndicator`): förfallna men
+  ej genomförda aktiviteter ⇒ Försenad; för "enligt plan" även genomförda
+  under plan; för deltagare närvaro mot planerat hittills; måltal nått ⇒
+  Klar; färre planerade aktiviteter än måltalet ⇒ Försenad ("planera fler");
+  inget förfallet ⇒ Ej startad. Odaterade poster förfaller vid årets slut
+  (`annualWheelDueDateKey`; perioder vid periodens slut).
+- **Utvärderingsmått** räknar bara utvärderingar (§ 47, `link_kind = event`,
+  aldrig mallar) med **minst 5 svar** (`AGGREGATE_MIN_GROUP`, k-anonymitet);
+  färre ⇒ "–" med förklaring. Bara tal läses ur svaren (betyg/NPS), aldrig
+  fritext. Läsningen sker med användarens token (RLS) och är kapad
+  (5 000 svar).
+- **Människa godkänner kvartalet (beslut 2026-10):** cockpiten visar värde,
+  statusförslag och de kopplade aktiviteterna live; kvartalsstatusen sparas
+  fortfarande av en människa (`recordGoalStatus`), som för `activities`
+  hämtar värdet server-side och avvisar ett manuellt värde (samma regel som
+  `computed`/`survey`, § 42.3). Presentationsläget visar live-värdet.
+- **Säkerhet:** indikatorer slås upp tenant-verifierat och MÅSTE ha källan
+  `activities`; aktiviteten likaså. Fälten är agent-nekade i
+  `writable-fields.ts` (verksamhetsplanens siffror flyttas av människor) —
+  chattens `add_goal_indicator` erbjuder fortfarande bara computed/manual.
+  Audit i `agent_actions` (titel, indikatoretiketter, utfall, antal —
+  PII-fritt) och feeden visar "Event: "X" — genomförd enligt plan".
+  Schema-drift: saknade fält efter skrivning ⇒ tydligt fel som namnger
+  migrationen; `verify-baseline.mjs` asserterar fälten och select-värdet
+  `goal_indicators.source = activities`; allt speglas i `setup-via-api.mjs`.
+  Goal-importen (§ 42.3) tolkar `activities` som manuell med varning (måttet
+  väljs i `/mal`).
+- **Riskklass:** n/a — deterministisk beräkning, ingen AI-inferens. Ingen ny
+  PII; nya fält når inte AI-kontexten.
+
+### 53.5 Inbjudningar — fliken under Marknadsverktyget
+
+`/inflode/inbjudningar` (flik mellan Startupkompassen och Utvärdering) visar
+kommande event (och de senaste 30 dagarna) med läget inbjudna / kommer /
+avböjt / ej utskickade. Per event (`/inflode/inbjudningar/<id>`) söker staff
+i **kontaktboken** (namn, organisation, e-post, kategori — högst 50 träffar),
+bjuder in och följer svaren. Migration **1700000197**.
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/event-invitations.ts` (+ `.test.ts`) | `selectInviteRecipients` (e-post, avregistrering, dubbletter, tak 500), `rsvpOpen`, `stageForRsvp`, tokenformat |
+| `apps/web/src/lib/core/write/event-invitations.ts` | Skrivlagret: `inviteContactsToEvent`, `sendEventInvitations` (pending/påminnelse), `hashRsvpToken` |
+| `apps/web/src/lib/email.ts` | `sendEventInvites` — ett mejl per mottagare med personlig svarslänk + avregistrering |
+| `apps/web/src/lib/events/rsvp.ts` + `app/e/svar/page.tsx` + `app/api/public/e/rsvp/route.ts` | Publik bekräftelsesida och svarsroute |
+| `apps/web/src/lib/events/counters.ts` | `recomputeEventCounters` — delad av eventsidan, inbjudningarna och svarsvägen |
+
+- **En deltagarlista:** en inbjudan är en rad i `event_signups` med
+  `stage = invited` (nytt steg före tratten, liksom `declined`), `contact`
+  och `invited_at`. Ja ⇒ `signup` (raden står direkt i eventets
+  deltagarlista), nej ⇒ `declined`. Inbjudna/avböjda räknas inte som anmälda
+  (`eventSignupCounters`, `EVENT_INVITE_STAGES`) och syns inte i tratten.
+  Ett svar nedgraderar aldrig en närvarande/antagen.
+- **Svarslänken:** 32 slumpbytes (base64url) per utskick; bara SHA-256-hashen
+  lagras (`rsvp_token_hash`, indexerad) — klartexten finns enbart i mejlet
+  och ett nytt utskick/påminnelse roterar den. Länken går till en
+  **bekräftelsesida** (GET svarar aldrig — mejlskannrar förhandsläser
+  länkar); svaret skickas med POST till `/api/public/e/rsvp` (rate-limit
+  20/min och IP, transient). Uppslaget sker via superuser (ingen session);
+  tenant härleds ur raden och eventet MÅSTE tillhöra samma tenant. Svar tas
+  emot till eventets slut (`rsvpOpen`); avregistrering gäller alltid. `/e/`
+  är publik i middleware och renderas utan AppShell (layout + SessionGuard).
+- **Rättslig grund (beslut 2026-10): berättigat intresse** — även kontakter
+  utan samtycke kan bjudas in, med avregistrering i varje mejl (GDPR art. 21).
+  "Avregistrera mig" sätter `contacts.invite_opt_out` (+ `_at`); avregistrerade
+  kan inte väljas och hoppas över vid **varje** utskick, även påminnelser.
+  Kontrolleras mot marknadsföringslagen innan utskick till privatpersoner i
+  stor skala (inbjudningar till B2B-kontakter i kontaktnätet är huvudfallet).
+- **Dataminimering:** e-postadressen kopieras till deltagarraden (som för en
+  manuellt inlagd deltagare) och visas aldrig i inbjudningsvyn; loggar och
+  audit (`agent_actions`, feeden: "Inbjudan skickad till "X" · N mejl")
+  innehåller bara antal. `event_signups` cascade-raderas med eventet och är
+  fortsatt denylistad för AI.
+- **Människa-i-loopen:** att bjuda in och skicka är mänskliga klick med
+  bekräftelse (`CREATE_POLICIES.event_signups`: agent nekad); chattens
+  `create_event` skapar fortfarande bara eventet.
+- **Schema-drift:** saknade fält efter skrivning ⇒ fel som namnger
+  migrationen; `verify-baseline.mjs` asserterar fälten och select-värdena
+  `invited`/`declined`; allt speglas i `setup-via-api.mjs` (inklusive
+  `event_signups.contact` från 1700000073, som saknades där).
+- **Inte byggt (YAGNI):** publik självanmälan för okända, inbjudan av
+  bolagsmedlemmar/personal som användare, kalenderfil (.ics) och automatiska
+  påminnelser — nästa steg om behovet visar sig.
+
+### 53.2 Säkerhet och regelefterlevnad
+
+- **Tenant:** `wheel_item` från klienten litas aldrig på — `createEventAction`
+  slår upp posten med `getRecordInTenant` och avvisar en okänd referens
+  (aldrig ett tyst fristående event). Förifyllningen på `/events/new` är bara
+  presentation.
+- **Schema-drift (§ 24.4):** saknas `wheel_item` på den skapade posten
+  redirectas till eventet med `?varning=arshjul` och en gul banner som
+  namnger migrationen. Fältet speglas i `setup-via-api.mjs` (målkollektionens
+  id slås upp på namnet, § 30.4 p. 1) och asserteras i `verify-baseline.mjs`
+  (`REQUIRED_APP_FIELDS`).
+- **GDPR § 5:** inga nya personuppgiftsfält; deltagarnas e-post läses fortsatt
+  transient vid utskick. `event_signups` når aldrig AI-kontexten. Riskklass
+  (EU AI Act): n/a — ingen AI-inferens.

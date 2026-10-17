@@ -1306,11 +1306,25 @@ export interface IncubatorEvent {
   attended_count?: number;
   leads_count?: number;
   admitted_count?: number;
+  /** Årshjulsaktiviteten eventet genomför (migration 1700000194, § 53). */
+  wheel_item?: string;
+  /** Mål som drivs av aktiviteter (migration 1700000196, § 53.4). */
+  goal_indicators?: string[];
+  planned_participants?: number;
+  completed_at?: string;
+  outcome_verdict?: string;
   created: string;
   updated: string;
 }
 
-export type EventSignupStage = 'signup' | 'attended' | 'meeting' | 'application' | 'admitted';
+export type EventSignupStage =
+  | 'invited'
+  | 'declined'
+  | 'signup'
+  | 'attended'
+  | 'meeting'
+  | 'application'
+  | 'admitted';
 
 export interface EventSignup {
   id: string;
@@ -1322,6 +1336,11 @@ export interface EventSignup {
   stage: EventSignupStage;
   startup?: string;
   notes?: string;
+  /** Kontakt i kontaktboken (§ 15.2) — mottagare av en inbjudan (§ 53.5). */
+  contact?: string;
+  invited_at?: string;
+  invite_sent_at?: string;
+  responded_at?: string;
   created: string;
   updated: string;
   expand?: {
@@ -1763,11 +1782,14 @@ export function resolveUserModules(input: {
   return resolveEnabledModules({ ...input, allowedForRoles: allowedModuleIdsForRoles(input.roles) });
 }
 export * from './event-time';
+export * from './event-participants';
+export * from './event-invitations';
 export * from './org-posts';
 export * from './home';
 export * from './followup-rules';
 export * from './metrics';
 export * from './goals';
+export * from './goal-activities';
 export * from './goals-import';
 export {
   SURVEY_TEMPLATES as COMPASS_SURVEY_TEMPLATES,

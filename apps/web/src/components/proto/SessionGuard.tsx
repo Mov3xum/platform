@@ -11,7 +11,12 @@ import { usePathname } from 'next/navigation';
 const SHELL_LESS_PATHS = ['/login', '/offline'];
 
 function isShellLess(pathname: string): boolean {
-  return SHELL_LESS_PATHS.includes(pathname) || pathname.startsWith('/m/') || pathname.startsWith('/u/');
+  return (
+    SHELL_LESS_PATHS.includes(pathname) ||
+    pathname.startsWith('/m/') ||
+    pathname.startsWith('/u/') ||
+    pathname.startsWith('/e/')
+  );
 }
 
 /**

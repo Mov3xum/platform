@@ -332,6 +332,93 @@ export async function sendSurveyInvites(
   return { sent, failed };
 }
 
+export interface EventInviteFields {
+  eventName: string;
+  /** Färdigformaterad tid i svensk tid, t.ex. "20 oktober 2026 09:00". */
+  when: string;
+  location?: string;
+  /** Kort beskrivning (ren text). */
+  intro?: string;
+  /** Påminnelse till den som inte svarat. */
+  reminder?: boolean;
+}
+
+/**
+ * Skickar inbjudningar till ett event (CLAUDE.md § 53.5). Ett mejl per
+ * mottagare med en PERSONLIG svarslänk (engångstoken i URL:en) — därför
+ * tar funktionen `{ key, email, rsvpUrl }` per mottagare och returnerar
+ * nycklarna (t.ex. rad-id) för lyckade utskick. Länkarna går till en
+ * bekräftelsesida (ingen GET svarar åt personen — mejlskannrar förhandsläser
+ * länkar). Varje mejl har en avregistreringslänk (GDPR art. 21). Innehållet
+ * HTML-escapas; adresser loggas aldrig.
+ */
+export async function sendEventInvites(
+  recipients: { key: string; email: string; rsvpUrl: string }[],
+  fields: EventInviteFields
+): Promise<{ sent: string[]; failed: number }> {
+  const apiKey = getResendApiKey();
+  const esc = (v: string) =>
+    v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const subject = fields.reminder ? `Påminnelse: ${fields.eventName}` : `Inbjudan: ${fields.eventName}`;
+  const html = (rsvpUrl: string) => {
+    const yes = `${rsvpUrl}&svar=yes`;
+    const no = `${rsvpUrl}&svar=no`;
+    const unsubscribe = `${rsvpUrl}&svar=unsubscribe`;
+    return `<!DOCTYPE html>
+<html lang="sv">
+<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>${esc(fields.eventName)}</title></head>
+<body style="margin:0;padding:0;background:#f2f2f2;font-family:'Nunito Sans','Nunito Sans Variable',system-ui,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f2f2f2;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;padding:40px;max-width:560px;">
+        <tr><td style="padding-bottom:24px;"><span style="font-size:22px;font-weight:700;color:#121212;letter-spacing:-0.5px;">movexum</span></td></tr>
+        <tr><td>
+          <p style="margin:0 0 6px;font-size:13px;color:#6b6b6b;">${fields.reminder ? 'Påminnelse — du har inte svarat än' : 'Du är inbjuden'}</p>
+          <h1 style="margin:0 0 12px;font-size:20px;font-weight:700;color:#121212;">${esc(fields.eventName)}</h1>
+          <p style="margin:0 0 4px;font-size:14px;color:#3f3f3f;"><strong>När:</strong> ${esc(fields.when)}</p>
+          ${fields.location ? `<p style="margin:0 0 12px;font-size:14px;color:#3f3f3f;"><strong>Var:</strong> ${esc(fields.location)}</p>` : ''}
+          ${fields.intro ? `<p style="margin:12px 0 20px;font-size:14px;line-height:1.5;color:#3f3f3f;white-space:pre-wrap;">${esc(fields.intro)}</p>` : ''}
+          <a href="${esc(yes)}" style="display:inline-block;background:#002c40;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:12px 20px;border-radius:999px;margin:8px 8px 0 0;">Jag kommer</a>
+          <a href="${esc(no)}" style="display:inline-block;background:#ffffff;color:#002c40;text-decoration:none;font-weight:600;font-size:14px;padding:11px 19px;border-radius:999px;border:1px solid #002c40;margin:8px 0 0;">Jag kan inte</a>
+          <p style="margin:20px 0 0;font-size:12px;color:#6b6b6b;">Länken är personlig och gäller till och med eventet. Du kan ändra ditt svar när som helst innan dess.</p>
+          <p style="margin:16px 0 0;font-size:11px;color:#8a8a8a;">Du får inbjudan eftersom du finns i Movexums kontaktnät. Vill du inte få fler inbjudningar? <a href="${esc(unsubscribe)}" style="color:#8a8a8a;">Avregistrera dig</a>.</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+  };
+
+  const sent: string[] = [];
+  let failed = 0;
+  const BATCH = 10;
+  for (let i = 0; i < recipients.length; i += BATCH) {
+    const chunk = recipients.slice(i, i + BATCH).filter((r) => r.email.includes('@'));
+    const results = await Promise.all(
+      chunk.map(async (r) => {
+        try {
+          const res = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify({ from: FROM_EMAIL, to: [r.email], subject, html: html(r.rsvpUrl) })
+          });
+          if (!res.ok) {
+            // PII-fritt: status, aldrig adressen.
+            console.error(`[email] Resend event invite error ${res.status}`);
+            return null;
+          }
+          return r.key;
+        } catch {
+          return null;
+        }
+      })
+    );
+    for (const r of results) r ? sent.push(r) : failed++;
+  }
+  return { sent, failed };
+}
+
 export interface ChatSummaryEmailFields {
   moduleName: string;
   /** Besökarsammanfattningen (ren text; radbrytningar bevaras). */

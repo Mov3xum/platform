@@ -148,6 +148,8 @@ export function middleware(req: NextRequest) {
     // Marknadsverktyg → Utvärdering (§ 39): anonyma enkäter på /u/<slug>.
     pathname === '/u' ||
     pathname.startsWith('/u/') ||
+    // Svar på inbjudningar (§ 53.5): /e/svar?t=<token>.
+    pathname.startsWith('/e/') ||
     pathname.startsWith('/api/public/') ||
     PWA_PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));
 

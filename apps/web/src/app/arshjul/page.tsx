@@ -12,6 +12,7 @@ import { listAnnualWheelCategories } from '@/lib/annual-wheel/categories';
 import { ensureAnnualWheelSchema, unrepairableDriftMessage } from '@/lib/annual-wheel/schema-repair';
 import { PageShell } from '@/components/PageShell';
 import { AnnualWheelView } from './AnnualWheelView';
+import { listActivityIndicatorOptions } from '@/lib/goals/activities';
 import type { AnnualWheelItem, Role } from '@platform/shared';
 
 export const dynamic = 'force-dynamic';
@@ -35,6 +36,10 @@ interface WheelRow {
   category?: string;
   responsible?: string;
   notes?: string;
+  goal_indicators?: string[];
+  planned_participants?: number;
+  outcome_verdict?: string;
+  completed_at?: string;
   created_by?: string;
   created?: string;
   updated?: string;
@@ -128,11 +133,34 @@ export default async function ArshjulPage({
     // kategori behåller sin nyckel — vyn visar den då rått med neutral färg.
     category: typeof r.category === 'string' && r.category ? r.category : fallbackCategory,
     notes: r.notes || undefined,
+    goal_indicators: Array.isArray(r.goal_indicators) ? r.goal_indicators : [],
+    planned_participants: r.planned_participants && r.planned_participants > 0 ? r.planned_participants : null,
+    outcome_verdict: r.outcome_verdict || null,
+    completed_at: r.completed_at || undefined,
     created_by: r.created_by,
     created: r.created,
     updated: r.updated
   }));
 
+
+  // Mål & genomförande (§ 53.4): indikatorer att koppla till och event som
+  // genomför posterna. Fail-soft — utan migrationerna blir båda tomma.
+  const [goalOptions, linkedEvents] = await Promise.all([
+    listActivityIndicatorOptions(pb, user.tenant),
+    pb
+      .collection('incubator_events')
+      .getFullList<{ id: string; name?: string; wheel_item?: string }>({
+        filter: pb.filter('tenant = {:t} && wheel_item != ""', { t: user.tenant }),
+        fields: 'id,name,wheel_item',
+        batch: 500
+      })
+      .catch(() => [])
+  ]);
+  const eventsByItem: Record<string, { id: string; name: string }[]> = {};
+  for (const e of linkedEvents) {
+    if (!e.wheel_item) continue;
+    (eventsByItem[e.wheel_item] ??= []).push({ id: e.id, name: e.name || 'Event' });
+  }
 
   return (
     <PageShell
@@ -152,6 +180,8 @@ export default async function ArshjulPage({
         schemaNotice={schemaNotice}
         readNotice={readNotice}
         openItemId={openItemId}
+        goalOptions={goalOptions}
+        eventsByItem={eventsByItem}
       />
     </PageShell>
   );

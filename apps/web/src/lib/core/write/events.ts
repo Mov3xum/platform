@@ -12,6 +12,7 @@ import {
 import { writeWithFallback } from './helpers';
 import type { Actor, WriteResult } from './types';
 import { fail, ok } from './types';
+import { EVENT_TYPES, isEventType, type EventType } from '@platform/shared';
 
 /**
  * Möten/events (`incubator_events`, § 18.4) via chatten. Eventet skapas med
@@ -20,9 +21,6 @@ import { fail, ok } from './types';
  * är denylistad, § 9.3) och deltagarlistor är ett mänskligt beslut i UI:t.
  * Ingen PII skrivs (namn/plats/beskrivning är verksamhetsdata).
  */
-
-const EVENT_TYPES = ['pitch', 'conference', 'matching', 'hack', 'mingle', 'workshop', 'other'] as const;
-type EventType = (typeof EVENT_TYPES)[number];
 
 export interface CreateEventParams {
   name: string;
@@ -56,9 +54,7 @@ export async function createEvent(
   const name = validateNonEmptyText(params.name, 'name', 200);
   if (!name.ok) return fail('INVALID_VALUE', name.error);
 
-  const type: EventType = EVENT_TYPES.includes(params.type as EventType)
-    ? (params.type as EventType)
-    : 'other';
+  const type: EventType = isEventType(params.type) ? params.type : 'other';
 
   const startsAt = validateIsoDateTime(params.startsAt, 'starts_at');
   if (!startsAt.ok) return fail('INVALID_VALUE', startsAt.error);

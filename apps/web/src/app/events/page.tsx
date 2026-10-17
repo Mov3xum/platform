@@ -8,28 +8,16 @@ import { Chip } from '@/components/proto';
 import { PageShell } from '@/components/PageShell';
 import { RailSection, RailStat, RailItem } from '@/components/PageRail';
 import {
+  EVENT_SIGNUP_STAGE_LABEL,
   eventPhase,
+  eventSignupFunnel,
   stockholmWallClock,
+  type EventFunnelStage,
   type EventSignup,
-  type EventSignupStage,
   type IncubatorEvent
 } from '@platform/shared';
 
-const STAGE_ORDER: EventSignupStage[] = [
-  'signup',
-  'attended',
-  'meeting',
-  'application',
-  'admitted'
-];
-const STAGE_LABEL: Record<EventSignupStage, string> = {
-  signup: 'Anmäld',
-  attended: 'Närvarande',
-  meeting: 'Möte bokat',
-  application: 'Ansökan',
-  admitted: 'Antagen'
-};
-const STAGE_ACCENT: Record<EventSignupStage, string> = {
+const STAGE_ACCENT: Record<EventFunnelStage, string> = {
   signup: '#005470',
   attended: '#00a8de',
   meeting: '#6138b5',
@@ -105,25 +93,10 @@ export default async function EventsPage() {
     }
   }
 
-  const stageCounts: Record<EventSignupStage, number> = {
-    signup: 0,
-    attended: 0,
-    meeting: 0,
-    application: 0,
-    admitted: 0
-  };
-  for (const s of allSignups) {
-    const idx = STAGE_ORDER.indexOf(s.stage);
-    for (let i = 0; i <= idx; i++) {
-      stageCounts[STAGE_ORDER[i]] += 1;
-    }
-  }
-
-  const funnelData = STAGE_ORDER.map((stage) => ({
-    stage,
-    label: STAGE_LABEL[stage],
-    count: stageCounts[stage],
-    color: STAGE_ACCENT[stage]
+  const funnelData = eventSignupFunnel(allSignups).map((f) => ({
+    ...f,
+    label: EVENT_SIGNUP_STAGE_LABEL[f.stage],
+    color: STAGE_ACCENT[f.stage]
   }));
   const maxCount = Math.max(1, ...funnelData.map((f) => f.count));
   const admittedTotal = funnelData[funnelData.length - 1].count;

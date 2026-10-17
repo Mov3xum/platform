@@ -3943,7 +3943,10 @@ await ensureCollection({
     { name: 'send_at', type: 'date', required: false },
     { name: 'sent_at', type: 'date', required: false },
     { name: 'sent_count', type: 'number', required: false, min: 0 },
-    { name: 'send_base_url', type: 'text', required: false, max: 300 }
+    { name: 'send_base_url', type: 'text', required: false, max: 300 },
+    // 1700000195 — egna mallar (§ 53.3). Mallar publiceras/skickas aldrig.
+    { name: 'is_template', type: 'bool', required: false },
+    { name: 'template_for', type: 'select', required: false, maxSelect: 7, values: ['pitch', 'conference', 'matching', 'hack', 'mingle', 'workshop', 'other'] }
   ],
   indexes: [
     'CREATE INDEX idx_surveys_tenant ON surveys (tenant)',
@@ -4205,7 +4208,7 @@ await ensureCollection({
     { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
     { name: 'goal', type: 'relation', required: true, collectionId: 'goals_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
     { name: 'label', type: 'text', required: true, min: 1, max: 200 },
-    { name: 'source', type: 'select', required: true, maxSelect: 1, values: ['computed', 'manual', 'survey'] },
+    { name: 'source', type: 'select', required: true, maxSelect: 1, values: ['computed', 'manual', 'survey', 'activities'] },
     { name: 'metric_key', type: 'text', required: false, max: 60 },
     // Migration 1700000160: enkätkälla (§ 43) + känt-flagga för måltalet (PB lagrar null som 0).
     { name: 'survey_module', type: 'relation', required: false, collectionId: 'compass_modules_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
@@ -4919,7 +4922,23 @@ for (const name of ['capital_rounds', 'de_minimis_stod']) {
 // Migration 1700000160: goal_indicators.source += 'survey' (§ 43) — inline-
 // defen ovan bär redan fälten, men ensureCollection synkar inte select-värden
 // på en befintlig collection. Hela listan (patchCollection ERSÄTTER values).
-await patchCollection('goal_indicators', [], { source: { values: ['computed', 'manual', 'survey'] } });
+await patchCollection('goal_indicators', [], { source: { values: ['computed', 'manual', 'survey', 'activities'] } });
+// Migration 1700000196: mål som drivs av aktiviteter (§ 53.4) — måttet på
+// indikatorn + koppling/plan/utfall på årshjulsposter och event.
+await patchCollection('goal_indicators', [
+  { name: 'activity_measure', type: 'select', required: false, maxSelect: 1, values: ['completed', 'completed_on_plan', 'participants', 'eval_score', 'eval_nps'] }
+]);
+{
+  const goalIndicatorsCol = await pb.collections.getOne('goal_indicators');
+  for (const name of ['annual_wheel_items', 'incubator_events']) {
+    await patchCollection(name, [
+      { name: 'goal_indicators', type: 'relation', required: false, collectionId: goalIndicatorsCol.id, cascadeDelete: false, minSelect: 0, maxSelect: 20 },
+      { name: 'planned_participants', type: 'number', required: false, onlyInt: true, min: 0, max: 100000 },
+      { name: 'completed_at', type: 'date', required: false },
+      { name: 'outcome_verdict', type: 'select', required: false, maxSelect: 1, values: ['on_plan', 'below_plan', 'cancelled'] }
+    ]);
+  }
+}
 // Migration 1700000161: goals.kind (övergripande/personligt) + owner_user —
 // ensureCollection lägger bara till fält på en NY collection.
 await patchCollection('goals', [
@@ -5039,6 +5058,34 @@ await patchCollection('annual_wheel_items', [
   track: { required: false },
   tags: { values: ANNUAL_WHEEL_TAG_VALUES, maxSelect: ANNUAL_WHEEL_TAG_VALUES.length }
 });
+
+// Migration 1700000197: inbjudningar (§ 53.5) — inbjudans steg, hashad
+// svarstoken och tidsstämplar på event_signups (+ kontaktrelationen från
+// 1700000073, som saknades här) och avregistrering på contacts.
+// patchCollection ERSÄTTER select-värdena — hela listan.
+{
+  const contactsCol = await pb.collections.getOne('contacts');
+  await patchCollection('event_signups', [
+    { name: 'contact', type: 'relation', required: false, collectionId: contactsCol.id, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'rsvp_token_hash', type: 'text', required: false, max: 64 },
+    { name: 'invited_at', type: 'date', required: false },
+    { name: 'invite_sent_at', type: 'date', required: false },
+    { name: 'responded_at', type: 'date', required: false }
+  ], {
+    stage: { values: ['invited', 'declined', 'signup', 'attended', 'meeting', 'application', 'admitted'] }
+  });
+  await patchCollection('contacts', [
+    { name: 'invite_opt_out', type: 'bool', required: false },
+    { name: 'invite_opt_out_at', type: 'date', required: false }
+  ]);
+}
+
+// Migration 1700000194: incubator_events.wheel_item — eventet genomför en
+// årshjulsaktivitet (§ 53). Målkollektionens id slås upp på namnet (§ 30.4 p. 1).
+const annualWheelItemsCol = await pb.collections.getOne('annual_wheel_items');
+await patchCollection('incubator_events', [
+  { name: 'wheel_item', type: 'relation', required: false, collectionId: annualWheelItemsCol.id, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+]);
 
 // =========================================================================
 // 18d. Field-patches på befintliga collections (porterade från migrations
