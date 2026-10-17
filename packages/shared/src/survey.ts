@@ -560,8 +560,8 @@ export function defaultSurveySendAt(event: {
 //
 // En mall är en vanlig `surveys`-rad med `is_template = true`: den byggs i
 // samma byggare, kan aldrig publiceras eller skickas, och anger vilka
-// eventtyper den är standard för (`template_for`). De inbyggda
-// `SURVEY_TEMPLATES` är fortsatt startpunkten när tenanten saknar egen mall.
+// eventtyper den är standard för (`template_for`). Saknar tenanten egen mall
+// för en eventtyp gäller Movexums standardmall (survey-starters.ts).
 
 export interface SurveyTemplateCandidate {
   id: string;
@@ -578,8 +578,8 @@ export function normalizeSurveyTemplateTargets(raw: unknown): EventType[] {
 
 /**
  * Tenantens standardmall för en eventtyp: den första (i namnordning) som
- * anger typen i `template_for`. Null ⇒ ingen egen mall — då skapas ingen
- * utvärdering automatiskt (inbyggda mallar väljs bara uttryckligen).
+ * anger typen i `template_for`. Null ⇒ ingen egen mall — då gäller Movexums
+ * standardmall för typen (`defaultEvaluationTemplateRef`, survey-starters.ts).
  */
 export function pickSurveyTemplateForEventType(
   templates: ReadonlyArray<SurveyTemplateCandidate>,

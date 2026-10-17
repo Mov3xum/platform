@@ -7,11 +7,22 @@ import { Card, Chip, Icon } from '@/components/proto';
 import { listSurveys } from '@/lib/surveys/store';
 import { EVENT_TYPE_LABEL, SURVEY_KIND_LABEL } from '@platform/shared';
 import { SurveyLinkChip } from '@/components/surveys/SurveyLinkChip';
+import { StarterTemplateGallery } from '@/components/surveys/StarterTemplateGallery';
 import { buildInflodeTabs } from '../_tabs';
 
 export const dynamic = 'force-dynamic';
 
-export default async function SurveysPage() {
+const TEMPLATE_ERROR: Record<string, string> = {
+  las: 'Kunde inte läsa era mallar — inga mallar lades till. Försök igen.',
+  schema: 'PocketBase saknar fälten för mallar — kör migration 1700000195 (eller "Sync PocketBase").'
+};
+
+export default async function SurveysPage({
+  searchParams
+}: {
+  searchParams: Promise<{ mallar?: string; mallfel?: string }>;
+}) {
+  const { mallar, mallfel } = await searchParams;
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) redirect('/inflode');
   const pb = await getServerPb();
@@ -53,10 +64,32 @@ export default async function SurveysPage() {
         </div>
       </Card>
 
+      {(mallar !== undefined || mallfel) && (
+        <div
+          role="status"
+          className="mx-t-13"
+          style={{
+            marginBottom: 16,
+            padding: '8px 12px',
+            borderRadius: 10,
+            background: mallfel ? 'var(--movexum-pastell-orange)' : 'var(--movexum-pastell-gron)',
+            color: mallfel ? 'var(--movexum-morkorange)' : 'var(--movexum-morkgron)'
+          }}
+        >
+          {mallfel
+            ? (TEMPLATE_ERROR[mallfel] ?? `${Number(mallfel) || 1} mallar kunde inte läggas till. Försök igen.`)
+            : Number(mallar) > 0
+              ? `${Number(mallar)} standardmallar lades till som egna mallar — anpassa dem fritt.`
+              : 'Mallarna fanns redan.'}
+        </div>
+      )}
+
+      <StarterTemplateGallery ownTemplateNames={templates.map((t) => t.name)} />
+
       {templates.length > 0 && (
         <div style={{ marginBottom: 20 }}>
           <div className="mx-t-12 mx-muted mx-fw-6" style={{ marginBottom: 8 }}>
-            Mallar · utvärdering skapas som utkast när ett event av vald typ skapas
+            Era mallar · går före standardmallen när ett event av vald typ skapas
           </div>
           <div style={{ display: 'grid', gap: 8 }}>
             {templates.map((t) => (

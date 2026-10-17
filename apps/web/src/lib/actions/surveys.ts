@@ -16,8 +16,9 @@ import { resolveSurveySeed } from '@/lib/core/write/surveys';
 import type { Role } from '@platform/shared';
 import {
   SURVEY_LINK_DEFAULT_KIND,
-  SURVEY_TEMPLATES,
+  SURVEY_STARTER_TEMPLATES,
   defaultSurveySendAt,
+  isStarterTemplateRef,
   isSurveyKind,
   normalizeSurveyQuestions,
   normalizeSurveyTemplateTargets,
@@ -100,7 +101,12 @@ export async function createSurveyAction(formData: FormData) {
   // Mallvalet är antingen en inbyggd typ (`kind:<typ>`) eller en egen mall
   // (`template:<id>`, tenant-verifierad i resolveSurveySeed).
   const choice = String(formData.get('template') || '');
-  const templateId = choice.startsWith('template:') ? choice.slice('template:'.length) : '';
+  // `starter:<nyckel>` = Movexums standardmall (lösas i resolveSurveySeed).
+  const templateId = choice.startsWith('template:')
+    ? choice.slice('template:'.length)
+    : isStarterTemplateRef(choice)
+      ? choice
+      : '';
   const kindRaw = choice.startsWith('kind:')
     ? choice.slice('kind:'.length)
     : String(formData.get('kind') || (link ? SURVEY_LINK_DEFAULT_KIND[link.kind] : 'custom'));
@@ -116,13 +122,11 @@ export async function createSurveyAction(formData: FormData) {
   }
   const tpl = seed.value;
   const kind = tpl.kind;
-  const defaultName = asTemplate
-    ? `Mall: ${SURVEY_TEMPLATES[kind].label}`
-    : link
-      ? `Uppföljning: ${link.label}`
-      : SURVEY_TEMPLATES[kind].label;
+  const defaultName = asTemplate ? `Mall: ${tpl.label}` : link ? `Uppföljning: ${link.label}` : tpl.label;
   const name = cap(formData.get('name'), 160) || defaultName;
-  const templateFor = asTemplate ? normalizeSurveyTemplateTargets(formData.getAll('template_for')) : [];
+  // En mall som kopieras från en standardmall ärver dess eventtyper om inga valts.
+  const chosenFor = normalizeSurveyTemplateTargets(formData.getAll('template_for'));
+  const templateFor = asTemplate ? (chosenFor.length > 0 ? chosenFor : normalizeSurveyTemplateTargets(tpl.template_for)) : [];
   let created: { id: string } | null = null;
   let createError: { code: CreateSurveyErrorCode; detail: string } | null = null;
   // Den slumpade sluggen kolliderar i praktiken aldrig; ett unikt-index-fel
@@ -202,6 +206,74 @@ export async function createSurveyAction(formData: FormData) {
     }
   }
   redirect(`/inflode/utvardering/${created.id}`);
+}
+
+/**
+ * Lägger till Movexums standardmallar (§ 53.3) som EGNA mallar under
+ * Utvärdering, så att de kan anpassas. Idempotent: en mall med samma namn
+ * hoppas över. Läsningen är strikt — ett läsfel tolkas aldrig som "inga
+ * mallar" (det skulle dubblera dem). Redirectar tillbaka med antal.
+ */
+export async function addStarterTemplatesAction(formData: FormData) {
+  const user = await requireManager();
+  const pb = await getServerPb();
+  const keys = new Set(formData.getAll('starter').map((v) => String(v)));
+  const starters = SURVEY_STARTER_TEMPLATES.filter((t) => keys.has(t.key));
+  if (starters.length === 0) redirect('/inflode/utvardering?mallar=0');
+
+  let existing: string[];
+  try {
+    const rows = await writeWithFallback(pb, (c) =>
+      c.collection('surveys').getFullList<{ name?: string }>({
+        filter: c.filter('tenant = {:t} && is_template = true', { t: user.tenant }),
+        fields: 'id,name'
+      })
+    );
+    existing = rows.map((r) => (r.name || '').trim().toLowerCase());
+  } catch (err) {
+    console.error('[surveys] template read failed', { status: pbStatus(err) });
+    redirect('/inflode/utvardering?mallfel=las');
+  }
+
+  let added = 0;
+  let failed = 0;
+  let schemaDrift = false;
+  for (const t of starters) {
+    if (existing.includes(t.name.toLowerCase())) continue;
+    try {
+      const created = await writeWithFallback(pb, (c) =>
+        c.collection('surveys').create<Record<string, unknown>>({
+          tenant: user.tenant,
+          name: t.name,
+          kind: t.kind,
+          description: t.description,
+          welcome_title: t.welcome_title,
+          welcome_body: t.welcome_body,
+          thank_you_message: t.thank_you_message,
+          questions: t.questions,
+          is_active: false,
+          public_slug: newPublicSlug(),
+          created_by: user.id,
+          is_template: true,
+          template_for: t.template_for
+        })
+      );
+      // Schema-drift (§ 24.4): utan migration 1700000195 blev raden en vanlig
+      // enkät — ta bort den hellre än att lämna en publicerbar kopia.
+      if (created.is_template !== true) {
+        await writeWithFallback(pb, (c) => c.collection('surveys').delete(String(created.id))).catch(() => undefined);
+        schemaDrift = true;
+        break;
+      }
+      added++;
+    } catch (err) {
+      failed++;
+      console.error('[surveys] starter template create failed', { status: pbStatus(err) });
+    }
+  }
+  revalidatePath('/inflode/utvardering');
+  if (schemaDrift) redirect('/inflode/utvardering?mallfel=schema');
+  redirect(`/inflode/utvardering?mallar=${added}${failed ? `&mallfel=${failed}` : ''}`);
 }
 
 export interface SaveSurveyInput {

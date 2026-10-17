@@ -5,10 +5,19 @@ import {
   INVITE_MAX_RECIPIENTS,
   formatStockholmDateTime,
   rsvpOpen,
-  selectInviteRecipients
+  selectInviteRecipients,
+  type InviteCandidate,
+  type InviteSkipped
 } from '@platform/shared';
-import { sendEventInvites } from '@/lib/email';
+import { sendEventInvites, type EventInviteRecipient } from '@/lib/email';
 import { recomputeEventCounters } from '@/lib/events/counters';
+import {
+  contactDisplayName,
+  loadContactsByIds,
+  loadStartupReach,
+  type ContactRow
+} from '@/lib/events/invite-candidates';
+import { signUnsubscribeKey, unsubscribeSecret } from '@/lib/unsubscribe-key';
 import { canCreateRecord } from './writable-fields';
 import { logAgentAction } from './audit';
 import { getRecordInTenant, writeWithFallback } from './helpers';
@@ -19,13 +28,16 @@ import { fail, ok } from './types';
  * Inbjudningar till event (CLAUDE.md § 53.5) via det delade skrivlagret.
  *
  * En inbjudan är en rad i deltagarlistan (`event_signups`, stage
- * `invited`, `contact` = kontakten i kontaktboken). Svarslänkens token
+ * `invited`) med `contact` (kontaktboken), `user` (bolagsmedlem) och/eller
+ * `startup` (bolaget den bjöds in via). Svarslänkens token
  * genereras vid varje utskick, lagras bara som SHA-256-hash och finns i
  * klartext enbart i mejlet — ett nytt utskick (påminnelse) roterar den.
  *
  * - Bara människor bjuder in (`CREATE_POLICIES.event_signups`: agent nekad).
- * - Kontakterna slås upp med användarens token, tenant-filtrerat; den som
- *   avregistrerat sig (`invite_opt_out`) hoppas över vid VARJE utskick.
+ * - Kontakter och bolag slås upp med användarens token, tenant-filtrerat;
+ *   bolagsmedlemmarnas e-post läses via superusern EFTER rollkontrollen
+ *   (`lib/events/invite-candidates.ts`). En kontakt som avregistrerat sig
+ *   (`invite_opt_out`) hoppas över vid VARJE utskick.
  * - E-postadresserna kopieras till deltagarraden (samma som en manuellt
  *   inlagd deltagare) och loggas aldrig; auditen innehåller bara antal.
  */
@@ -59,87 +71,115 @@ function gate(actor: Actor): WriteResult<never> | null {
   return null;
 }
 
-function anyOf(pb: PocketBase, field: string, values: readonly string[]): string {
-  const params: Record<string, string> = {};
-  const parts = values.map((v, i) => {
-    params[`v${i}`] = v;
-    return `${field} = {:v${i}}`;
-  });
-  return pb.filter(`(${parts.join(' || ')})`, params);
-}
-
-type ContactRow = { id: string; first_name?: string; last_name?: string; email?: string; organization?: string; invite_opt_out?: boolean };
-
-async function loadContacts(pb: PocketBase, tenant: string, ids: readonly string[]): Promise<ContactRow[]> {
-  const out: ContactRow[] = [];
-  for (let i = 0; i < ids.length; i += 40) {
-    const part = ids.slice(i, i + 40);
-    out.push(
-      ...(await pb.collection('contacts').getFullList<ContactRow>({
-        filter: `${pb.filter('tenant = {:t}', { t: tenant })} && ${anyOf(pb, 'id', part)}`,
-        fields: 'id,first_name,last_name,email,organization,invite_opt_out'
-      }))
-    );
-  }
-  return out;
-}
-
 export interface InviteResult {
   invited: number;
   sent: number;
   failed: number;
-  skipped: { optOut: number; noEmail: number; already: number; overCap: number };
+  skipped: InviteSkipped;
+  /** Bolag som saknar både medlemmar, huvudkontakter och e-post. */
+  unreachableStartups: number;
+}
+
+const MAX_STARTUPS = 200;
+
+type Candidate = InviteCandidate & {
+  name: string;
+  organization: string;
+  contact?: string;
+  user?: string;
+  startup?: string;
+};
+
+function contactCandidate(c: ContactRow, startup?: string, organization?: string): Candidate {
+  return {
+    id: c.id,
+    kind: 'contact',
+    email: c.email,
+    invite_opt_out: c.invite_opt_out,
+    name: contactDisplayName(c),
+    organization: organization || c.organization || '',
+    contact: c.id,
+    ...(startup ? { startup } : {})
+  };
+}
+
+function idList(raw: unknown, max: number): string[] | null {
+  const ids = [...new Set((Array.isArray(raw) ? raw : []).map((v) => String(v ?? '')))].filter(Boolean);
+  if (ids.length > max || ids.some((v) => !ID.test(v))) return null;
+  return ids;
 }
 
 /**
- * Lägger till kontakter som inbjudna och skickar inbjudan direkt. Kontakter
- * som redan finns på listan, saknar e-post eller avregistrerat sig hoppas
- * över (räknas i svaret).
+ * Lägger till kontakter och/eller bolag som inbjudna och skickar inbjudan
+ * direkt. Ett bolag blir en rad per mottagare (medlemmar, annars
+ * huvudkontakter, annars bolagets adress). Mottagare som redan finns på
+ * listan, saknar e-post eller avregistrerat sig hoppas över (räknas i svaret).
  */
-export async function inviteContactsToEvent(
+export async function inviteToEvent(
   pb: PocketBase,
   actor: Actor,
-  input: { eventId: string; contactIds: unknown; baseUrl: string }
+  input: { eventId: string; contactIds?: unknown; startupIds?: unknown; baseUrl: string }
 ): Promise<WriteResult<InviteResult>> {
   const denied = gate(actor);
   if (denied) return denied;
   const ev = await loadOpenEvent(pb, actor, input.eventId);
   if ('error' in ev) return ev.error;
 
-  const ids = [...new Set((Array.isArray(input.contactIds) ? input.contactIds : []).map((v) => String(v ?? '')))];
-  if (ids.length === 0) return fail('INVALID_VALUE', 'Välj minst en kontakt.');
-  if (ids.length > INVITE_MAX_RECIPIENTS || ids.some((v) => !ID.test(v))) {
-    return fail('INVALID_VALUE', `Välj högst ${INVITE_MAX_RECIPIENTS} giltiga kontakter.`);
+  const contactIds = idList(input.contactIds, INVITE_MAX_RECIPIENTS);
+  const startupIds = idList(input.startupIds, MAX_STARTUPS);
+  if (!contactIds || !startupIds) {
+    return fail('INVALID_VALUE', `Välj högst ${INVITE_MAX_RECIPIENTS} kontakter och ${MAX_STARTUPS} bolag.`);
   }
+  if (contactIds.length === 0 && startupIds.length === 0) return fail('INVALID_VALUE', 'Välj minst en kontakt eller ett bolag.');
 
-  let contacts: ContactRow[];
-  let existing: { contact?: string; email?: string }[];
+  const candidates: Candidate[] = [];
+  let unreachableStartups = 0;
+  let existing: { contact?: string; user?: string; email?: string }[];
   try {
-    contacts = await loadContacts(pb, actor.tenant, ids);
-    existing = await pb.collection('event_signups').getFullList<{ contact?: string; email?: string }>({
+    if (contactIds.length > 0) {
+      for (const c of await loadContactsByIds(pb, actor.tenant, contactIds)) candidates.push(contactCandidate(c));
+    }
+    if (startupIds.length > 0) {
+      for (const reach of await loadStartupReach(pb, actor.tenant, startupIds)) {
+        if (reach.members.length > 0) {
+          for (const m of reach.members) {
+            candidates.push({ id: m.id, kind: 'user', email: m.email, name: m.name, organization: reach.name, user: m.id, startup: reach.id });
+          }
+        } else if (reach.primaryContacts.length > 0) {
+          for (const c of reach.primaryContacts) candidates.push(contactCandidate(c, reach.id, reach.name));
+        } else if (reach.companyEmail) {
+          candidates.push({ id: reach.id, kind: 'startup', email: reach.companyEmail, name: reach.name, organization: reach.name, startup: reach.id });
+        } else {
+          unreachableStartups++;
+        }
+      }
+    }
+    existing = await pb.collection('event_signups').getFullList<{ contact?: string; user?: string; email?: string }>({
       filter: pb.filter('tenant = {:t} && event = {:e}', { t: actor.tenant, e: ev.id }),
-      fields: 'id,contact,email'
+      fields: 'id,contact,user,email'
     });
-  } catch {
-    return fail('DB_ERROR', 'Kunde inte läsa kontakterna eller deltagarlistan.');
+  } catch (err) {
+    const msg = err instanceof Error && err.message.includes('superuser') ? err.message : 'Kunde inte läsa mottagarna eller deltagarlistan.';
+    return fail('DB_ERROR', msg);
   }
-  const { invite, skipped } = selectInviteRecipients(contacts, existing);
+  const { invite, skipped } = selectInviteRecipients(candidates, existing);
 
   const now = new Date().toISOString();
   let invited = 0;
   for (const c of invite) {
-    const name = `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || c.email || 'Kontakt';
     try {
       const row = await writeWithFallback(pb, (client) =>
         client.collection('event_signups').create<Record<string, unknown>>({
           tenant: actor.tenant,
           event: ev.id,
-          name: name.slice(0, 200),
+          name: (c.name || c.email || 'Inbjuden').slice(0, 200),
           email: (c.email || '').trim().toLowerCase(),
-          organization: (c.organization || '').slice(0, 200),
+          organization: c.organization.slice(0, 200),
           stage: 'invited',
-          contact: c.id,
-          invited_at: now
+          invited_at: now,
+          ...(c.contact ? { contact: c.contact } : {}),
+          ...(c.user ? { user: c.user } : {}),
+          ...(c.startup ? { startup: c.startup } : {})
         })
       );
       // PB släpper okända fält tyst (§ 24.4) — utan kontaktrelationen kan
@@ -159,12 +199,12 @@ export async function inviteContactsToEvent(
     collection: 'event_signups',
     record_id: ev.id,
     field: 'invitations',
-    after_value: { title: ev.name ?? '', invited, skipped }
+    after_value: { title: ev.name ?? '', invited, startups: startupIds.length, skipped }
   });
 
   const sent = await sendEventInvitations(pb, actor, { eventId: ev.id, mode: 'pending', baseUrl: input.baseUrl });
   if (!sent.ok) return sent;
-  return ok({ invited, sent: sent.value.sent, failed: sent.value.failed, skipped });
+  return ok({ invited, sent: sent.value.sent, failed: sent.value.failed, skipped, unreachableStartups });
 }
 
 export interface SendInvitationsResult {
@@ -190,12 +230,12 @@ export async function sendEventInvitations(
   const baseUrl = input.baseUrl.replace(/\/+$/, '');
   if (!/^https?:\/\/[^\s/]+$/.test(baseUrl)) return fail('INVALID_VALUE', 'Ingen giltig adress för svarslänken.');
 
-  type Row = { id: string; email?: string; contact?: string; invite_sent_at?: string };
+  type Row = { id: string; email?: string; contact?: string; user?: string; startup?: string; invite_sent_at?: string };
   let rows: Row[];
   try {
     rows = await pb.collection('event_signups').getFullList<Row>({
       filter: pb.filter('tenant = {:t} && event = {:e} && stage = "invited"', { t: actor.tenant, e: ev.id }),
-      fields: 'id,email,contact,invite_sent_at'
+      fields: 'id,email,contact,user,startup,invite_sent_at'
     });
   } catch {
     return fail('DB_ERROR', 'Kunde inte läsa deltagarlistan.');
@@ -208,7 +248,7 @@ export async function sendEventInvitations(
   let optedOutIds = new Set<string>();
   if (contactIds.length > 0) {
     try {
-      const contacts = await loadContacts(pb, actor.tenant, contactIds);
+      const contacts = await loadContactsByIds(pb, actor.tenant, contactIds);
       optedOutIds = new Set(contacts.filter((c) => c.invite_opt_out === true).map((c) => c.id));
     } catch {
       return fail('DB_ERROR', 'Kunde inte kontrollera avregistreringar — inget skickades.');
@@ -216,7 +256,8 @@ export async function sendEventInvitations(
   }
   const sendable = rows.filter((r) => r.email && !(r.contact && optedOutIds.has(r.contact)));
 
-  const recipients: { key: string; email: string; rsvpUrl: string }[] = [];
+  const secret = unsubscribeSecret();
+  const recipients: EventInviteRecipient[] = [];
   for (const r of sendable) {
     const token = newRsvpToken();
     try {
@@ -224,7 +265,19 @@ export async function sendEventInvitations(
     } catch {
       continue; // utan sparad hash vore länken död — skicka inte
     }
-    recipients.push({ key: r.id, email: r.email as string, rsvpUrl: `${baseUrl}/e/svar?t=${token}` });
+    // Kontaktnätet (berättigat intresse) får avregistrering med en stabil
+    // nyckel som fungerar från varje mejl; bolagsmedlemmar och bolagets egen
+    // adress bjuds in som del av programmet.
+    const key = r.contact ? signUnsubscribeKey(r.contact, secret) : null;
+    const viaProgram = !r.contact && Boolean(r.user || r.startup);
+    recipients.push({
+      key: r.id,
+      email: r.email as string,
+      rsvpUrl: `${baseUrl}/e/svar?t=${token}`,
+      reason: viaProgram ? 'program' : 'contact',
+      unsubscribeUrl: key ? `${baseUrl}/e/avregistrera?k=${key}` : null,
+      oneClickUrl: key ? `${baseUrl}/api/public/e/unsubscribe?k=${key}` : null
+    });
   }
 
   const startsAt = ev.starts_at ? formatStockholmDateTime(ev.starts_at) : '';

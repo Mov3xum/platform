@@ -4,7 +4,10 @@ import { useActionState, useState } from 'react';
 import {
   EVENT_TYPES,
   EVENT_TYPE_LABEL,
-  pickSurveyTemplateForEventType,
+  SURVEY_STARTER_TEMPLATES,
+  defaultEvaluationTemplateRef,
+  getSurveyStarterTemplate,
+  starterTemplateRef,
   toStockholmDateTimeInputValue,
   type EventStatus,
   type EventType
@@ -61,10 +64,10 @@ function toLocalDateTimeValue(iso?: string): string {
 export function EventForm({ action, initial, submitLabel = 'Spara', wheelItem, evaluationTemplates }: Props) {
   const [state, formAction, pending] = useActionState(action, {} as EventActionState);
   const [type, setType] = useState<EventType>(initial?.type ?? 'other');
-  const autoTemplate = evaluationTemplates
-    ? pickSurveyTemplateForEventType(evaluationTemplates, type)
-    : null;
-  const autoName = evaluationTemplates?.find((t) => t.id === autoTemplate)?.name;
+  // Egen mall för typen går före Movexums standardmall (§ 53.3).
+  const autoTemplate = evaluationTemplates ? defaultEvaluationTemplateRef(evaluationTemplates, type) : null;
+  const autoName =
+    getSurveyStarterTemplate(autoTemplate)?.name ?? evaluationTemplates?.find((t) => t.id === autoTemplate)?.name;
   const inputClass =
     'block w-full rounded-xl border border-default bg-surface px-3 py-2 text-sm text-foreground outline-none transition focus:border-brand focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila';
 
@@ -150,14 +153,23 @@ export function EventForm({ action, initial, submitLabel = 'Spara', wheelItem, e
         <div>
           <label className="block text-sm font-medium text-foreground-muted">Utvärdering efter eventet</label>
           <select name="evaluation" defaultValue="auto" className={`mt-1 ${inputClass}`}>
-            <option value="auto">
-              {autoName ? `Standardmallen för typen (${autoName})` : 'Standardmallen för typen (ingen finns — skapas inte)'}
-            </option>
-            {evaluationTemplates.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
+            <option value="auto">{`Mallen för typen (${autoName ?? 'saknas'})`}</option>
+            {evaluationTemplates.length > 0 && (
+              <optgroup label="Era mallar">
+                {evaluationTemplates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            <optgroup label="Movexums standardmallar">
+              {SURVEY_STARTER_TEMPLATES.map((t) => (
+                <option key={t.key} value={starterTemplateRef(t.key)}>
+                  {t.name}
+                </option>
+              ))}
+            </optgroup>
             <option value="none">Ingen utvärdering</option>
           </select>
           <p className="mt-1 text-xs text-foreground-subtle">

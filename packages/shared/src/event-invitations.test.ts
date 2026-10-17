@@ -3,9 +3,14 @@ import assert from 'node:assert/strict';
 
 import {
   INVITE_MAX_RECIPIENTS,
+  groupInvitesByStatus,
+  inviteStatus,
+  tallyInvites,
   isRsvpAnswer,
   isRsvpToken,
   rsvpOpen,
+  contactSearchWords,
+  matchesContactSearch,
   selectInviteRecipients,
   stageForRsvp
 } from './event-invitations.ts';
@@ -56,4 +61,68 @@ test('selectInviteRecipients kapar vid taket', () => {
   const { invite, skipped } = selectInviteRecipients(many, []);
   assert.equal(invite.length, INVITE_MAX_RECIPIENTS);
   assert.equal(skipped.overCap, 3);
+});
+
+test('selectInviteRecipients: bolagsmedlemmar dedupliceras på konto och adress', () => {
+  const { invite, skipped } = selectInviteRecipients(
+    [
+      { id: 'u1', email: 'a@bolag.se', kind: 'user' as const },
+      { id: 'u2', email: 'b@bolag.se', kind: 'user' as const },
+      // Samma person som kontakt med samma adress — redan med.
+      { id: 'c1', email: 'B@bolag.se', kind: 'contact' as const },
+      { id: 's1', email: 'info@bolag.se', kind: 'startup' as const }
+    ],
+    [{ user: 'u1' }]
+  );
+  assert.deepEqual(invite.map((c) => c.id), ['u2', 's1']);
+  assert.equal(skipped.already, 2);
+});
+
+test('contactSearchWords delar upp i ord så att fullt namn matchar', () => {
+  assert.deepEqual(contactSearchWords('  Anna  Svensson '), ['anna', 'svensson']);
+  assert.deepEqual(contactSearchWords('a, a; b'), ['a', 'b']);
+  assert.deepEqual(contactSearchWords(undefined), []);
+  assert.equal(contactSearchWords('a b c d e f g').length, 5);
+  assert.equal(matchesContactSearch(['Anna', 'Svensson', 'Bolag AB'], ['anna', 'svensson']), true);
+  assert.equal(matchesContactSearch(['Anna', 'Berg'], ['anna', 'svensson']), false);
+  assert.equal(matchesContactSearch(['x'], []), true);
+});
+
+test('inviteStatus: svar går före öppnat, öppnat före utskickat', () => {
+  assert.equal(inviteStatus({ stage: 'invited' }), 'unsent');
+  assert.equal(inviteStatus({ stage: 'invited', invite_sent_at: '2026-10-01' }), 'sent');
+  assert.equal(inviteStatus({ stage: 'invited', invite_sent_at: '2026-10-01', invite_opened_at: '2026-10-02' }), 'opened');
+  assert.equal(inviteStatus({ stage: 'signup', invite_sent_at: '2026-10-01' }), 'coming');
+  assert.equal(inviteStatus({ stage: 'attended' }), 'coming');
+  assert.equal(inviteStatus({ stage: 'declined', invite_sent_at: '2026-10-01' }), 'declined');
+});
+
+test('tallyInvites räknar svar som öppnade och grupperar i fast ordning', () => {
+  const rows = [
+    { stage: 'invited' },
+    { stage: 'invited', invite_sent_at: 'x' },
+    { stage: 'invited', invite_sent_at: 'x', invite_opened_at: 'y' },
+    { stage: 'signup', invite_sent_at: 'x', responded_at: 'z' },
+    { stage: 'declined', invite_sent_at: 'x', responded_at: 'z' }
+  ];
+  assert.deepEqual(tallyInvites(rows), {
+    invited: 5,
+    sent: 4,
+    opened: 3,
+    coming: 1,
+    declined: 1,
+    unanswered: 2,
+    unsent: 1
+  });
+  assert.deepEqual(
+    groupInvitesByStatus(rows).map((g) => [g.status, g.rows.length]),
+    [
+      ['coming', 1],
+      ['declined', 1],
+      ['opened', 1],
+      ['sent', 1],
+      ['unsent', 1]
+    ]
+  );
+  assert.deepEqual(groupInvitesByStatus([]), []);
 });

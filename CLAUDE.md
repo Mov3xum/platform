@@ -9180,21 +9180,38 @@ motor.
   avvisar mallar även om flaggan skulle sättas förbi skrivlagret, och mallar
   saknar källa så utskick/schemaläggning aldrig är möjligt. Byggaren visar
   "Mallen används för" i stället för publicering/delning.
+- **Movexums standardmallar** (`packages/shared/src/survey-starters.ts`,
+  ren + enhetstestad): sex genomarbetade mallar — Frukostträff & mingel
+  (mingel, matching), Workshop & utbildning, Pitchevent & demodag,
+  Konferens & seminarium, Hackathon och Kort eventutvärdering (annat).
+  Varje eventtyp har EXAKT en standardmall (testat), och alla har samma
+  bärande struktur — obligatoriskt helhetsbetyg (`helhet`, 1–5) och NPS
+  (`rekommendera`) — så att resultaten går att jämföra mellan aktiviteter och
+  mot målen (§ 53.4). De finns alltid (ingen seed) och refereras som
+  `starter:<nyckel>`. Under Utvärdering visas de som ett galleri
+  (`StarterTemplateGallery`): **Använd** (`new?utgang=starter:<nyckel>`)
+  eller **Lägg till som egen mall** (`addStarterTemplatesAction`, idempotent
+  på namn; läsningen är strikt så ett läsfel aldrig dubblerar mallarna, och
+  en rad som inte blev mall p.g.a. schema-drift tas bort). Lägg aldrig till
+  en eventtyp utan att ge den en standardmall.
 - **En väg för mallinnehåll:** `resolveSurveySeed` i `lib/core/write/surveys.ts`
-  löser antingen en egen mall (tenant-verifierad via `getRecordInTenant`,
-  MÅSTE vara `is_template`, annars fel — aldrig en tyst fallback) eller den
-  inbyggda `SURVEY_TEMPLATES[kind]`. UI-actionen, eventskapandet och
+  löser en egen mall (tenant-verifierad via `getRecordInTenant`, MÅSTE vara
+  `is_template`, annars fel — aldrig en tyst fallback), en standardmall
+  (`starter:<nyckel>`; okänd nyckel ⇒ fel) eller den inbyggda
+  `SURVEY_TEMPLATES[kind]`. UI-actionen, eventskapandet, inbjudningssidan och
   chatt-verktygets skrivlager (`createSurvey({ templateId })`) använder den.
 - **Utkast först (beslut 2026-10):** när ett event skapas väljer formuläret
-  "Utvärdering efter eventet" — standardmallen för eventtypen
-  (`pickSurveyTemplateForEventType`: första matchande mallen i namnordning,
-  ren + enhetstestad), en specifik mall eller ingen. Utvärderingen skapas
-  via skrivlagret som **opublicerat utkast** kopplat till eventet
-  (`link_kind = event`); en människa granskar, publicerar och schemalägger
-  (§ 47.5). Finns ingen mall för typen skapas ingenting. Misslyckas utkastet
-  skapas eventet ändå och eventsidan visar `?varning=utvardering`.
-- **"Skapa uppföljning"** på ett event förväljer tenantens mall för
-  eventtypen; egna mallar listas före de inbyggda.
+  "Utvärdering efter eventet" — mallen för eventtypen
+  (`defaultEvaluationTemplateRef`: tenantens egen mall för typen, första i
+  namnordning, annars Movexums standardmall), en specifik egen mall eller
+  standardmall, eller ingen. Utvärderingen skapas via skrivlagret som
+  **opublicerat utkast** kopplat till eventet (`link_kind = event`); en
+  människa granskar, publicerar och schemalägger (§ 47.5). Misslyckas
+  utkastet skapas eventet ändå och eventsidan visar `?varning=utvardering`.
+  Samma val finns på inbjudningssidan ("Utvärdering efter eventet",
+  `createEventEvaluationAction` → byggaren).
+- **"Skapa uppföljning"** på ett event förväljer mallen för eventtypen;
+  egna mallar listas före standardmallarna och de inbyggda typerna.
 - **Eventtyper** (`EVENT_TYPES`, `EVENT_TYPE_LABEL`, `isEventType`) bor i
   `event-participants.ts` och delas av formuläret, actions, skrivlagret och
   mallarna — `template_for`-värdena MÅSTE spegla dem.
@@ -9267,18 +9284,40 @@ fylls aldrig i för hand. Migration **1700000196**.
 
 `/inflode/inbjudningar` (flik mellan Startupkompassen och Utvärdering) visar
 kommande event (och de senaste 30 dagarna) med läget inbjudna / kommer /
-avböjt / ej utskickade. Per event (`/inflode/inbjudningar/<id>`) söker staff
-i **kontaktboken** (namn, organisation, e-post, kategori — högst 50 träffar),
-bjuder in och följer svaren. Migration **1700000197**.
+avböjt / ej utskickade. Per event (`/inflode/inbjudningar/<id>`) och direkt
+på eventsidan ("Bjud in" i deltagarpanelen) väljer staff mottagare i
+**inbjudningspanelen**, bjuder in och följer svaren. Migration **1700000197**.
 
 | Fil | Syfte |
 |-----|-------|
-| `packages/shared/src/event-invitations.ts` (+ `.test.ts`) | `selectInviteRecipients` (e-post, avregistrering, dubbletter, tak 500), `rsvpOpen`, `stageForRsvp`, tokenformat |
-| `apps/web/src/lib/core/write/event-invitations.ts` | Skrivlagret: `inviteContactsToEvent`, `sendEventInvitations` (pending/påminnelse), `hashRsvpToken` |
-| `apps/web/src/lib/email.ts` | `sendEventInvites` — ett mejl per mottagare med personlig svarslänk + avregistrering |
+| `packages/shared/src/event-invitations.ts` (+ `.test.ts`) | `selectInviteRecipients` (kontakt/konto/bolagsadress, e-post, avregistrering, dubbletter, tak 500), `contactSearchWords`/`matchesContactSearch`, `rsvpOpen`, `stageForRsvp`, tokenformat |
+| `apps/web/src/lib/events/invite-candidates.ts` | Vem som kan bjudas in: kontaktsökning (kategori + ord), antal per kategori, hur ett bolag nås (`loadStartupReach`) — delas av listningen och skrivlagret |
+| `apps/web/src/components/invitations/InvitePanel.tsx` | Panelen (klient): flikarna Kontaktboken/Bolag, kategorichips med antal, kryssrutor, "Välj alla", ett utskick |
+| `apps/web/src/lib/core/write/event-invitations.ts` | Skrivlagret: `inviteToEvent` (kontakter + bolag), `sendEventInvitations` (pending/påminnelse), `hashRsvpToken` |
+| `apps/web/src/lib/email.ts` + `lib/mail-sender.ts` (+ `.test.ts`) | `sendEventInvites` — personlig svarslänk, HTML + text, avsändare/svarsadress från env, `List-Unsubscribe` |
+| `apps/web/src/lib/unsubscribe-key.ts` (+ `.test.ts`) + `app/e/avregistrera/page.tsx` + `app/api/public/e/unsubscribe/route.ts` | Stabil, signerad avregistrering (sida + en-klick) |
 | `apps/web/src/lib/events/rsvp.ts` + `app/e/svar/page.tsx` + `app/api/public/e/rsvp/route.ts` | Publik bekräftelsesida och svarsroute |
 | `apps/web/src/lib/events/counters.ts` | `recomputeEventCounters` — delad av eventsidan, inbjudningarna och svarsvägen |
 
+- **Urval med kryssrutor, dynamiskt:** fliken **Kontaktboken** visar
+  kategorichips med antal ("Alla (312)", "Investerare (48)" …); listan hämtas
+  med server action när kategori eller sökning ändras (högst 1 000 rader,
+  "visar X av Y" när fler finns) och "Välj alla investerare som kan bjudas
+  in" kryssar hela kategorin. Sökningen är **ordvis** — varje ord måste
+  matcha namn, organisation eller e-post, så "anna svensson" hittar Anna
+  Svensson (förut matchades hela strängen mot varje fält var för sig och
+  fullt namn gav aldrig träff). Fliken **Bolag** listar portföljen med
+  statusfilter och hur varje bolag nås. Urvalet följer med mellan flikar och
+  kategorier; ETT utskick skickar allt. Listorna innehåller aldrig
+  e-postadresser — bara om mottagaren går att nå (`på listan`,
+  `avregistrerad`, `saknar e-post`, `N medlemmar`).
+- **Ett bolag** blir en rad per mottagare (`startup` satt på raden): bolagets
+  medlemmar i plattformen (`startup_member` länkad till bolaget, `user` på
+  raden), annars bolagets huvudkontakter i kontaktboken
+  (`startup_contacts.is_primary`, `contact` på raden), annars bolagets egen
+  e-postadress. Medlemmarnas e-post är dold för vanliga tokens och läses med
+  den cachade superusern EFTER att staff-rollen verifierats; utan superuser
+  felar bolagsfliken tydligt. Dubbletter stoppas på kontakt, konto och adress.
 - **En deltagarlista:** en inbjudan är en rad i `event_signups` med
   `stage = invited` (nytt steg före tratten, liksom `declined`), `contact`
   och `invited_at`. Ja ⇒ `signup` (raden står direkt i eventets
@@ -9294,16 +9333,61 @@ bjuder in och följer svaren. Migration **1700000197**.
   tenant härleds ur raden och eventet MÅSTE tillhöra samma tenant. Svar tas
   emot till eventets slut (`rsvpOpen`); avregistrering gäller alltid. `/e/`
   är publik i middleware och renderas utan AppShell (layout + SessionGuard).
-- **Rättslig grund (beslut 2026-10): berättigat intresse** — även kontakter
-  utan samtycke kan bjudas in, med avregistrering i varje mejl (GDPR art. 21).
-  "Avregistrera mig" sätter `contacts.invite_opt_out` (+ `_at`); avregistrerade
-  kan inte väljas och hoppas över vid **varje** utskick, även påminnelser.
-  Kontrolleras mot marknadsföringslagen innan utskick till privatpersoner i
-  stor skala (inbjudningar till B2B-kontakter i kontaktnätet är huvudfallet).
+- **Öppnat / ja / nej direkt på eventraden (migration 1700000198):**
+  översikten `/inflode/inbjudningar` visar per event inbjudna · öppnat · ja ·
+  nej · inte svarat · ej utskickade, och "Visa vilka" listar namn +
+  organisation per status (aldrig e-post). Statusen är ren, enhetstestad
+  logik (`inviteStatus`/`tallyInvites`/`groupInvitesByStatus` i
+  `event-invitations.ts`) och delas med eventets inbjudningssida.
+  **"Öppnat" = mottagaren har öppnat sin personliga svarslänk**
+  (`event_signups.invite_opened_at`, första gången): `/e/svar` skickar ett
+  POST från webbläsaren till `/api/public/e/opened` (rate-limit 30/min och
+  IP, svarar alltid 204) — inte vid GET, så mejlskannrar räknas inte — och
+  ett svar sätter fältet om det saknas (fungerar utan JS). **Ingen
+  spårningspixel i mejlet** (beslut 2026-10): en pixel läser av mottagarens
+  utrustning och kräver samtycke (ePrivacy/LEK), vilket kontakter inbjudna
+  på berättigat intresse inte gett, och Apple Mail Privacy Protection gör
+  öppningssiffran fel ändå. Bara en tidsstämpel lagras, ingen IP eller user
+  agent.
+- **Rättslig grund (beslut 2026-10):** kontakter i kontaktnätet bjuds in på
+  **berättigat intresse** — även utan samtycke — med avregistrering i varje
+  mejl (GDPR art. 21). Bolagsmedlemmar och bolagets egen adress bjuds in som
+  del av **inkubatorprogrammet** (avtal); deras mejl säger det och har ingen
+  avregistreringslänk (de kan svara nej). Avregistrering sätter
+  `contacts.invite_opt_out` (+ `_at`); avregistrerade kan inte väljas och
+  hoppas över vid **varje** utskick, även påminnelser. Kontrolleras mot
+  marknadsföringslagen innan utskick till privatpersoner i stor skala
+  (inbjudningar till B2B-kontakter i kontaktnätet är huvudfallet).
+- **Avregistreringen är stabil:** länken är `/e/avregistrera?k=<kontakt-id>.<HMAC>`
+  (`lib/unsubscribe-key.ts`, hemlighet `MOVEXUM_UNSUBSCRIBE_SECRET`, annars
+  `MOVEXUM_INTEGRATION_KEY`) och fungerar från VARJE mejl kontakten fått —
+  svarslänkens token roteras vid påminnelser och dög därför inte. GET visar
+  bara en knapp (mejlskannrar); POST till `/api/public/e/unsubscribe`
+  avregistrerar (rate-limit 30/min och IP). Utan hemlighet faller mejlet
+  tillbaka på svarslänkens avregistrering och saknar `List-Unsubscribe`.
+- **Leveransbarhet (så att inbjudningar inte klassas som skräppost):**
+  - Avsändaren ska ligga på **Movexums egen domän, verifierad i Resend** —
+    SPF, DKIM (Resends CNAME/TXT-poster) och en DMARC-post
+    (`v=DMARC1; p=none; rua=…`, skärps till `quarantine` när rapporterna är
+    rena). Rekommenderat: en underdomän för utskick (t.ex. `mail.movexum.se`)
+    så att huvuddomänens rykte skyddas.
+  - Konfigureras i Coolify (aldrig i kod, `lib/mail-sender.ts`):
+    `RESEND_FROM_EMAIL` (alla mejl), `RESEND_INVITE_FROM_EMAIL`
+    (inbjudningar och enkäter, t.ex. `Movexum Event <event@movexum.se>`) och
+    `RESEND_REPLY_TO` (en riktig adress att svara till). Ett ogiltigt värde
+    ignoreras (standard `Movexum <noreply@movexum.se>`) så ett felskrivet
+    env-värde aldrig stoppar mejlen.
+  - Varje inbjudan har HTML **och** ren text, en dold förhandsrad,
+    tydlig avsändare och anledning ("du finns i Movexums kontaktnät" /
+    "ditt bolag deltar i programmet"), Resend-taggar per kategori, och för
+    kontakter `List-Unsubscribe` + `List-Unsubscribe-Post: List-Unsubscribe=One-Click`
+    (RFC 8058 — Gmail/Yahoo kräver en-klick för massutskick). Länkarna går
+    till appens konfigurerade adress (`APP_URL`, § 47.5), aldrig en
+    URL-förkortare. Ett mejl per mottagare, i batchar om 10.
 - **Dataminimering:** e-postadressen kopieras till deltagarraden (som för en
   manuellt inlagd deltagare) och visas aldrig i inbjudningsvyn; loggar och
   audit (`agent_actions`, feeden: "Inbjudan skickad till "X" · N mejl")
-  innehåller bara antal. `event_signups` cascade-raderas med eventet och är
+  innehåller bara antal (inbjudna, bolag, hoppade över). `event_signups` cascade-raderas med eventet och är
   fortsatt denylistad för AI.
 - **Människa-i-loopen:** att bjuda in och skicka är mänskliga klick med
   bekräftelse (`CREATE_POLICIES.event_signups`: agent nekad); chattens
@@ -9313,8 +9397,8 @@ bjuder in och följer svaren. Migration **1700000197**.
   `invited`/`declined`; allt speglas i `setup-via-api.mjs` (inklusive
   `event_signups.contact` från 1700000073, som saknades där).
 - **Inte byggt (YAGNI):** publik självanmälan för okända, inbjudan av
-  bolagsmedlemmar/personal som användare, kalenderfil (.ics) och automatiska
-  påminnelser — nästa steg om behovet visar sig.
+  Movexum-personal, kalenderfil (.ics) och automatiska påminnelser — nästa
+  steg om behovet visar sig.
 
 ### 53.2 Säkerhet och regelefterlevnad
 

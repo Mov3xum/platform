@@ -12,6 +12,7 @@ import {
   SURVEY_KINDS,
   SURVEY_LINK_KINDS,
   SURVEY_TEMPLATES,
+  getSurveyStarterTemplate,
   isSurveyKind,
   isSurveyLinkKind,
   normalizeSurveyQuestions,
@@ -98,6 +99,10 @@ export function surveyPath(id: string): string {
 /** Utgångsinnehållet för en ny enkät — ur en egen mall eller en inbyggd. */
 export interface SurveySeed {
   kind: SurveyKind;
+  /** Mallens namn — förval för en ny enkäts/mallens namn. */
+  label: string;
+  /** Eventtyper (bara standardmallar) — följer med när mallen kopieras som egen. */
+  template_for: string[];
   description: string;
   welcome_title: string;
   welcome_body: string;
@@ -109,7 +114,8 @@ export interface SurveySeed {
  * Löser mallen en ny enkät utgår från (§ 53.3). En egen mall slås upp
  * tenant-verifierat och MÅSTE vara en mall (`is_template`) — ett id till en
  * vanlig enkät eller en annan tenants mall avvisas, aldrig en tyst fallback
- * till den inbyggda. Utan `templateId` används `SURVEY_TEMPLATES[kind]`.
+ * till den inbyggda. `starter:<nyckel>` är en av Movexums standardmallar
+ * (`SURVEY_STARTER_TEMPLATES`). Utan `templateId` används `SURVEY_TEMPLATES[kind]`.
  * Delas av UI-actionen, eventskapandet och chatt-agenten.
  */
 export async function resolveSurveySeed(
@@ -122,6 +128,8 @@ export async function resolveSurveySeed(
     const tpl = SURVEY_TEMPLATES[opts.kind];
     return ok({
       kind: opts.kind,
+      label: tpl.label,
+      template_for: [],
       description: tpl.description,
       welcome_title: tpl.welcome_title,
       welcome_body: tpl.welcome_body,
@@ -129,18 +137,33 @@ export async function resolveSurveySeed(
       questions: tpl.questions
     });
   }
+  if (templateId.startsWith('starter:')) {
+    const starter = getSurveyStarterTemplate(templateId);
+    if (!starter) return fail('NOT_FOUND', 'Standardmallen finns inte.');
+    return ok({
+      kind: starter.kind,
+      label: starter.name,
+      template_for: [...starter.template_for],
+      description: starter.description,
+      welcome_title: starter.welcome_title,
+      welcome_body: starter.welcome_body,
+      thank_you_message: starter.thank_you_message,
+      questions: starter.questions
+    });
+  }
   if (!/^[a-zA-Z0-9_-]{1,64}$/.test(templateId)) return fail('INVALID_VALUE', 'Ogiltig mall.');
   const row = await getRecordInTenant<{
     id: string;
     tenant?: string;
     is_template?: boolean;
+    name?: string;
     kind?: string;
     description?: string;
     welcome_title?: string;
     welcome_body?: string;
     thank_you_message?: string;
     questions?: unknown;
-  }>(pb, actor, COLLECTION, templateId, 'id,tenant,is_template,kind,description,welcome_title,welcome_body,thank_you_message,questions');
+  }>(pb, actor, COLLECTION, templateId, 'id,tenant,is_template,name,kind,description,welcome_title,welcome_body,thank_you_message,questions');
   if (!row || row.is_template !== true) {
     return fail('NOT_FOUND', 'Mallen hittades inte i er organisation.');
   }
@@ -148,6 +171,8 @@ export async function resolveSurveySeed(
   if (questions.length === 0) return fail('INVALID_VALUE', 'Mallen har inga frågor ännu — lägg till frågor i mallen först.');
   return ok({
     kind: isSurveyKind(row.kind) ? row.kind : 'custom',
+    label: row.name || 'Mall',
+    template_for: [],
     description: row.description || '',
     welcome_title: row.welcome_title || '',
     welcome_body: row.welcome_body || '',

@@ -21,6 +21,7 @@ import { getRecordInTenant } from '@/lib/core/write/helpers';
 import { listActivityIndicatorOptions } from '@/lib/goals/activities';
 import { ActivityGoalPanel } from '@/components/activities/ActivityGoalPanel';
 import {
+  rsvpOpen,
   EVENT_PHASE_LABEL,
   EVENT_SIGNUP_STAGE_LABEL,
   annualWheelRangeLabel,
@@ -251,7 +252,12 @@ export default async function EventDetailPage({
         style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 16, marginTop: 12 }}
       >
         {/* ── Deltagare ────────────────────────────────── */}
-        <Participants eventId={event.id} rows={participantRows} canEdit={canEdit} />
+        <Participants
+          eventId={event.id}
+          rows={participantRows}
+          canEdit={canEdit}
+          inviteOpen={rsvpOpen(event, new Date(), 'yes')}
+        />
 
         {/* ── Funnel ────────────────────────────────────── */}
         <Card style={{ padding: 0, overflow: 'hidden' }}>

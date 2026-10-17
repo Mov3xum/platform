@@ -50,7 +50,12 @@ export async function POST(req: Request) {
   const now = new Date().toISOString();
   try {
     if (isInviteStage(signup.stage) || signup.stage === 'signup') {
-      await pb.collection('event_signups').update(signup.id, { stage: stageForRsvp(answer), responded_at: now });
+      // Ett svar kräver att länken öppnats — även utan JS (§ 53.5).
+      await pb.collection('event_signups').update(signup.id, {
+        stage: stageForRsvp(answer),
+        responded_at: now,
+        ...(signup.invite_opened_at ? {} : { invite_opened_at: now })
+      });
     }
     if (answer === 'unsubscribe' && signup.contact) {
       const contact = await pb.collection('contacts').getOne<{ id: string; tenant?: string }>(signup.contact, { fields: 'id,tenant' });

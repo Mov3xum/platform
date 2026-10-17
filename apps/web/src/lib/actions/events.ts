@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
@@ -12,8 +13,9 @@ import { listSurveyTemplates } from '@/lib/surveys/store';
 import {
   isEventSignupStage,
   isEventType,
-  parseDateTimeInput,
-  pickSurveyTemplateForEventType
+  defaultEvaluationTemplateRef,
+  isStarterTemplateRef,
+  parseDateTimeInput
 } from '@platform/shared';
 import type {
   Role,
@@ -125,7 +127,7 @@ export async function createEventAction(
       { id: eventId, name, type },
       String(formData.get('evaluation') || 'auto')
     );
-    if (!evaluation) warnings.push('utvardering');
+    if (!evaluation.ok) warnings.push('utvardering');
     return { eventId, warnings };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte skapa event.' };
@@ -133,26 +135,29 @@ export async function createEventAction(
 }
 
 /**
- * Utvärdering som UTKAST för ett nytt event (§ 53.3): från vald mall, eller
- * — med `auto` — tenantens mall för eventtypen. Ingen mall ⇒ ingenting
- * skapas (true). Skapas via det delade skrivlagret (tenant-verifierad mall
- * och källa, audit) och alltid opublicerad: en människa granskar, publicerar
- * och schemalägger utskicket. Returnerar false när något gick fel, så
- * eventet ändå skapas och staff ser en varning.
+ * Utvärdering som UTKAST för ett event (§ 53.3): från vald mall (egen eller
+ * `starter:<nyckel>`), eller — med `auto` — tenantens egen mall för
+ * eventtypen, annars Movexums standardmall för typen. Skapas via det delade
+ * skrivlagret (tenant-verifierad mall och källa, audit) och alltid
+ * opublicerad: en människa granskar, publicerar och schemalägger utskicket.
+ * `ok: false` när något gick fel, så att eventet ändå skapas och staff ser en
+ * varning.
  */
 async function createEvaluationDraft(
   pb: Awaited<ReturnType<typeof getServerPb>>,
   user: Awaited<ReturnType<typeof requireUser>>,
   event: { id: string; name: string; type: EventType },
   choice: string
-): Promise<boolean> {
-  if (choice === 'none') return true;
+): Promise<{ ok: boolean; surveyId: string | null }> {
+  if (choice === 'none') return { ok: true, surveyId: null };
   const templates = await listSurveyTemplates(pb, user.tenant);
   const templateId =
     choice === 'auto'
-      ? pickSurveyTemplateForEventType(templates, event.type)
-      : templates.find((t) => t.id === choice)?.id ?? null;
-  if (!templateId) return choice === 'auto';
+      ? defaultEvaluationTemplateRef(templates, event.type)
+      : isStarterTemplateRef(choice)
+        ? choice
+        : (templates.find((t) => t.id === choice)?.id ?? null);
+  if (!templateId) return { ok: false, surveyId: null };
   const res = await createSurvey(
     pb,
     { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Role[] },
@@ -160,10 +165,41 @@ async function createEvaluationDraft(
   );
   if (!res.ok) {
     console.error('[events] evaluation draft failed', { code: res.code });
-    return false;
+    return { ok: false, surveyId: null };
   }
   revalidatePath('/inflode/utvardering');
-  return true;
+  return { ok: true, surveyId: res.value.surveyId };
+}
+
+/**
+ * "Skapa utvärdering" på inbjudningssidan (§ 53.3/§ 53.5): utkast från vald
+ * mall, kopplat till eventet. Skickar vidare till byggaren.
+ */
+export async function createEventEvaluationAction(formData: FormData) {
+  const user = await requireUser();
+  if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) redirect('/inflode');
+  const pb = await getServerPb();
+  const eventId = String(formData.get('event') || '');
+  const ev = /^[a-zA-Z0-9_-]{1,64}$/.test(eventId)
+    ? await getRecordInTenant<{ id: string; tenant?: string; name?: string; type?: string }>(
+        pb,
+        { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Role[] },
+        'incubator_events',
+        eventId,
+        'id,tenant,name,type'
+      )
+    : null;
+  if (!ev) redirect('/inflode/inbjudningar');
+  const res = await createEvaluationDraft(
+    pb,
+    user,
+    { id: ev.id, name: ev.name || 'Event', type: isEventType(ev.type) ? ev.type : 'other' },
+    String(formData.get('evaluation') || 'auto')
+  );
+  if (!res.surveyId) redirect(`/inflode/inbjudningar/${ev.id}?fel=utvardering`);
+  revalidatePath(`/inflode/inbjudningar/${ev.id}`);
+  revalidatePath(`/events/${ev.id}`);
+  redirect(`/inflode/utvardering/${res.surveyId}`);
 }
 
 export async function addSignupAction(

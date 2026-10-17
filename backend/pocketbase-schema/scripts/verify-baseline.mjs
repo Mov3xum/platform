@@ -1095,7 +1095,7 @@ const REQUIRED_APP_FIELDS = [
   { collection: 'incubator_events', fields: ['goal_indicators', 'planned_participants', 'completed_at', 'outcome_verdict'] },
   // Inbjudningar (§ 53.5, migration 1700000197): utan fälten "sparas"
   // svarstoken/avregistrering tyst bort och svarslänkarna slutar fungera.
-  { collection: 'event_signups', fields: ['contact', 'rsvp_token_hash', 'invited_at', 'invite_sent_at', 'responded_at'] },
+  { collection: 'event_signups', fields: ['contact', 'rsvp_token_hash', 'invited_at', 'invite_sent_at', 'responded_at', 'invite_opened_at'] },
   { collection: 'contacts', fields: ['invite_opt_out', 'invite_opt_out_at'] },
   // Upphandlingar (§ 39): regelgenererade uppföljningar = tasks med
   // procurement-länk + rule_key (migration 1700000152). Saknas fälten

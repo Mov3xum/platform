@@ -14,8 +14,12 @@ import {
   SURVEY_KINDS,
   SURVEY_LINK_DEFAULT_KIND,
   SURVEY_LINK_KIND_LABEL,
+  SURVEY_STARTER_TEMPLATES,
   SURVEY_TEMPLATES,
-  pickSurveyTemplateForEventType,
+  defaultEvaluationTemplateRef,
+  isStarterTemplateRef,
+  starterTemplateEventTypes,
+  starterTemplateRef,
   surveyLinkHref,
   surveyLinkRefParam,
   type Role
@@ -39,11 +43,11 @@ const ERROR_TEXT: Record<string, string> = {
 export default async function NewSurveyPage({
   searchParams
 }: {
-  searchParams: Promise<{ for?: string; error?: string; detail?: string; mall?: string }>;
+  searchParams: Promise<{ for?: string; error?: string; detail?: string; mall?: string; utgang?: string }>;
 }) {
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) redirect('/inflode');
-  const { for: forRaw, error: errorKey, detail: detailRaw, mall } = await searchParams;
+  const { for: forRaw, error: errorKey, detail: detailRaw, mall, utgang } = await searchParams;
   // `?mall=1` (§ 53.3): skapa en egen mall i stället för en enkät.
   const asTemplate = mall === '1';
   const errorText = errorKey ? ERROR_TEXT[errorKey] || ERROR_TEXT.create_failed : null;
@@ -68,10 +72,16 @@ export default async function NewSurveyPage({
       link.id,
       'id,tenant,type'
     );
-    preferredTemplate = pickSurveyTemplateForEventType(templates, ev?.type);
+    preferredTemplate = defaultEvaluationTemplateRef(templates, ev?.type);
   }
   const defaultKind = link ? SURVEY_LINK_DEFAULT_KIND[link.kind] : SURVEY_KINDS[0];
-  const defaultChoice = preferredTemplate ? `template:${preferredTemplate}` : `kind:${defaultKind}`;
+  // `?utgang=starter:<nyckel>` från mallgalleriet vinner över förvalet.
+  const chosen = isStarterTemplateRef(utgang) ? String(utgang) : preferredTemplate;
+  const defaultChoice = chosen
+    ? isStarterTemplateRef(chosen)
+      ? chosen
+      : `template:${chosen}`
+    : `kind:${defaultKind}`;
 
   return (
     <PageShell title="Marknadsverktyg" tabs={buildInflodeTabs()}>
@@ -197,6 +207,32 @@ export default async function NewSurveyPage({
               </Card>
             </label>
           ))}
+          <div className="mx-t-12 mx-muted mx-fw-6" style={{ marginTop: 4 }}>
+            Movexums standardmallar
+          </div>
+          {SURVEY_STARTER_TEMPLATES.map((t) => (
+            <label key={t.key} style={{ cursor: 'pointer' }}>
+              <Card style={{ padding: 12, display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                <input
+                  type="radio"
+                  name="template"
+                  value={starterTemplateRef(t.key)}
+                  defaultChecked={defaultChoice === starterTemplateRef(t.key)}
+                  style={{ accentColor: 'var(--movexum-morkbla)', marginTop: 4 }}
+                />
+                <div>
+                  <div className="mx-disp mx-fw-6 mx-t-13">{t.name}</div>
+                  <div className="mx-t-12 mx-muted" style={{ lineHeight: 1.4 }}>
+                    {t.summary} · {starterTemplateEventTypes(t).map((e) => EVENT_TYPE_LABEL[e].toLowerCase()).join(', ')} ·{' '}
+                    {t.questions.length} frågor
+                  </div>
+                </div>
+              </Card>
+            </label>
+          ))}
+          <div className="mx-t-12 mx-muted mx-fw-6" style={{ marginTop: 4 }}>
+            Övriga utgångspunkter
+          </div>
           {SURVEY_KINDS.map((kind) => {
             const t = SURVEY_TEMPLATES[kind];
             return (
