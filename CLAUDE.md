@@ -8018,7 +8018,7 @@ skapade uppföljningar med status + länkar till resultat/redigering
 ### 47.5 Utskick till deltagare (e-post efter ett event)
 
 En enkät som följer upp ett **event** (§ 47.4, `link_kind = 'event'`) kan
-skickas till eventets anmälda deltagare — antingen direkt ("Skicka nu") eller
+skickas till eventets deltagare (bara de som markerats närvarande, § 53.1) — antingen direkt ("Skicka nu") eller
 **automatiskt** vid en vald tidpunkt (förslag: 09:00 svensk tid dagen efter
 eventet, `defaultSurveySendAt`, ren + enhetstestad, § 38-dygnsgränser). Panelen
 `SurveySendPanel` ligger under byggaren på `/inflode/utvardering/<id>` och visar
@@ -9083,3 +9083,61 @@ team (TMRL), affär (BRL), IPR (IPRL), finansiering (FRL), teknik (TRL)**.
 - **Riskklass (EU AI Act):** n/a — mänsklig bedömning + deterministisk
   presentation, ingen AI-inferens.
 
+
+---
+
+## 53. Aktivitet → deltagare → utvärdering → mål (2026-10)
+
+### 53.1 Översikt och principer
+
+Marknadsverktygets kedja knyts ihop så att en aktivitet planeras **en** gång
+och följs hela vägen till målen utan manuell inmatning:
+
+```
+Mål/indikator ◄─(bidrar till)── Årshjulsaktivitet (PLAN)
+      ▲                                │ genomförs som (incubator_events.wheel_item)
+      │ live-värde                     ▼
+      │                          Event (GENOMFÖRANDE) ──► Deltagarlista (event_signups)
+      │                                                   anmäld → närvarande → …
+      └─── aggregat (k ≥ 5) ◄── Utvärdering (§ 47) ◄── utskick till närvarande
+```
+
+- **Årshjulet är planen, eventet genomförandet.** Ett event skapas från
+  årshjulsposten ("Skapa event" i årshjulets dialog →
+  `/events/new?fran=<id>`, namn/datum/beskrivning förifylls via
+  `annualWheelEventStartInput`) och pekar på den med `wheel_item`
+  (migration **1700000194**, relation på eventet så flera event kan genomföra
+  samma aktivitet). Ingen kopia — eventsidan visar planen med länk tillbaka.
+- **Deltagarlistan är `event_signups`, ingen parallell lista.** Steg, etiketter
+  och vad som räknas som närvaro bor i `packages/shared/src/event-participants.ts`
+  (`EVENT_SIGNUP_STAGES`, `EVENT_ATTENDED_STAGES`, `eventSignupCounters`,
+  `eventSignupFunnel` — rena, enhetstestade). Räknarna på eventet, eventsidans
+  tratt och utvärderingsutskicket läser alla därifrån; lägg aldrig en egen
+  steglista inline.
+- **Närvaro styr utvärderingen.** `dispatchSurveyInvites` skickar bara till
+  närvarande (eller längre i tratten) — mejlet tackar för att man *deltog*.
+  Har eventet anmälda men ingen markerad närvaro svarar utskicket med ett
+  tydligt fel i stället för ett tomt utskick: cron-vägen försöker igen varje
+  timme (provisoriskt lås, § 47.5) och panelen visar "Närvaron är inte
+  markerad än" med länk till eventet. Schemaläggning går bra innan eventet
+  (räknas mot anmälda); "Skicka nu" kräver närvarande mottagare.
+- **Deltagarlistan hanteras på eventsidan** (`app/events/[id]/Participants.tsx`):
+  lägg till deltagare, byt steg per rad och "Alla närvarande"
+  (`markSignupsAttendedAction` — bara `signup` → `attended`, senare steg rörs
+  inte). Allt är server actions med rollkontroll (admin/incubator_lead/coach)
+  och tenant-verifiering; e-post valideras server-side.
+
+### 53.2 Säkerhet och regelefterlevnad
+
+- **Tenant:** `wheel_item` från klienten litas aldrig på — `createEventAction`
+  slår upp posten med `getRecordInTenant` och avvisar en okänd referens
+  (aldrig ett tyst fristående event). Förifyllningen på `/events/new` är bara
+  presentation.
+- **Schema-drift (§ 24.4):** saknas `wheel_item` på den skapade posten
+  redirectas till eventet med `?varning=arshjul` och en gul banner som
+  namnger migrationen. Fältet speglas i `setup-via-api.mjs` (målkollektionens
+  id slås upp på namnet, § 30.4 p. 1) och asserteras i `verify-baseline.mjs`
+  (`REQUIRED_APP_FIELDS`).
+- **GDPR § 5:** inga nya personuppgiftsfält; deltagarnas e-post läses fortsatt
+  transient vid utskick. `event_signups` når aldrig AI-kontexten. Riskklass
+  (EU AI Act): n/a — ingen AI-inferens.

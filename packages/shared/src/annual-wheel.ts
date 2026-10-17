@@ -1782,3 +1782,22 @@ export function countItemsByQuarter(items: readonly AnnualWheelItem[]): AnnualWh
 export function annualWheelHiddenOnHome(categories: readonly AnnualWheelCategoryDef[]): Set<string> {
   return new Set(categories.filter((c) => c.showOnHome === false).map((c) => c.id));
 }
+
+/**
+ * Förslag på starttid när ett event skapas från en årshjulsaktivitet (§ 53):
+ * aktivitetens datum kl. 09:00 som svensk väggklocka (`YYYY-MM-DDTHH:mm`,
+ * samma format som formulärens datetime-local). Bara månad ⇒ den 1:a;
+ * odaterad (helårs-) aktivitet ⇒ '' så personalen väljer själv.
+ */
+export function annualWheelEventStartInput(item: {
+  year?: number | null;
+  month?: number | null;
+  day?: number | null;
+}): string {
+  const year = typeof item.year === 'number' && Number.isInteger(item.year) ? item.year : null;
+  const month = sanitizeMonth(item.month);
+  if (year === null || month === null) return '';
+  const day = Math.min(sanitizeDay(item.day) ?? 1, daysInMonth(year, month));
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${year}-${pad(month)}-${pad(day)}T09:00`;
+}

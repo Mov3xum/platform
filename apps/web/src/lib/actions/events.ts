@@ -5,7 +5,8 @@ import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { escFilter } from '@/lib/pb-filter';
-import { parseDateTimeInput } from '@platform/shared';
+import { getRecordInTenant } from '@/lib/core/write/helpers';
+import { eventSignupCounters, isEventSignupStage, parseDateTimeInput } from '@platform/shared';
 import type {
   Role,
   EventSignup,
@@ -27,18 +28,15 @@ const VALID_EVENT_TYPES: EventType[] = [
   'other'
 ];
 const VALID_EVENT_STATUS: EventStatus[] = ['planned', 'live', 'completed', 'cancelled'];
-const VALID_SIGNUP_STAGES: EventSignupStage[] = [
-  'signup',
-  'attended',
-  'meeting',
-  'application',
-  'admitted'
-];
 
 export type EventActionState = {
   error?: string;
   eventId?: string;
   signupId?: string;
+  /** Schema-drift: kopplingen till årshjulet kunde inte sparas (migration 1700000194). */
+  warning?: 'arshjul';
+  /** Antal deltagare som markerades närvarande. */
+  updated?: number;
 };
 
 export async function createEventAction(
@@ -75,6 +73,24 @@ export async function createEventAction(
   const description = String(formData.get('description') || '').trim();
   const accent = String(formData.get('accent') || '').trim() || 'cyan';
 
+  // Årshjulsaktiviteten eventet genomför (§ 53). Tenant-verifierad — ett id
+  // från klienten litas aldrig på; en okänd referens är ett fel, aldrig ett
+  // tyst fristående event.
+  const wheelItemRaw = String(formData.get('wheel_item') || '').trim();
+  let wheelItem = '';
+  if (wheelItemRaw) {
+    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(wheelItemRaw)) return { error: 'Ogiltig årshjulsaktivitet.' };
+    const row = await getRecordInTenant<{ id: string; tenant?: string }>(
+      pb,
+      { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Role[] },
+      'annual_wheel_items',
+      wheelItemRaw,
+      'id,tenant'
+    );
+    if (!row) return { error: 'Årshjulsaktiviteten hittades inte.' };
+    wheelItem = row.id;
+  }
+
   try {
     const record = await pb.collection(PB_COLLECTIONS.events).create({
       tenant: user.tenant,
@@ -86,13 +102,17 @@ export async function createEventAction(
       location: location || null,
       description: description || null,
       accent,
+      ...(wheelItem ? { wheel_item: wheelItem } : {}),
       signups_count: 0,
       attended_count: 0,
       leads_count: 0,
       admitted_count: 0
     });
     revalidatePath('/events');
-    return { eventId: String(record.id) };
+    // PB släpper okända fält tyst (§ 24.4) — saknas kopplingen på den skapade
+    // posten körs instansen utan migration 1700000194.
+    const warning = wheelItem && !record.wheel_item ? ('arshjul' as const) : undefined;
+    return { eventId: String(record.id), warning };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte skapa event.' };
   }
@@ -122,8 +142,12 @@ export async function addSignupAction(
 
   const email = String(formData.get('email') || '').trim();
   const organization = String(formData.get('organization') || '').trim();
-  const stageRaw = String(formData.get('stage') || 'signup') as EventSignupStage;
-  const stage = VALID_SIGNUP_STAGES.includes(stageRaw) ? stageRaw : 'signup';
+  const stageRaw = String(formData.get('stage') || 'signup');
+  const stage: EventSignupStage = isEventSignupStage(stageRaw) ? stageRaw : 'signup';
+  if (email && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+    return { error: 'Ogiltig e-postadress.' };
+  }
+  if (name.length > 200 || organization.length > 200) return { error: 'Namn och organisation får vara högst 200 tecken.' };
   const notes = String(formData.get('notes') || '').trim();
 
   try {
@@ -151,7 +175,7 @@ export async function moveSignupStageAction(
 ): Promise<EventActionState> {
   const user = await requireUser();
   if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Åtkomst nekad.' };
-  if (!VALID_SIGNUP_STAGES.includes(nextStage)) return { error: 'Ogiltigt steg.' };
+  if (!isEventSignupStage(nextStage)) return { error: 'Ogiltigt steg.' };
 
   const pb = await getServerPb();
   let signup: EventSignup;
@@ -173,6 +197,53 @@ export async function moveSignupStageAction(
   }
 }
 
+/**
+ * Markerar alla som står som "Anmäld" som närvarande — snabbvägen efter ett
+ * event där alla anmälda kom. Senare steg (möte, ansökan, antagen) rörs inte.
+ */
+export async function markSignupsAttendedAction(eventId: string): Promise<EventActionState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Åtkomst nekad.' };
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(eventId)) return { error: 'Event hittades inte.' };
+  const pb = await getServerPb();
+
+  try {
+    const ev = await pb
+      .collection(PB_COLLECTIONS.events)
+      .getOne<{ tenant: string }>(eventId, { fields: 'id,tenant' });
+    if (ev.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
+  } catch {
+    return { error: 'Event hittades inte.' };
+  }
+
+  let pending: { id: string }[] = [];
+  try {
+    pending = await pb.collection(PB_COLLECTIONS.eventSignups).getFullList<{ id: string }>({
+      filter: pb.filter('tenant = {:t} && event = {:e} && stage = "signup"', { t: user.tenant, e: eventId }),
+      fields: 'id'
+    });
+  } catch {
+    return { error: 'Kunde inte läsa deltagarlistan.' };
+  }
+
+  let updated = 0;
+  for (const s of pending) {
+    try {
+      await pb.collection(PB_COLLECTIONS.eventSignups).update(s.id, { stage: 'attended' });
+      updated += 1;
+    } catch {
+      /* räknas som ej uppdaterad — rapporteras nedan */
+    }
+  }
+  await recomputeEventCounters(pb, user.tenant, eventId);
+  revalidatePath('/events');
+  revalidatePath(`/events/${eventId}`);
+  if (updated < pending.length) {
+    return { error: `${pending.length - updated} av ${pending.length} kunde inte markeras. Försök igen.`, updated };
+  }
+  return { eventId, updated };
+}
+
 async function recomputeEventCounters(
   pb: Awaited<ReturnType<typeof getServerPb>>,
   tenant: string,
@@ -183,16 +254,7 @@ async function recomputeEventCounters(
       filter: `tenant = "${escFilter(tenant)}" && event = "${escFilter(eventId)}"`,
       fields: 'id,stage'
     });
-    const counts = {
-      signups_count: all.length,
-      attended_count: all.filter((s) =>
-        ['attended', 'meeting', 'application', 'admitted'].includes(s.stage)
-      ).length,
-      leads_count: all.filter((s) => ['meeting', 'application', 'admitted'].includes(s.stage))
-        .length,
-      admitted_count: all.filter((s) => s.stage === 'admitted').length
-    };
-    await pb.collection(PB_COLLECTIONS.events).update(eventId, counts);
+    await pb.collection(PB_COLLECTIONS.events).update(eventId, eventSignupCounters(all));
   } catch {
     /* ignore */
   }

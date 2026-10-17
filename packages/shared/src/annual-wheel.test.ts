@@ -9,6 +9,7 @@ import {
   annualWheelCategoryLabel,
   annualWheelColorVar,
   annualWheelDateLabel,
+  annualWheelEventStartInput,
   annualWheelRangeLabel,
   annualWheelShortDateLabel,
   annualWheelShortRangeLabel,
@@ -964,4 +965,13 @@ test('resolveAnnualWheelCategories: show_on_home saknat = visas, false = döljs'
     ]
   );
   assert.deepEqual([...annualWheelHiddenOnHome(resolved)], ['vd']);
+});
+
+test('annualWheelEventStartInput föreslår aktivitetens datum kl. 09:00', () => {
+  assert.equal(annualWheelEventStartInput({ year: 2026, month: 3, day: 12 }), '2026-03-12T09:00');
+  assert.equal(annualWheelEventStartInput({ year: 2026, month: 3 }), '2026-03-01T09:00');
+  // Dagen klampas mot månadslängden.
+  assert.equal(annualWheelEventStartInput({ year: 2026, month: 2, day: 31 }), '2026-02-28T09:00');
+  assert.equal(annualWheelEventStartInput({ year: 2026, month: null }), '');
+  assert.equal(annualWheelEventStartInput({ month: 4 }), '');
 });

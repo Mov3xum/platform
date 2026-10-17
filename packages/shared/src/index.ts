@@ -1306,6 +1306,8 @@ export interface IncubatorEvent {
   attended_count?: number;
   leads_count?: number;
   admitted_count?: number;
+  /** Årshjulsaktiviteten eventet genomför (migration 1700000194, § 53). */
+  wheel_item?: string;
   created: string;
   updated: string;
 }
@@ -1763,6 +1765,7 @@ export function resolveUserModules(input: {
   return resolveEnabledModules({ ...input, allowedForRoles: allowedModuleIdsForRoles(input.roles) });
 }
 export * from './event-time';
+export * from './event-participants';
 export * from './org-posts';
 export * from './home';
 export * from './followup-rules';

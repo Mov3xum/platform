@@ -44,6 +44,8 @@ interface Props {
   action: (state: EventActionState, formData: FormData) => Promise<EventActionState>;
   initial?: EventFormInitial;
   submitLabel?: string;
+  /** Årshjulsaktiviteten eventet genomför (§ 53) — skickas som dolt fält och verifieras server-side. */
+  wheelItem?: { id: string; title: string; when: string };
 }
 
 // Formuläret visar och tar emot SVENSK tid (Europe/Stockholm) oavsett var
@@ -52,13 +54,19 @@ function toLocalDateTimeValue(iso?: string): string {
   return toStockholmDateTimeInputValue(iso);
 }
 
-export function EventForm({ action, initial, submitLabel = 'Spara' }: Props) {
+export function EventForm({ action, initial, submitLabel = 'Spara', wheelItem }: Props) {
   const [state, formAction, pending] = useActionState(action, {} as EventActionState);
   const inputClass =
     'block w-full rounded-xl border border-default bg-surface px-3 py-2 text-sm text-foreground outline-none transition focus:border-brand focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila';
 
   return (
     <form action={formAction} className="space-y-5">
+      {wheelItem ? (
+        <div className="rounded-xl bg-canvas-subtle px-4 py-2.5 text-sm text-foreground-muted">
+          <input type="hidden" name="wheel_item" value={wheelItem.id} />
+          Genomför årshjulsaktiviteten <strong className="text-foreground">{wheelItem.title}</strong> ({wheelItem.when}).
+        </div>
+      ) : null}
       <div>
         <label className="block text-sm font-medium text-foreground-muted">Namn</label>
         <input name="name" required defaultValue={initial?.name ?? ''} className={`mt-1 ${inputClass}`} />

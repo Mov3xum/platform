@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState, useTransition } from 'react';
 import { Card, CardHead, Icon } from '@/components/proto';
 import {
@@ -12,12 +13,16 @@ import { formatStockholmDateTime, toStockholmDateTimeInputValue } from '@platfor
 
 // Utskick till eventets deltagare (CLAUDE.md § 47.5). Visas bara för enkäter
 // som följer upp ett event. Alla knappar är mänskliga klick; adresser visas
-// aldrig här — bara antal.
+// aldrig här — bara antal. Enkäten går bara till dem som DELTOG (§ 53.1):
+// schemaläggning går bra innan eventet, men utskicket väntar tills närvaron
+// är markerad.
 
 export function SurveySendPanel({
   surveyId,
   isActive,
-  recipientCount,
+  registeredCount,
+  attendedCount,
+  eventId,
   sendAt,
   sentAt,
   sentCount,
@@ -25,8 +30,11 @@ export function SurveySendPanel({
 }: {
   surveyId: string;
   isActive: boolean;
-  /** Antal deltagare med giltig e-post (räknat server-side, adresser visas aldrig). */
-  recipientCount: number;
+  /** Anmälda med giltig e-post (räknat server-side, adresser visas aldrig). */
+  registeredCount: number;
+  /** Närvarande med giltig e-post — de som får enkäten. */
+  attendedCount: number;
+  eventId: string;
   sendAt: string;
   sentAt: string;
   sentCount: number;
@@ -52,10 +60,17 @@ export function SurveySendPanel({
       <CardHead label="Skicka till deltagarna" />
       <div style={{ padding: 16, display: 'grid', gap: 12 }}>
         <div className="mx-t-13">
-          <strong className="mx-ink-soft">{recipientCount}</strong> anmälda deltagare har en
-          e-postadress. Varje person får ett eget mejl med länken till enkäten — adresserna
-          lagras inte på enkäten.
+          <strong className="mx-ink-soft">{attendedCount}</strong> närvarande deltagare (av{' '}
+          {registeredCount} anmälda) har en e-postadress. Varje person får ett eget mejl med
+          länken till enkäten — adresserna lagras inte på enkäten.
         </div>
+        {attendedCount === 0 && registeredCount > 0 && (
+          <div className="mx-t-12 mx-muted">
+            Närvaron är inte markerad än.{' '}
+            <Link href={`/events/${encodeURIComponent(eventId)}`}>Markera vilka som deltog</Link> — ett
+            schemalagt utskick väntar tills dess och försöker igen varje timme.
+          </div>
+        )}
 
         {sentAt && (
           <div
@@ -103,7 +118,7 @@ export function SurveySendPanel({
             <button
               type="button"
               className="mx-btn"
-              disabled={pending || recipientCount === 0}
+              disabled={pending || registeredCount === 0}
               onClick={() => run(scheduleSurveySendAction, fd({ send_at: when }))}
             >
               <Icon name="clock" size={12} /> Schemalägg
@@ -111,14 +126,14 @@ export function SurveySendPanel({
             <button
               type="button"
               className="mx-btn mx-primary"
-              disabled={pending || recipientCount === 0 || !isActive}
+              disabled={pending || attendedCount === 0 || !isActive}
               onClick={() => {
                 const again = Boolean(sentAt);
                 if (
                   !window.confirm(
                     again
-                      ? `Skicka enkäten IGEN till ${recipientCount} deltagare?`
-                      : `Skicka enkäten till ${recipientCount} deltagare nu?`
+                      ? `Skicka enkäten IGEN till ${attendedCount} deltagare?`
+                      : `Skicka enkäten till ${attendedCount} deltagare nu?`
                   )
                 )
                   return;
@@ -145,7 +160,7 @@ export function SurveySendPanel({
           </div>
         )}
         <div className="mx-t-12 mx-muted">
-          Rättslig grund: berättigat intresse — ett engångsmejl till dem som anmält sig till
+          Rättslig grund: berättigat intresse — ett engångsmejl till dem som deltog i
           aktiviteten. Mejlet anger att enkäten är anonym.
         </div>
       </div>

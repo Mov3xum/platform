@@ -1,9 +1,16 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { requireUser } from '@/lib/auth.server';
+import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { createEventAction, type EventActionState } from '@/lib/actions/events';
-import { EventForm } from '@/components/EventForm';
+import { EventForm, type EventFormInitial } from '@/components/EventForm';
+import { getRecordInTenant } from '@/lib/core/write/helpers';
+import {
+  annualWheelEventStartInput,
+  annualWheelRangeLabel,
+  parseDateTimeInput,
+  type Role
+} from '@platform/shared';
 
 async function createEventAndRedirect(
   _prev: EventActionState,
@@ -12,15 +19,58 @@ async function createEventAndRedirect(
   'use server';
   const result = await createEventAction({}, formData);
   if (result.eventId) {
-    redirect(`/events/${result.eventId}`);
+    redirect(`/events/${result.eventId}${result.warning ? `?varning=${result.warning}` : ''}`);
   }
   return result;
 }
 
-export default async function NewEventPage() {
+type WheelItemRow = {
+  id: string;
+  tenant?: string;
+  title?: string;
+  year?: number;
+  month?: number;
+  day?: number;
+  end_month?: number;
+  end_day?: number;
+  notes?: string;
+};
+
+export default async function NewEventPage({
+  searchParams
+}: {
+  searchParams?: Promise<{ fran?: string }>;
+}) {
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) {
     redirect('/events');
+  }
+  const { fran } = (await searchParams) ?? {};
+
+  // "Skapa event" från en årshjulsaktivitet (§ 53): posten slås upp
+  // tenant-verifierat och förifyller namn, datum och beskrivning. Kopplingen
+  // verifieras igen i createEventAction — det här är bara förifyllning.
+  let wheelItem: WheelItemRow | null = null;
+  if (fran && /^[a-zA-Z0-9_-]{1,64}$/.test(fran)) {
+    const pb = await getServerPb();
+    wheelItem = await getRecordInTenant<WheelItemRow>(
+      pb,
+      { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Role[] },
+      'annual_wheel_items',
+      fran,
+      'id,tenant,title,year,month,day,end_month,end_day,notes'
+    );
+  }
+  const wheelMissing = Boolean(fran) && !wheelItem;
+
+  let initial: EventFormInitial | undefined;
+  if (wheelItem) {
+    const startInput = annualWheelEventStartInput(wheelItem);
+    initial = {
+      name: wheelItem.title || '',
+      starts_at: startInput ? parseDateTimeInput(startInput)?.toISOString() : undefined,
+      description: wheelItem.notes || ''
+    };
   }
 
   return (
@@ -38,8 +88,27 @@ export default async function NewEventPage() {
         </p>
       </header>
 
+      {wheelMissing && (
+        <p className="mb-4 rounded-xl bg-movexum-pastell-orange px-4 py-2.5 text-sm text-movexum-morkorange">
+          Årshjulsaktiviteten hittades inte — eventet skapas fristående om du fortsätter.
+        </p>
+      )}
+
       <div className="rounded-3xl border border-default bg-surface p-8 shadow-sm shadow-movexum-svart/5">
-        <EventForm action={createEventAndRedirect} submitLabel="Skapa event" />
+        <EventForm
+          action={createEventAndRedirect}
+          submitLabel="Skapa event"
+          initial={initial}
+          wheelItem={
+            wheelItem
+              ? {
+                  id: wheelItem.id,
+                  title: wheelItem.title || 'Aktivitet',
+                  when: annualWheelRangeLabel({ ...wheelItem, year: wheelItem.year ?? new Date().getFullYear() })
+                }
+              : undefined
+          }
+        />
       </div>
     </main>
   );

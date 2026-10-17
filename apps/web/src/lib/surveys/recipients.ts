@@ -1,25 +1,32 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
-import { collectSurveyRecipients } from '@platform/shared';
+import { collectSurveyRecipients, isAttendedStage } from '@platform/shared';
+
+export interface SurveyRecipientCounts {
+  /** Anmälda (alla steg) med giltig e-post. */
+  registered: number;
+  /** Närvarande (eller längre i tratten) med giltig e-post — de som får enkäten. */
+  attended: number;
+}
 
 /**
- * Antal deltagare med giltig e-post för ett event (§ 47.5). Läser
+ * Antal deltagare med giltig e-post för ett event (§ 47.5, § 53.1). Läser
  * `event_signups` med användarens token (RLS) och superuser-fallback vid
  * PB v0.23.4:s tysta nekande (§ 21.3), tenant-filtrerat i båda fallen.
- * Returnerar bara ett TAL — adresserna lämnar aldrig servern.
+ * Returnerar bara TAL — adresserna lämnar aldrig servern.
  */
 export async function countSurveyRecipients(
   pb: PocketBase,
   tenant: string,
   eventId: string
-): Promise<number> {
+): Promise<SurveyRecipientCounts> {
   const read = (c: PocketBase) =>
-    c.collection('event_signups').getFullList<{ email?: string }>({
+    c.collection('event_signups').getFullList<{ email?: string; stage?: string }>({
       filter: c.filter('event = {:e} && tenant = {:t}', { e: eventId, t: tenant }),
-      fields: 'id,email'
+      fields: 'id,email,stage'
     });
-  let rows: { email?: string }[] = [];
+  let rows: { email?: string; stage?: string }[] = [];
   try {
     rows = await read(pb);
   } catch {
@@ -35,5 +42,8 @@ export async function countSurveyRecipients(
       }
     }
   }
-  return collectSurveyRecipients(rows).length;
+  return {
+    registered: collectSurveyRecipients(rows).length,
+    attended: collectSurveyRecipients(rows.filter((r) => isAttendedStage(r.stage))).length
+  };
 }

@@ -10,7 +10,7 @@ import { deleteSurveyAction } from '@/lib/actions/surveys';
 import { getSurvey, getSurveyResults } from '@/lib/surveys/store';
 import { SurveyLinkChip } from '@/components/surveys/SurveyLinkChip';
 import { SurveySendPanel } from '@/components/surveys/SurveySendPanel';
-import { countSurveyRecipients } from '@/lib/surveys/recipients';
+import { countSurveyRecipients, type SurveyRecipientCounts } from '@/lib/surveys/recipients';
 import { getRecordInTenant } from '@/lib/core/write/helpers';
 import { defaultSurveySendAt, type Role } from '@platform/shared';
 import { buildInflodeTabs } from '../../_tabs';
@@ -37,7 +37,7 @@ export default async function SurveyDetailPage({
 
   // Utskick (§ 47.5) — bara för event-kopplade enkäter. Antalet räknas
   // server-side; adresserna når aldrig klienten.
-  let send: { recipientCount: number; defaultSendAt: string } | null = null;
+  let send: { recipients: SurveyRecipientCounts; eventId: string; defaultSendAt: string } | null = null;
   if (!showResults && survey.link_kind === 'event' && survey.link_id) {
     const ev = await getRecordInTenant<{ id: string; tenant?: string; starts_at?: string; ends_at?: string }>(
       pb,
@@ -48,7 +48,8 @@ export default async function SurveyDetailPage({
     );
     if (ev) {
       send = {
-        recipientCount: await countSurveyRecipients(pb, user.tenant, survey.link_id),
+        recipients: await countSurveyRecipients(pb, user.tenant, survey.link_id),
+        eventId: ev.id,
         defaultSendAt: defaultSurveySendAt(ev)?.toISOString() ?? ''
       };
     }
@@ -108,7 +109,9 @@ export default async function SurveyDetailPage({
               <SurveySendPanel
                 surveyId={survey.id}
                 isActive={survey.is_active}
-                recipientCount={send.recipientCount}
+                registeredCount={send.recipients.registered}
+                attendedCount={send.recipients.attended}
+                eventId={send.eventId}
                 sendAt={survey.send_at}
                 sentAt={survey.sent_at}
                 sentCount={survey.sent_count}

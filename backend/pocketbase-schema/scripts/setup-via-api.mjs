@@ -5040,6 +5040,13 @@ await patchCollection('annual_wheel_items', [
   tags: { values: ANNUAL_WHEEL_TAG_VALUES, maxSelect: ANNUAL_WHEEL_TAG_VALUES.length }
 });
 
+// Migration 1700000194: incubator_events.wheel_item — eventet genomför en
+// årshjulsaktivitet (§ 53). Målkollektionens id slås upp på namnet (§ 30.4 p. 1).
+const annualWheelItemsCol = await pb.collections.getOne('annual_wheel_items');
+await patchCollection('incubator_events', [
+  { name: 'wheel_item', type: 'relation', required: false, collectionId: annualWheelItemsCol.id, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+]);
+
 // =========================================================================
 // 18d. Field-patches på befintliga collections (porterade från migrations
 // 43, 49, 54, 56, 57, 58, 61, 67)

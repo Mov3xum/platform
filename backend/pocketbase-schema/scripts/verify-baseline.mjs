@@ -1082,6 +1082,9 @@ const REQUIRED_APP_FIELDS = [
   // Årshjul (§ 30): day = migration 1700000138, tags/responsible = 1700000139.
   // day = 1700000138, tags/responsible = 1700000139, end_* = 1700000141.
   { collection: 'annual_wheel_items', fields: ['day', 'tags', 'responsible', 'end_month', 'end_day'] },
+  // Event ↔ årshjul (§ 53, migration 1700000194): utan fältet "sparas"
+  // kopplingen tyst bort och eventet tappar sin plan.
+  { collection: 'incubator_events', fields: ['wheel_item'] },
   // Upphandlingar (§ 39): regelgenererade uppföljningar = tasks med
   // procurement-länk + rule_key (migration 1700000152). Saknas fälten
   // skapas korten utan idempotensnyckel → dubbletter vid varje synk.
