@@ -594,6 +594,12 @@ export interface AnnualWheelItem {
   /** Ansvarigs visningsnamn, upplöst av anroparen (aldrig e-post/PII). */
   responsible_name?: string | null;
   notes?: string;
+  /** Mål som drivs av aktiviteter (migration 1700000196, § 53.4). */
+  goal_indicators?: string[];
+  planned_participants?: number | null;
+  /** 'on_plan' | 'below_plan' | 'cancelled' — tomt = ej genomförd. */
+  outcome_verdict?: string | null;
+  completed_at?: string;
   created_by?: string;
   created?: string;
   updated?: string;
@@ -1800,4 +1806,27 @@ export function annualWheelEventStartInput(item: {
   const day = Math.min(sanitizeDay(item.day) ?? 1, daysInMonth(year, month));
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${year}-${pad(month)}-${pad(day)}T09:00`;
+}
+
+/**
+ * Dagen då en årshjulsaktivitet ska vara genomförd (§ 53.4): periodens slut
+ * för en kampanj, annars postens dag (eller månadens sista dag). Odaterad
+ * (helårs-)post ⇒ '' — den förfaller först vid årets slut.
+ */
+export function annualWheelDueDateKey(item: {
+  year: number;
+  month?: number | null;
+  day?: number | null;
+  end_month?: number | null;
+  end_day?: number | null;
+}): string {
+  const start = sanitizeMonth(item.month);
+  if (start === null) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const period = isAnnualWheelPeriod(item);
+  const month = period ? (sanitizeMonth(item.end_month) as number) : start;
+  const day = period
+    ? (sanitizeDay(item.end_day) ?? daysInMonth(item.year, month))
+    : (sanitizeDay(item.day) ?? daysInMonth(item.year, month));
+  return `${item.year}-${pad(month)}-${pad(Math.min(day, daysInMonth(item.year, month)))}`;
 }

@@ -18,6 +18,8 @@ import { ConfirmDeleteButton } from '@/components/ConfirmDeleteButton';
 import { Participants, type ParticipantRow } from './Participants';
 import { FollowUpSurveys } from '@/components/surveys/FollowUpSurveys';
 import { getRecordInTenant } from '@/lib/core/write/helpers';
+import { listActivityIndicatorOptions } from '@/lib/goals/activities';
+import { ActivityGoalPanel } from '@/components/activities/ActivityGoalPanel';
 import {
   EVENT_PHASE_LABEL,
   EVENT_SIGNUP_STAGE_LABEL,
@@ -25,6 +27,7 @@ import {
   eventPhase,
   eventSignupFunnel,
   formatStockholmDateTime,
+  isActivityOutcome,
   isEventSignupStage,
   type EventSignup,
   type EventSignupStage,
@@ -97,14 +100,17 @@ export default async function EventDetailPage({
         day?: number;
         end_month?: number;
         end_day?: number;
+        goal_indicators?: string[];
+        planned_participants?: number;
       }>(
         pb,
         { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Role[] },
         'annual_wheel_items',
         event.wheel_item,
-        'id,tenant,title,year,month,day,end_month,end_day'
+        'id,tenant,title,year,month,day,end_month,end_day,goal_indicators,planned_participants'
       )
     : null;
+  const goalOptions = await listActivityIndicatorOptions(pb, user.tenant);
 
   const funnelData = eventSignupFunnel(signups).map((f) => ({
     ...f,
@@ -297,6 +303,23 @@ export default async function EventDetailPage({
           </div>
         </Card>
       </div>
+
+      <SectionHead title="Mål & genomförande" label="verksamhetsplan" />
+      <Card style={{ padding: 16 }}>
+        <ActivityGoalPanel
+          kind="event"
+          id={event.id}
+          options={goalOptions}
+          selected={event.goal_indicators ?? []}
+          inherited={wheelItem?.goal_indicators ?? []}
+          plannedParticipants={event.planned_participants && event.planned_participants > 0 ? event.planned_participants : null}
+          inheritedPlanned={wheelItem?.planned_participants && wheelItem.planned_participants > 0 ? wheelItem.planned_participants : null}
+          outcome={isActivityOutcome(event.outcome_verdict) ? event.outcome_verdict : null}
+          completedAt={event.completed_at || undefined}
+          attended={event.attended_count || 0}
+          canEdit={canEdit}
+        />
+      </Card>
 
       <SectionHead title="Uppföljning" label="enkät" />
       <FollowUpSurveys

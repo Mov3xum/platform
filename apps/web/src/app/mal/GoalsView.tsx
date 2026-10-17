@@ -12,6 +12,9 @@ import {
   GOAL_OWNER_TEAMS,
   GOAL_OWNER_TEAM_LABELS,
   GOAL_PERIOD_STATUS_LABELS,
+  ACTIVITY_MEASURES,
+  ACTIVITY_MEASURE_LABELS,
+  ACTIVITY_OUTCOME_LABELS,
   GOAL_STATUSES,
   GOAL_STATUS_LABELS,
   METRIC_DEFINITIONS,
@@ -28,6 +31,7 @@ import {
   type GoalKind,
   type GoalNode,
   type GoalPeriod,
+  type ActivityMeasure,
   type GoalStatus,
   type MetricKey,
   type MetricValue,
@@ -50,6 +54,7 @@ import {
   type GoalActionState
 } from '@/lib/actions/goals';
 import type { GoalWorkspace, SurveyIndicatorValue } from '@/lib/goals/data';
+import type { ActivityIndicatorLive } from '@/lib/goals/activities';
 
 type SurveyModuleOption = GoalWorkspace['surveyModules'][number];
 type PersonOption = GoalWorkspace['people'][number];
@@ -116,7 +121,7 @@ export function GoalsView({
   /** Ledning (admin/incubator_lead): år, övergripande mål, indikatorer, personliga mål åt andra. */
   canManage: boolean;
 }) {
-  const { periods, period, tree, metrics, surveys, surveyModules, people, schemaMissing } = workspace;
+  const { periods, period, tree, metrics, surveys, activities, surveyModules, people, schemaMissing } = workspace;
   const rollup = rollupGoalStatuses(tree, quarter);
   const yearHref = (y: number, q: Quarter = quarter) => `/mal?ar=${y}&q=${q}`;
   const open = !!period && period.status !== 'closed';
@@ -208,6 +213,7 @@ export function GoalsView({
                 quarter={quarter}
                 metrics={metrics}
                 surveys={surveys}
+                activities={activities}
                 surveyModules={surveyModules}
                 people={people}
                 focusGoal={focusGoal}
@@ -227,6 +233,7 @@ export function GoalsView({
                 quarter={quarter}
                 metrics={metrics}
                 surveys={surveys}
+                activities={activities}
                 surveyModules={surveyModules}
                 people={people}
                 focusGoal={focusGoal}
@@ -254,6 +261,7 @@ function GoalGroup({
   quarter,
   metrics,
   surveys,
+  activities,
   surveyModules,
   people,
   focusGoal,
@@ -270,6 +278,7 @@ function GoalGroup({
   quarter: Quarter;
   metrics: Partial<Record<MetricKey, MetricValue>>;
   surveys: Record<string, SurveyIndicatorValue>;
+  activities: Record<string, ActivityIndicatorLive>;
   surveyModules: SurveyModuleOption[];
   people: PersonOption[];
   focusGoal: string | null;
@@ -297,6 +306,7 @@ function GoalGroup({
           quarter={quarter}
           metrics={metrics}
           surveys={surveys}
+          activities={activities}
           surveyModules={surveyModules}
           people={people}
           focused={focusGoal === node.goal.id}
@@ -320,6 +330,7 @@ function GoalCard({
   quarter,
   metrics,
   surveys,
+  activities,
   surveyModules,
   people,
   focused,
@@ -332,6 +343,7 @@ function GoalCard({
   quarter: Quarter;
   metrics: Partial<Record<MetricKey, MetricValue>>;
   surveys: Record<string, SurveyIndicatorValue>;
+  activities: Record<string, ActivityIndicatorLive>;
   surveyModules: SurveyModuleOption[];
   people: PersonOption[];
   focused: boolean;
@@ -417,6 +429,7 @@ function GoalCard({
                   quarter={quarter}
                   metrics={metrics}
                   survey={surveys[ind.indicator.id]}
+                  activity={activities[ind.indicator.id]}
                   canReport={canReport}
                   canManage={canManageIndicators}
                 />
@@ -543,6 +556,7 @@ function IndicatorRow({
   quarter,
   metrics,
   survey,
+  activity,
   canReport,
   canManage
 }: {
@@ -550,6 +564,8 @@ function IndicatorRow({
   quarter: Quarter;
   metrics: Partial<Record<MetricKey, MetricValue>>;
   survey?: SurveyIndicatorValue;
+  /** Live-resultat för en aktivitetsindikator (§ 53.4). */
+  activity?: ActivityIndicatorLive;
   canReport: boolean;
   canManage: boolean;
 }) {
@@ -563,9 +579,13 @@ function IndicatorRow({
       ? (live?.value ?? null)
       : indicator.source === 'survey'
         ? (survey?.value ?? null)
-        : latestManual;
+        : indicator.source === 'activities'
+          ? (activity?.value ?? null)
+          : latestManual;
   const liveNote =
-    indicator.source === 'survey'
+    indicator.source === 'activities'
+      ? (activity?.note ?? 'Inga aktiviteter är kopplade till indikatorn ännu.')
+      : indicator.source === 'survey'
       ? survey
         ? survey.visible
           ? `${survey.respondents} svar`
@@ -575,8 +595,10 @@ function IndicatorRow({
         ? 'Känsligt aggregat — visas bara för admin/incubator_lead/coach.'
         : live?.note;
   const unit = { unit: indicator.unit === 'bool' ? 'count' : indicator.unit } as const;
-  const suggestion = suggestStatusFromValue(indicator, current);
+  // Aktivitetsindikatorer jämför utfallet med planen hittills (§ 53.4); övriga mot måltalet.
+  const suggestion = indicator.source === 'activities' ? (activity?.status ?? null) : suggestStatusFromValue(indicator, current);
   const [open, setOpen] = useState(false);
+  const [showActivities, setShowActivities] = useState(false);
   const [editing, setEditing] = useState(false);
   const [state, setState] = useState<GoalActionState | null>(null);
   const [pending, start] = useTransition();
@@ -600,8 +622,35 @@ function IndicatorRow({
               ? `Beräknas: ${METRIC_DEFINITIONS[indicator.metric_key as MetricKey]?.label ?? indicator.metric_key}`
               : indicator.source === 'survey'
                 ? 'Enkät i Startupkompassen (medel 1–10)'
-                : 'Manuell bedömning'}
+                : indicator.source === 'activities'
+                  ? `Aktiviteter: ${ACTIVITY_MEASURE_LABELS[indicator.activity_measure as ActivityMeasure] ?? 'okänt mått'}`
+                  : 'Manuell bedömning'}
           </div>
+          {indicator.source === 'activities' && activity && activity.activities.length > 0 && (
+            <button
+              type="button"
+              className="mt-0.5 text-[11px] font-semibold text-link hover:underline"
+              onClick={() => setShowActivities((v) => !v)}
+            >
+              {showActivities ? 'Dölj' : 'Visa'} {activity.activities.length} kopplade aktiviteter
+            </button>
+          )}
+          {showActivities && activity && (
+            <ul className="mt-1 space-y-0.5 text-[11px] text-foreground-muted">
+              {activity.activities.map((a) => (
+                <li key={`${a.kind}:${a.id}`}>
+                  <Link
+                    href={a.kind === 'event' ? `/events/${a.id}` : `/arshjul?item=${encodeURIComponent(a.id)}`}
+                    className="hover:underline"
+                  >
+                    {a.date ? `${a.date} · ` : ''}
+                    {a.title}
+                  </Link>{' '}
+                  · {a.outcome ? ACTIVITY_OUTCOME_LABELS[a.outcome] : 'Ej genomförd'}
+                </li>
+              ))}
+            </ul>
+          )}
         </td>
         <td className="py-2 pr-3 tabular-nums text-foreground">
           {indicator.unit === 'bool' ? 'Ja' : indicator.target === null || indicator.target === undefined ? '–' : formatMetricValue(unit, indicator.target)}
@@ -753,7 +802,12 @@ function StatusForm({
   const [state, setState] = useState<GoalActionState | null>(null);
   const [pending, start] = useTransition();
   const manual = node.indicator.source === 'manual';
-  const sourceLabel = node.indicator.source === 'survey' ? 'Värde (ur enkäten)' : 'Värde (ur data)';
+  const sourceLabel =
+    node.indicator.source === 'survey'
+      ? 'Värde (ur enkäten)'
+      : node.indicator.source === 'activities'
+        ? 'Värde (ur aktiviteterna)'
+        : 'Värde (ur data)';
 
   return (
     <form
@@ -1112,7 +1166,8 @@ function NewIndicatorForm({ goalId, surveyModules }: { goalId: string; surveyMod
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [label, setLabel] = useState('');
-  const [source, setSource] = useState<'computed' | 'manual' | 'survey'>('computed');
+  const [source, setSource] = useState<'computed' | 'manual' | 'survey' | 'activities'>('computed');
+  const [measure, setMeasure] = useState<ActivityMeasure>('completed');
   const [surveyModule, setSurveyModule] = useState<string>(surveyModules[0]?.id ?? '');
   const [metricKey, setMetricKey] = useState<string>(METRIC_KEYS.find((k) => METRIC_DEFINITIONS[k].scope === 'tenant') ?? 'active_startups');
   const [target, setTarget] = useState('');
@@ -1141,6 +1196,7 @@ function NewIndicatorForm({ goalId, surveyModules }: { goalId: string; surveyMod
             source,
             metric_key: source === 'computed' ? metricKey : undefined,
             survey_module: source === 'survey' ? surveyModule : undefined,
+            activity_measure: source === 'activities' ? measure : undefined,
             target,
             unit: source === 'manual' ? unit : undefined
           });
@@ -1160,8 +1216,13 @@ function NewIndicatorForm({ goalId, surveyModules }: { goalId: string; surveyMod
       </div>
       <div>
         <label className={labelClass}>Mätkälla</label>
-        <select className={inputClass} value={source} onChange={(e) => setSource(e.target.value as 'computed' | 'manual' | 'survey')}>
+        <select
+          className={inputClass}
+          value={source}
+          onChange={(e) => setSource(e.target.value as 'computed' | 'manual' | 'survey' | 'activities')}
+        >
           <option value="computed">Beräknas ur data</option>
+          <option value="activities">Kopplade aktiviteter</option>
           <option value="survey" disabled={surveyModules.length === 0}>
             Enkät i Startupkompassen{surveyModules.length === 0 ? ' (ingen enkätmodul ännu)' : ''}
           </option>
@@ -1180,6 +1241,20 @@ function NewIndicatorForm({ goalId, surveyModules }: { goalId: string; surveyMod
               ))}
             </select>
             {def && <p className="mt-1 text-[11px] text-foreground-subtle">{def.description}</p>}
+          </>
+        ) : source === 'activities' ? (
+          <>
+            <label className={labelClass}>Mäter</label>
+            <select className={inputClass} value={measure} onChange={(e) => setMeasure(e.target.value as ActivityMeasure)}>
+              {ACTIVITY_MEASURES.map((m) => (
+                <option key={m} value={m}>
+                  {ACTIVITY_MEASURE_LABELS[m]}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-[11px] text-foreground-subtle">
+              Koppla aktiviteter i årshjulet eller på eventet — värdet och statusen räknas live mot planen.
+            </p>
           </>
         ) : source === 'survey' ? (
           <>

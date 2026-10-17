@@ -388,6 +388,10 @@ export function parseGoalImportRows(headers: readonly string[], dataRows: readon
         warnings.push(`Rad ${line}: enkätindikatorer kopplas till en enkätmodul i /mal — importeras som manuell bedömning.`);
         source = 'manual';
       }
+      if (source === 'activities') {
+        warnings.push(`Rad ${line}: aktivitetsindikatorer får sitt mått i /mal — importeras som manuell bedömning.`);
+        source = 'manual';
+      }
       if (source === 'computed' && !metric) {
         warnings.push(`Rad ${line}: beräknad indikator utan känd metrik — importeras som manuell bedömning.`);
         source = 'manual';

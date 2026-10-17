@@ -1,7 +1,7 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 import { escFilter } from '@/lib/pb-filter';
-import { isOrgPostKind, orgPostHomePath } from '@platform/shared';
+import { ACTIVITY_OUTCOME_LABELS, isActivityOutcome, isOrgPostKind, orgPostHomePath } from '@platform/shared';
 
 /**
  * Samlad händelselogg för aktivitetsfeeden (CLAUDE.md § 32).
@@ -117,6 +117,40 @@ function trunc(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 
+/**
+ * Mål & genomförande på en aktivitet (§ 53.4): koppling till mål eller
+ * utfall. Null för alla andra rader (de mappas som förut).
+ */
+function activityGoalEntry(
+  row: { field?: string },
+  after: Record<string, unknown>,
+  prefix: string,
+  href: string
+): MappedEntry | null {
+  const title = str(after.title);
+  const name = title ? `"${title}"` : 'en aktivitet';
+  if (row.field === 'outcome_verdict') {
+    const outcome = after.outcome;
+    return {
+      title: isActivityOutcome(outcome)
+        ? `${prefix}: ${name} — ${ACTIVITY_OUTCOME_LABELS[outcome].toLowerCase()}`
+        : `${prefix}: ${name} öppnades igen`,
+      detail: typeof after.attended === 'number' ? `${after.attended} närvarande` : undefined,
+      href,
+      icon: 'target'
+    };
+  }
+  if (row.field === 'goal_indicators') {
+    const count = Array.isArray(after.indicators) ? after.indicators.length : 0;
+    return {
+      title: `${prefix}: ${name} kopplades till ${count} målindikator${count === 1 ? '' : 'er'}`,
+      href,
+      icon: 'target'
+    };
+  }
+  return null;
+}
+
 function fieldLabel(field?: string): string {
   if (!field) return 'ett fält';
   return FIELD_LABELS[field] ?? field;
@@ -185,6 +219,8 @@ function mapRow(
 
   switch (row.collection) {
     case 'annual_wheel_items': {
+      const goalEntry = activityGoalEntry(row, after, 'Årshjulet', '/arshjul');
+      if (goalEntry) return goalEntry;
       if (action === 'create') {
         return {
           title: `Ny aktivitet i årshjulet: "${str(after.title) || 'utan titel'}"`,
@@ -361,6 +397,8 @@ function mapRow(
     }
 
     case 'incubator_events': {
+      const goalEntry = activityGoalEntry(row, after, 'Event', row.record_id ? `/events/${row.record_id}` : '/events');
+      if (goalEntry) return goalEntry;
       const starts = str(after.starts_at);
       return {
         title: `Nytt event: "${str(after.name) || 'utan namn'}"`,

@@ -1088,6 +1088,11 @@ const REQUIRED_APP_FIELDS = [
   // Utvärderingsmallar (§ 53.3, migration 1700000195): utan fälten "sparas"
   // en mall tyst som en vanlig (publicerbar) enkät.
   { collection: 'surveys', fields: ['is_template', 'template_for'] },
+  // Mål som drivs av aktiviteter (§ 53.4, migration 1700000196): utan fälten
+  // "sparas" koppling/plan/utfall tyst bort och målen uppdateras aldrig.
+  { collection: 'goal_indicators', fields: ['activity_measure'] },
+  { collection: 'annual_wheel_items', fields: ['goal_indicators', 'planned_participants', 'completed_at', 'outcome_verdict'] },
+  { collection: 'incubator_events', fields: ['goal_indicators', 'planned_participants', 'completed_at', 'outcome_verdict'] },
   // Upphandlingar (§ 39): regelgenererade uppföljningar = tasks med
   // procurement-länk + rule_key (migration 1700000152). Saknas fälten
   // skapas korten utan idempotensnyckel → dubbletter vid varje synk.
@@ -1163,7 +1168,8 @@ const REQUIRED_APP_FIELDS = [
  * bolagen" (§ 37.2, migration 1700000171) med "audience: Invalid value".
  */
 const REQUIRED_SELECT_VALUES = [
-  { collection: 'org_posts', field: 'audience', values: ['staff', 'all', 'startups'], migration: '1700000171' }
+  { collection: 'org_posts', field: 'audience', values: ['staff', 'all', 'startups'], migration: '1700000171' },
+  { collection: 'goal_indicators', field: 'source', values: ['computed', 'manual', 'survey', 'activities'], migration: '1700000196' }
 ];
 
 const MUST_NOT_BE_REQUIRED = [

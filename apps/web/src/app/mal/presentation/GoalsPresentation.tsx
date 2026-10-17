@@ -21,6 +21,7 @@ import {
   usePresentationShell
 } from '@/components/presentation/PresentationShell';
 import type { GoalWorkspace, SurveyIndicatorValue } from '@/lib/goals/data';
+import type { ActivityIndicatorLive } from '@/lib/goals/activities';
 import { StatusChip } from '../ui';
 
 /**
@@ -37,7 +38,7 @@ export function GoalsPresentation({
   workspace: GoalWorkspace;
   initialQuarter: Quarter;
 }) {
-  const { periods, period, tree, metrics, surveys, people } = workspace;
+  const { periods, period, tree, metrics, surveys, activities, people } = workspace;
   const [quarter, setQuarter] = useState<Quarter>(initialQuarter);
   const years = useMemo(() => periods.map((p) => p.year).sort((a, b) => a - b), [periods]);
 
@@ -186,7 +187,7 @@ export function GoalsPresentation({
                           <ul className="mt-2 divide-y divide-default">
                             {/* Art. 9-aggregat visas aldrig på projektorn (§ 41.2) — bara i /mal för behöriga. */}
                             {g.indicators.filter((ind) => !isAggregateOnlyIndicator(ind.indicator)).map((ind) => (
-                              <IndicatorLine key={ind.indicator.id} node={ind} quarter={quarter} metrics={metrics} survey={surveys[ind.indicator.id]} />
+                              <IndicatorLine key={ind.indicator.id} node={ind} quarter={quarter} metrics={metrics} survey={surveys[ind.indicator.id]} activity={activities[ind.indicator.id]} />
                             ))}
                           </ul>
                         )}
@@ -209,12 +210,15 @@ function IndicatorLine({
   node,
   quarter,
   metrics,
-  survey
+  survey,
+  activity
 }: {
   node: GoalIndicatorNode;
   quarter: Quarter;
   metrics: Partial<Record<MetricKey, MetricValue>>;
   survey?: SurveyIndicatorValue;
+  /** Live-värde för en aktivitetsindikator (§ 53.4). */
+  activity?: ActivityIndicatorLive;
 }) {
   const { indicator } = node;
   const entry = node.byQuarter[quarter];
@@ -224,7 +228,9 @@ function IndicatorLine({
       ? (live?.value ?? null)
       : indicator.source === 'survey'
         ? (survey?.value ?? null)
-        : (entry?.value ?? node.latest?.value ?? null);
+        : indicator.source === 'activities'
+          ? (activity?.value ?? null)
+          : (entry?.value ?? node.latest?.value ?? null);
   const unit = { unit: indicator.unit === 'bool' ? 'count' : indicator.unit } as const;
   const isBool = indicator.unit === 'bool';
   return (

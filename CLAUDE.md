@@ -9163,6 +9163,66 @@ motor.
   sådan instans ger `?varning=mall`. Fälten speglas i `setup-via-api.mjs` och
   asserteras i `verify-baseline.mjs`.
 
+### 53.4 Mål som drivs av aktiviteter — VP live mot aktiviteterna
+
+En indikator i `/mal` kan ha källan **`activities`** ("Kopplade
+aktiviteter") med ett **mått** (`activity_measure`): antal genomförda,
+antal genomförda enligt plan, antal deltagare (närvarande), utvärderingens
+snittbetyg (1–5) eller NPS. Aktiviteter — årshjulsposter och event —
+kopplas till sådana indikatorer, får en plan (planerat antal deltagare) och
+markeras genomförda. Värdet **och statusförslaget** räknas live; mål och VP
+fylls aldrig i för hand. Migration **1700000196**.
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/goal-activities.ts` (+ `.test.ts`) | Vokabulär (`ACTIVITY_MEASURES`, `ACTIVITY_OUTCOMES`), `eventOutcomeFromAttendance`, `parsePlannedParticipants`, `evaluateActivityIndicator` (värde + status mot plan hittills) |
+| `apps/web/src/lib/core/write/activity-goals.ts` | Skrivlagret: `setActivityGoals` (koppling + plan), `completeActivity` (genomförd/inställd/öppna igen) |
+| `apps/web/src/lib/goals/activities.ts` | Läsvägen: `loadActivityIndicatorResults` (årets aktiviteter + utvärderingssvar → resultat per indikator), `listActivityIndicatorOptions` |
+| `apps/web/src/components/activities/ActivityGoalPanel.tsx` | "Mål & genomförande" — samma panel på eventsidan och i årshjulets dialog |
+| `apps/web/src/lib/actions/activity-goals.ts` | Tunna server actions → skrivlagret |
+
+- **En aktivitet räknas en gång:** ett event är en aktivitet; en
+  årshjulspost utan event är en aktivitet; en post som genomförs via event
+  (`wheel_item`) representeras av sina event och avslutas där. Eventets
+  koppling = egna indikatorer ∪ årshjulspostens; planen ärvs från posten
+  när eventet saknar egen.
+- **Utfall:** ett event räknar utfallet **server-side** ur närvaron mot planen
+  (`eventOutcomeFromAttendance`: minst så många närvarande som planerat =
+  enligt plan; utan plan räcker genomförandet). Närvaron räknas om ur
+  deltagarlistan vid avslut — räknarna på eventet litas inte på. En
+  årshjulspost utan event saknar deltagardata; där väljer människan
+  "enligt plan" / "under plan". Inställda räknas varken som planerade eller
+  sena.
+- **Status mot planen hittills** (`evaluateActivityIndicator`): förfallna men
+  ej genomförda aktiviteter ⇒ Försenad; för "enligt plan" även genomförda
+  under plan; för deltagare närvaro mot planerat hittills; måltal nått ⇒
+  Klar; färre planerade aktiviteter än måltalet ⇒ Försenad ("planera fler");
+  inget förfallet ⇒ Ej startad. Odaterade poster förfaller vid årets slut
+  (`annualWheelDueDateKey`; perioder vid periodens slut).
+- **Utvärderingsmått** räknar bara utvärderingar (§ 47, `link_kind = event`,
+  aldrig mallar) med **minst 5 svar** (`AGGREGATE_MIN_GROUP`, k-anonymitet);
+  färre ⇒ "–" med förklaring. Bara tal läses ur svaren (betyg/NPS), aldrig
+  fritext. Läsningen sker med användarens token (RLS) och är kapad
+  (5 000 svar).
+- **Människa godkänner kvartalet (beslut 2026-10):** cockpiten visar värde,
+  statusförslag och de kopplade aktiviteterna live; kvartalsstatusen sparas
+  fortfarande av en människa (`recordGoalStatus`), som för `activities`
+  hämtar värdet server-side och avvisar ett manuellt värde (samma regel som
+  `computed`/`survey`, § 42.3). Presentationsläget visar live-värdet.
+- **Säkerhet:** indikatorer slås upp tenant-verifierat och MÅSTE ha källan
+  `activities`; aktiviteten likaså. Fälten är agent-nekade i
+  `writable-fields.ts` (verksamhetsplanens siffror flyttas av människor) —
+  chattens `add_goal_indicator` erbjuder fortfarande bara computed/manual.
+  Audit i `agent_actions` (titel, indikatoretiketter, utfall, antal —
+  PII-fritt) och feeden visar "Event: "X" — genomförd enligt plan".
+  Schema-drift: saknade fält efter skrivning ⇒ tydligt fel som namnger
+  migrationen; `verify-baseline.mjs` asserterar fälten och select-värdet
+  `goal_indicators.source = activities`; allt speglas i `setup-via-api.mjs`.
+  Goal-importen (§ 42.3) tolkar `activities` som manuell med varning (måttet
+  väljs i `/mal`).
+- **Riskklass:** n/a — deterministisk beräkning, ingen AI-inferens. Ingen ny
+  PII; nya fält når inte AI-kontexten.
+
 ### 53.2 Säkerhet och regelefterlevnad
 
 - **Tenant:** `wheel_item` från klienten litas aldrig på — `createEventAction`

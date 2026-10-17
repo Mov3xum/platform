@@ -39,6 +39,19 @@ const EVENT_MANAGE: Role[] = ['admin', 'incubator_lead', 'coach'];
 // Schemaläggning av AI-agenter är admin/incubator_lead (§ 12.2).
 const SCHEDULE_MANAGE: Role[] = ['admin', 'incubator_lead'];
 
+function activityGoalFields(roles: Role[]): Record<string, FieldPolicy> {
+  const human = (reason: string): FieldPolicy => ({
+    user: { kind: 'roles', roles },
+    agent: { kind: 'deny', reason }
+  });
+  return {
+    goal_indicators: human('Kopplingen till mål görs av en människa (verksamhetsplanen).'),
+    planned_participants: human('Planen sätts av en människa.'),
+    completed_at: human('En aktivitet markeras genomförd av en människa.'),
+    outcome_verdict: human('Utfallet sätts av en människa.')
+  };
+}
+
 const POLICIES: Record<string, Record<string, FieldPolicy>> = {
   startups: {
     next_step: {
@@ -118,8 +131,14 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
       agent: { kind: 'deny', reason: 'Ansvarig sätts av en människa i årshjulet.' }
     },
     notes: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
-    year: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } }
+    year: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    // Mål som drivs av aktiviteter (§ 53.4). Kopplingen, planen och utfallet
+    // flyttar verksamhetsplanens siffror — ett mänskligt beslut i UI:t.
+    ...activityGoalFields(STAFF_FULL)
   },
+  // Event (§ 53.4): samma koppling/plan/utfall som årshjulsposterna, för
+  // eventansvariga (createRule-kretsen). Agenten skapar event men rör inte målen.
+  incubator_events: activityGoalFields(EVENT_MANAGE),
   // Startupkompassens intag-moduler (§ 23, § 31). Ren modulkonfiguration —
   // ingen besökardata, ingen PII. Publiceringsfälten (`is_active`,
   // `public_url_enabled`) är MEDVETET agent-nekade: att lägga ut en modul

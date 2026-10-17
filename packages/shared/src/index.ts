@@ -1308,6 +1308,11 @@ export interface IncubatorEvent {
   admitted_count?: number;
   /** Årshjulsaktiviteten eventet genomför (migration 1700000194, § 53). */
   wheel_item?: string;
+  /** Mål som drivs av aktiviteter (migration 1700000196, § 53.4). */
+  goal_indicators?: string[];
+  planned_participants?: number;
+  completed_at?: string;
+  outcome_verdict?: string;
   created: string;
   updated: string;
 }
@@ -1771,6 +1776,7 @@ export * from './home';
 export * from './followup-rules';
 export * from './metrics';
 export * from './goals';
+export * from './goal-activities';
 export * from './goals-import';
 export {
   SURVEY_TEMPLATES as COMPASS_SURVEY_TEMPLATES,

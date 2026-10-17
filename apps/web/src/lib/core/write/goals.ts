@@ -29,6 +29,7 @@ import {
 } from '@platform/shared';
 import { computeMetric } from '@/lib/metrics/registry';
 import { loadSurveyAggregate } from '@/lib/compass/survey';
+import { loadActivityIndicatorResults } from '@/lib/goals/activities';
 import { canCreateRecord, canWriteField } from './writable-fields';
 import { logAgentAction } from './audit';
 import { getRecordInTenant, writeWithFallback } from './helpers';
@@ -707,6 +708,7 @@ export async function createGoalIndicator(
     source: unknown;
     metric_key?: unknown;
     survey_module?: unknown;
+    activity_measure?: unknown;
     target?: unknown;
     unit?: unknown;
     direction?: unknown;
@@ -753,6 +755,7 @@ export async function createGoalIndicator(
         source: v.value.source,
         metric_key: v.value.metric_key ?? '',
         survey_module: v.value.survey_module ?? '',
+        ...(v.value.activity_measure ? { activity_measure: v.value.activity_measure } : {}),
         target: v.value.target ?? 0,
         ...numberWithFlag(v.value.target, 'has_target'),
         unit: v.value.unit,
@@ -773,6 +776,7 @@ export async function createGoalIndicator(
         source: v.value.source,
         metric_key: v.value.metric_key,
         survey_module: v.value.survey_module,
+        activity_measure: v.value.activity_measure ?? undefined,
         target: v.value.target
       }
     });
@@ -922,9 +926,11 @@ export async function recordGoalStatus(
     actor,
     GOAL_INDICATORS,
     input.indicator,
-    'id,tenant,goal,label,source,metric_key,survey_module,target,unit,direction'
+    'id,tenant,goal,label,source,metric_key,survey_module,activity_measure,target,has_target,unit,direction'
   );
   if (!indicator) return fail('NOT_FOUND', 'Indikatorn hittades inte.');
+  // PB lagrar null som 0 (§ 42.2) — måltal utan känt-flagga är okänt.
+  if ((indicator as GoalIndicator & { has_target?: boolean }).has_target === false) indicator.target = null;
   const goal = await getRecordInTenant<Goal>(pb, actor, GOALS, indicator.goal, 'id,tenant,period,title');
   if (!goal) return fail('NOT_FOUND', 'Målet hittades inte.');
   const period = await loadOpenPeriod(pb, actor, goal.period);
@@ -986,6 +992,19 @@ export async function recordGoalStatus(
         note: agg.visible ? undefined : `Visas först vid minst ${agg.minGroup} svar (${agg.respondents} hittills).`
       };
       value = agg.score;
+      valueProvided = true;
+    }
+  } else if (indicator.source === 'activities') {
+    // Räknas live ur kopplade aktiviteter (§ 53.4) — aldrig ett manuellt värde.
+    if (v.value.value !== null) {
+      return fail('INVALID_VALUE', `"${indicator.label}" räknas ur kopplade aktiviteter — värdet kan inte anges manuellt.`);
+    }
+    if (!maySnapshot) {
+      skipReason = 'Bara admin, incubator lead och coach läser hela underlaget — värdet lämnades orört.';
+    } else {
+      const live = (await loadActivityIndicatorResults(pb, actor.tenant, period.year, [indicator]))[indicator.id];
+      reading = { source: 'activities', value: live?.value ?? null, complete: true, note: live?.note };
+      value = reading.value;
       valueProvided = true;
     }
   } else if (v.value.value !== null) {

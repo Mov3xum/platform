@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
+  isActivityOutcome,
   ANNUAL_WHEEL_TAGS,
   ANNUAL_WHEEL_CATEGORY_LABEL_MAX,
   ANNUAL_WHEEL_COLOR_TOKENS,
@@ -82,6 +83,8 @@ import {
   type LoadMode
 } from './Dashboard';
 import type { AssignableResource } from '@/lib/assignments/types';
+import type { ActivityIndicatorOption } from '@/lib/goals/activities';
+import { ActivityGoalPanel } from '@/components/activities/ActivityGoalPanel';
 import {
   createAnnualWheelCategoryAction,
   createAnnualWheelItemAction,
@@ -123,6 +126,10 @@ interface Props {
    * annars fokus + markering i månadslistan.
    */
   openItemId?: string | null;
+  /** Indikatorer en aktivitet kan bidra till (§ 53.4). */
+  goalOptions?: ActivityIndicatorOption[];
+  /** Event som genomför respektive post (wheel_item → event). */
+  eventsByItem?: Record<string, { id: string; name: string }[]>;
 }
 
 interface FormState {
@@ -198,7 +205,9 @@ export function AnnualWheelView({
   canManageCategories,
   schemaNotice = null,
   readNotice = null,
-  openItemId = null
+  openItemId = null,
+  goalOptions = [],
+  eventsByItem = {}
 }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -1051,6 +1060,23 @@ export function AnnualWheelView({
           pending={pending}
           error={error}
           people={people}
+          goalPanel={(() => {
+            const saved = form.id ? items.find((i) => i.id === form.id) : undefined;
+            if (!saved) return null;
+            return (
+              <ActivityGoalPanel
+                kind="annual_wheel"
+                id={saved.id}
+                options={goalOptions}
+                selected={saved.goal_indicators ?? []}
+                plannedParticipants={saved.planned_participants ?? null}
+                outcome={isActivityOutcome(saved.outcome_verdict) ? saved.outcome_verdict : null}
+                completedAt={saved.completed_at}
+                viaEvents={eventsByItem[saved.id]}
+                canEdit={canEdit}
+              />
+            );
+          })()}
         />
       ) : null}
 
@@ -1475,7 +1501,8 @@ export function EditorModal({
   onClose,
   pending,
   error,
-  people
+  people,
+  goalPanel = null
 }: {
   form: FormState;
   categories: AnnualWheelCategoryDef[];
@@ -1485,6 +1512,8 @@ export function EditorModal({
   pending: boolean;
   error: string | null;
   people: AssignableResource[];
+  /** "Mål & genomförande" för en sparad post (§ 53.4) — sparas för sig. */
+  goalPanel?: React.ReactNode;
 }) {
   const yearNow = new Date().getFullYear();
   const yearOptions = [yearNow - 1, yearNow, yearNow + 1, yearNow + 2];
@@ -1860,6 +1889,15 @@ export function EditorModal({
               <Icon name="alert" size={14} />
               <span>{error}</span>
             </p>
+          ) : null}
+
+          {goalPanel ? (
+            <div className="space-y-2 rounded-xl border border-default p-3">
+              <div className="flex items-center gap-1.5 text-[13px] font-semibold text-foreground">
+                <Icon name="target" size={13} /> Mål &amp; genomförande
+              </div>
+              {goalPanel}
+            </div>
           ) : null}
         </div>
 
