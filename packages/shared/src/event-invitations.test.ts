@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 
 import {
   INVITE_MAX_RECIPIENTS,
+  groupInvitesByStatus,
+  inviteStatus,
+  tallyInvites,
   isRsvpAnswer,
   isRsvpToken,
   rsvpOpen,
@@ -83,4 +86,43 @@ test('contactSearchWords delar upp i ord så att fullt namn matchar', () => {
   assert.equal(matchesContactSearch(['Anna', 'Svensson', 'Bolag AB'], ['anna', 'svensson']), true);
   assert.equal(matchesContactSearch(['Anna', 'Berg'], ['anna', 'svensson']), false);
   assert.equal(matchesContactSearch(['x'], []), true);
+});
+
+test('inviteStatus: svar går före öppnat, öppnat före utskickat', () => {
+  assert.equal(inviteStatus({ stage: 'invited' }), 'unsent');
+  assert.equal(inviteStatus({ stage: 'invited', invite_sent_at: '2026-10-01' }), 'sent');
+  assert.equal(inviteStatus({ stage: 'invited', invite_sent_at: '2026-10-01', invite_opened_at: '2026-10-02' }), 'opened');
+  assert.equal(inviteStatus({ stage: 'signup', invite_sent_at: '2026-10-01' }), 'coming');
+  assert.equal(inviteStatus({ stage: 'attended' }), 'coming');
+  assert.equal(inviteStatus({ stage: 'declined', invite_sent_at: '2026-10-01' }), 'declined');
+});
+
+test('tallyInvites räknar svar som öppnade och grupperar i fast ordning', () => {
+  const rows = [
+    { stage: 'invited' },
+    { stage: 'invited', invite_sent_at: 'x' },
+    { stage: 'invited', invite_sent_at: 'x', invite_opened_at: 'y' },
+    { stage: 'signup', invite_sent_at: 'x', responded_at: 'z' },
+    { stage: 'declined', invite_sent_at: 'x', responded_at: 'z' }
+  ];
+  assert.deepEqual(tallyInvites(rows), {
+    invited: 5,
+    sent: 4,
+    opened: 3,
+    coming: 1,
+    declined: 1,
+    unanswered: 2,
+    unsent: 1
+  });
+  assert.deepEqual(
+    groupInvitesByStatus(rows).map((g) => [g.status, g.rows.length]),
+    [
+      ['coming', 1],
+      ['declined', 1],
+      ['opened', 1],
+      ['sent', 1],
+      ['unsent', 1]
+    ]
+  );
+  assert.deepEqual(groupInvitesByStatus([]), []);
 });

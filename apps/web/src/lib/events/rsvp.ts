@@ -12,7 +12,15 @@ import { hashRsvpToken } from '@/lib/core/write/event-invitations';
  */
 export interface ResolvedRsvp {
   pb: PocketBase;
-  signup: { id: string; tenant: string; event: string; stage: string; contact?: string; name?: string };
+  signup: {
+    id: string;
+    tenant: string;
+    event: string;
+    stage: string;
+    contact?: string;
+    name?: string;
+    invite_opened_at?: string;
+  };
   event: { id: string; tenant: string; name?: string; starts_at?: string; ends_at?: string; location?: string };
 }
 
@@ -27,7 +35,7 @@ export async function resolveRsvp(token: unknown): Promise<ResolvedRsvp | null> 
     const signup = await su.pb
       .collection('event_signups')
       .getFirstListItem<ResolvedRsvp['signup']>(su.pb.filter('rsvp_token_hash = {:h}', { h: hashRsvpToken(token) }), {
-        fields: 'id,tenant,event,stage,contact,name'
+        fields: 'id,tenant,event,stage,contact,name,invite_opened_at'
       });
     const event = await su.pb
       .collection('incubator_events')

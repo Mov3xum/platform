@@ -138,3 +138,72 @@ export function matchesContactSearch(fields: ReadonlyArray<string | null | undef
   const hay = fields.map((f) => (f || '').toLowerCase());
   return words.every((w) => hay.some((h) => h.includes(w)));
 }
+
+/**
+ * Var en inbjudan står (§ 53.5) — för översikten och eventets inbjudningssida.
+ * "Öppnat" = mottagaren har öppnat sin personliga svarslänk (`invite_opened_at`,
+ * eller svarat — ett svar kräver att länken öppnats). Vi mäter medvetet INTE
+ * mejlöppningar med spårningspixel: det kräver samtycke enligt ePrivacy/LEK och
+ * blir ändå fel med Apple Mail Privacy Protection.
+ */
+export const INVITE_STATUSES = ['coming', 'declined', 'opened', 'sent', 'unsent'] as const;
+export type InviteStatus = (typeof INVITE_STATUSES)[number];
+
+export const INVITE_STATUS_LABEL: Record<InviteStatus, string> = {
+  coming: 'Kommer',
+  declined: 'Avböjt',
+  opened: 'Öppnat — inte svarat',
+  sent: 'Inte öppnat',
+  unsent: 'Ej utskickad'
+};
+
+export interface InviteStatusRow {
+  stage?: string | null;
+  invite_sent_at?: string | null;
+  invite_opened_at?: string | null;
+  responded_at?: string | null;
+}
+
+export function inviteOpened(row: InviteStatusRow): boolean {
+  return Boolean(row.invite_opened_at || row.responded_at);
+}
+
+export function inviteStatus(row: InviteStatusRow): InviteStatus {
+  if (row.stage === 'declined') return 'declined';
+  if (row.stage && row.stage !== 'invited') return 'coming';
+  if (inviteOpened(row)) return 'opened';
+  return row.invite_sent_at ? 'sent' : 'unsent';
+}
+
+export interface InviteTally {
+  invited: number;
+  sent: number;
+  opened: number;
+  coming: number;
+  declined: number;
+  /** Utskickade som inte svarat (öppnat eller inte). */
+  unanswered: number;
+  unsent: number;
+}
+
+export function tallyInvites(rows: readonly InviteStatusRow[]): InviteTally {
+  const t: InviteTally = { invited: 0, sent: 0, opened: 0, coming: 0, declined: 0, unanswered: 0, unsent: 0 };
+  for (const r of rows) {
+    t.invited++;
+    if (r.invite_sent_at) t.sent++;
+    if (inviteOpened(r)) t.opened++;
+    const s = inviteStatus(r);
+    if (s === 'coming') t.coming++;
+    else if (s === 'declined') t.declined++;
+    else if (s === 'unsent') t.unsent++;
+    else t.unanswered++;
+  }
+  return t;
+}
+
+/** Grupperar inbjudningar per status i fast ordning (tomma grupper utelämnas). */
+export function groupInvitesByStatus<T extends InviteStatusRow>(rows: readonly T[]): Array<{ status: InviteStatus; rows: T[] }> {
+  return INVITE_STATUSES.map((status) => ({ status, rows: rows.filter((r) => inviteStatus(r) === status) })).filter(
+    (g) => g.rows.length > 0
+  );
+}

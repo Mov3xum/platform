@@ -5,9 +5,13 @@ import { hasRole } from '@/lib/rbac';
 import { PageShell } from '@/components/PageShell';
 import { Card, Chip, Icon } from '@/components/proto';
 import {
+  INVITE_STATUS_LABEL,
   formatStockholmDateTime,
+  groupInvitesByStatus,
   startOfStockholmDay,
-  toPocketBaseDateTime
+  tallyInvites,
+  toPocketBaseDateTime,
+  type InviteStatus
 } from '@platform/shared';
 import { buildInflodeTabs } from '../_tabs';
 
@@ -23,18 +27,32 @@ interface EventRow {
   location?: string;
 }
 
-interface Tally {
-  invited: number;
-  coming: number;
-  declined: number;
-  unsent: number;
+interface InviteRow {
+  id: string;
+  event: string;
+  name?: string;
+  organization?: string;
+  stage?: string;
+  invite_sent_at?: string;
+  invite_opened_at?: string;
+  responded_at?: string;
 }
+
+const STATUS_VARIANT: Record<InviteStatus, 'active' | 'draft' | 'default'> = {
+  coming: 'active',
+  declined: 'default',
+  opened: 'draft',
+  sent: 'default',
+  unsent: 'draft'
+};
 
 /**
  * Marknadsverktyg → Inbjudningar (CLAUDE.md § 53.5). Kommande event (och de
- * senaste 30 dagarna) med inbjudningsläget: inbjudna, kommer, avböjt, ej
- * utskickade. Själva inbjudandet sker per event. Läser med användarens token
- * (RLS § 21) — bara antal visas här, inga personer.
+ * senaste 30 dagarna) med inbjudningsläget direkt på raden: inbjudna, öppnat,
+ * kommer, avböjt, inte svarat, ej utskickade — och vilka, per status. "Öppnat"
+ * = öppnat sin personliga svarslänk (ingen spårningspixel). Själva inbjudandet
+ * sker per event. Läser med användarens token (RLS § 21); namn och
+ * organisation visas för staff, e-postadresser aldrig.
  */
 export default async function InvitationsPage() {
   const user = await requireUser();
@@ -57,7 +75,7 @@ export default async function InvitationsPage() {
     events = [];
   }
 
-  const tallies = new Map<string, Tally>();
+  const invitesBy = new Map<string, InviteRow[]>();
   for (let i = 0; i < events.length; i += 40) {
     const part = events.slice(i, i + 40);
     const params: Record<string, string> = { t: user.tenant };
@@ -66,18 +84,12 @@ export default async function InvitationsPage() {
       return `event = {:e${j}}`;
     });
     try {
-      const rows = await pb.collection('event_signups').getFullList<{ event: string; stage?: string; invited_at?: string; invite_sent_at?: string }>({
+      const rows = await pb.collection('event_signups').getFullList<InviteRow>({
         filter: pb.filter(`tenant = {:t} && invited_at != "" && (${ors.join(' || ')})`, params),
-        fields: 'event,stage,invited_at,invite_sent_at'
+        fields: 'id,event,name,organization,stage,invite_sent_at,invite_opened_at,responded_at',
+        sort: 'name'
       });
-      for (const r of rows) {
-        const t = tallies.get(r.event) ?? { invited: 0, coming: 0, declined: 0, unsent: 0 };
-        t.invited++;
-        if (r.stage === 'declined') t.declined++;
-        else if (r.stage !== 'invited') t.coming++;
-        if (r.stage === 'invited' && !r.invite_sent_at) t.unsent++;
-        tallies.set(r.event, t);
-      }
+      for (const r of rows) invitesBy.set(r.event, [...(invitesBy.get(r.event) ?? []), r]);
     } catch {
       // Instans utan migration 1700000197: inga inbjudningar att räkna.
     }
@@ -88,7 +100,8 @@ export default async function InvitationsPage() {
   const recent = events.filter((e) => !upcoming.includes(e)).reverse();
 
   const renderEvent = (e: EventRow) => {
-    const t = tallies.get(e.id);
+    const rows = invitesBy.get(e.id) ?? [];
+    const t = rows.length > 0 ? tallyInvites(rows) : null;
     return (
       <Card key={e.id} style={{ padding: 14 }}>
         <div className="mx-flex mx-items-c mx-gap-2" style={{ flexWrap: 'wrap' }}>
@@ -102,11 +115,23 @@ export default async function InvitationsPage() {
           {t ? (
             <span className="mx-flex mx-gap-2" style={{ flexWrap: 'wrap' }}>
               <Chip mono>{t.invited} INBJUDNA</Chip>
+              <span title="Har öppnat sin personliga svarslänk">
+                <Chip mono>{t.opened} ÖPPNAT</Chip>
+              </span>
               <Chip variant="active" mono>
-                {t.coming} KOMMER
+                {t.coming} JA
               </Chip>
-              {t.declined > 0 && <Chip mono>{t.declined} AVBÖJT</Chip>}
-              {t.unsent > 0 && <Chip variant="draft" mono>{t.unsent} EJ UTSKICKADE</Chip>}
+              <Chip mono>{t.declined} NEJ</Chip>
+              {t.unanswered > 0 && (
+                <Chip variant="draft" mono>
+                  {t.unanswered} INTE SVARAT
+                </Chip>
+              )}
+              {t.unsent > 0 && (
+                <Chip variant="draft" mono>
+                  {t.unsent} EJ UTSKICKADE
+                </Chip>
+              )}
             </span>
           ) : (
             <span className="mx-t-12 mx-muted">Inga inbjudningar ännu</span>
@@ -115,6 +140,40 @@ export default async function InvitationsPage() {
             <Icon name="send" size={12} /> Bjud in
           </Link>
         </div>
+        {rows.length > 0 && (
+          <details style={{ marginTop: 10 }}>
+            <summary className="mx-t-12 mx-fw-6" style={{ cursor: 'pointer' }}>
+              Visa vilka
+            </summary>
+            <div
+              style={{
+                display: 'grid',
+                gap: 12,
+                marginTop: 10,
+                gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))'
+              }}
+            >
+              {groupInvitesByStatus(rows).map((g) => (
+                <div key={g.status} style={{ minWidth: 0 }}>
+                  <div className="mx-flex mx-items-c mx-gap-2" style={{ marginBottom: 6 }}>
+                    <Chip variant={STATUS_VARIANT[g.status]} mono>
+                      {INVITE_STATUS_LABEL[g.status].toUpperCase()}
+                    </Chip>
+                    <span className="mx-mono mx-t-xs mx-muted">{g.rows.length}</span>
+                  </div>
+                  <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 4 }}>
+                    {g.rows.map((r) => (
+                      <li key={r.id} className="mx-t-12 mx-truncate">
+                        {r.name || 'Okänd'}
+                        {r.organization ? <span className="mx-muted"> · {r.organization}</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
       </Card>
     );
   };
@@ -134,9 +193,11 @@ export default async function InvitationsPage() {
         <div className="mx-flex mx-items-c mx-gap-2 mx-t-12 mx-muted" style={{ flexWrap: 'wrap' }}>
           <Icon name="shield" size={13} />
           <span>
-            Inbjudningar går till kontakter i kontaktboken. Varje mottagare får en personlig svarslänk
-            och kan avregistrera sig; avregistrerade bjuds aldrig in igen. De som tackar ja hamnar
-            direkt i eventets deltagarlista — närvaron där styr utvärderingen och målen.
+            Inbjudningar går till kontakter i kontaktboken och till bolag i portföljen. Varje mottagare
+            får en personlig svarslänk; kontakter kan avregistrera sig och bjuds då aldrig in igen.
+            &quot;Öppnat&quot; betyder att mottagaren öppnat sin svarslänk — vi använder ingen
+            spårningspixel i mejlet. De som tackar ja hamnar direkt i eventets deltagarlista — närvaron
+            där styr utvärderingen och målen.
           </span>
         </div>
       </Card>

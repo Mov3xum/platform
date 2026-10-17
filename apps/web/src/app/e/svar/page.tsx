@@ -3,6 +3,7 @@ import { Logo } from '@/components/Logo';
 import { getPublicTenantBranding } from '@/lib/compass/public';
 import { resolveRsvp } from '@/lib/events/rsvp';
 import { formatStockholmDateTime, isRsvpAnswer, rsvpOpen } from '@platform/shared';
+import { OpenedBeacon } from './OpenedBeacon';
 
 export const dynamic = 'force-dynamic';
 
@@ -79,6 +80,7 @@ export default async function RsvpPage({
           )}
         </div>
 
+        {resolved && !done && t && !resolved.signup.invite_opened_at && <OpenedBeacon token={t} />}
         {resolved && !done && (
           <section className="mx-compass-card">
             {fel && ERROR_TEXT[fel] && <p className="mx-compass-body">{ERROR_TEXT[fel]}</p>}

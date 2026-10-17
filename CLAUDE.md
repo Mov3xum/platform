@@ -9294,6 +9294,22 @@ på eventsidan ("Bjud in" i deltagarpanelen) väljer staff mottagare i
   tenant härleds ur raden och eventet MÅSTE tillhöra samma tenant. Svar tas
   emot till eventets slut (`rsvpOpen`); avregistrering gäller alltid. `/e/`
   är publik i middleware och renderas utan AppShell (layout + SessionGuard).
+- **Öppnat / ja / nej direkt på eventraden (migration 1700000198):**
+  översikten `/inflode/inbjudningar` visar per event inbjudna · öppnat · ja ·
+  nej · inte svarat · ej utskickade, och "Visa vilka" listar namn +
+  organisation per status (aldrig e-post). Statusen är ren, enhetstestad
+  logik (`inviteStatus`/`tallyInvites`/`groupInvitesByStatus` i
+  `event-invitations.ts`) och delas med eventets inbjudningssida.
+  **"Öppnat" = mottagaren har öppnat sin personliga svarslänk**
+  (`event_signups.invite_opened_at`, första gången): `/e/svar` skickar ett
+  POST från webbläsaren till `/api/public/e/opened` (rate-limit 30/min och
+  IP, svarar alltid 204) — inte vid GET, så mejlskannrar räknas inte — och
+  ett svar sätter fältet om det saknas (fungerar utan JS). **Ingen
+  spårningspixel i mejlet** (beslut 2026-10): en pixel läser av mottagarens
+  utrustning och kräver samtycke (ePrivacy/LEK), vilket kontakter inbjudna
+  på berättigat intresse inte gett, och Apple Mail Privacy Protection gör
+  öppningssiffran fel ändå. Bara en tidsstämpel lagras, ingen IP eller user
+  agent.
 - **Rättslig grund (beslut 2026-10):** kontakter i kontaktnätet bjuds in på
   **berättigat intresse** — även utan samtycke — med avregistrering i varje
   mejl (GDPR art. 21). Bolagsmedlemmar och bolagets egen adress bjuds in som

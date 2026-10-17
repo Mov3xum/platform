@@ -7,12 +7,15 @@ import { Card, CardHead, Chip, Icon } from '@/components/proto';
 import { getRecordInTenant } from '@/lib/core/write/helpers';
 import {
   EVENT_SIGNUP_STAGE_LABEL,
+  INVITE_STATUS_LABEL,
   SURVEY_STARTER_TEMPLATES,
   defaultEvaluationTemplateRef,
   formatStockholmDateTime,
   getSurveyStarterTemplate,
+  inviteStatus,
   isEventSignupStage,
   rsvpOpen,
+  tallyInvites,
   starterTemplateRef,
   type Role
 } from '@platform/shared';
@@ -35,6 +38,7 @@ type Invitee = {
   contact?: string;
   invited_at?: string;
   invite_sent_at?: string;
+  invite_opened_at?: string;
   responded_at?: string;
 };
 
@@ -82,16 +86,13 @@ export default async function EventInvitationsPage({
   try {
     invitees = await pb.collection('event_signups').getFullList<Invitee>({
       filter: pb.filter('tenant = {:t} && event = {:e} && invited_at != ""', { t: user.tenant, e: event.id }),
-      fields: 'id,name,organization,stage,contact,invited_at,invite_sent_at,responded_at',
+      fields: 'id,name,organization,stage,contact,invited_at,invite_sent_at,invite_opened_at,responded_at',
       sort: 'name'
     });
   } catch {
     invitees = [];
   }
-  const unsent = invitees.filter((i) => i.stage === 'invited' && !i.invite_sent_at).length;
-  const unanswered = invitees.filter((i) => i.stage === 'invited' && i.invite_sent_at).length;
-  const coming = invitees.filter((i) => i.stage !== 'invited' && i.stage !== 'declined').length;
-  const declined = invitees.filter((i) => i.stage === 'declined').length;
+  const { unsent, unanswered, coming, declined, opened } = tallyInvites(invitees);
 
   // Utvärderingen efter eventet (§ 53.3): egen mall för typen, annars
   // Movexums standardmall — samma val som när eventet skapas.
@@ -124,6 +125,7 @@ export default async function EventInvitationsPage({
           </div>
           <span className="mx-flex mx-gap-2" style={{ flexWrap: 'wrap' }}>
             <Chip mono>{invitees.length} INBJUDNA</Chip>
+            <Chip mono>{opened} ÖPPNAT</Chip>
             <Chip variant="active" mono>
               {coming} KOMMER
             </Chip>
@@ -173,10 +175,15 @@ export default async function EventInvitationsPage({
                     <div className="mx-mono mx-t-xs mx-muted mx-truncate">
                       {i.organization || '—'}
                       {i.invite_sent_at ? ` · skickad ${formatStockholmDateTime(i.invite_sent_at)}` : ' · ej utskickad'}
+                      {i.invite_opened_at ? ` · öppnad ${formatStockholmDateTime(i.invite_opened_at)}` : ''}
                     </div>
                   </div>
                   <Chip variant={i.stage === 'declined' ? 'default' : i.stage === 'invited' ? 'draft' : 'active'} mono>
-                    {isEventSignupStage(i.stage) ? EVENT_SIGNUP_STAGE_LABEL[i.stage] : i.stage}
+                    {i.stage === 'invited'
+                      ? INVITE_STATUS_LABEL[inviteStatus(i)]
+                      : isEventSignupStage(i.stage)
+                        ? EVENT_SIGNUP_STAGE_LABEL[i.stage]
+                        : i.stage}
                   </Chip>
                 </div>
               ))}
