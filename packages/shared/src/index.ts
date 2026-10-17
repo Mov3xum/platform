@@ -1,6 +1,7 @@
 import type { EducationDocumentKind } from './education-documents';
 import type { FileTopic, FileTopicStatus } from './file-topics';
 import type { MeetingRequestRef } from './meeting';
+import type { ChatMessageAttachment } from './chat-attachments';
 
 export type Role =
   | 'admin'
@@ -408,6 +409,10 @@ export interface ToolRunMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
   attachments?: ToolRunAttachmentRef[];
+  // Bilagor som användaren laddade upp direkt i chatten (/chatt, user-turn).
+  // Extraherad text sparas (sanerad, inom tråd-budget) så senare turer kan
+  // läsa filen igen — se `chat-attachments.ts`.
+  chat_attachments?: ChatMessageAttachment[];
   // Webbkällor som agenten hämtade via `web_search` för detta (assistant-)turn.
   sources?: WebSearchSourceRef[];
   // Agent-genererade dokument knutna till detta (assistant-)turn.
@@ -1748,6 +1753,7 @@ export * from './survey';
 // ─── AI-miljöpåverkan (tokens → CO₂e/vatten, ren logik, enhetstestad) ────────
 export * from './ai-impact';
 export * from './voice';
+export * from './chat-attachments';
 export * from './compass-authoring';
 export * from './compass-layout';
 export * from './login-branding';

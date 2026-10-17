@@ -579,8 +579,10 @@ export function buildChatTools(
         description:
           'Söker i ANVÄNDARENS EGNA uppladdade filer i den personliga Filer-ytan ' +
           '(PDF, Excel, text, CSV m.m. som användaren själv laddat upp). Använd när ' +
-          'användaren refererar till "mina filer", "dokumentet jag laddade upp", en ' +
-          'rapport/fil de äger, eller vill att du kör mot eget material. Bara den ' +
+          'användaren refererar till "mina filer", "i Filer", en sparad ' +
+          'rapport/fil de äger, eller vill att du kör mot eget material. INTE för ' +
+          'filer som bifogats i chatten — deras text står redan i samtalet ' +
+          '("BIFOGADE FILER …"). Bara den ' +
           'inloggade användarens egna filer nås — aldrig andras. Returnerar de mest ' +
           'relevanta textstyckena med filnamn; etiketten visar även filens ' +
           'ämnesmapp och kopplade bolag (t.ex. "[Acme AB · Finansiering] …") när ' +
@@ -619,9 +621,11 @@ export function buildChatTools(
           'i EN namngiven fil — till skillnad från search_my_files som bara ' +
           'returnerar de mest relevanta textstyckena och som ALDRIG matchar på ' +
           'filnamn. Använd detta så fort användaren nämner en fil vid namn ' +
-          '("Idebeskrivning.pptx", "pitchdecket jag laddade upp", "min rapport") ' +
+          '("Idebeskrivning.pptx", "min rapport") ' +
           'eller säger att en fil "ligger i Filer", och när du ska ANALYSERA/' +
-          'SAMMANFATTA/BYGGA något utifrån hela filen. Lämna `query` och `file_id` ' +
+          'SAMMANFATTA/BYGGA något utifrån hela filen. Är filen bifogad i chatten ' +
+          '("BIFOGADE FILER …" i samtalet) — läs den där i stället, den finns inte i ' +
+          'Filer. Lämna `query` och `file_id` ' +
           'tomma för att se vilka filer som finns; matcha sedan på namn (`query`, ' +
           'tolerant mot felstavning) eller läs en exakt fil (`file_id`). Säg ALDRIG ' +
           'att en fil saknas innan du listat filerna med detta verktyg. Svaret ' +
