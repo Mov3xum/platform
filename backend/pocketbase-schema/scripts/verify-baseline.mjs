@@ -155,6 +155,8 @@ async function verifyCollectionsExist() {
     'startup_contacts',
     // Kontaktboken (§ 45, migration 1700000157) — förfrågningar om kontaktanvändning.
     'contact_requests',
+    // Kontaktboken: egna grupper (§ 45.8, migration 1700000199).
+    'contact_groups',
     // Önskemål & buggar (§ 49, migration 1700000176) — intern backlog.
     'feedback_items',
     // Kompetens-hashtags (§ 29.7, migration 1700000178) — tenantens vokabulär.
@@ -478,6 +480,8 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   // + vem som frågar om vilken extern kontakt → staff/observer-only; bolagen
   // ser DELADE kontakter via den kurerade vyn på Mitt bolag, inte här.
   'contact_requests',
+  // Egna grupper i kontaktboken (§ 45.8, migration 1700000199) → staff/observer-only.
+  'contact_groups',
   // Önskemål & buggar (§ 49, migration 1700000176). Intern backlog för
   // Movexum-personal (kort + ledningens svar) → staff/observer-only.
   'feedback_items',
@@ -1104,6 +1108,8 @@ const REQUIRED_APP_FIELDS = [
   // Kontaktboken (§ 45, migration 1700000156): utan owners/organization/
   // category "sparas" ägare/kategori tyst bort (PB släpper okända fält).
   { collection: 'contacts', fields: ['owners', 'organization', 'category'] },
+  // Grupper i kontaktboken (§ 45.8, migration 1700000199).
+  { collection: 'contacts', fields: ['groups'] },
   // AI-minne (§ 16.4): kategori per notering = migration 1700000155. Saknas
   // fältet "sparas" kategorin från UI/memory_write men försvinner tyst.
   { collection: 'agent_memory', fields: ['category'] },

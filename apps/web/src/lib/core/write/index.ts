@@ -97,6 +97,17 @@ export {
   type ImportContactsOptions,
   type ImportContactsResult
 } from './contacts';
+export {
+  createContactGroup,
+  updateContactGroup,
+  deleteContactGroup,
+  changeContactGroupMembers,
+  setContactGroups,
+  contactGroupPath,
+  CONTACT_GROUPS_MIGRATION_HINT,
+  type ContactGroupResult,
+  type GroupMembershipResult
+} from './contact-groups';
 // Stödcheckar & finansieringsprojekt (§ 46)
 export {
   createFundingProject,

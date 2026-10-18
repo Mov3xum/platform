@@ -66,6 +66,7 @@ const MONTH_NAMES = [
 
 /** Svenska etiketter för de fält skrivlagret kan ändra. */
 const FIELD_LABELS: Record<string, string> = {
+  groups: 'grupper',
   question_order: 'frågornas ordning',
   screening_facts: 'de manuella svaren i Bedömning excellens',
   title: 'titeln',
@@ -737,6 +738,26 @@ function mapRow(
         title: `Mål importerade${year ? ` till ${year}` : ''}: ${created} nya mål, ${indicators} indikatorer${statuses ? `, ${statuses} kvartalsstatusar` : ''}`,
         href: year ? `/mal?ar=${year}` : '/mal',
         icon: 'upload'
+      };
+    }
+    case 'contact_groups': {
+      const name = str(after.name) || 'en grupp';
+      if (action === 'create') {
+        return { title: `Ny grupp i kontaktboken: ${name}`, href: `/kontakter?grupp=${row.record_id ?? ''}`, icon: 'people' };
+      }
+      if (after.deleted === true) {
+        return { title: `Kontaktboken: gruppen ${name} togs bort`, href: '/kontakter/grupper', icon: 'people' };
+      }
+      const added = typeof after.added === 'number' ? after.added : 0;
+      const removed = typeof after.removed === 'number' ? after.removed : 0;
+      return {
+        title: added
+          ? `Kontaktboken: ${added} kontakter lades till i ${name}`
+          : removed
+            ? `Kontaktboken: ${removed} kontakter togs bort ur ${name}`
+            : `Kontaktboken: gruppen ${name} ${changedVerb}`,
+        href: `/kontakter?grupp=${row.record_id ?? ''}`,
+        icon: 'people'
       };
     }
     case 'contact_import': {

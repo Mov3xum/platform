@@ -1,10 +1,13 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 import {
+  CONTACT_BOOK_ROLES,
   CONTACT_CATEGORIES,
   contactSearchWords,
   isContactCategory,
-  type ContactCategory
+  isPureStartupMember,
+  type ContactCategory,
+  type Role
 } from '@platform/shared';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 
@@ -65,10 +68,16 @@ export async function loadContactsByIds(pb: PocketBase, tenant: string, ids: rea
   return out;
 }
 
-/** Filter för kontaktsökningen: kategori + varje sökord i något fält. */
-export function contactSearchFilter(pb: PocketBase, tenant: string, opts: { category?: string; q?: string }): string {
+/** Filter för kontaktsökningen: kategori eller egen grupp + varje sökord i något fält. */
+export function contactSearchFilter(
+  pb: PocketBase,
+  tenant: string,
+  opts: { category?: string; group?: string; q?: string }
+): string {
   const parts = [pb.filter('tenant = {:t}', { t: tenant })];
   if (isContactCategory(opts.category)) parts.push(pb.filter('category = {:c}', { c: opts.category }));
+  // `groups` är en multi-relation (JSON-lista) — `~` i stället för `?=` (§ 21.3).
+  if (opts.group) parts.push(pb.filter('groups ~ {:g}', { g: opts.group }));
   contactSearchWords(opts.q).forEach((w) => {
     parts.push(
       pb.filter('(first_name ~ {:w} || last_name ~ {:w} || organization ~ {:w} || email ~ {:w})', { w })
@@ -96,6 +105,116 @@ export async function countContactsByCategory(
     if (counts[i]) byCategory[c] = counts[i];
   });
   return { all, byCategory };
+}
+
+/** Antal kontakter per egen grupp (§ 45.8). Saknas `contacts.groups` ⇒ tomt. */
+export async function countContactsByGroup(
+  pb: PocketBase,
+  tenant: string,
+  groupIds: readonly string[]
+): Promise<Record<string, number>> {
+  const base = pb.filter('tenant = {:t}', { t: tenant });
+  const counts = await Promise.all(
+    groupIds.map((g) =>
+      pb
+        .collection('contacts')
+        .getList(1, 1, { filter: `${base} && ${pb.filter('groups ~ {:g}', { g })}`, fields: 'id' })
+        .then((r) => r.totalItems)
+        .catch(() => 0)
+    )
+  );
+  return Object.fromEntries(groupIds.map((g, i) => [g, counts[i]]));
+}
+
+/**
+ * Plattformens användare som kan bjudas in (§ 53.5): Movexum-personalen
+ * (admin/incubator_lead/coach/mentor) eller rena bolagsmedlemmar. E-posten är
+ * dold för vanliga tokens och läses med superusern — anroparen MÅSTE ha
+ * verifierat att den inloggade är staff i tenanten. Adresserna lämnar aldrig
+ * servern i listningen.
+ */
+export type InviteUserKind = 'staff' | 'members';
+
+export interface InviteUser {
+  id: string;
+  name: string;
+  email: string;
+  kind: InviteUserKind;
+  /** Bolagsmedlemmens första bolag (deltagarradens `startup`). */
+  startup: string;
+  startupName: string;
+}
+
+export function inviteUserKind(roles: readonly string[] | undefined): InviteUserKind | null {
+  const r = (roles ?? []) as Role[];
+  if (r.some((x) => CONTACT_BOOK_ROLES.includes(x))) return 'staff';
+  if (isPureStartupMember(r)) return 'members';
+  return null;
+}
+
+export async function loadInviteUsers(
+  pb: PocketBase,
+  tenant: string,
+  opts: { kind?: InviteUserKind; ids?: readonly string[] } = {}
+): Promise<InviteUser[]> {
+  const su = await getSuperuserPb();
+  if (!su.ok) throw new Error('Användarnas e-post kan inte läsas (superuser saknas).');
+  const filters = [su.pb.filter('tenant = {:t}', { t: tenant })];
+  if (opts.ids) {
+    if (opts.ids.length === 0) return [];
+    const out: UserRow[] = [];
+    for (let i = 0; i < opts.ids.length; i += CHUNK) {
+      out.push(
+        ...(await su.pb.collection('users').getFullList<UserRow>({
+          filter: `${filters[0]} && ${anyOf(su.pb, 'id', opts.ids.slice(i, i + CHUNK))}`,
+          fields: 'id,display_name,email,roles,linked_startups'
+        }))
+      );
+    }
+    return toInviteUsers(pb, tenant, out, opts.kind);
+  }
+  const rows = await su.pb.collection('users').getFullList<UserRow>({
+    filter: filters[0],
+    fields: 'id,display_name,email,roles,linked_startups',
+    sort: 'display_name',
+    batch: 500
+  });
+  return toInviteUsers(pb, tenant, rows, opts.kind);
+}
+
+async function toInviteUsers(
+  pb: PocketBase,
+  tenant: string,
+  rows: readonly UserRow[],
+  kind?: InviteUserKind
+): Promise<InviteUser[]> {
+  const picked = rows
+    .map((u) => ({ u, k: inviteUserKind(u.roles) }))
+    .filter((x): x is { u: UserRow; k: InviteUserKind } => x.k !== null && (!kind || x.k === kind));
+  const startupIds = [...new Set(picked.filter((x) => x.k === 'members').map((x) => x.u.linked_startups?.[0]).filter(Boolean))] as string[];
+  const names = new Map<string, string>();
+  for (let i = 0; i < startupIds.length; i += CHUNK) {
+    const part = startupIds.slice(i, i + CHUNK);
+    const list = await pb
+      .collection('startups')
+      .getFullList<StartupRow>({
+        filter: `${pb.filter('tenant = {:t}', { t: tenant })} && ${anyOf(pb, 'id', part)}`,
+        fields: 'id,name'
+      })
+      .catch(() => [] as StartupRow[]);
+    for (const s of list) names.set(s.id, s.name || 'Bolag');
+  }
+  return picked.map(({ u, k }) => {
+    const startup = k === 'members' ? (u.linked_startups ?? []).find((id) => names.has(id)) ?? '' : '';
+    return {
+      id: u.id,
+      name: u.display_name || (k === 'staff' ? 'Kollega' : 'Bolagsmedlem'),
+      email: (u.email || '').trim(),
+      kind: k,
+      startup,
+      startupName: startup ? names.get(startup) ?? '' : ''
+    };
+  });
 }
 
 export interface StartupMember {

@@ -1,5 +1,6 @@
 'use client';
 
+import { actionErrorMessage } from '@/lib/action-error';
 import { useState, useTransition } from 'react';
 import { Icon } from '@/components/proto';
 import { sendInvitationsAction, type InvitationState } from '@/lib/actions/invitations';
@@ -31,7 +32,13 @@ export function SendButtons({ eventId, unsent, unanswered }: { eventId: string; 
   const run = (mode: 'pending' | 'reminder', count: number) => {
     const text = mode === 'reminder' ? `Skicka en påminnelse till ${count} som inte svarat?` : `Skicka inbjudan till ${count} som inte fått den?`;
     if (!window.confirm(text)) return;
-    start(async () => setState(await sendInvitationsAction({ eventId, mode })));
+    start(async () => {
+      try {
+        setState(await sendInvitationsAction({ eventId, mode }));
+      } catch (err) {
+        setState({ error: actionErrorMessage(err, 'Inbjudningarna kunde inte skickas. Ladda om sidan och försök igen.') });
+      }
+    });
   };
   if (unsent === 0 && unanswered === 0) return null;
   return (

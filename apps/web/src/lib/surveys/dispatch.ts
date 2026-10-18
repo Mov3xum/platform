@@ -1,6 +1,6 @@
 import 'server-only';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
-import { sendSurveyInvites } from '@/lib/email';
+import { EMAIL_NOT_CONFIGURED_MESSAGE, isEmailConfigured, sendSurveyInvites } from '@/lib/email';
 import { collectSurveyRecipients, isAttendedStage, isInviteStage } from '@platform/shared';
 import { toSurvey, type Survey } from './store';
 
@@ -88,13 +88,22 @@ export async function dispatchSurveyInvites(
     return { ok: true, sent: 0, failed: 0, recipients: 0 };
   }
 
+  // Utan e-posttjänst: fel (cron försöker igen nästa timme), aldrig ett kast.
+  if (!isEmailConfigured()) return { ok: false, error: EMAIL_NOT_CONFIGURED_MESSAGE };
   const url = `${baseUrl}/u/${encodeURIComponent(survey.public_slug)}?utm_source=event`;
-  const { sent, failed } = await sendSurveyInvites(recipients, {
-    title: survey.welcome_title || survey.name,
-    url,
-    eventName,
-    intro: survey.welcome_body || undefined
-  });
+  let sent: number;
+  let failed: number;
+  try {
+    ({ sent, failed } = await sendSurveyInvites(recipients, {
+      title: survey.welcome_title || survey.name,
+      url,
+      eventName,
+      intro: survey.welcome_body || undefined
+    }));
+  } catch (err) {
+    console.error('[surveys] send failed', err instanceof Error ? err.message : 'unknown');
+    return { ok: false, error: 'Enkäten kunde inte skickas. Försök igen.' };
+  }
 
   try {
     await pb.collection('surveys').update(survey.id, {

@@ -1,5 +1,6 @@
 import 'server-only';
 import { listUnsubscribeHeaders, resolveReplyTo, resolveSender } from '@/lib/mail-sender';
+import type { InviteReason } from '@platform/shared';
 
 // Avsändaren konfigureras i Coolify (`RESEND_FROM_EMAIL` m.fl., se
 // lib/mail-sender.ts) och måste ligga på en domän som är verifierad i Resend.
@@ -7,10 +8,18 @@ const FROM_EMAIL = resolveSender(process.env, 'default');
 const INVITE_FROM_EMAIL = resolveSender(process.env, 'invite');
 const REPLY_TO = resolveReplyTo(process.env);
 
+export const EMAIL_NOT_CONFIGURED_MESSAGE =
+  'E-posttjänsten är inte konfigurerad (RESEND_API_KEY saknas på web-appen). Kontakta administratören.';
+
+/** Finns en Resend-nyckel? Utskicksflöden kontrollerar detta INNAN de skriver något. */
+export function isEmailConfigured(): boolean {
+  return Boolean(process.env.RESEND_API_KEY);
+}
+
 function getResendApiKey(): string {
   const key = process.env.RESEND_API_KEY;
   if (!key) {
-    throw new Error('E-posttjänsten är inte konfigurerad. Kontakta administratören.');
+    throw new Error(EMAIL_NOT_CONFIGURED_MESSAGE);
   }
   return key;
 }
@@ -375,9 +384,10 @@ export interface EventInviteRecipient {
   rsvpUrl: string;
   /**
    * Varför mottagaren får inbjudan: `contact` = kontaktnätet (berättigat
-   * intresse, avregistrering krävs), `program` = bolag i inkubatorprogrammet.
+   * intresse, avregistrering krävs), `program` = bolag i inkubatorprogrammet,
+   * `team` = Movexums egen personal.
    */
-  reason: 'contact' | 'program';
+  reason: InviteReason;
   /** Avregistreringssidan (bara `contact`). */
   unsubscribeUrl?: string | null;
   /** En-klicksavregistrering för `List-Unsubscribe` (https, bara `contact`). */
@@ -406,7 +416,9 @@ export async function sendEventInvites(
   const reasonText = (r: EventInviteRecipient) =>
     r.reason === 'program'
       ? 'Du får inbjudan eftersom ditt bolag deltar i Movexums inkubatorprogram.'
-      : 'Du får inbjudan eftersom du finns i Movexums kontaktnät.';
+      : r.reason === 'team'
+        ? 'Du får inbjudan som medarbetare hos Movexum.'
+        : 'Du får inbjudan eftersom du finns i Movexums kontaktnät.';
 
   const html = (r: EventInviteRecipient) => {
     const yes = `${r.rsvpUrl}&svar=yes`;

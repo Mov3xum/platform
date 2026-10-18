@@ -7714,6 +7714,38 @@ kategori/ägare, **aldrig e-post, telefon eller kön**. Guidad i
   `notify()` faller tillbaka på kind `assigned` mot ett schema utan
   1700000158 så en förfrågan aldrig tappas tyst.
 
+### 45.8 Egna grupper i kontaktboken (2026-10-17)
+
+Personalen samlar kontakter i egna, namngivna grupper ("Frukostgänget",
+"Investerare Gävleborg") utöver de fasta kategorierna — skapa, döp om, ta
+bort (`/kontakter/grupper`, flik i kontaktboken). Grupperna kan väljas direkt
+i inbjudningarnas dropdown (§ 53.5).
+
+- **Datamodell (migration 1700000199):** `contact_groups` (`tenant`
+  cascade, `name` ≤ 80, unikt per tenant — skiftlägesokänsligt i koden,
+  `description` ≤ 300, `created_by`) och `contacts.groups` (multi-relation
+  ≤ 50, ingen cascade — PocketBase tar bort id:t från kontakterna när en
+  grupp raderas; kontakterna finns kvar). Medlemskapet ligger på kontakten,
+  så listan filtreras med `groups ~ {:g}` (§ 21.3).
+- **Ren logik** i `packages/shared/src/contact-groups.ts` (validering,
+  namnnyckel, `nextContactGroups`, tak) — enhetstestad.
+- **Skrivlagret** `lib/core/write/contact-groups.ts`: skapa/ändra/ta bort
+  grupp, lägg till/ta bort kontakter i bulk (≤ 500, tenant-verifierade i
+  chunkar om 40) och sätt en kontakts grupper. Policy `contact_groups` =
+  Movexum-personal, agent nekad. Audit PII-fri (gruppnamn + antal) → feeden
+  ("3 kontakter lades till i Frukostgänget"). Schema-drift: saknat
+  `contacts.groups` efter skrivning ⇒ fel som namnger migrationen.
+- **UI:** kontaktlistan har gruppfilter (`?grupp=<id>` djuplänkar), gruppchips
+  per rad, kryssrutor + "Välj alla i listan" och "Lägg till i / Ta bort ur
+  grupp"; kontaktkortet har panelen **Grupper** (kryssa och spara).
+- **RLS:** list/view staff/observer, createRule pinnar tenant + skapare
+  (§ 21.8), update/delete Movexum-personal (`:each ?=`). Speglat i
+  `setup-via-api.mjs` (def + `FORCE_CREATE_RULES` + patch av `contacts`),
+  asserterat i `verify-baseline.mjs` (must-exist,
+  `MUST_BE_STAFF_OR_OBSERVER`, `contacts.groups` i `REQUIRED_APP_FIELDS`).
+- **GDPR/AI:** gruppen bär inga personuppgifter (namn/beskrivning
+  personnummer-saneras ändå). Ingen ny AI-väg; riskklass n/a.
+
 ## 46. Stödcheckar — digital ansökan, bedömning, finansiering & bokföring
 
 ### 46.1 Översikt
@@ -9389,18 +9421,32 @@ på eventsidan ("Bjud in" i deltagarpanelen) väljer staff mottagare i
 | `apps/web/src/lib/events/rsvp.ts` + `app/e/svar/page.tsx` + `app/api/public/e/rsvp/route.ts` | Publik bekräftelsesida och svarsroute |
 | `apps/web/src/lib/events/counters.ts` | `recomputeEventCounters` — delad av eventsidan, inbjudningarna och svarsvägen |
 
-- **Urval med kryssrutor, dynamiskt:** fliken **Kontaktboken** visar
-  kategorichips med antal ("Alla (312)", "Investerare (48)" …); listan hämtas
-  med server action när kategori eller sökning ändras (högst 1 000 rader,
-  "visar X av Y" när fler finns) och "Välj alla investerare som kan bjudas
-  in" kryssar hela kategorin. Sökningen är **ordvis** — varje ord måste
-  matcha namn, organisation eller e-post, så "anna svensson" hittar Anna
-  Svensson (förut matchades hela strängen mot varje fält var för sig och
-  fullt namn gav aldrig träff). Fliken **Bolag** listar portföljen med
-  statusfilter och hur varje bolag nås. Urvalet följer med mellan flikar och
-  kategorier; ETT utskick skickar allt. Listorna innehåller aldrig
+- **Urval via dropdown + kryssrutor (2026-10-17):** panelen har EN
+  dropdown för vilken lista som visas — **Alla personer — sök överallt**
+  (standard: kontaktboken + plattformens användare, så att en namnsökning
+  hittar personen var den än finns; incident 2026-10: "Hampus Granström" är
+  en användare, inte en kontakt, och gav "inga träffar"), **Kontaktboken**
+  (hela eller per kategori, med antal), **Egna grupper** (§ 45.8, med antal)
+  och **Plattformen** (Movexum-personal, bolagsmedlemmar, bolag). Bredvid
+  ligger sökningen; raderna är kryssrutor med "Välj alla … som kan bjudas
+  in". Listan hämtas med `listInviteOptionsAction` (högst 1 000 rader,
+  "visar X av Y" när fler finns), valet är nycklat `c:`/`u:`/`s:` +
+  id (`inviteSelectionKey`/`splitInviteSelection` i `event-invitations.ts`,
+  rena + enhetstestade; `parseInviteList` tolkar dropdownens värde — okänt
+  ⇒ alla personer), följer med när listan byts och visas som chips. ETT
+  utskick skickar allt. Sökningen är **ordvis** — varje ord måste matcha
+  namn, organisation eller e-post. Listorna innehåller aldrig
   e-postadresser — bara om mottagaren går att nå (`på listan`,
   `avregistrerad`, `saknar e-post`, `N medlemmar`).
+- **Användare kan bjudas in direkt:** Movexum-personal
+  (admin/incubator_lead/coach/mentor) och rena bolagsmedlemmar i tenanten
+  (`loadInviteUsers`, rollen avgörs av `inviteUserKind`; observers och
+  partners kan inte väljas). E-posten läses via superusern EFTER
+  rollkontrollen. Raden får `user` (bolagsmedlemmen även `startup` = första
+  länkade bolaget). Mejlets anledning väljs av `inviteReason`: kontakt ⇒
+  kontaktnätet (avregistrering), bolag/medlem ⇒ programmet, personal utan
+  bolag ⇒ `team` ("Du får inbjudan som medarbetare hos Movexum.", ingen
+  avregistrering).
 - **Ett bolag** blir en rad per mottagare (`startup` satt på raden): bolagets
   medlemmar i plattformen (`startup_member` länkad till bolaget, `user` på
   raden), annars bolagets huvudkontakter i kontaktboken
@@ -9474,6 +9520,15 @@ på eventsidan ("Bjud in" i deltagarpanelen) väljer staff mottagare i
     (RFC 8058 — Gmail/Yahoo kräver en-klick för massutskick). Länkarna går
     till appens konfigurerade adress (`APP_URL`, § 47.5), aldrig en
     URL-förkortare. Ett mejl per mottagare, i batchar om 10.
+- **Utan e-posttjänst kastar inget (incident 2026-10-17):** saknades
+  `RESEND_API_KEY` kastade `sendEventInvites` mitt i "Bjud in" — raderna var
+  redan skapade och sidan föll i "Server Components render" (500). Nu
+  kontrollerar `inviteToEvent`/`sendEventInvitations` och enkätutskicket
+  (§ 47.5) `isEmailConfigured()` INNAN något skrivs och svarar med ett tydligt
+  fel; ett misslyckat utskick efter att raderna skapats redovisas
+  (`sendError`) i stället för att kasta. Klientkomponenter som anropar server
+  actions direkt fångar kastade fel med `actionErrorMessage`
+  (`lib/action-error.ts`) — en action får aldrig riva sidan.
 - **Dataminimering:** e-postadressen kopieras till deltagarraden (som för en
   manuellt inlagd deltagare) och visas aldrig i inbjudningsvyn; loggar och
   audit (`agent_actions`, feeden: "Inbjudan skickad till "X" · N mejl")

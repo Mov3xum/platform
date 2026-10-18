@@ -1,5 +1,6 @@
 'use client';
 
+import { actionErrorMessage } from '@/lib/action-error';
 import Link from 'next/link';
 import { useState, useTransition } from 'react';
 import { Card, CardHead, Chip, Icon } from '@/components/proto';
@@ -62,12 +63,23 @@ export function Participants({
 
   const changeStage = (id: string, value: string) => {
     if (!isEventSignupStage(value)) return;
-    start(async () => setState(await moveSignupStageAction(id, value)));
+    start(async () => {
+      try {
+        setState(await moveSignupStageAction(id, value));
+      } catch (err) {
+        setState({ error: actionErrorMessage(err, 'Steget kunde inte sparas. Ladda om sidan och försök igen.') });
+      }
+    });
   };
 
   const add = (fd: FormData) =>
     start(async () => {
-      const res = await addSignupAction({}, fd);
+      let res: EventActionState;
+      try {
+        res = await addSignupAction({}, fd);
+      } catch (err) {
+        res = { error: actionErrorMessage(err, 'Deltagaren kunde inte läggas till. Ladda om sidan och försök igen.') };
+      }
       setState(res);
       if (!res.error) setAdding(false);
     });
@@ -86,7 +98,13 @@ export function Participants({
                   disabled={pending}
                   onClick={() => {
                     if (!window.confirm(`Markera ${notAttended} anmälda som närvarande?`)) return;
-                    start(async () => setState(await markSignupsAttendedAction(eventId)));
+                    start(async () => {
+                      try {
+                        setState(await markSignupsAttendedAction(eventId));
+                      } catch (err) {
+                        setState({ error: actionErrorMessage(err, 'Närvaron kunde inte sparas. Ladda om sidan och försök igen.') });
+                      }
+                    });
                   }}
                   title="Alla som står som Anmäld blir Närvarande"
                 >

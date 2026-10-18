@@ -28,6 +28,7 @@ import { escFilter } from '@/lib/pb-filter';
 export const CONTACTS = 'contacts';
 export const CONTACT_REQUESTS = 'contact_requests';
 export const STARTUP_CONTACTS = 'startup_contacts';
+export const CONTACT_GROUPS = 'contact_groups';
 
 export interface ContactRow {
   id: string;
@@ -45,9 +46,18 @@ export interface ContactRow {
   gdpr_consent: boolean;
   gdpr_consent_at: string | null;
   owners: string[];
+  /** Egna grupper (§ 45.8). Tom lista mot ett schema utan migration 1700000199. */
+  groups: string[];
   created_by: string | null;
   created?: string;
   updated?: string;
+}
+
+export interface ContactGroupRow {
+  id: string;
+  name: string;
+  description: string;
+  created_by: string | null;
 }
 
 export interface ContactRequestRow {
@@ -120,10 +130,43 @@ export function normalizeContact(raw: Record<string, unknown>): ContactRow {
     gdpr_consent: raw.gdpr_consent === true,
     gdpr_consent_at: str(raw.gdpr_consent_at),
     owners: ids(raw.owners),
+    groups: ids(raw.groups),
     created_by: str(raw.created_by),
     created: str(raw.created) ?? undefined,
     updated: str(raw.updated) ?? undefined
   };
+}
+
+/**
+ * Tenantens egna grupper (§ 45.8), sorterade på namn. `error` sätts när
+ * läsningen misslyckades — ett läsfel visas, det betyder aldrig "inga grupper".
+ * En instans utan migration 1700000199 svarar 404 och ger `missing: true`.
+ */
+export async function listContactGroups(
+  pb: PocketBase,
+  tenantId: string
+): Promise<{ groups: ContactGroupRow[]; missing?: boolean; error?: string }> {
+  try {
+    const rows = await pb.collection(CONTACT_GROUPS).getFullList<Record<string, unknown>>({
+      filter: pb.filter('tenant = {:tenant}', { tenant: tenantId }),
+      fields: 'id,name,description,created_by',
+      sort: 'name',
+      batch: 200
+    });
+    return {
+      groups: rows.map((r) => ({
+        id: String(r.id),
+        name: typeof r.name === 'string' ? r.name : '',
+        description: typeof r.description === 'string' ? r.description : '',
+        created_by: str(r.created_by)
+      }))
+    };
+  } catch (err) {
+    const status = (err as { status?: number })?.status;
+    if (status === 404) return { groups: [], missing: true };
+    console.error('[contacts] group list failed', { status });
+    return { groups: [], error: 'Kunde inte läsa grupperna.' };
+  }
 }
 
 export function normalizeRequest(raw: Record<string, unknown>): ContactRequestRow {

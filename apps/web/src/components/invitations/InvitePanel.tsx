@@ -1,45 +1,27 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from 'react';
+import { actionErrorMessage } from '@/lib/action-error';
+import Link from 'next/link';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { Icon } from '@/components/proto';
 import {
   inviteToEventAction,
-  listInviteContactsAction,
-  listInviteStartupsAction,
+  listInviteOptionsAction,
   type InvitationState,
-  type InviteContactOption,
-  type InviteContactsResult,
-  type InviteStartupOption
+  type InviteListMeta,
+  type InviteOption,
+  type InviteOptionsResult
 } from '@/lib/actions/invitations';
-import {
-  CONTACT_CATEGORIES,
-  CONTACT_CATEGORY_LABELS,
-  contactSearchWords,
-  isContactCategory,
-  matchesContactSearch
-} from '@platform/shared';
+import { CONTACT_CATEGORIES, CONTACT_CATEGORY_LABELS, splitInviteSelection } from '@platform/shared';
 
 // Inbjudningspanelen (CLAUDE.md § 53.5) — samma på eventsidan och under
-// Marknadsverktyg → Inbjudningar. Kryssa i kontakter per kategori ("alla
-// investerare") eller hela bolag; urvalet följer med mellan flikar och
-// kategorier, och ETT utskick skickar allt. Listorna hämtas dynamiskt och
+// Marknadsverktyg → Inbjudningar. En dropdown väljer listan (alla personer,
+// kontaktboken, en kategori, en egen grupp, Movexum-personalen,
+// bolagsmedlemmarna eller bolagen); sök och kryssa i. Urvalet följer med när
+// listan byts, och ETT utskick skickar allt. Listorna hämtas dynamiskt och
 // innehåller aldrig e-postadresser — bara om mottagaren går att nå.
 
-type Tab = 'contacts' | 'startups';
-
-const STARTUP_VIA: Record<InviteStartupOption['via'], (n: number) => string> = {
-  members: (n) => `${n} ${n === 1 ? 'medlem' : 'medlemmar'}`,
-  contacts: (n) => `${n} ${n === 1 ? 'huvudkontakt' : 'huvudkontakter'}`,
-  company: () => 'bolagets e-post',
-  none: () => 'ingen mottagare'
-};
-
-const STATUS_LABEL: Record<string, string> = {
-  active: 'Aktiva',
-  alumni: 'Alumni',
-  paused: 'Pausade',
-  rejected: 'Avslutade'
-};
+const KIND_LABEL: Record<InviteOption['kind'], string> = { contact: 'Kontakt', user: 'Användare', startup: 'Bolag' };
 
 function Notice({ state }: { state: InvitationState | null }) {
   if (!state || (!state.error && !state.notice)) return null;
@@ -59,323 +41,285 @@ function Notice({ state }: { state: InvitationState | null }) {
   );
 }
 
-function FilterChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+function ListSelect({ value, onChange, meta }: { value: string; onChange: (v: string) => void; meta?: InviteListMeta }) {
+  const n = (v: number | undefined) => (meta && v !== undefined ? ` (${v})` : '');
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className="mx-t-12"
-      style={{
-        padding: '4px 10px',
-        borderRadius: 999,
-        border: `1px solid ${active ? 'var(--color-brand)' : 'var(--mx-line-soft)'}`,
-        background: active ? 'var(--color-brand)' : 'transparent',
-        color: active ? 'var(--color-brand-foreground)' : 'var(--color-foreground-muted)',
-        cursor: 'pointer'
-      }}
-    >
-      {children}
-    </button>
+    <select className="mx-input" value={value} onChange={(e) => onChange(e.target.value)} aria-label="Vilka vill du bjuda in?">
+      <option value="everyone">Alla personer — sök överallt</option>
+      <optgroup label="Kontaktboken">
+        <option value="contacts">Hela kontaktboken{n(meta?.contacts)}</option>
+        {CONTACT_CATEGORIES.map((c) => {
+          const count = meta?.byCategory[c];
+          if (meta && !count) return null;
+          return (
+            <option key={c} value={`cat:${c}`}>
+              {CONTACT_CATEGORY_LABELS[c]}
+              {n(count)}
+            </option>
+          );
+        })}
+      </optgroup>
+      {meta && meta.groups.length > 0 && (
+        <optgroup label="Egna grupper">
+          {meta.groups.map((g) => (
+            <option key={g.id} value={`group:${g.id}`}>
+              {g.name} ({g.count})
+            </option>
+          ))}
+        </optgroup>
+      )}
+      <optgroup label="Plattformen">
+        <option value="staff">Movexum-personal{n(meta?.staff)}</option>
+        <option value="members">Bolagsmedlemmar{n(meta?.members)}</option>
+        <option value="startups">Bolag{n(meta?.startups)}</option>
+      </optgroup>
+    </select>
   );
 }
 
-function Row({
-  checked,
-  disabled,
-  onChange,
-  title,
-  detail,
-  note
-}: {
-  checked: boolean;
-  disabled: boolean;
-  onChange: (checked: boolean) => void;
-  title: string;
-  detail: string;
-  note: string;
-}) {
+function Row({ item, checked, onChange }: { item: InviteOption; checked: boolean; onChange: (on: boolean) => void }) {
+  const disabled = !item.selectable;
   return (
     <label
       className="mx-t-13 mx-flex mx-items-c mx-gap-2"
-      style={{ padding: '6px 4px', opacity: disabled ? 0.55 : 1, cursor: disabled ? 'default' : 'pointer' }}
+      style={{
+        padding: '7px 6px',
+        borderBottom: '1px solid var(--mx-line-soft)',
+        opacity: disabled ? 0.55 : 1,
+        cursor: disabled ? 'default' : 'pointer'
+      }}
     >
       <input
         type="checkbox"
         checked={checked}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
-        style={{ accentColor: 'var(--movexum-morkbla)' }}
+        style={{ accentColor: 'var(--color-brand)', width: 16, height: 16 }}
       />
       <span style={{ flex: 1, minWidth: 0 }} className="mx-truncate">
-        {title}
-        {detail ? <span className="mx-muted"> · {detail}</span> : null}
+        {item.name}
+        {item.detail ? <span className="mx-muted"> · {item.detail}</span> : null}
       </span>
-      {note && <span className="mx-mono mx-t-xs mx-muted">{note}</span>}
+      {item.note ? (
+        <span className="mx-mono mx-t-xs mx-muted">{item.note}</span>
+      ) : (
+        <span className="mx-mono mx-t-xs mx-muted">{KIND_LABEL[item.kind]}</span>
+      )}
     </label>
   );
 }
 
 export function InvitePanel({ eventId, onDone }: { eventId: string; onDone?: () => void }) {
-  const [tab, setTab] = useState<Tab>('contacts');
-  const [category, setCategory] = useState('');
+  const [list, setList] = useState('everyone');
   const [q, setQ] = useState('');
-  const [contacts, setContacts] = useState<InviteContactsResult | null>(null);
-  const [counts, setCounts] = useState<InviteContactsResult['counts']>();
-  const [startups, setStartups] = useState<InviteStartupOption[] | null>(null);
-  const [startupError, setStartupError] = useState<string | null>(null);
-  const [startupStatus, setStartupStatus] = useState('active');
-  const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [pickedStartups, setPickedStartups] = useState<Set<string>>(new Set());
+  const [result, setResult] = useState<InviteOptionsResult | null>(null);
+  const [meta, setMeta] = useState<InviteListMeta>();
+  const [startupStatus, setStartupStatus] = useState('');
+  /** Valda mottagare: nyckel → visningsnamn (för chipsen). */
+  const [picked, setPicked] = useState<Map<string, string>>(new Map());
   const [state, setState] = useState<InvitationState | null>(null);
   const [loading, startLoading] = useTransition();
   const [sending, startSending] = useTransition();
+  const [reload, setReload] = useState(0);
   const req = useRef(0);
+  /** Räknarna i dropdownen hämtas första gången och efter varje utskick. */
+  const needMeta = useRef(true);
 
-  // Kontaktboken: hämtas om när kategori eller sökning ändras (debounce).
   useEffect(() => {
-    if (tab !== 'contacts') return;
     const id = ++req.current;
     const timer = setTimeout(
       () =>
         startLoading(async () => {
-          const res = await listInviteContactsAction({ eventId, category, q, withCounts: !counts });
+          let res: InviteOptionsResult;
+          try {
+            res = await listInviteOptionsAction({ eventId, list, q, withMeta: needMeta.current });
+          } catch (err) {
+            res = { error: actionErrorMessage(err, 'Kunde inte läsa listan. Ladda om sidan och försök igen.'), items: [], total: 0 };
+          }
           if (id !== req.current) return;
-          setContacts(res);
-          if (res.counts) setCounts(res.counts);
+          setResult(res);
+          if (res.meta) {
+            setMeta(res.meta);
+            needMeta.current = false;
+          }
         }),
       q ? 250 : 0
     );
     return () => clearTimeout(timer);
-    // counts behövs bara första gången — inte som beroende.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eventId, category, q, tab]);
+  }, [eventId, list, q, reload]);
 
-  useEffect(() => {
-    if (tab !== 'startups' || startups) return;
-    startLoading(async () => {
-      const res = await listInviteStartupsAction({ eventId });
-      setStartups(res.items);
-      setStartupError(res.error ?? null);
+  const items = useMemo(() => {
+    const all = result?.items ?? [];
+    return list === 'startups' && startupStatus ? all.filter((i) => i.detail === startupStatus) : all;
+  }, [result, list, startupStatus]);
+  const statuses = useMemo(
+    () => (list === 'startups' ? [...new Set((result?.items ?? []).map((i) => i.detail).filter(Boolean))] : []),
+    [result, list]
+  );
+  const selectable = items.filter((i) => i.selectable);
+  const allPicked = selectable.length > 0 && selectable.every((i) => picked.has(i.key));
+
+  const toggle = (entries: InviteOption[], on: boolean) =>
+    setPicked((prev) => {
+      const next = new Map(prev);
+      for (const i of entries) {
+        if (on) next.set(i.key, i.name);
+        else next.delete(i.key);
+      }
+      return next;
     });
-  }, [eventId, tab, startups]);
 
-  const contactItems = contacts?.items ?? [];
-  const selectableContacts = contactItems.filter((c) => c.hasEmail && !c.optedOut && !c.alreadyInvited);
-  const allContactsPicked = selectableContacts.length > 0 && selectableContacts.every((c) => picked.has(c.id));
+  const split = splitInviteSelection(picked.keys());
+  const summary = [
+    split.contactIds.length ? `${split.contactIds.length} ${split.contactIds.length === 1 ? 'kontakt' : 'kontakter'}` : '',
+    split.userIds.length ? `${split.userIds.length} användare` : '',
+    split.startupIds.length ? `${split.startupIds.length} bolag` : ''
+  ].filter(Boolean);
 
-  const words = contactSearchWords(q);
-  const startupStatuses = useMemo(
-    () => [...new Set((startups ?? []).map((s) => s.status).filter(Boolean))],
-    [startups]
-  );
-  const visibleStartups = (startups ?? []).filter(
-    (s) => (!startupStatus || s.status === startupStatus) && matchesContactSearch([s.name], words)
-  );
-  const selectableStartups = visibleStartups.filter((s) => s.via !== 'none' && !s.alreadyInvited);
-  const allStartupsPicked = selectableStartups.length > 0 && selectableStartups.every((s) => pickedStartups.has(s.id));
-
-  const toggleAll = (current: Set<string>, set: (s: Set<string>) => void, ids: string[], on: boolean) => {
-    const next = new Set(current);
-    for (const id of ids) {
-      if (on) next.add(id);
-      else next.delete(id);
-    }
-    set(next);
-  };
-
-  const total = picked.size + pickedStartups.size;
   const submit = () => {
-    const parts = [
-      picked.size ? `${picked.size} ${picked.size === 1 ? 'kontakt' : 'kontakter'}` : '',
-      pickedStartups.size ? `${pickedStartups.size} bolag` : ''
-    ].filter(Boolean);
-    if (!window.confirm(`Skicka inbjudan till ${parts.join(' och ')} nu?`)) return;
+    if (!window.confirm(`Skicka inbjudan till ${summary.join(', ')} nu?`)) return;
     startSending(async () => {
-      const res = await inviteToEventAction({
-        eventId,
-        contactIds: [...picked.keys()],
-        startupIds: [...pickedStartups.keys()]
-      });
+      let res: InvitationState;
+      try {
+        res = await inviteToEventAction({ eventId, selection: [...picked.keys()] });
+      } catch (err) {
+        res = { error: actionErrorMessage(err, 'Inbjudan kunde inte skickas. Ladda om sidan och försök igen.') };
+      }
       setState(res);
       if (res.ok) {
-        setPicked(new Set());
-        setPickedStartups(new Set());
-        // Läs om listorna så att de nyss inbjudna visas som "på listan".
-        setStartups(null);
-        setContacts(await listInviteContactsAction({ eventId, category, q }));
+        setPicked(new Map());
+        // Läs om listan så att de nyss inbjudna visas som "på listan".
+        needMeta.current = true;
+        setReload((n) => n + 1);
         onDone?.();
       }
     });
   };
 
-  const contactNote = (c: InviteContactOption) =>
-    c.alreadyInvited ? 'på listan' : c.optedOut ? 'avregistrerad' : !c.hasEmail ? 'saknar e-post' : '';
+  const chips = [...picked.entries()];
+  const listLabel = list.startsWith('cat:') ? CONTACT_CATEGORY_LABELS[list.slice(4) as keyof typeof CONTACT_CATEGORY_LABELS]?.toLowerCase() : '';
 
   return (
     <div style={{ display: 'grid', gap: 12 }}>
-      <div className="mx-flex mx-gap-2" role="tablist">
-        {(
-          [
-            ['contacts', 'Kontaktboken'],
-            ['startups', 'Bolag']
-          ] as const
-        ).map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            role="tab"
-            aria-selected={tab === key}
-            className={`mx-btn mx-sm${tab === key ? ' mx-primary' : ''}`}
-            onClick={() => {
-              setTab(key);
-              setQ('');
-            }}
-          >
-            {label}
-            {key === 'contacts' && picked.size > 0 ? ` (${picked.size})` : ''}
-            {key === 'startups' && pickedStartups.size > 0 ? ` (${pickedStartups.size})` : ''}
-          </button>
-        ))}
+      <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.4fr)' }}>
+        <ListSelect
+          value={list}
+          meta={meta}
+          onChange={(v) => {
+            setList(v);
+            setStartupStatus('');
+          }}
+        />
+        <input
+          className="mx-input"
+          type="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder={list === 'startups' ? 'Sök bolag' : 'Sök namn, organisation eller e-post'}
+          maxLength={120}
+          aria-label="Sök"
+        />
       </div>
 
-      <input
-        className="mx-input"
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        placeholder={tab === 'contacts' ? 'Sök namn, organisation eller e-post' : 'Sök bolag'}
-        maxLength={120}
-        aria-label="Sök"
-      />
+      {list === 'startups' && statuses.length > 1 && (
+        <select
+          className="mx-input"
+          value={startupStatus}
+          onChange={(e) => setStartupStatus(e.target.value)}
+          aria-label="Bolagsstatus"
+          style={{ maxWidth: 240 }}
+        >
+          <option value="">Alla bolag</option>
+          {statuses.map((st) => (
+            <option key={st} value={st}>
+              {st}
+            </option>
+          ))}
+        </select>
+      )}
 
-      {tab === 'contacts' ? (
-        <>
-          <div className="mx-flex mx-gap-2 mx-wrap">
-            <FilterChip active={!category} onClick={() => setCategory('')}>
-              Alla{counts ? ` (${counts.all})` : ''}
-            </FilterChip>
-            {CONTACT_CATEGORIES.map((c) => {
-              const n = counts?.byCategory[c];
-              if (counts && !n) return null;
-              return (
-                <FilterChip key={c} active={category === c} onClick={() => setCategory(c)}>
-                  {CONTACT_CATEGORY_LABELS[c]}
-                  {n ? ` (${n})` : ''}
-                </FilterChip>
-              );
-            })}
-          </div>
-          {contacts?.error ? (
-            <Notice state={{ error: contacts.error }} />
-          ) : contacts && contactItems.length === 0 ? (
-            <div className="mx-muted mx-t-13">Inga kontakter matchar.</div>
-          ) : (
-            <>
-              <label className="mx-t-12 mx-muted mx-flex mx-items-c mx-gap-2">
-                <input
-                  type="checkbox"
-                  checked={allContactsPicked}
-                  disabled={selectableContacts.length === 0}
-                  onChange={(e) => toggleAll(picked, setPicked, selectableContacts.map((c) => c.id), e.target.checked)}
-                  style={{ accentColor: 'var(--movexum-morkbla)' }}
-                />
-                Välj alla {category && isContactCategory(category) ? CONTACT_CATEGORY_LABELS[category].toLowerCase() : 'i listan'} som kan
-                bjudas in ({selectableContacts.length})
-                {loading && <span className="mx-mono mx-t-xs">· laddar…</span>}
-              </label>
-              {contacts && contacts.total > contactItems.length && (
-                <div className="mx-t-12 mx-muted">
-                  Visar {contactItems.length} av {contacts.total} — sök eller välj en kategori för att smalna av.
-                </div>
-              )}
-              <div style={{ maxHeight: 380, overflowY: 'auto', borderTop: '1px solid var(--mx-line-soft)' }}>
-                {contactItems.map((c) => (
-                  <Row
-                    key={c.id}
-                    checked={picked.has(c.id)}
-                    disabled={!c.hasEmail || c.optedOut || c.alreadyInvited}
-                    onChange={(on) => toggleAll(picked, setPicked, [c.id], on)}
-                    title={c.name}
-                    detail={[c.organization, isContactCategory(c.category) ? CONTACT_CATEGORY_LABELS[c.category] : '']
-                      .filter(Boolean)
-                      .join(' · ')}
-                    note={contactNote(c)}
-                  />
-                ))}
-              </div>
-            </>
-          )}
-        </>
+      {meta?.warning && <div className="mx-t-12 mx-muted">{meta.warning}</div>}
+      {result?.warning && <div className="mx-t-12 mx-muted">{result.warning}</div>}
+
+      {result?.error ? (
+        <Notice state={{ error: result.error }} />
       ) : (
         <>
-          <div className="mx-flex mx-gap-2 mx-wrap">
-            <FilterChip active={!startupStatus} onClick={() => setStartupStatus('')}>
-              Alla{startups ? ` (${startups.length})` : ''}
-            </FilterChip>
-            {startupStatuses.map((st) => (
-              <FilterChip key={st} active={startupStatus === st} onClick={() => setStartupStatus(st)}>
-                {STATUS_LABEL[st] ?? st} ({(startups ?? []).filter((s) => s.status === st).length})
-              </FilterChip>
-            ))}
+          <div className="mx-flex mx-items-c mx-gap-2 mx-wrap">
+            <label className="mx-t-12 mx-muted mx-flex mx-items-c mx-gap-2">
+              <input
+                type="checkbox"
+                checked={allPicked}
+                disabled={selectable.length === 0}
+                onChange={(e) => toggle(selectable, e.target.checked)}
+                style={{ accentColor: 'var(--color-brand)', width: 16, height: 16 }}
+              />
+              Välj alla {listLabel || 'i listan'} som kan bjudas in ({selectable.length})
+            </label>
+            {loading && <span className="mx-mono mx-t-xs mx-muted">laddar…</span>}
+            <span style={{ flex: 1 }} />
+            <Link href="/kontakter/grupper" className="mx-t-12" style={{ color: 'var(--color-link)' }}>
+              Hantera grupper
+            </Link>
           </div>
-          {startupError ? (
-            <Notice state={{ error: startupError }} />
-          ) : !startups ? (
-            <div className="mx-muted mx-t-13">Laddar bolag…</div>
-          ) : visibleStartups.length === 0 ? (
-            <div className="mx-muted mx-t-13">Inga bolag matchar.</div>
-          ) : (
-            <>
-              <label className="mx-t-12 mx-muted mx-flex mx-items-c mx-gap-2">
-                <input
-                  type="checkbox"
-                  checked={allStartupsPicked}
-                  disabled={selectableStartups.length === 0}
-                  onChange={(e) => toggleAll(pickedStartups, setPickedStartups, selectableStartups.map((s) => s.id), e.target.checked)}
-                  style={{ accentColor: 'var(--movexum-morkbla)' }}
-                />
-                Välj alla bolag i listan ({selectableStartups.length})
-              </label>
-              <div style={{ maxHeight: 380, overflowY: 'auto', borderTop: '1px solid var(--mx-line-soft)' }}>
-                {visibleStartups.map((s) => (
-                  <Row
-                    key={s.id}
-                    checked={pickedStartups.has(s.id)}
-                    disabled={s.via === 'none' || s.alreadyInvited}
-                    onChange={(on) => toggleAll(pickedStartups, setPickedStartups, [s.id], on)}
-                    title={s.name}
-                    detail={STATUS_LABEL[s.status] ?? ''}
-                    note={s.alreadyInvited ? 'inbjudet' : STARTUP_VIA[s.via](s.count)}
-                  />
-                ))}
-              </div>
-              <div className="mx-t-12 mx-muted">
-                Ett bolag bjuds in via sina medlemmar i plattformen, annars bolagets huvudkontakter i kontaktboken,
-                annars bolagets e-postadress.
-              </div>
-            </>
+          {result && result.total > (result.items?.length ?? 0) && (
+            <div className="mx-t-12 mx-muted">
+              Visar {result.items.length} av {result.total} — sök eller välj en kategori/grupp för att smalna av.
+            </div>
           )}
+          <div style={{ maxHeight: 380, overflowY: 'auto', borderTop: '1px solid var(--mx-line-soft)' }}>
+            {result && items.length === 0 ? (
+              <div className="mx-muted mx-t-13" style={{ padding: '12px 4px' }}>
+                {q ? `Ingen träff på "${q}" i den här listan.` : 'Listan är tom.'}
+                {q && list !== 'everyone' && (
+                  <>
+                    {' '}
+                    <button
+                      type="button"
+                      className="mx-t-13"
+                      style={{ color: 'var(--color-link)', background: 'none', border: 0, padding: 0, cursor: 'pointer' }}
+                      onClick={() => setList('everyone')}
+                    >
+                      Sök bland alla personer
+                    </button>
+                  </>
+                )}
+              </div>
+            ) : (
+              items.map((item) => (
+                <Row key={item.key} item={item} checked={picked.has(item.key)} onChange={(on) => toggle([item], on)} />
+              ))
+            )}
+          </div>
         </>
       )}
 
+      {chips.length > 0 && (
+        <div className="mx-flex mx-gap-2 mx-wrap" aria-label="Valda mottagare">
+          {chips.slice(0, 12).map(([key, name]) => (
+            <span key={key} className="mx-chip mx-draft mx-flex mx-items-c mx-gap-1">
+              {name}
+              <button
+                type="button"
+                aria-label={`Ta bort ${name}`}
+                onClick={() => setPicked((prev) => new Map([...prev].filter(([k]) => k !== key)))}
+                style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer', color: 'inherit' }}
+              >
+                <Icon name="close" size={10} />
+              </button>
+            </span>
+          ))}
+          {chips.length > 12 && <span className="mx-t-12 mx-muted">+{chips.length - 12} till</span>}
+        </div>
+      )}
+
       <div className="mx-flex mx-items-c mx-gap-2 mx-wrap">
-        <button type="button" className="mx-btn mx-primary" disabled={sending || total === 0} onClick={submit}>
+        <button type="button" className="mx-btn mx-primary" disabled={sending || picked.size === 0} onClick={submit}>
           <Icon name="send" size={12} />{' '}
-          {sending
-            ? 'Skickar…'
-            : total === 0
-              ? 'Bjud in och skicka'
-              : `Bjud in och skicka (${[picked.size ? `${picked.size} kontakter` : '', pickedStartups.size ? `${pickedStartups.size} bolag` : ''].filter(Boolean).join(' + ')})`}
+          {sending ? 'Skickar…' : picked.size === 0 ? 'Bjud in och skicka' : `Bjud in och skicka (${summary.join(' + ')})`}
         </button>
-        {total > 0 && (
-          <button
-            type="button"
-            className="mx-btn mx-sm"
-            onClick={() => {
-              setPicked(new Set());
-              setPickedStartups(new Set());
-            }}
-          >
+        {picked.size > 0 && (
+          <button type="button" className="mx-btn mx-sm" onClick={() => setPicked(new Map())}>
             Rensa val
           </button>
         )}
@@ -383,7 +327,8 @@ export function InvitePanel({ eventId, onDone }: { eventId: string; onDone?: () 
       <Notice state={state} />
       <div className="mx-t-12 mx-muted">
         Varje mejl har en personlig svarslänk. Kontakter i kontaktboken bjuds in på grund av berättigat intresse och
-        kan avregistrera sig i varje mejl; den som avregistrerat sig kan inte väljas.
+        kan avregistrera sig i varje mejl; den som avregistrerat sig kan inte väljas. Ett bolag bjuds in via sina
+        medlemmar i plattformen, annars bolagets huvudkontakter, annars bolagets e-postadress.
       </div>
     </div>
   );

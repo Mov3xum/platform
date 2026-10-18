@@ -79,6 +79,7 @@ export default async function ForfragningarPage() {
       title="Förfrågningar"
       tabs={[
         { id: 'alla', label: 'Kontakter', href: '/kontakter' },
+        { id: 'grupper', label: 'Grupper', href: '/kontakter/grupper' },
         { id: 'forfragningar', label: 'Förfrågningar', href: '/kontakter/forfragningar', badge: waitingForMe.length },
         ...(canEdit ? [{ id: 'import', label: 'Importera', href: '/kontakter/import' }] : [])
       ]}

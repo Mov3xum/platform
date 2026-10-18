@@ -2,8 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  inviteReason,
   INVITE_MAX_RECIPIENTS,
   groupInvitesByStatus,
+  inviteListValue,
+  inviteSelectionKey,
+  parseInviteList,
+  splitInviteSelection,
   inviteStatus,
   tallyInvites,
   isRsvpAnswer,
@@ -125,4 +130,37 @@ test('tallyInvites räknar svar som öppnade och grupperar i fast ordning', () =
     ]
   );
   assert.deepEqual(groupInvitesByStatus([]), []);
+});
+
+test('parseInviteList: kända listor tolkas, okänt blir alla personer', () => {
+  const cats = ['investerare', 'annan'];
+  assert.deepEqual(parseInviteList('cat:investerare', cats), { kind: 'category', category: 'investerare' });
+  assert.deepEqual(parseInviteList('cat:okand', cats), { kind: 'everyone' });
+  assert.deepEqual(parseInviteList('group:abc123', cats), { kind: 'group', id: 'abc123' });
+  assert.deepEqual(parseInviteList('group:../x', cats), { kind: 'everyone' });
+  assert.deepEqual(parseInviteList('staff', cats), { kind: 'staff' });
+  assert.deepEqual(parseInviteList(undefined, cats), { kind: 'everyone' });
+  for (const v of ['everyone', 'contacts', 'cat:annan', 'group:g1', 'members', 'startups']) {
+    assert.equal(inviteListValue(parseInviteList(v, cats)), v);
+  }
+});
+
+test('splitInviteSelection delar upp valen per sort och släpper skräp', () => {
+  const keys = [
+    inviteSelectionKey('contact', 'c1'),
+    inviteSelectionKey('user', 'u1'),
+    inviteSelectionKey('startup', 's1'),
+    'c:c1',
+    'x:bad',
+    'c:../'
+  ];
+  assert.deepEqual(splitInviteSelection(keys), { contactIds: ['c1'], userIds: ['u1'], startupIds: ['s1'] });
+});
+
+test('inviteReason: kontakt, program och team', () => {
+  assert.equal(inviteReason({ contact: 'c1', startup: 's1' }), 'contact');
+  assert.equal(inviteReason({ user: 'u1', startup: 's1' }), 'program');
+  assert.equal(inviteReason({ startup: 's1' }), 'program');
+  assert.equal(inviteReason({ user: 'u1' }), 'team');
+  assert.equal(inviteReason({}), 'contact');
 });
