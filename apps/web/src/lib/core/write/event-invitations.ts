@@ -84,6 +84,8 @@ export interface InviteResult {
   unreachableStartups: number;
   /** Raderna skapades men utskicket gick inte — orsaken (PII-fri). */
   sendError?: string;
+  /** Varför Resend avvisade enskilda mejl (PII-fri). */
+  failReason?: string;
 }
 
 const MAX_STARTUPS = 200;
@@ -232,13 +234,22 @@ export async function inviteToEvent(
   // tillbaka listan ("Skicka ej utskickade" tar dem senare).
   const sent = await sendEventInvitations(pb, actor, { eventId: ev.id, mode: 'pending', baseUrl: input.baseUrl });
   if (!sent.ok) return ok({ invited, sent: 0, failed: 0, skipped, unreachableStartups, sendError: sent.error });
-  return ok({ invited, sent: sent.value.sent, failed: sent.value.failed, skipped, unreachableStartups });
+  return ok({
+    invited,
+    sent: sent.value.sent,
+    failed: sent.value.failed,
+    skipped,
+    unreachableStartups,
+    ...(sent.value.failReason ? { failReason: sent.value.failReason } : {})
+  });
 }
 
 export interface SendInvitationsResult {
   sent: number;
   failed: number;
   optedOut: number;
+  /** Varför Resend avvisade mejlen (PII-fri), när något misslyckades. */
+  failReason?: string;
 }
 
 /**
@@ -311,8 +322,9 @@ export async function sendEventInvitations(
   const startsAt = ev.starts_at ? formatStockholmDateTime(ev.starts_at) : '';
   let sent: string[];
   let failed: number;
+  let failReason: string | undefined;
   try {
-    ({ sent, failed } = await sendEventInvites(recipients, {
+    ({ sent, failed, firstError: failReason } = await sendEventInvites(recipients, {
       eventName: ev.name || 'Event',
       when: startsAt || 'Tid meddelas',
       location: ev.location || undefined,
@@ -337,7 +349,7 @@ export async function sendEventInvitations(
     field: input.mode === 'reminder' ? 'invitation_reminder' : 'invitation_sent',
     after_value: { title: ev.name ?? '', sent: sent.length, failed, opted_out: rows.length - sendable.length }
   });
-  return ok({ sent: sent.length, failed, optedOut: rows.length - sendable.length });
+  return ok({ sent: sent.length, failed, optedOut: rows.length - sendable.length, ...(failed > 0 && failReason ? { failReason } : {}) });
 }
 
 /**

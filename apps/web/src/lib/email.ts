@@ -1,5 +1,5 @@
 import 'server-only';
-import { listUnsubscribeHeaders, resolveReplyTo, resolveSender } from '@/lib/mail-sender';
+import { describeResendError, listUnsubscribeHeaders, resolveReplyTo, resolveSender } from '@/lib/mail-sender';
 import type { InviteReason } from '@platform/shared';
 
 // Avsändaren konfigureras i Coolify (`RESEND_FROM_EMAIL` m.fl., se
@@ -11,13 +11,27 @@ const REPLY_TO = resolveReplyTo(process.env);
 export const EMAIL_NOT_CONFIGURED_MESSAGE =
   'E-posttjänsten är inte konfigurerad (RESEND_API_KEY saknas på web-appen). Kontakta administratören.';
 
+/**
+ * Nyckeln som den står i Coolify — utan mellanslag/radbrytningar och omgivande
+ * citattecken (ett klistrat `"re_…"` eller en avslutande radbrytning ger annars
+ * 401 från Resend).
+ */
+function resendApiKey(): string {
+  return (process.env.RESEND_API_KEY ?? '').trim().replace(/^(['"])(.*)\1$/, '$2').trim();
+}
+
 /** Finns en Resend-nyckel? Utskicksflöden kontrollerar detta INNAN de skriver något. */
 export function isEmailConfigured(): boolean {
-  return Boolean(process.env.RESEND_API_KEY);
+  return Boolean(resendApiKey());
+}
+
+/** Ser nyckeln ut som en Resend-nyckel (`re_…`)? För driftdiagnosen — nyckeln lämnar aldrig servern. */
+export function resendKeyLooksValid(): boolean {
+  return /^re_[A-Za-z0-9_]{10,}$/.test(resendApiKey());
 }
 
 function getResendApiKey(): string {
-  const key = process.env.RESEND_API_KEY;
+  const key = resendApiKey();
   if (!key) {
     throw new Error(EMAIL_NOT_CONFIGURED_MESSAGE);
   }
@@ -107,7 +121,7 @@ export async function sendVerificationEmail(to: string, verificationUrl: string)
 
   if (!res.ok) {
     const body = await res.text();
-    console.error(`[email] Resend API error ${res.status}:`, body);
+    console.error(`[email] Resend API error ${res.status}: ${describeResendError(res.status, body, FROM_EMAIL)}`);
     throw new Error(`Kunde inte skicka verifieringsmail (fel ${res.status}). Försök igen.`);
   }
 }
@@ -256,7 +270,7 @@ export async function sendInflowNotification(
 
   if (!res.ok) {
     const body = await res.text();
-    console.error(`[email] Resend inflow notification error ${res.status}:`, body);
+    console.error(`[email] Resend inflow notification error ${res.status}: ${describeResendError(res.status, body, FROM_EMAIL)}`);
     throw new Error(`Kunde inte skicka inflödesnotis (fel ${res.status}).`);
   }
 }
@@ -281,7 +295,7 @@ export interface SurveyInviteFields {
 export async function sendSurveyInvites(
   recipients: string[],
   fields: SurveyInviteFields
-): Promise<{ sent: number; failed: number }> {
+): Promise<{ sent: number; failed: number; firstError?: string }> {
   const apiKey = getResendApiKey();
   const to = recipients.filter((r) => r && r.includes('@'));
   if (to.length === 0) return { sent: 0, failed: 0 };
@@ -330,6 +344,7 @@ export async function sendSurveyInvites(
 
   let sent = 0;
   let failed = 0;
+  let firstError: string | undefined;
   const BATCH = 10;
   for (let i = 0; i < to.length; i += BATCH) {
     const chunk = to.slice(i, i + BATCH);
@@ -350,19 +365,24 @@ export async function sendSurveyInvites(
             })
           });
           if (!res.ok) {
-            // PII-fritt: status, aldrig adressen.
-            console.error(`[email] Resend survey invite error ${res.status}`);
+            // PII-fritt: status + Resends orsak med adresser maskade.
+            const reason = describeResendError(res.status, await res.text().catch(() => ''), INVITE_FROM_EMAIL);
+            console.error(`[email] Resend survey invite error ${res.status}: ${reason}`);
+            firstError ??= reason;
             return false;
           }
           return true;
-        } catch {
+        } catch (err) {
+          const reason = `Kunde inte nå Resend (${err instanceof Error ? err.message : 'nätverksfel'}).`;
+          console.error(`[email] Resend survey invite request failed: ${reason}`);
+          firstError ??= reason;
           return false;
         }
       })
     );
     for (const ok of results) ok ? sent++ : failed++;
   }
-  return { sent, failed };
+  return { sent, failed, firstError };
 }
 
 export interface EventInviteFields {
@@ -406,7 +426,7 @@ export interface EventInviteRecipient {
 export async function sendEventInvites(
   recipients: EventInviteRecipient[],
   fields: EventInviteFields
-): Promise<{ sent: string[]; failed: number }> {
+): Promise<{ sent: string[]; failed: number; firstError?: string }> {
   const apiKey = getResendApiKey();
   const esc = (v: string) =>
     v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -470,6 +490,7 @@ export async function sendEventInvites(
 
   const sent: string[] = [];
   let failed = 0;
+  let firstError: string | undefined;
   const BATCH = 10;
   for (let i = 0; i < recipients.length; i += BATCH) {
     const chunk = recipients.slice(i, i + BATCH).filter((r) => r.email.includes('@'));
@@ -492,19 +513,24 @@ export async function sendEventInvites(
             })
           });
           if (!res.ok) {
-            // PII-fritt: status, aldrig adressen.
-            console.error(`[email] Resend event invite error ${res.status}`);
+            // PII-fritt: status + Resends orsak med adresser maskade.
+            const reason = describeResendError(res.status, await res.text().catch(() => ''), INVITE_FROM_EMAIL);
+            console.error(`[email] Resend event invite error ${res.status}: ${reason}`);
+            firstError ??= reason;
             return null;
           }
           return r.key;
-        } catch {
+        } catch (err) {
+          const reason = `Kunde inte nå Resend (${err instanceof Error ? err.message : 'nätverksfel'}).`;
+          console.error(`[email] Resend event invite request failed: ${reason}`);
+          firstError ??= reason;
           return null;
         }
       })
     );
     for (const r of results) r ? sent.push(r) : failed++;
   }
-  return { sent, failed };
+  return { sent, failed, firstError };
 }
 
 export interface ChatSummaryEmailFields {
@@ -571,7 +597,7 @@ export async function sendChatSummaryEmail(to: string, fields: ChatSummaryEmailF
   });
   if (!res.ok) {
     const body = await res.text();
-    console.error(`[email] Resend chat summary error ${res.status}:`, body);
+    console.error(`[email] Resend chat summary error ${res.status}: ${describeResendError(res.status, body, FROM_EMAIL)}`);
     throw new Error(`Kunde inte skicka sammanfattningen (fel ${res.status}).`);
   }
 }

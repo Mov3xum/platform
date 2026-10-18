@@ -283,9 +283,12 @@ export async function inviteToEventAction(input: {
   }
   if (!res.ok) return { error: res.error };
   revalidateEvent(input.eventId);
-  const { invited, sent, failed, skipped, unreachableStartups, sendError } = res.value;
+  const { invited, sent, failed, skipped, unreachableStartups, sendError, failReason } = res.value;
   if (sendError) {
     return { error: `${invited} lades till på listan men inget mejl skickades: ${sendError}` };
+  }
+  if (sent === 0 && failed > 0) {
+    return { error: `${invited} lades till på listan men inget mejl skickades. ${failReason ?? 'Resend avvisade utskicket.'}` };
   }
   const notes = [
     skipped.already ? `${skipped.already} fanns redan på listan` : '',
@@ -293,7 +296,7 @@ export async function inviteToEventAction(input: {
     skipped.noEmail ? `${skipped.noEmail} saknar e-post` : '',
     skipped.overCap ? `${skipped.overCap} över taket` : '',
     unreachableStartups ? `${unreachableStartups} bolag saknar mottagare` : '',
-    failed ? `${failed} mejl misslyckades — försök igen med "Skicka ej utskickade"` : ''
+    failed ? `${failed} mejl misslyckades${failReason ? ` (${failReason.replace(/\.$/, '')})` : ''} — försök igen med "Skicka ej utskickade"` : ''
   ].filter(Boolean);
   return {
     ok: true,
@@ -316,10 +319,13 @@ export async function sendInvitationsAction(input: { eventId: string; mode: 'pen
   }
   if (!res.ok) return { error: res.error };
   revalidateEvent(input.eventId);
-  const { sent, failed, optedOut } = res.value;
+  const { sent, failed, optedOut, failReason } = res.value;
+  if (sent === 0 && failed > 0) {
+    return { error: `Inga mejl skickades. ${failReason ?? 'Resend avvisade utskicket.'}` };
+  }
   return {
     ok: true,
-    notice: `${sent} mejl skickade${failed ? `, ${failed} misslyckades` : ''}${optedOut ? ` (${optedOut} avregistrerade hoppades över)` : ''}.`
+    notice: `${sent} mejl skickade${failed ? `, ${failed} misslyckades${failReason ? ` (${failReason.replace(/\.$/, '')})` : ''}` : ''}${optedOut ? ` (${optedOut} avregistrerade hoppades över)` : ''}.`
   };
 }
 
