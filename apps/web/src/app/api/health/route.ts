@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { describePbUrlSource, getServerPbUrl } from '@/lib/pb-url';
 import { probePocketBase, probeSummary } from '@/lib/pb-health';
+import { resolveSender, senderAddress } from '@/lib/mail-sender';
+import { isEmailConfigured, resendKeyLooksValid } from '@/lib/email';
 
 // Driftdiagnos för web-appen (publik, undantagen auth-redirect + force-https i
 // middleware). Svarar vilken PocketBase-adress servern resolvat för sin miljö
@@ -28,6 +30,15 @@ export async function GET(): Promise<NextResponse> {
         kind: probe.kind,
         status: probe.status ?? null,
         summary: probeSummary(probe)
+      },
+      // E-post (CLAUDE.md § 53.5): bara OM nyckeln finns i containern och
+      // vilken avsändardomän som används — aldrig nyckeln. `configured: false`
+      // trots att den lagts in i Coolify = fel resurs eller ingen omdeploy.
+      email: {
+        configured: isEmailConfigured(),
+        key_format_ok: resendKeyLooksValid(),
+        sender_domain: senderAddress(resolveSender(process.env, 'default')).split('@')[1] ?? null,
+        invite_sender_domain: senderAddress(resolveSender(process.env, 'invite')).split('@')[1] ?? null
       },
       checked_at: new Date().toISOString()
     },

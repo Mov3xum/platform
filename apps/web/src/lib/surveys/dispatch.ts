@@ -14,7 +14,7 @@ import { toSurvey, type Survey } from './store';
 
 
 export type DispatchResult =
-  | { ok: true; sent: number; failed: number; recipients: number }
+  | { ok: true; sent: number; failed: number; recipients: number; failReason?: string }
   | { ok: false; error: string };
 
 export async function dispatchSurveyInvites(
@@ -93,8 +93,9 @@ export async function dispatchSurveyInvites(
   const url = `${baseUrl}/u/${encodeURIComponent(survey.public_slug)}?utm_source=event`;
   let sent: number;
   let failed: number;
+  let failReason: string | undefined;
   try {
-    ({ sent, failed } = await sendSurveyInvites(recipients, {
+    ({ sent, failed, firstError: failReason } = await sendSurveyInvites(recipients, {
       title: survey.welcome_title || survey.name,
       url,
       eventName,
@@ -103,6 +104,11 @@ export async function dispatchSurveyInvites(
   } catch (err) {
     console.error('[surveys] send failed', err instanceof Error ? err.message : 'unknown');
     return { ok: false, error: 'Enkäten kunde inte skickas. Försök igen.' };
+  }
+  // Inget mejl gick fram: markera INTE som skickad (cron/knappen kan försöka
+  // igen) och säg varför Resend avvisade dem.
+  if (sent === 0 && failed > 0) {
+    return { ok: false, error: `Inga mejl skickades. ${failReason ?? 'Resend avvisade utskicket.'}` };
   }
 
   try {
@@ -114,5 +120,5 @@ export async function dispatchSurveyInvites(
   } catch (err) {
     console.error('[surveys] could not record dispatch', (err as { status?: number })?.status);
   }
-  return { ok: true, sent, failed, recipients: recipients.length };
+  return { ok: true, sent, failed, recipients: recipients.length, ...(failed > 0 && failReason ? { failReason } : {}) };
 }

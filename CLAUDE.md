@@ -9539,6 +9539,18 @@ på eventsidan ("Bjud in" i deltagarpanelen) väljer staff mottagare i
   (`sendError`) i stället för att kasta. Klientkomponenter som anropar server
   actions direkt fångar kastade fel med `actionErrorMessage`
   (`lib/action-error.ts`) — en action får aldrig riva sidan.
+- **Resends orsak syns (2026-10-18):** ett avvisat mejl gav bara "N mejl
+  misslyckades" och loggen bar bara statusen. `describeResendError`
+  (`lib/mail-sender.ts`, ren + enhetstestad) översätter Resends svar till en
+  PII-fri orsak (overifierad avsändardomän, fel/återkallad nyckel, testläge,
+  kvot) med adresser maskade; den visas i inbjudnings-/enkätpanelen och
+  loggas som `[email] Resend … error <status>: <orsak>`. Gick inget mejl
+  fram är svaret ett fel (enkäten markeras då inte som skickad). Nyckeln
+  normaliseras (mellanslag/citattecken). `/api/health` → `email` visar
+  `configured`, `key_format_ok` och avsändardomänerna — aldrig nyckeln. Nyckeln
+  sätts på **web-appen** för rätt miljö och kräver omdeploy;
+  `infra/coolify.yml` för nu vidare `RESEND_*`, `MOVEXUM_INFLOW_EMAIL`,
+  `MOVEXUM_UNSUBSCRIBE_SECRET` och `APP_URL` till web-containern.
 - **Dataminimering:** e-postadressen kopieras till deltagarraden (som för en
   manuellt inlagd deltagare) och visas aldrig i inbjudningsvyn; loggar och
   audit (`agent_actions`, feeden: "Inbjudan skickad till "X" · N mejl")

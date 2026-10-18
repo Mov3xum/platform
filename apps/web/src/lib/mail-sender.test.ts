@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_SENDER,
+  describeResendError,
   listUnsubscribeHeaders,
   parseSender,
   resolveReplyTo,
@@ -41,4 +42,24 @@ test('List-Unsubscribe bara för https', () => {
   });
   assert.deepEqual(listUnsubscribeHeaders('http://x.se/u'), {});
   assert.deepEqual(listUnsubscribeHeaders(null), {});
+});
+
+test('describeResendError förklarar vanliga Resend-fel utan adresser', () => {
+  const from = 'Movexum <noreply@movexum.se>';
+  assert.match(
+    describeResendError(403, JSON.stringify({ name: 'validation_error', message: 'The movexum.se domain is not verified. Please, add and verify your domain on https://resend.com/domains' }), from),
+    /movexum\.se är inte verifierad/
+  );
+  const testing = describeResendError(
+    403,
+    JSON.stringify({ name: 'validation_error', message: 'You can only send testing emails to your own email address (owner@example.com).' }),
+    from
+  );
+  assert.match(testing, /testläge/);
+  assert.doesNotMatch(testing, /owner@example\.com/);
+  assert.match(describeResendError(401, JSON.stringify({ name: 'invalid_api_key', message: 'API key is invalid' }), from), /API-nyckeln/);
+  assert.match(describeResendError(429, '{}', from), /begränsar/);
+  const other = describeResendError(500, 'boom from x@y.se', from);
+  assert.match(other, /svarade 500/);
+  assert.doesNotMatch(other, /x@y\.se/);
 });

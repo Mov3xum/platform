@@ -58,3 +58,49 @@ export function listUnsubscribeHeaders(url: string | null | undefined): Record<s
     'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click'
   };
 }
+
+/** E-postadresser i fritext (Resends felmeddelanden kan innehålla kontoägarens adress). */
+function maskEmails(text: string): string {
+  return text.replace(/[^\s<>@"'(),;:]+@[^\s<>@"'(),;:]+\.[a-z]{2,}/gi, '[e-post]');
+}
+
+/**
+ * Översätter ett avvisat Resend-anrop till en begriplig, PII-fri orsak — så
+ * personalen ser VARFÖR mejlen inte gick (overifierad domän, fel nyckel,
+ * testläge) i stället för bara "misslyckades". `body` är svarstexten
+ * (`{ name, message, statusCode }`); adresser maskas alltid.
+ */
+export function describeResendError(status: number, body: string, from: string): string {
+  let name = '';
+  let message = '';
+  try {
+    const parsed = JSON.parse(body) as { name?: unknown; message?: unknown };
+    if (typeof parsed.name === 'string') name = parsed.name;
+    if (typeof parsed.message === 'string') message = parsed.message;
+  } catch {
+    message = body;
+  }
+  const raw = maskEmails(message.replace(/\s+/g, ' ').trim()).slice(0, 240);
+  const lower = `${name} ${message}`.toLowerCase();
+  const domain = senderAddress(from).split('@')[1] ?? '';
+
+  if (status === 401 || /missing_api_key|invalid_api_key|api key is invalid/.test(lower)) {
+    return 'Resend avvisade API-nyckeln (RESEND_API_KEY är fel, ofullständig eller återkallad). Klistra in nyckeln på nytt på web-appen i Coolify och deploya om.';
+  }
+  if (/testing emails|own email address/.test(lower)) {
+    return 'Resend-kontot är i testläge och får bara skicka till kontoägarens egen adress. Verifiera avsändardomänen under Domains i Resend.';
+  }
+  if (/domain is not verified|not verified|verify a domain|domain.*not found/.test(lower)) {
+    return `Avsändardomänen ${domain || '(okänd)'} är inte verifierad i Resend. Lägg till och verifiera den under Domains i Resend, eller sätt RESEND_FROM_EMAIL/RESEND_INVITE_FROM_EMAIL till en adress på en verifierad domän.`;
+  }
+  if (status === 403 && /restricted_api_key|permission|not allowed/.test(lower)) {
+    return 'API-nyckeln saknar behörighet att skicka mejl. Skapa en nyckel med "Sending access" i Resend.';
+  }
+  if (status === 422 || /invalid_from_address|validation_error/.test(lower)) {
+    return `Resend godtog inte mejlet${raw ? `: ${raw}` : ''}. Kontrollera avsändaradressen (${maskEmails(from)}).`;
+  }
+  if (status === 429 || /rate_limit|daily_quota|monthly_quota/.test(lower)) {
+    return 'Resend begränsar utskicken just nu (för många mejl eller kvoten är slut). Vänta en stund och försök igen.';
+  }
+  return `Resend svarade ${status}${raw ? `: ${raw}` : ''}.`;
+}
