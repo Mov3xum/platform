@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MEMBER_RAIL, RAIL_GROUPS, coreModules } from './index';
+import { MARKETING_TOOL_MODULES, MEMBER_RAIL, RAIL_GROUPS, coreModules, marketingToolsEntry } from './index';
 
 // Låser att varje modul med en egen sida faktiskt har en plats i sidmenyn.
 // Bakgrund (2026-10): "Önskemål & buggar" (§ 49) försvann ur railen när två
@@ -13,6 +13,7 @@ const RAIL_LESS_MODULES = new Set([
   'insights', // Inställningar → AI-analys (§ 36.1)
   'anvandare', // Inställningar → Användare (§ 36.1)
   'integrationer', // Inställningar → Integrationer
+  'events', // flik under Marknadsverktyg (/inflode/events)
   'dashboard', // alias för idag (§ 36.3)
   'toolbox', // alias för agenter (§ 36.3)
   'onboarding', // dolt legacy-id (§ 36.3)
@@ -46,4 +47,23 @@ test('Önskemål & buggar ligger i System-gruppen', () => {
   const system = RAIL_GROUPS.find((g) => g.label === 'System');
   assert.ok(system);
   assert.ok(system.modules.includes('onskemal'));
+});
+
+test('Events och Community bor under Marknadsverktyg, inte som egna rail-poster', () => {
+  const all = RAIL_GROUPS.flatMap((g) => g.modules);
+  assert.ok(all.includes('inflode'));
+  assert.ok(!all.includes('events'));
+  assert.ok(!all.includes('community'));
+  for (const id of MARKETING_TOOL_MODULES) {
+    const mod = coreModules.find((m) => m.id === id);
+    assert.ok(mod, id);
+    assert.ok(mod.route.startsWith('/inflode'), `${id} ska ligga under /inflode`);
+  }
+});
+
+test('marketingToolsEntry leder till första modulen användaren når', () => {
+  assert.equal(marketingToolsEntry(() => true)?.href, '/inflode');
+  assert.equal(marketingToolsEntry((id) => id === 'events' || id === 'community')?.href, '/inflode/events');
+  assert.equal(marketingToolsEntry((id) => id === 'community')?.href, '/inflode/community');
+  assert.equal(marketingToolsEntry(() => false), null);
 });

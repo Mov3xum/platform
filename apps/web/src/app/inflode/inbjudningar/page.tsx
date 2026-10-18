@@ -190,7 +190,7 @@ export default async function InvitationsPage() {
       tabs={buildInflodeTabs()}
       meta={<span className="text-[12px] text-foreground-subtle">Inbjudningar · bjud in till event och följ svaren</span>}
       actions={
-        <Link href="/events/new" className="mx-btn mx-primary">
+        <Link href="/inflode/events/new" className="mx-btn mx-primary">
           <Icon name="plus" size={13} /> Nytt event
         </Link>
       }

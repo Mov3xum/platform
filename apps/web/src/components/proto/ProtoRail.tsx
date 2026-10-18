@@ -3,6 +3,8 @@ import {
   RAIL_GROUPS,
   MEMBER_RAIL,
   isPureStartupMember,
+  marketingToolsEntry,
+  MARKETING_TOOLS_PATH,
   type Role
 } from '@platform/shared';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
@@ -41,6 +43,11 @@ export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoR
 
   // Ren bolagsmedlem har "Min översikt" som hemvy (staff → Dashboard, § 37).
   const homeHref = isPureStartupMember(user.roles) ? '/min-oversikt' : '/hem';
+  // Events och Community är flikar under Marknadsverktyg — posten visas för den
+  // som når någon av dem och leder till den första den når.
+  const marketingEntry = marketingToolsEntry((id) =>
+    canAccessModuleForUser(user.roles, id, user.enabledModules)
+  );
 
   return (
     <aside id="mx-rail" className="mx-rail" aria-label="Huvudnavigation">
@@ -87,7 +94,9 @@ export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoR
               .filter(
                 (m) =>
                   m !== undefined &&
-                  canAccessModuleForUser(user.roles, m.id, user.enabledModules)
+                  (m.id === 'inflode'
+                    ? marketingEntry !== null
+                    : canAccessModuleForUser(user.roles, m.id, user.enabledModules))
               );
 
           if (groupModules.length === 0) return null;
@@ -98,7 +107,8 @@ export function ProtoRail({ user, counts = {}, switchableStartups = [] }: ProtoR
               {groupModules.map((mod) => (
                 <ModuleNavItem
                   key={mod!.id}
-                  href={mod!.route}
+                  href={mod!.id === 'inflode' && marketingEntry ? marketingEntry.href : mod!.route}
+                  activePrefix={mod!.id === 'inflode' ? MARKETING_TOOLS_PATH : undefined}
                   label={mod!.title}
                   icon={moduleIcons[mod!.id] || 'dot'}
                   count={counts[mod!.id]}

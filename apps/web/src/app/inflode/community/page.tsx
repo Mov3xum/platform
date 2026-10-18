@@ -1,9 +1,10 @@
 import Link from 'next/link';
 import { getServerPb, requireUser } from '@/lib/auth.server';
-import { hasRole } from '@/lib/rbac';
+import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { Avatar, Chip, Icon } from '@/components/proto';
 import { PageShell } from '@/components/PageShell';
+import { buildInflodeTabs } from '../_tabs';
 import { RailSection, RailStat, RailEmpty } from '@/components/PageRail';
 import { isPureStartupMember, type Alumni, type AlumniTag, type Partner } from '@platform/shared';
 
@@ -209,7 +210,7 @@ export default async function CommunityPage() {
             return (
               <Link
                 key={a.id}
-                href={`/community/${a.id}`}
+                href={`/inflode/community/${a.id}`}
                 className="flex items-center gap-3 rounded-xl px-2 py-2 transition hover:bg-canvas-muted"
               >
                 <Avatar
@@ -238,7 +239,7 @@ export default async function CommunityPage() {
 
   const actions = isStaff ? (
     <Link
-      href="/community/new"
+      href="/inflode/community/new"
       className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[12.5px] font-medium text-brand-foreground hover:bg-brand-hover"
     >
       <Icon name="plus" size={12} /> Bjud in alumni
@@ -246,7 +247,15 @@ export default async function CommunityPage() {
   ) : null;
 
   return (
-    <PageShell title="Community & alumni" actions={actions} rightPanel={rail}>
+    <PageShell
+      title="Marknadsverktyg"
+      tabs={buildInflodeTabs({
+        canAccess: (id) => canAccessModuleForUser(user.roles, id, user.enabledModules)
+      })}
+      meta={<span className="text-[12px] text-foreground-subtle">Community · alumni, mentorer och nätverk</span>}
+      actions={actions}
+      rightPanel={rail}
+    >
       <div className="py-6">
         {feed.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-default p-12 text-center text-foreground-muted">

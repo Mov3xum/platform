@@ -14,7 +14,7 @@ export type ActivityGoalState = { ok?: boolean; error?: string; notice?: string 
 function revalidateActivity(kind: string, id: string) {
   revalidatePath('/mal');
   revalidatePath('/arshjul');
-  if (kind === 'event') revalidatePath(`/events/${id}`);
+  if (kind === 'event') revalidatePath(`/inflode/events/${id}`);
 }
 
 export async function saveActivityGoalsAction(input: {

@@ -256,7 +256,7 @@ export async function createAssignmentMeeting(
     payload: {
       title,
       snippet: formatStockholmDateTime(startIso),
-      href: `/events/${eventId}`
+      href: `/inflode/events/${eventId}`
     }
   }).catch(() => undefined);
 

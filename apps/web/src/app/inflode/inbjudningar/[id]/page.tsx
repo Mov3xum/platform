@@ -109,7 +109,7 @@ export default async function EventInvitationsPage({
       tabs={buildInflodeTabs()}
       meta={<span className="text-[12px] text-foreground-subtle">Inbjudningar / {event.name || 'Event'}</span>}
       actions={
-        <Link href={`/events/${event.id}`} className="mx-btn">
+        <Link href={`/inflode/events/${event.id}`} className="mx-btn">
           <Icon name="calendar" size={12} /> Till eventet
         </Link>
       }

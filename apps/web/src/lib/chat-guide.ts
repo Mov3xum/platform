@@ -158,7 +158,7 @@ const GUIDE: ChatGuideSection[] = [
       {
         title: 'Events',
         description:
-          'Boka ett event/möte i kalendern (status "planerat"). Deltagare bjuds in i /events.',
+          'Boka ett event/möte i kalendern (status "planerat"). Deltagare bjuds in under Marknadsverktyg → Events.',
         roles: EVENT_MANAGE,
         examples: ['Boka en pitchträning torsdag 14:00 i Gävle']
       },

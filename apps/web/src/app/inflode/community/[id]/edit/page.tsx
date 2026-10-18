@@ -16,7 +16,7 @@ export default async function EditAlumniPage({ params }: { params: Promise<{ id:
   const { id } = await params;
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
-    redirect('/community');
+    redirect('/inflode/community');
   }
 
   const pb = await getServerPb();
@@ -26,7 +26,7 @@ export default async function EditAlumniPage({ params }: { params: Promise<{ id:
   } catch {
     notFound();
   }
-  if (alumni.tenant !== user.tenant) redirect('/community');
+  if (alumni.tenant !== user.tenant) redirect('/inflode/community');
 
   async function updateAndRedirect(
     _prev: CommunityActionState,
@@ -34,14 +34,14 @@ export default async function EditAlumniPage({ params }: { params: Promise<{ id:
   ): Promise<CommunityActionState> {
     'use server';
     const result = await updateAlumniFromFormAction(id, {}, formData);
-    if (!result.error) redirect(`/community/${id}`);
+    if (!result.error) redirect(`/inflode/community/${id}`);
     return result;
   }
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-10 lg:px-8">
       <div className="mb-6">
-        <Link href="/community" className="text-sm text-foreground-muted hover:text-foreground">
+        <Link href="/inflode/community" className="text-sm text-foreground-muted hover:text-foreground">
           ← Tillbaka
         </Link>
       </div>

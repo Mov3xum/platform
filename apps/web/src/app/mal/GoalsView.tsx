@@ -1153,7 +1153,7 @@ function IndicatorRow({
               {activity.activities.map((a) => (
                 <li key={`${a.kind}:${a.id}`}>
                   <Link
-                    href={a.kind === 'event' ? `/events/${a.id}` : `/arshjul?item=${encodeURIComponent(a.id)}`}
+                    href={a.kind === 'event' ? `/inflode/events/${a.id}` : `/arshjul?item=${encodeURIComponent(a.id)}`}
                     className="hover:underline"
                   >
                     {a.date ? `${a.date} · ` : ''}

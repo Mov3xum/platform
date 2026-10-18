@@ -3470,7 +3470,7 @@ bolaget under inkubatorprogrammet. Railen har exakt fem rubriker:
    dokument som blivit output av aktiviteter (utbildningsdokument), plus
    medlemmens egna genererade/uppladdade filer.
 4. **De minimis** (`/de-minimis`) — befintlig modul (§ 20).
-5. **Community** (`/community`) — platshållare för co-startup-interaktion ("bara
+5. **Community** (`/inflode/community`) — platshållare för co-startup-interaktion ("bara
    rubriken för nu"). Alumni-/partnerdatan är staff/observer-only (§ 21).
 
 ### 22.2 Implementation
@@ -3482,7 +3482,7 @@ bolaget under inkubatorprogrammet. Railen har exakt fem rubriker:
 | `apps/web/src/app/mina-aktiviteter/page.tsx` | Aktivitetsvy + progressbar (medlem) / read-only granskning (staff via `?startup`) |
 | `apps/web/src/app/min-oversikt/page.tsx` | Program-info för medlem; staff behåller "Mitt bolag" |
 | `apps/web/src/app/filer/page.tsx` | Avtal + aktivitetsdokument-sektioner för medlem |
-| `apps/web/src/app/community/page.tsx` | Medlems-platshållare |
+| `apps/web/src/app/inflode/community/page.tsx` | Medlems-platshållare |
 | `apps/web/src/components/proto/RailAccountMenu.tsx` | Kontomenyn i railens fot (gäller ALLA roller): "Mitt konto" + "Logga ut" |
 
 **Kontomenyn (railens fot).** Hela raden med avatar + namn är en knapp som
@@ -6806,7 +6806,7 @@ formulären förskjöts två timmar i sommartid.
 | `apps/web/src/lib/actions/events.ts` | Skapa/uppdatera event — tolkar formulärtider via `parseDateTimeInput` |
 | `apps/web/src/lib/core/write/validators.ts` | `validateIsoDateTime` (chatt-agentens `create_event`) — samma tolkning |
 | `apps/web/src/lib/assignments/collaboration.ts`, `lib/actions/tasks.ts` | Möten från tilldelningar / Outlook — samma tolkning |
-| `apps/web/src/app/events/{page,[id]/page}.tsx`, `components/overview/AgendaStrip.tsx`, `lib/overview/aggregate.ts` | Fas + visning i svensk tid |
+| `apps/web/src/app/inflode/events/{page,[id]/page}.tsx`, `components/overview/AgendaStrip.tsx`, `lib/overview/aggregate.ts` | Fas + visning i svensk tid |
 
 **Regler (bindande):**
 
@@ -6824,7 +6824,7 @@ formulären förskjöts två timmar i sommartid.
   `live` ELLER klockan mellan start och slut; annars `upcoming`. Ingen
   skrivning sker — fältet lämnas orört, detaljsidan visar den härledda fasen
   och noterar när fältet släpar. "Live nu"/"Kommande"/"Avslutade" på
-  `/events`, LIVE-chippen på detaljsidan och agendan på översikten använder
+  `/inflode/events`, LIVE-chippen på detaljsidan och agendan på översikten använder
   fasen.
 - **"Idag"/dygnsgränser räknas på svenska kalenderdatum**
   (`stockholmDateKey`/`stockholmDayDiff`), aldrig `getDate()`/
@@ -8024,8 +8024,22 @@ finansieringsblocket. "Ny ansökan" finns för staff och länkad medlem.
 ### 47.1 Översikt
 
 `/inflode` (Marknadsverktyg) har flikarna Dashboard · Analys · Leads ·
-**Startupkompassen** (intag-moduler, § 23) · **Inbjudningar** (§ 53.5) ·
-**Utvärdering**. Utvärdering låter
+**Startupkompassen** (intag-moduler, § 23) · **Events** (§ 53) ·
+**Inbjudningar** (§ 53.5) · **Utvärdering** · **Community**.
+
+**Events och Community bor under Marknadsverktyg (2026-10).** Sidorna ligger
+på `/inflode/events/**` och `/inflode/community/**` (modulernas `route`); de
+gamla adresserna `/events/**` och `/community/**` 308-redirectas i
+`next.config.mjs` (sparade notiser, aktivitetslogg, bokmärken). Modulerna
+`events`/`community` behåller sin egen behörighet (`rolesAllowed` + per-person-
+listan § 36.3) — `MARKETING_TOOL_MODULES`/`marketingToolsEntry` i
+`@platform/shared` styr railen: posten "Marknadsverktyg" visas för den som når
+NÅGON av `inflode`/`events`/`community` och leder till den första (en observer
+landar på Events), och är aktiv på hela `/inflode`-prefixet. `buildInflodeTabs`
+tar `canAccess` så Events/Community-sidorna bara visar flikar användaren når.
+Events och Community har inga egna rail-poster längre (`rail.test.ts` låser
+det); en ren bolagsmedlem når fortfarande Community via `MEMBER_RAIL` (§ 22).
+Nya länkar ska peka direkt på `/inflode/events/<id>`. Utvärdering låter
 admin/incubator_lead/coach bygga **digitala enkäter i webbläsaren** för
 uppföljning (workshop-/event-utvärdering, inkubatorprogram, alumni) och dela dem
 på en publik, oinloggad länk `/u/<public_slug>` med QR-kod. Svaren är
@@ -9283,7 +9297,7 @@ Mål/indikator ◄─(bidrar till)── Årshjulsaktivitet (PLAN)
   timme (provisoriskt lås, § 47.5) och panelen visar "Närvaron är inte
   markerad än" med länk till eventet. Schemaläggning går bra innan eventet
   (räknas mot anmälda); "Skicka nu" kräver närvarande mottagare.
-- **Deltagarlistan hanteras på eventsidan** (`app/events/[id]/Participants.tsx`):
+- **Deltagarlistan hanteras på eventsidan** (`app/inflode/events/[id]/Participants.tsx`):
   lägg till deltagare, byt steg per rad och "Alla närvarande"
   (`markSignupsAttendedAction` — bara `signup` → `attended`, senare steg rörs
   inte). Allt är server actions med rollkontroll (admin/incubator_lead/coach)

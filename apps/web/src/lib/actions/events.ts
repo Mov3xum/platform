@@ -115,7 +115,7 @@ export async function createEventAction(
       leads_count: 0,
       admitted_count: 0
     });
-    revalidatePath('/events');
+    revalidatePath('/inflode/events');
     const eventId = String(record.id);
     const warnings: EventCreateWarning[] = [];
     // PB släpper okända fält tyst (§ 24.4) — saknas kopplingen på den skapade
@@ -198,7 +198,7 @@ export async function createEventEvaluationAction(formData: FormData) {
   );
   if (!res.surveyId) redirect(`/inflode/inbjudningar/${ev.id}?fel=utvardering`);
   revalidatePath(`/inflode/inbjudningar/${ev.id}`);
-  revalidatePath(`/events/${ev.id}`);
+  revalidatePath(`/inflode/events/${ev.id}`);
   redirect(`/inflode/utvardering/${res.surveyId}`);
 }
 
@@ -245,8 +245,8 @@ export async function addSignupAction(
       notes: notes || null
     });
     await recomputeEventCounters(pb, user.tenant, event);
-    revalidatePath('/events');
-    revalidatePath(`/events/${event}`);
+    revalidatePath('/inflode/events');
+    revalidatePath(`/inflode/events/${event}`);
     return { signupId: String(record.id) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte spara anmälan.' };
@@ -273,8 +273,8 @@ export async function moveSignupStageAction(
   try {
     await pb.collection(PB_COLLECTIONS.eventSignups).update(signupId, { stage: nextStage });
     await recomputeEventCounters(pb, user.tenant, signup.event);
-    revalidatePath('/events');
-    revalidatePath(`/events/${signup.event}`);
+    revalidatePath('/inflode/events');
+    revalidatePath(`/inflode/events/${signup.event}`);
     return { signupId };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte uppdatera anmälan.' };
@@ -320,8 +320,8 @@ export async function markSignupsAttendedAction(eventId: string): Promise<EventA
     }
   }
   await recomputeEventCounters(pb, user.tenant, eventId);
-  revalidatePath('/events');
-  revalidatePath(`/events/${eventId}`);
+  revalidatePath('/inflode/events');
+  revalidatePath(`/inflode/events/${eventId}`);
   if (updated < pending.length) {
     return { error: `${pending.length - updated} av ${pending.length} kunde inte markeras. Försök igen.`, updated };
   }
@@ -383,8 +383,8 @@ export async function updateEventAction(
       description: description || null,
       accent
     });
-    revalidatePath('/events');
-    revalidatePath(`/events/${id}`);
+    revalidatePath('/inflode/events');
+    revalidatePath(`/inflode/events/${id}`);
     return { eventId: id };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte uppdatera event.' };
@@ -413,7 +413,7 @@ export async function deleteEventAction(id: string): Promise<EventActionState> {
       await pb.collection(PB_COLLECTIONS.eventSignups).delete(s.id);
     }
     await pb.collection(PB_COLLECTIONS.events).delete(id);
-    revalidatePath('/events');
+    revalidatePath('/inflode/events');
     return { eventId: id };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte radera event.' };
@@ -443,8 +443,8 @@ export async function deleteEventSignupAction(signupId: string): Promise<EventAc
   try {
     await pb.collection(PB_COLLECTIONS.eventSignups).delete(signupId);
     await recomputeEventCounters(pb, user.tenant, signup.event);
-    revalidatePath('/events');
-    revalidatePath(`/events/${signup.event}`);
+    revalidatePath('/inflode/events');
+    revalidatePath(`/inflode/events/${signup.event}`);
     return { signupId };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte radera anmälan.' };

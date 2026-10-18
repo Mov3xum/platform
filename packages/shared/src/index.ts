@@ -1417,10 +1417,39 @@ export interface ModuleGroup {
 
 export const RAIL_GROUPS: ModuleGroup[] = [
   { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'mal', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
-  { label: 'Portfölj', modules: ['startups', 'kontakter', 'de_minimis', 'bedomning_excellens', 'checkar', 'projekt', 'upphandlingar', 'investerare', 'events', 'community'] },
+  { label: 'Portfölj', modules: ['startups', 'kontakter', 'de_minimis', 'bedomning_excellens', 'checkar', 'projekt', 'upphandlingar', 'investerare'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
   { label: 'System', modules: ['agenter', 'kunskapsbas', 'onskemal', 'installningar', 'min_profil'] }
 ];
+
+/**
+ * Moduler som bor som flikar under **Marknadsverktyg** (`/inflode`) i stället
+ * för som egna poster i sidmenyn: själva marknadsverktyget (Dashboard, Analys,
+ * Leads, Startupkompassen, Inbjudningar, Utvärdering) samt Events och
+ * Community. Varje modul behåller sin egen behörighet — railens post
+ * "Marknadsverktyg" visas för den som når NÅGON av dem och leder till den
+ * första den når (`marketingToolsEntry`). En ren bolagsmedlem når fortfarande
+ * Community via sin egen rail (`MEMBER_RAIL`).
+ */
+export const MARKETING_TOOL_MODULES = ['inflode', 'events', 'community'] as const;
+
+/** Prefixet som alla Marknadsverktygets sidor ligger under. */
+export const MARKETING_TOOLS_PATH = '/inflode';
+
+/**
+ * Railens post för Marknadsverktyg: vart den leder (första modulen användaren
+ * når) eller `null` när ingen av modulerna är tillgänglig.
+ */
+export function marketingToolsEntry(
+  canAccess: (moduleId: string) => boolean
+): { moduleId: string; href: string } | null {
+  for (const id of MARKETING_TOOL_MODULES) {
+    if (!canAccess(id)) continue;
+    const mod = coreModules.find((m) => m.id === id);
+    if (mod) return { moduleId: id, href: mod.route };
+  }
+  return null;
+}
 
 /**
  * Dedikerad navigation för en *ren* `startup_member` (CLAUDE.md § 21bis/§ 22).
@@ -1529,7 +1558,7 @@ export const coreModules: ModuleDefinition[] = [
   {
     id: 'inflode',
     title: 'Marknadsverktyg',
-    description: 'Inkubatorns marknads- och uppföljningsverktyg — fånga, kvalificera och konvertera leads med Startupkompassen (quiz, formulär och AI-chattar på publika URL:er med QR-koder) och följ upp med digitala enkäter i Utvärdering. Hanteras av admin, coach och incubator_lead.',
+    description: 'Inkubatorns marknads- och uppföljningsverktyg — fånga, kvalificera och konvertera leads med Startupkompassen (quiz, formulär och AI-chattar på publika URL:er med QR-koder), planera Events och bjud in under Inbjudningar, följ upp med digitala enkäter i Utvärdering och vårda nätverket i Community. Hanteras av admin, coach och incubator_lead.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach'],
     route: '/inflode'
   },
@@ -1600,14 +1629,14 @@ export const coreModules: ModuleDefinition[] = [
     title: 'Events',
     description: 'Eventflöde, trattanalys och ROI per event.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'observer'],
-    route: '/events'
+    route: '/inflode/events'
   },
   {
     id: 'community',
     title: 'Community',
     description: 'Alumni, mentorer och nätverk runt portföljen.',
     rolesAllowed: ALL_ROLES,
-    route: '/community'
+    route: '/inflode/community'
   },
   {
     id: 'onskemal',

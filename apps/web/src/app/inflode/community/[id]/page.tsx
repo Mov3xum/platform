@@ -44,7 +44,7 @@ export default async function AlumniDetailPage({
   const { id } = await params;
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) {
-    redirect('/community');
+    redirect('/inflode/community');
   }
 
   const pb = await getServerPb();
@@ -63,17 +63,17 @@ export default async function AlumniDetailPage({
   return (
     <div className="mx-view-pad mx-wide">
       <PageHead
-        crumb={`Community / ${alumni.name}`}
+        crumb={`Marknadsverktyg / Community / ${alumni.name}`}
         title={alumni.name}
         subtitle={alumni.company || (alumni.exit_year ? `Exit ${alumni.exit_year}` : 'Alumni')}
         actions={
           <>
-            <Link href="/community" className="mx-btn">
+            <Link href="/inflode/community" className="mx-btn">
               <Icon name="chevron" size={13} style={{ transform: 'rotate(180deg)' }} /> Tillbaka
             </Link>
             {canEdit && (
               <>
-                <Link href={`/community/${alumni.id}/edit`} className="mx-btn">
+                <Link href={`/inflode/community/${alumni.id}/edit`} className="mx-btn">
                   Redigera
                 </Link>
                 <ConfirmDeleteButton
