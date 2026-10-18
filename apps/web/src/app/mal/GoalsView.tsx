@@ -140,6 +140,7 @@ export function GoalsView({
   focusGoal,
   initialGrouping = 'focus',
   initialFilter = EMPTY_FILTER,
+  initialSection = null,
   currentUserId,
   canReport,
   canManage
@@ -149,6 +150,8 @@ export function GoalsView({
   focusGoal: string | null;
   initialGrouping?: GoalGrouping;
   initialFilter?: GoalFilter;
+  /** Valt område i sidomenyn (gruppens nyckel), `null` = alla. */
+  initialSection?: string | null;
   currentUserId: string;
   /** Movexum-personal: rapporterar status och sätter egna personliga mål. */
   canReport: boolean;
@@ -159,19 +162,41 @@ export function GoalsView({
   const [grouping, setGrouping] = useState<GoalGrouping>(initialGrouping);
   const [filter, setFilter] = useState<GoalFilter>(initialFilter);
   const [highlight, setHighlight] = useState<string | null>(focusGoal);
+  const [section, setSection] = useState<string | null>(initialSection);
   const filtered = filterGoalNodes(tree.nodes, filter, quarter);
   const filterActive = isGoalFilterActive(filter);
-  const rollup = rollupGoalStatuses(filtered, quarter);
-  const yearHref = (y: number, q: Quarter = quarter) => `/mal?${filterQuery({ ar: y, q }, grouping, filter)}`;
+  const personName = (id: string) => people.find((p) => p.id === id)?.name ?? null;
+  // Grupperna i vald gruppering = sidomenyns områden. I fokusvyn visas även
+  // tomma fokusområden (där nya mål läggs till); Projektmål först när det används.
+  const groups: GoalGroupSummary[] =
+    grouping === 'focus'
+      ? tree.areas
+          .map((area) => ({ key: area.area, label: area.label, nodes: filtered.filter((n) => n.goal.focus_area === area.area), total: area.goals.length }))
+          .filter((g) => (filterActive ? g.nodes.length > 0 : !(g.key === 'projekt' && g.total === 0)))
+      : groupGoalNodes(filtered, grouping, { personName });
+  // Ett valt område som filtret döljer släpps (då visas alla) i stället för en tom sida.
+  const activeSection = section && groups.some((g) => g.key === section) ? section : null;
+  const visibleGroups = activeSection ? groups.filter((g) => g.key === activeSection) : groups;
+  const shownNodes = visibleGroups.flatMap((g) => g.nodes);
+  const rollup = rollupGoalStatuses(shownNodes, quarter);
+  const yearHref = (y: number, q: Quarter = quarter) => `/mal?${filterQuery({ ar: y, q }, grouping, filter, activeSection)}`;
+  const changeGrouping = (g: GoalGrouping) => {
+    setGrouping(g);
+    setSection(null);
+  };
+  const selectSection = (key: string | null) => {
+    setSection(key);
+    window.setTimeout(() => document.getElementById('mal-innehall')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 30);
+  };
   const open = !!period && period.status !== 'closed';
   const actor = { id: currentUserId, roles: canManage ? ['admin'] : canReport ? ['coach'] : [] };
 
   // Filter och gruppering speglas i URL:en (delbar länk) utan serverrunda.
   useEffect(() => {
     if (!period) return;
-    const qs = filterQuery({ ar: period.year, q: quarter }, grouping, filter);
+    const qs = filterQuery({ ar: period.year, q: quarter }, grouping, filter, activeSection);
     window.history.replaceState(window.history.state, '', `/mal?${qs}`);
-  }, [period, quarter, grouping, filter]);
+  }, [period, quarter, grouping, filter, activeSection]);
 
   const goalIndex = new Map(tree.nodes.map((n) => [n.goal.id, n]));
   const ctx: TreeCtx = {
@@ -183,13 +208,12 @@ export function GoalsView({
     highlight,
     onJump: (goalId) => {
       setHighlight(goalId);
-      // Målet kan vara bortfiltrerat — släpp filtret så det syns.
+      // Målet kan vara bortfiltrerat eller ligga i ett annat område — släpp det som döljer det.
       if (!filtered.some((n) => n.goal.id === goalId)) setFilter(EMPTY_FILTER);
+      if (!shownNodes.some((n) => n.goal.id === goalId)) setSection(null);
       window.setTimeout(() => document.getElementById(`mal-${goalId}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 60);
     }
   };
-  const personName = (id: string) => people.find((p) => p.id === id)?.name ?? null;
-
   if (schemaMissing) {
     return (
       <div className="mx-auto max-w-3xl rounded-xl border border-movexum-morkgul/30 bg-movexum-pastell-gul p-4 text-sm text-movexum-morkgul dark:bg-movexum-morkgul/20 dark:text-movexum-pastell-gul">
@@ -287,12 +311,12 @@ export function GoalsView({
           <GoalFilterBar
             nodes={tree.nodes}
             grouping={grouping}
-            onGrouping={setGrouping}
+            onGrouping={changeGrouping}
             filter={filter}
             onFilter={setFilter}
             people={people}
             quarter={quarter}
-            shown={filtered.length}
+            shown={shownNodes.length}
           />
 
           {canManage && <PeriodControls period={period} />}
@@ -306,65 +330,68 @@ export function GoalsView({
             </p>
           )}
 
-          {grouping === 'focus' ? (
-            tree.areas.map((area) => {
-              const inArea = filtered.filter((n) => n.goal.focus_area === area.area);
-              const overall = inArea.filter((n) => goalKindOf(n.goal) === 'overall');
-              const personal = inArea.filter((n) => goalKindOf(n.goal) === 'personal');
-              // Med filter: bara områden med träffar. Utan filter visas Projektmål först när det används.
-              if (filterActive ? inArea.length === 0 : area.area === 'projekt' && area.goals.length === 0) return null;
-              return (
-                <section key={area.area} className="space-y-5 border-t border-default pt-6">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <h2 className="font-heading text-lg font-semibold text-foreground">{area.label}</h2>
-                    <span className="text-xs text-foreground-subtle">
-                      {area.goals.length === 0 ? 'Inga mål satta' : `${overall.length} övergripande · ${personal.length} personliga`}
-                    </span>
-                  </div>
-                  <GoalGroup kind="overall" nodes={overall} {...cardProps} canAdd={canManage && open} periodId={period.id} area={area.area} />
-                  <GoalGroup kind="personal" nodes={personal} {...cardProps} canAdd={canReport && open} periodId={period.id} area={area.area} />
-                </section>
-              );
-            })
-          ) : (
-            <>
-              <p className="text-xs text-foreground-subtle">Nya mål läggs till i vyn Fokusområde.</p>
-              {groupGoalNodes(filtered, grouping, { personName }).map((group) => (
-                <section key={group.key} className="space-y-5 border-t border-default pt-6">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <h2 className="font-heading text-lg font-semibold text-foreground">
-                      {group.label}
-                      {group.sublabel && <span className="ml-2 text-sm font-normal text-foreground-subtle">{group.sublabel}</span>}
-                    </h2>
-                    <span className="text-xs text-foreground-subtle">
-                      {group.nodes.length} mål · {groupStatusSummary(group.nodes, quarter)}
-                    </span>
-                  </div>
-                  <div className="space-y-6">
-                    {group.nodes.map((node) => (
-                      <GoalCard
-                        key={node.goal.id}
-                        node={node}
-                        quarter={quarter}
-                        metrics={metrics}
-                        surveys={surveys}
-                        activities={activities}
-                        surveyModules={surveyModules}
-                        people={people}
-                        ctx={ctx}
-                        canReport={canReport && open}
-                        focused={highlight === node.goal.id}
-                        canManageIndicators={canManage && open}
-                        canEdit={((canManage && open) || (canReport && open)) && canManageGoal(node.goal, actor)}
-                        isLead={canManage}
-                        showFocusArea={true}
-                      />
-                    ))}
-                  </div>
-                </section>
-              ))}
-            </>
-          )}
+          <div className="grid gap-6 lg:grid-cols-[14rem_minmax(0,1fr)] lg:items-start">
+            <GoalSectionNav grouping={grouping} groups={groups} active={activeSection} onSelect={selectSection} quarter={quarter} />
+            <div id="mal-innehall" className="min-w-0 scroll-mt-4 space-y-8">
+              {grouping === 'focus' ? (
+                visibleGroups.map((group) => {
+                  const area = group.key as (typeof GOAL_FOCUS_AREAS)[number];
+                  const overall = group.nodes.filter((n) => goalKindOf(n.goal) === 'overall');
+                  const personal = group.nodes.filter((n) => goalKindOf(n.goal) === 'personal');
+                  return (
+                    <section key={group.key} className="space-y-5 border-t border-default pt-6 first:border-t-0 first:pt-0">
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <h2 className="font-heading text-lg font-semibold text-foreground">{group.label}</h2>
+                        <span className="text-xs text-foreground-subtle">
+                          {group.total === 0 ? 'Inga mål satta' : `${overall.length} övergripande · ${personal.length} personliga`}
+                        </span>
+                      </div>
+                      <GoalGroup kind="overall" nodes={overall} {...cardProps} canAdd={canManage && open} periodId={period.id} area={area} />
+                      <GoalGroup kind="personal" nodes={personal} {...cardProps} canAdd={canReport && open} periodId={period.id} area={area} />
+                    </section>
+                  );
+                })
+              ) : (
+                <>
+                  <p className="text-xs text-foreground-subtle">Nya mål läggs till i vyn Fokusområde.</p>
+                  {visibleGroups.map((group) => (
+                    <section key={group.key} className="space-y-5 border-t border-default pt-6">
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <h2 className="font-heading text-lg font-semibold text-foreground">
+                          {group.label}
+                          {group.sublabel && <span className="ml-2 text-sm font-normal text-foreground-subtle">{group.sublabel}</span>}
+                        </h2>
+                        <span className="text-xs text-foreground-subtle">
+                          {group.nodes.length} mål · {groupStatusSummary(group.nodes, quarter)}
+                        </span>
+                      </div>
+                      <div className="space-y-6">
+                        {group.nodes.map((node) => (
+                          <GoalCard
+                            key={node.goal.id}
+                            node={node}
+                            quarter={quarter}
+                            metrics={metrics}
+                            surveys={surveys}
+                            activities={activities}
+                            surveyModules={surveyModules}
+                            people={people}
+                            ctx={ctx}
+                            canReport={canReport && open}
+                            focused={highlight === node.goal.id}
+                            canManageIndicators={canManage && open}
+                            canEdit={((canManage && open) || (canReport && open)) && canManageGoal(node.goal, actor)}
+                            isLead={canManage}
+                            showFocusArea={true}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
         </>
       )}
     </div>
@@ -372,9 +399,10 @@ export function GoalsView({
 }
 
 /** Query-sträng för /mal med år, kvartal, gruppering och filter (tomma värden utelämnas). */
-function filterQuery(base: { ar: number; q: Quarter }, grouping: GoalGrouping, filter: GoalFilter): string {
+function filterQuery(base: { ar: number; q: Quarter }, grouping: GoalGrouping, filter: GoalFilter, section: string | null = null): string {
   const p = new URLSearchParams({ ar: String(base.ar), q: String(base.q) });
   if (grouping !== 'focus') p.set('grupp', grouping);
+  if (section) p.set('omrade', section);
   if (filter.team) p.set('team', filter.team);
   if (filter.level) p.set('niva', filter.level);
   if (filter.responsible) p.set('ansvarig', filter.responsible);
@@ -388,6 +416,76 @@ function groupStatusSummary(nodes: GoalNode[], quarter: Quarter): string {
   const r = rollupGoalStatuses(nodes, quarter);
   const parts = (['risk', 'delayed', 'on_track', 'done'] as const).filter((st) => r[st] > 0).map((st) => `${r[st]} ${GOAL_STATUS_LABELS[st].toLowerCase()}`);
   return parts.length ? parts.join(' · ') : `inget rapporterat Q${quarter}`;
+}
+
+// ── Sidomeny: områden i vald gruppering ─────────────────────────────────────
+
+type GoalGroupSummary = { key: string; label: string; sublabel?: string; nodes: GoalNode[]; total?: number };
+
+/**
+ * Hoppmeny över grupperna (fokusområden, team, nivåer eller ansvariga) — som
+ * flikarna på bolagskortet och i Inställningar: ett klick visar bara det
+ * området. Klistrad till vänster på desktop, en rad chips på mobil. Orange/gul
+ * prick = minst ett mål med risk/försenad i kvartalet (§ 2.3, ingen röd).
+ */
+function GoalSectionNav({
+  grouping,
+  groups,
+  active,
+  onSelect,
+  quarter
+}: {
+  grouping: GoalGrouping;
+  groups: GoalGroupSummary[];
+  active: string | null;
+  onSelect: (key: string | null) => void;
+  quarter: Quarter;
+}) {
+  const total = groups.reduce((sum, g) => sum + g.nodes.length, 0);
+  const items: Array<{ key: string | null; label: string; sublabel?: string; nodes: GoalNode[] }> = [
+    { key: null, label: grouping === 'focus' ? 'Alla fokusområden' : 'Alla', nodes: groups.flatMap((g) => g.nodes) },
+    ...groups
+  ];
+  return (
+    <nav aria-label={`Områden per ${GOAL_GROUPING_LABELS[grouping].toLowerCase()}`} className="lg:sticky lg:top-4">
+      <p className="mb-2 hidden text-xs font-semibold uppercase tracking-wide text-foreground-subtle lg:block">
+        {GOAL_GROUPING_LABELS[grouping]}
+      </p>
+      <ul className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 lg:mx-0 lg:flex-col lg:gap-0.5 lg:overflow-visible lg:px-0 lg:pb-0">
+        {items.map((item) => {
+          const selected = item.key === active;
+          const r = rollupGoalStatuses(item.nodes, quarter);
+          const flag = r.risk > 0 ? 'risk' : r.delayed > 0 ? 'delayed' : null;
+          const count = item.key === null ? total : item.nodes.length;
+          return (
+            <li key={item.key ?? '__alla'} className="shrink-0 lg:shrink">
+              <button
+                type="button"
+                onClick={() => onSelect(item.key)}
+                aria-current={selected ? 'true' : undefined}
+                title={item.sublabel ? `${item.label} · ${item.sublabel}` : item.label}
+                className={`flex w-full items-center gap-2 whitespace-nowrap rounded-full border px-3 py-1.5 text-left text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-movexum-pastell-lila dark:focus-visible:ring-movexum-morklila lg:whitespace-normal lg:rounded-lg lg:border-0 lg:border-l-2 lg:px-3 ${
+                  selected
+                    ? 'border-brand bg-canvas-muted font-semibold text-foreground'
+                    : 'border-default text-foreground-muted hover:bg-canvas-subtle hover:text-foreground lg:border-transparent'
+                }`}
+              >
+                <span className="min-w-0 flex-1 lg:truncate">{item.label}</span>
+                {flag && (
+                  <span
+                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${flag === 'risk' ? 'bg-movexum-orange' : 'bg-movexum-gul'}`}
+                    title={flag === 'risk' ? `${r.risk} mål med risk i Q${quarter}` : `${r.delayed} försenade mål i Q${quarter}`}
+                    aria-label={flag === 'risk' ? `${r.risk} med risk` : `${r.delayed} försenade`}
+                  />
+                )}
+                <span className="shrink-0 text-xs text-foreground-subtle mx-tnum">{count}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
+  );
 }
 
 // ── Filter & gruppering ─────────────────────────────────────────────────────

@@ -54,6 +54,8 @@ export default async function MalPage({
     focusArea: isGoalFocusArea(sp.fokus) ? sp.fokus : null,
     query: str('sok', 200) || null
   };
+  // Valt område i sidomenyn (gruppens nyckel); okänd nyckel ⇒ alla visas.
+  const initialSection = str('omrade') || null;
 
   const pb = await getServerPb();
   const ws = await loadGoalWorkspace(pb, user.tenant, user.id, user.roles, year);
@@ -73,6 +75,7 @@ export default async function MalPage({
         focusGoal={focusGoal}
         initialGrouping={grouping}
         initialFilter={initialFilter}
+        initialSection={initialSection}
         currentUserId={user.id}
         canReport={hasRole(user.roles, STAFF_ROLES)}
         canManage={hasRole(user.roles, LEAD_ROLES)}
