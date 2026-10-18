@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  canRemoveInvitation,
   inviteReason,
   INVITE_MAX_RECIPIENTS,
   groupInvitesByStatus,
@@ -163,4 +164,14 @@ test('inviteReason: kontakt, program och team', () => {
   assert.equal(inviteReason({ startup: 's1' }), 'program');
   assert.equal(inviteReason({ user: 'u1' }), 'team');
   assert.equal(inviteReason({}), 'contact');
+});
+
+test('canRemoveInvitation: inbjudna, avböjda och ja-svar — aldrig närvarande eller ej inbjudna', () => {
+  const at = '2026-10-01 10:00:00.000Z';
+  assert.equal(canRemoveInvitation({ stage: 'invited', invited_at: at }), true);
+  assert.equal(canRemoveInvitation({ stage: 'declined', invited_at: at }), true);
+  assert.equal(canRemoveInvitation({ stage: 'signup', invited_at: at }), true);
+  assert.equal(canRemoveInvitation({ stage: 'attended', invited_at: at }), false);
+  assert.equal(canRemoveInvitation({ stage: 'invited', invited_at: '' }), false);
+  assert.equal(canRemoveInvitation({ stage: 'signup' }), false);
 });

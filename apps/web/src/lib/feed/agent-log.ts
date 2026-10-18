@@ -405,6 +405,9 @@ function mapRow(
       if (row.field === 'invitations') {
         return { title: `Inbjudningar till ${name}: ${Number(after.invited) || 0} inbjudna`, href, icon: 'send' };
       }
+      if (row.field === 'invitation_removed') {
+        return { title: `En inbjudan till ${name} togs bort`, href, icon: 'send' };
+      }
       if (row.field === 'invitation_sent' || row.field === 'invitation_reminder') {
         return {
           title: `${row.field === 'invitation_reminder' ? 'Påminnelse' : 'Inbjudan'} skickad till ${name}`,

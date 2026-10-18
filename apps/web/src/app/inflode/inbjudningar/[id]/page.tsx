@@ -9,6 +9,7 @@ import {
   EVENT_SIGNUP_STAGE_LABEL,
   INVITE_STATUS_LABEL,
   SURVEY_STARTER_TEMPLATES,
+  canRemoveInvitation,
   defaultEvaluationTemplateRef,
   formatStockholmDateTime,
   getSurveyStarterTemplate,
@@ -20,6 +21,7 @@ import {
   type Role
 } from '@platform/shared';
 import { InvitePanel } from '@/components/invitations/InvitePanel';
+import { RemoveInviteButton } from '@/components/invitations/RemoveInviteButton';
 import { FollowUpSurveys } from '@/components/surveys/FollowUpSurveys';
 import { createEventEvaluationAction } from '@/lib/actions/events';
 import { listSurveyTemplates } from '@/lib/surveys/store';
@@ -185,6 +187,7 @@ export default async function EventInvitationsPage({
                         ? EVENT_SIGNUP_STAGE_LABEL[i.stage]
                         : i.stage}
                   </Chip>
+                  {canRemoveInvitation(i) && <RemoveInviteButton signupId={i.id} name={i.name || 'mottagaren'} />}
                 </div>
               ))}
             </div>

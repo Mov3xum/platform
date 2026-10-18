@@ -6,6 +6,7 @@ import { PageShell } from '@/components/PageShell';
 import { Card, Chip, Icon } from '@/components/proto';
 import {
   INVITE_STATUS_LABEL,
+  canRemoveInvitation,
   formatStockholmDateTime,
   groupInvitesByStatus,
   startOfStockholmDay,
@@ -13,6 +14,7 @@ import {
   toPocketBaseDateTime,
   type InviteStatus
 } from '@platform/shared';
+import { RemoveInviteButton } from '@/components/invitations/RemoveInviteButton';
 import { buildInflodeTabs } from '../_tabs';
 
 export const dynamic = 'force-dynamic';
@@ -33,6 +35,7 @@ interface InviteRow {
   name?: string;
   organization?: string;
   stage?: string;
+  invited_at?: string;
   invite_sent_at?: string;
   invite_opened_at?: string;
   responded_at?: string;
@@ -86,7 +89,7 @@ export default async function InvitationsPage() {
     try {
       const rows = await pb.collection('event_signups').getFullList<InviteRow>({
         filter: pb.filter(`tenant = {:t} && invited_at != "" && (${ors.join(' || ')})`, params),
-        fields: 'id,event,name,organization,stage,invite_sent_at,invite_opened_at,responded_at',
+        fields: 'id,event,name,organization,stage,invited_at,invite_sent_at,invite_opened_at,responded_at',
         sort: 'name'
       });
       for (const r of rows) invitesBy.set(r.event, [...(invitesBy.get(r.event) ?? []), r]);
@@ -163,9 +166,12 @@ export default async function InvitationsPage() {
                   </div>
                   <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 4 }}>
                     {g.rows.map((r) => (
-                      <li key={r.id} className="mx-t-12 mx-truncate">
-                        {r.name || 'Okänd'}
-                        {r.organization ? <span className="mx-muted"> · {r.organization}</span> : null}
+                      <li key={r.id} className="mx-flex mx-items-c mx-gap-2 mx-t-12">
+                        <span className="mx-truncate" style={{ flex: 1, minWidth: 0 }}>
+                          {r.name || 'Okänd'}
+                          {r.organization ? <span className="mx-muted"> · {r.organization}</span> : null}
+                        </span>
+                        {canRemoveInvitation(r) && <RemoveInviteButton signupId={r.id} name={r.name || 'mottagaren'} />}
                       </li>
                     ))}
                   </ul>
