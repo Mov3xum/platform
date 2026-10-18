@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { inviteToEvent, sendEventInvitations } from '@/lib/core/write/event-invitations';
+import { inviteToEvent, removeEventInvitation, sendEventInvitations } from '@/lib/core/write/event-invitations';
 import {
   CONTACT_LIST_LIMIT,
   contactDisplayName,
@@ -321,4 +321,22 @@ export async function sendInvitationsAction(input: { eventId: string; mode: 'pen
     ok: true,
     notice: `${sent} mejl skickade${failed ? `, ${failed} misslyckades` : ''}${optedOut ? ` (${optedOut} avregistrerade hoppades över)` : ''}.`
   };
+}
+
+export async function removeInvitationAction(signupId: string): Promise<InvitationState> {
+  const user = await requireUser();
+  let res: Awaited<ReturnType<typeof removeEventInvitation>>;
+  try {
+    res = await removeEventInvitation(
+      await getServerPb(),
+      { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Role[] },
+      String(signupId || '')
+    );
+  } catch (err) {
+    console.error('[invitations] remove failed', err instanceof Error ? err.message : 'unknown');
+    return { error: 'Inbjudan kunde inte tas bort. Ladda om sidan och försök igen.' };
+  }
+  if (!res.ok) return { error: res.error };
+  revalidateEvent(res.value.eventId);
+  return { ok: true, notice: 'Inbjudan togs bort.' };
 }

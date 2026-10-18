@@ -278,3 +278,15 @@ export function inviteReason(row: { contact?: string | null; user?: string | nul
   if (row.startup) return 'program';
   return row.user ? 'team' : 'contact';
 }
+
+/**
+ * Får en inbjudan tas bort? Bara inbjudna (`invited`), avböjda (`declined`)
+ * och de som tackat ja men inte markerats närvarande (`signup`). En
+ * närvarande deltagare (eller längre i tratten) är ett utfall som mål och
+ * utvärderingar räknar på (§ 53.4) — den tas bort på eventets deltagarlista,
+ * inte här.
+ */
+export function canRemoveInvitation(row: { stage?: string | null; invited_at?: string | null }): boolean {
+  if (!row.invited_at) return false;
+  return row.stage === 'invited' || row.stage === 'declined' || row.stage === 'signup';
+}

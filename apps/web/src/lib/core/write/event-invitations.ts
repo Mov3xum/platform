@@ -3,6 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import type PocketBase from 'pocketbase';
 import {
   INVITE_MAX_RECIPIENTS,
+  canRemoveInvitation,
   formatStockholmDateTime,
   inviteReason,
   rsvpOpen,
@@ -337,4 +338,54 @@ export async function sendEventInvitations(
     after_value: { title: ev.name ?? '', sent: sent.length, failed, opted_out: rows.length - sendable.length }
   });
   return ok({ sent: sent.length, failed, optedOut: rows.length - sendable.length });
+}
+
+/**
+ * Tar bort en inbjudan (raden i deltagarlistan). Svarslänken slutar gälla
+ * eftersom hashen försvinner med raden. Bara inbjudna, avböjda och ja-svar
+ * utan markerad närvaro (`canRemoveInvitation`) — närvaro är ett utfall som
+ * mål och utvärderingar räknar på. Auditen bär eventets namn och steget,
+ * aldrig mottagaren.
+ */
+export async function removeEventInvitation(
+  pb: PocketBase,
+  actor: Actor,
+  signupId: string
+): Promise<WriteResult<{ eventId: string }>> {
+  const denied = gate(actor);
+  if (denied) return denied;
+  if (!ID.test(signupId)) return fail('INVALID_VALUE', 'Ogiltig inbjudan.');
+  const row = await getRecordInTenant<{ id: string; tenant?: string; event?: string; stage?: string; invited_at?: string }>(
+    pb,
+    actor,
+    'event_signups',
+    signupId,
+    'id,tenant,event,stage,invited_at'
+  );
+  if (!row || !row.event) return fail('NOT_FOUND', 'Inbjudan hittades inte.');
+  if (!canRemoveInvitation(row)) {
+    return fail(
+      'STATE_TRANSITION',
+      row.invited_at
+        ? 'Personen är markerad som närvarande — ändra eller ta bort raden i eventets deltagarlista.'
+        : 'Raden är ingen inbjudan — ta bort den i eventets deltagarlista.'
+    );
+  }
+  const ev = await getRecordInTenant<EventRow>(pb, actor, 'incubator_events', row.event, 'id,tenant,name');
+  try {
+    await writeWithFallback(pb, (c) => c.collection('event_signups').delete(row.id), { fallbackOn404: true });
+  } catch (err) {
+    console.error('[invitations] remove failed', { status: (err as { status?: number })?.status });
+    return fail('DB_ERROR', 'Inbjudan kunde inte tas bort. Försök igen.');
+  }
+  await recomputeEventCounters(pb, actor.tenant, row.event);
+  await logAgentAction(pb, {
+    actor,
+    action_type: 'update',
+    collection: 'event_signups',
+    record_id: row.event,
+    field: 'invitation_removed',
+    after_value: { title: ev?.name ?? '', stage: row.stage ?? '', deleted: true }
+  });
+  return ok({ eventId: row.event });
 }

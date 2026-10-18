@@ -9520,6 +9520,16 @@ på eventsidan ("Bjud in" i deltagarpanelen) väljer staff mottagare i
     (RFC 8058 — Gmail/Yahoo kräver en-klick för massutskick). Länkarna går
     till appens konfigurerade adress (`APP_URL`, § 47.5), aldrig en
     URL-förkortare. Ett mejl per mottagare, i batchar om 10.
+- **Ta bort en inbjudan (2026-10-18):** ✕ per mottagare under "Visa vilka"
+  på översikten och i listan på eventets inbjudningssida
+  (`RemoveInviteButton` → `removeInvitationAction` → `removeEventInvitation`
+  i skrivlagret: samma roller som att bjuda in, tenant-verifierad, raden
+  raderas och räknarna räknas om). Bara inbjudna, avböjda och ja-svar utan
+  markerad närvaro (`canRemoveInvitation`, ren + enhetstestad) — en
+  närvarande deltagare är ett utfall som mål och utvärderingar räknar på och
+  tas bort på eventets deltagarlista. Svarslänken slutar gälla (hashen
+  försvinner med raden). Audit PII-fri (eventets namn + steg) → feeden "En
+  inbjudan till "X" togs bort".
 - **Utan e-posttjänst kastar inget (incident 2026-10-17):** saknades
   `RESEND_API_KEY` kastade `sendEventInvites` mitt i "Bjud in" — raderna var
   redan skapade och sidan föll i "Server Components render" (500). Nu
