@@ -1,7 +1,12 @@
-// "Så funkar det" — ALLA instruktioner för Bedömning excellens samlade på ett
-// ställe överst (CLAUDE.md § 51). Själva formuläret och rapporten bär inga
-// förklarande textstycken; lägg nya instruktioner här, inte i rapporten.
+'use client';
 
+// "Så funkar det" — ALLA instruktioner för Bedömning excellens samlade på ett
+// ställe (CLAUDE.md § 51, § 51.12): en knapp i sidhuvudet som öppnar guiden
+// som ett överlägg, så den aldrig tar plats i flödet. Själva formuläret och
+// rapporten bär inga förklarande textstycken; lägg nya instruktioner här,
+// inte i rapporten.
+
+import { useEffect, useState } from 'react';
 import { MAX_RELATED_COMPANIES } from '@platform/shared';
 
 const STEPS: { title: string; items: string[] }[] = [
@@ -66,26 +71,58 @@ const STEPS: { title: string; items: string[] }[] = [
 ];
 
 export function HowItWorks() {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
   return (
-    <details className="group rounded-2xl border border-default bg-surface px-5 py-3">
-      <summary className="cursor-pointer list-none text-[13.5px] font-semibold text-foreground">
-        <span className="inline-flex items-center gap-2">
-          <span aria-hidden className="text-[11px] text-foreground-subtle transition group-open:rotate-90">▶</span>
-          Så funkar det
-        </span>
-      </summary>
-      <div className="mt-3 grid gap-4 pb-2 lg:grid-cols-2">
-        {STEPS.map((s) => (
-          <div key={s.title}>
-            <h3 className="text-[12.5px] font-semibold text-foreground">{s.title}</h3>
-            <ul className="mt-1 list-disc space-y-1 pl-5 text-[12.5px] text-foreground-muted">
-              {s.items.map((t) => (
-                <li key={t}>{t}</li>
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        className="inline-flex items-center justify-center rounded-full border border-strong px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-canvas-subtle"
+      >
+        Så funkar det
+      </button>
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-movexum-svart/40 p-4 sm:p-8" onClick={() => setOpen(false)}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="how-it-works-title"
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-4xl rounded-2xl border border-default bg-surface px-5 py-4 shadow-xl shadow-movexum-svart/20"
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-default pb-3">
+              <h2 id="how-it-works-title" className="text-[15px] font-semibold text-foreground">
+                Så funkar Bedömning excellens
+              </h2>
+              <button type="button" onClick={() => setOpen(false)} className="rounded-full border border-strong px-3 py-1 text-[12px] font-semibold text-foreground hover:bg-canvas-subtle">
+                Stäng
+              </button>
+            </div>
+            <div className="mt-3 grid gap-4 pb-2 lg:grid-cols-2">
+              {STEPS.map((s) => (
+                <div key={s.title}>
+                  <h3 className="text-[12.5px] font-semibold text-foreground">{s.title}</h3>
+                  <ul className="mt-1 list-disc space-y-1 pl-5 text-[12.5px] text-foreground-muted">
+                    {s.items.map((t) => (
+                      <li key={t}>{t}</li>
+                    ))}
+                  </ul>
+                </div>
               ))}
-            </ul>
+            </div>
           </div>
-        ))}
-      </div>
-    </details>
+        </div>
+      )}
+    </>
   );
 }
