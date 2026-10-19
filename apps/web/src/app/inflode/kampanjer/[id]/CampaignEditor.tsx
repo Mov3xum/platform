@@ -61,7 +61,7 @@ import {
 } from '@platform/shared';
 
 /**
- * Kampanjeditorn (CLAUDE.md § 54.3–54.8): blockbaserat innehåll, mallens
+ * Kampanjeditorn (CLAUDE.md § 55.3–54.8): blockbaserat innehåll, mallens
  * design (accent + kort/enkelt), ämne/förhandsrad, kategori och rättslig
  * grund, avsändare med riktig svarsadress, kopplat event, mottagarurval (samma
  * listor som inbjudningspanelen) och **live-förhandsgranskning** renderad med
@@ -362,7 +362,7 @@ export function CampaignEditor({
   const needsEvent = blocksNeedEvent(blocks);
   const sender = staff.find((s) => s.id === senderUserId);
 
-  // Förhandsgranskningen — exakt samma renderare som utskicket (§ 54.5).
+  // Förhandsgranskningen — exakt samma renderare som utskicket (§ 55.5).
   const rendered = useMemo(
     () =>
       renderCampaignEmail({

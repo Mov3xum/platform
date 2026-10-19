@@ -13,7 +13,7 @@ import {
 import { Panel } from '../ui';
 
 /**
- * Kontaktens utskicksläge (§ 54.1/§ 54.9): e-poststatus (studsar, klagomål,
+ * Kontaktens utskicksläge (§ 55.1/§ 55.9): e-poststatus (studsar, klagomål,
  * avregistrerad), avstängda kategorier (preferenscentret), avregistrering
  * från inbjudningar och nyhetsbrevssamtycke (med källa). Samtycket kan
  * registreras för hand när personen sagt ja på annat sätt — källan blir då

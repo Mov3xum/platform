@@ -2,7 +2,7 @@ import 'server-only';
 import { describeResendError } from '@/lib/mail-sender';
 
 /**
- * Batchutskick via Resend (CLAUDE.md § 54.4). `/emails/batch` tar upp till
+ * Batchutskick via Resend (CLAUDE.md § 55.4). `/emails/batch` tar upp till
  * 100 mejl per anrop (vi skickar 50) och svarar med ett id per mejl i samma
  * ordning — id:t sparas på mottagarraden så webhooken (studs/klagomål) kan
  * matchas tillbaka. Avvisas hela batchen (valideringsfel i ETT mejl fäller

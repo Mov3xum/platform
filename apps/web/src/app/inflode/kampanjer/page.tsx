@@ -80,7 +80,7 @@ function CampaignLine({ c }: { c: CampaignRow }) {
 }
 
 /**
- * Marknadsverktyg → Kampanjer (CLAUDE.md § 54). E-postutskick till
+ * Marknadsverktyg → Kampanjer (CLAUDE.md § 55). E-postutskick till
  * kontaktboken, bolag och personal: utkast, schemalagda och skickade med
  * leveransstatistik (studsar, klagomål, klick) direkt på raden, samt egna
  * sparade mallar. Läser med användarens token (RLS § 21); listan bär aldrig
@@ -118,7 +118,7 @@ export default async function CampaignsPage({ searchParams }: { searchParams: Pr
         )}
         {res.missing && (
           <div className="mx-t-13" style={{ padding: '8px 12px', borderRadius: 10, background: 'var(--movexum-pastell-gul)', color: 'var(--movexum-morkgul)' }}>
-            Kampanjkollektionen saknas i PocketBase — kör migration 1700000201 (eller &ldquo;Sync PocketBase&rdquo;).
+            Kampanjkollektionen saknas i PocketBase — kör migration 1700000203 (eller &ldquo;Sync PocketBase&rdquo;).
           </div>
         )}
         {res.error && !res.missing && (

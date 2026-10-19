@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { dispatchCampaign } from '@/lib/email/campaign-dispatch';
 
 // Intern endpoint som PB-hooken campaign_dispatch_tick.pb.js POSTar till
-// (CLAUDE.md § 54.4). Samma auth som run-schedule/send-survey (§ 12.3):
+// (CLAUDE.md § 55.4). Samma auth som run-schedule/send-survey (§ 12.3):
 // delat secret MOVEXUM_SCHEDULE_SECRET i header, jämfört i konstant tid.
 // Body: { campaignId }.
 

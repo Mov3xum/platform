@@ -1,5 +1,5 @@
 // Svarssidan för inbjudningar — gästfrågor, maxantal, väntelista, kalenderfil
-// och påminnelser (CLAUDE.md § 54.11, det viktigaste från Confetti). Ren,
+// och påminnelser (CLAUDE.md § 55.11, det viktigaste från Confetti). Ren,
 // IO-fri logik som delas av eventformuläret, den publika svarssidan,
 // påminnelse-ticken och incheckningen.
 //

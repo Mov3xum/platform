@@ -1,6 +1,6 @@
 /// <reference path="../pb_data/types.d.ts" />
 
-// Påminnelse-ticker för event (CLAUDE.md § 54.11). En gång i timmen POSTas
+// Påminnelse-ticker för event (CLAUDE.md § 55.11). En gång i timmen POSTas
 // `/api/internal/event-reminders`, som själv hittar event med påminnelser
 // påslagna (`rsvp_settings.remind_*_days`) vars fönster är öppet och ännu
 // inte skickats (`reminder_*_sent_at`). Delat secret MOVEXUM_SCHEDULE_SECRET

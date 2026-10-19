@@ -26,7 +26,7 @@ import { listInviteOptionsAction, type InviteOptionsResult } from '@/lib/actions
 import { isEmailSuppressionReason, parseDateTimeInput, type Role } from '@platform/shared';
 
 /**
- * Server actions för e-postkampanjer (CLAUDE.md § 54). Tunna skal: RBAC här,
+ * Server actions för e-postkampanjer (CLAUDE.md § 55). Tunna skal: RBAC här,
  * validering + tenant + audit i `lib/core/write/email-campaigns.ts`. Alla
  * utskick är mänskliga klick; klienten är aldrig säkerhetsgränsen.
  */
@@ -58,7 +58,7 @@ export async function createCampaignAction(input: {
   templateKey?: string;
   fromId?: string;
   eventId?: string;
-  /** Eventets deltagarlista som mottagargrupp (§ 54.3). */
+  /** Eventets deltagarlista som mottagargrupp (§ 55.3). */
   eventGroup?: string;
   surveyId?: string;
   title?: string;

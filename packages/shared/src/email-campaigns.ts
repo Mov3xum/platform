@@ -1,4 +1,4 @@
-// E-postkampanjer (CLAUDE.md § 54) — ren, IO-fri domänlogik.
+// E-postkampanjer (CLAUDE.md § 55) — ren, IO-fri domänlogik.
 //
 // En kampanj är ETT utskick (eller en sparad mall): ämne, förhandsrad,
 // avsändare, kategori, mottagarurval och innehållsblock som renderas
@@ -73,7 +73,7 @@ export function campaignEditable(status: EmailCampaignStatus): boolean {
  * `legitimate_interest` — B2B-kontakter i kontaktnätet får mejlet på
  * berättigat intresse med avregistrering i varje mejl (beslut 2026-10,
  * § 53.5). `consent_only` — bara kontakter som uttryckligen tackat ja till
- * nyhetsbrev (`newsletter_consent`, dubbel opt-in § 54.9); krävs för
+ * nyhetsbrev (`newsletter_consent`, dubbel opt-in § 55.9); krävs för
  * nyhetsbrev till privatpersoner enligt marknadsföringslagen.
  */
 export const EMAIL_CONSENT_MODES = ['legitimate_interest', 'consent_only'] as const;
@@ -273,7 +273,7 @@ export type EmailBlock =
   | { id: string; type: 'spacer'; size: 's' | 'm' | 'l' }
   | { id: string; type: 'event_details' }
   | { id: string; type: 'rsvp' }
-  /** "Visa din biljett" + "Lägg i kalendern" — personlig länk till gästens anmälan (§ 54.11). */
+  /** "Visa din biljett" + "Lägg i kalendern" — personlig länk till gästens anmälan (§ 55.11). */
   | { id: string; type: 'ticket' }
   | { id: string; type: 'signature'; name: string; title: string };
 
@@ -462,7 +462,7 @@ export function normalizeEmailDesign(raw: unknown): EmailDesign {
 export const EMAIL_AUDIENCE_MAX_KEYS = 5000;
 
 /**
- * Eventets deltagarlista som mottagargrupp (§ 54.3) — DEN röda tråden från
+ * Eventets deltagarlista som mottagargrupp (§ 55.3) — DEN röda tråden från
  * inbjudan till uppföljning: samma `event_signups`-rader som svaren, närvaron
  * och målen bygger på. `unsent` = inbjudna som aldrig fått mejlet,
  * `unanswered` = alla som står som inbjudna, `confirmed` = tackat ja eller

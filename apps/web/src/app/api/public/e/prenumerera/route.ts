@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 const WINDOW_MS = 10 * 60 * 1000;
 const MAX_PER_WINDOW = 5;
 
-/** Steg 1 i dubbel opt-in (CLAUDE.md § 54.9): skicka bekräftelsemejlet. */
+/** Steg 1 i dubbel opt-in (CLAUDE.md § 55.9): skicka bekräftelsemejlet. */
 export async function POST(req: Request) {
   const rlKey = `newsletter-subscribe:${clientIpFromRequest(req)}`;
   if ((await checkRateLimit(rlKey, MAX_PER_WINDOW)).blocked) {

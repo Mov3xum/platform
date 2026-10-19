@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 export const metadata: Metadata = { title: 'Prenumerera på nyhetsbrevet', robots: { index: true } };
 
 /**
- * Publik prenumerationssida för nyhetsbrevet (CLAUDE.md § 54.9) — dubbel
+ * Publik prenumerationssida för nyhetsbrevet (CLAUDE.md § 55.9) — dubbel
  * opt-in: formuläret skickar ett bekräftelsemejl, inget sparas förrän
  * länken i mejlet klickats. `?org=<tenant-id>` väljer organisation; annars
  * samma tenant som inloggningssidan.

@@ -27,7 +27,7 @@ import type { Actor, WriteResult } from './types';
 import { fail, ok } from './types';
 
 /**
- * E-postkampanjer (CLAUDE.md § 54) — det delade skrivlagret.
+ * E-postkampanjer (CLAUDE.md § 55) — det delade skrivlagret.
  *
  * - Bara människor (policy `email_campaigns`, agent nekad). Tenant verifieras
  *   på varje kampanj, event och avsändare i koden; superuser bara som reserv
@@ -135,7 +135,7 @@ export interface CreateCampaignInput {
   eventId?: unknown;
   /** Kopplad utvärdering (§ 47) — fyller {{utvärdering.länk}}. */
   surveyId?: unknown;
-  /** Eventets deltagarlista som mottagargrupp (§ 54.3); kräver `eventId`. */
+  /** Eventets deltagarlista som mottagargrupp (§ 55.3); kräver `eventId`. */
   eventGroup?: unknown;
   title?: unknown;
   isTemplate?: boolean;
@@ -360,7 +360,7 @@ async function readyToSend(pb: PocketBase, actor: Actor, id: string): Promise<Wr
 }
 
 /**
- * Systemkampanj (§ 54.4): skapas av servern — påminnelse-ticken och
+ * Systemkampanj (§ 55.4): skapas av servern — påminnelse-ticken och
  * enkätutskicket — utan inloggad människa, med superuser. Ingen rollgrind
  * (anroparen har redan verifierat event/enkät och tenant), men samma mall,
  * normalisering och rendering som ett mänskligt utskick, så den syns i
@@ -540,7 +540,7 @@ export interface SuppressionImportResult {
 }
 
 /**
- * Importerar en spärrlista (Mailchimps "unsubscribed"/"cleaned", § 54.2).
+ * Importerar en spärrlista (Mailchimps "unsubscribed"/"cleaned", § 55.2).
  * Varje adress spärras idempotent; kontakter med adressen får status.
  */
 export async function importSuppressions(

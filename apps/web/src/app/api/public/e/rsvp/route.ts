@@ -21,7 +21,7 @@ const WINDOW_MS = 60 * 1000;
 const MAX_PER_WINDOW = 20;
 
 /**
- * Tar emot svaret på en inbjudan (CLAUDE.md § 53.5, § 54.11) från den
+ * Tar emot svaret på en inbjudan (CLAUDE.md § 53.5, § 55.11) från den
  * publika bekräftelsesidan `/e/svar`. POST (aldrig GET) så att mejlskannrar
  * som förhandsläser länkar inte svarar åt någon. Token → hash → deltagarrad;
  * tenant härleds ur raden. Ja/nej ändrar bara en rad som fortfarande är

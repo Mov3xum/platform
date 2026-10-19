@@ -30,7 +30,7 @@ import {
   type Role
 } from '@platform/shared';
 
-// Inbjudningar till event (CLAUDE.md § 53.5 / § 54). Själva utskicket är
+// Inbjudningar till event (CLAUDE.md § 53.5 / § 55). Själva utskicket är
 // sedan konsolideringen 2026-10 en KAMPANJ (mall "Eventinbjudan" med eventets
 // deltagarlista som mottagargrupp) — här finns listningen för
 // mottagarpanelen (kontaktboken, egna grupper, personal, bolagsmedlemmar,

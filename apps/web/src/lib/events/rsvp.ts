@@ -9,7 +9,7 @@ import { hashRsvpToken } from '@/lib/core/write/event-invitations';
  * svarsrouten har ingen session, så uppslaget går via superuser — därför
  * härleds tenant ur deltagarraden och eventet MÅSTE tillhöra samma tenant.
  * Token jämförs bara som SHA-256-hash; klartexten lagras aldrig.
- * Bär även svarssidans inställningar och gästens tidigare svar (§ 54.11).
+ * Bär även svarssidans inställningar och gästens tidigare svar (§ 55.11).
  */
 export interface ResolvedRsvp {
   pb: PocketBase;

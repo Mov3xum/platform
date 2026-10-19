@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 const WINDOW_MS = 60 * 1000;
 const MAX_PER_WINDOW = 20;
 
-/** Steg 2 i dubbel opt-in (CLAUDE.md § 54.9): POST från bekräftelsesidan skapar kontakten med samtycke. */
+/** Steg 2 i dubbel opt-in (CLAUDE.md § 55.9): POST från bekräftelsesidan skapar kontakten med samtycke. */
 export async function POST(req: Request) {
   const rlKey = `newsletter-confirm:${clientIpFromRequest(req)}`;
   if ((await checkRateLimit(rlKey, MAX_PER_WINDOW)).blocked) {

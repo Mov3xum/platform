@@ -42,7 +42,7 @@ export interface EventFormInitial {
   location?: string;
   description?: string;
   accent?: string;
-  /** Svarssidans inställningar (§ 54.11). */
+  /** Svarssidans inställningar (§ 55.11). */
   rsvp_settings?: EventRsvpSettings;
 }
 

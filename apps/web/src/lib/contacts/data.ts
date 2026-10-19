@@ -47,7 +47,7 @@ export interface ContactRow {
   owners: string[];
   /** Egna grupper (§ 45.8). Tom lista mot ett schema utan migration 1700000199. */
   groups: string[];
-  /** E-poststatus för utskick (§ 54): tomt = ok. */
+  /** E-poststatus för utskick (§ 55): tomt = ok. */
   email_status: ContactEmailStatus | null;
   email_status_at: string | null;
   /** Avstängda utskickskategorier (`all` = alla). */

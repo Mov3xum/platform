@@ -1,6 +1,6 @@
 /// <reference path="../pb_data/types.d.ts" />
 
-// CLAUDE.md § 54 — Marknadsverktyg → Kampanjer: e-postutskick som ersätter
+// CLAUDE.md § 55 — Marknadsverktyg → Kampanjer: e-postutskick som ersätter
 // Mailchimp/Confetti, med spärrlista, webhook-händelser, preferenscenter och
 // Confetti-funktionerna på svarssidan (gästfrågor, maxantal, väntelista,
 // påminnelser, incheckning).

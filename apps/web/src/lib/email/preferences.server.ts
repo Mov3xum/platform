@@ -10,7 +10,7 @@ import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { unsubscribeSecret, verifyUnsubscribeKey } from '@/lib/unsubscribe-key';
 
 /**
- * Preferenscentret (CLAUDE.md § 54.9): mottagaren väljer själv vilka utskick
+ * Preferenscentret (CLAUDE.md § 55.9): mottagaren väljer själv vilka utskick
  * hen vill ha. Nyckeln är samma signerade kontaktnyckel som avregistreringen
  * (`lib/unsubscribe-key.ts`) — den finns i varje mejl och går inte att gissa.
  * Läsning/skrivning sker med superusern (ingen session); bara kontaktens egna

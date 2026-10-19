@@ -8,12 +8,12 @@ import { createSystemCampaign } from '@/lib/core/write/email-campaigns';
 import { dispatchCampaign } from '@/lib/email/campaign-dispatch';
 
 /**
- * Automatiska påminnelser före ett event (CLAUDE.md § 54.11). Körs av
+ * Automatiska påminnelser före ett event (CLAUDE.md § 55.11). Körs av
  * PB-ticken `event_reminder_tick` via `/api/internal/event-reminders` en gång
  * i timmen — utan session, därför superuser, och varje event hanteras för
  * sig (fail-soft).
  *
- * Varje påminnelse är en SYSTEMKAMPANJ (§ 54.4) — samma mall, renderare,
+ * Varje påminnelse är en SYSTEMKAMPANJ (§ 55.4) — samma mall, renderare,
  * spärrlista och statistik som ett mänskligt utskick, synlig under
  * Marknadsverktyg → Kampanjer:
  * - **unanswered**: mallen "Påminnelse" till gruppen "inbjudna som inte

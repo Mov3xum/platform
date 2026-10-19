@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 export const metadata: Metadata = { title: 'Bekräfta prenumeration', robots: { index: false } };
 
 /**
- * Steg 2 i dubbel opt-in (CLAUDE.md § 54.9). GET visar en knapp — själva
+ * Steg 2 i dubbel opt-in (CLAUDE.md § 55.9). GET visar en knapp — själva
  * bekräftelsen är en POST, så att en mejlskanner som öppnar länken aldrig
  * prenumererar åt någon.
  */

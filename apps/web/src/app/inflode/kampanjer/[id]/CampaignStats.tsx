@@ -41,7 +41,7 @@ function Stat({ label, value, hint }: { label: string; value: string | number; h
   );
 }
 
-/** Statistikvyn för ett skickat utskick (§ 54.6). Inga e-postadresser — bara namn/organisation per status. */
+/** Statistikvyn för ett skickat utskick (§ 55.6). Inga e-postadresser — bara namn/organisation per status. */
 export function CampaignStats({ campaign, recipients }: { campaign: CampaignRow; recipients: RecipientRow[] }) {
   const rates = emailCampaignRates(campaign);
   const health = deliverabilityHealth(rates);
@@ -84,7 +84,7 @@ export function CampaignStats({ campaign, recipients }: { campaign: CampaignRow;
           <Stat label="Avregistreringar" value={formatRate(rates.unsubscribeRate)} hint={`${campaign.unsubscribed_count} st`} />
         </div>
         <p className="mx-t-13" style={{ margin: '12px 0 0', color: HEALTH_TONE[health] }}>
-          {HEALTH_TEXT[health]} Öppningar mäts inte — vi använder ingen spårningspixel (§ 54.6).
+          {HEALTH_TEXT[health]} Öppningar mäts inte — vi använder ingen spårningspixel (§ 55.6).
         </p>
       </Card>
 

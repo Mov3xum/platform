@@ -8,7 +8,7 @@ import { createCampaignAction } from '@/lib/actions/email-campaigns';
 import type { EmailEventGroup } from '@platform/shared';
 
 /**
- * Startpunkten för utskick kring ett event (CLAUDE.md § 54.3) — EN väg:
+ * Startpunkten för utskick kring ett event (CLAUDE.md § 55.3) — EN väg:
  * varje knapp skapar en kampanj från rätt mall, förkopplad till eventet och
  * med eventets deltagarlista som mottagargrupp, och öppnar den i editorn.
  * Där väljs/kompletteras mottagarna, mejlet förhandsgranskas och skickas.

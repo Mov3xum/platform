@@ -13,7 +13,7 @@ import { hashEmail } from './signed-tokens';
 import { addSuppression } from './suppression';
 
 /**
- * Behandlar en VERIFIERAD webhook-händelse från Resend (CLAUDE.md § 54.1).
+ * Behandlar en VERIFIERAD webhook-händelse från Resend (CLAUDE.md § 55.1).
  *
  *   email.delivered        → mottagarraden får `delivered`-händelse
  *   email.bounced          → hård studs: spärra adressen + kontaktstatus;

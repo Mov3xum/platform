@@ -49,7 +49,7 @@ async function ticketQr(url: string): Promise<string | null> {
   }
 }
 
-// Publik, OINLOGGAD bekräftelsesida för en inbjudan (§ 53.5, § 54.11). GET
+// Publik, OINLOGGAD bekräftelsesida för en inbjudan (§ 53.5, § 55.11). GET
 // visar bara eventet, gästfrågorna och knapparna — svaret skickas med POST,
 // så att en mejlskanner som öppnar länken aldrig svarar åt mottagaren. Efter
 // ett ja visas biljetten (QR för incheckning), kalenderfilen och svaren.
@@ -211,7 +211,7 @@ export default async function RsvpPage({
   );
 }
 
-/** Gästfrågorna som eventet ställer (§ 54.11): medföljande, kost/allergi, egen fråga. Förifylls med tidigare svar. */
+/** Gästfrågorna som eventet ställer (§ 55.11): medföljande, kost/allergi, egen fråga. Förifylls med tidigare svar. */
 function GuestQuestions({ resolved }: { resolved: ResolvedRsvp }) {
   const { settings, signup } = resolved;
   const fieldStyle = { display: 'grid', gap: 6 } as const;

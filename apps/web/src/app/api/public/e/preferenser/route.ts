@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 const WINDOW_MS = 60 * 1000;
 const MAX_PER_WINDOW = 30;
 
-/** Sparar valen från preferenscentret (CLAUDE.md § 54.9). POST, aldrig GET. */
+/** Sparar valen från preferenscentret (CLAUDE.md § 55.9). POST, aldrig GET. */
 export async function POST(req: Request) {
   const rlKey = `email-prefs:${clientIpFromRequest(req)}`;
   if ((await checkRateLimit(rlKey, MAX_PER_WINDOW)).blocked) {

@@ -3,7 +3,7 @@ import { secretsEqual } from '@/lib/secret-compare';
 import { runEventReminders } from '@/lib/events/reminders';
 
 // Intern endpoint som PB-hooken event_reminder_tick.pb.js POSTar till en gång
-// i timmen (CLAUDE.md § 54.11). Samma auth som run-schedule/send-survey
+// i timmen (CLAUDE.md § 55.11). Samma auth som run-schedule/send-survey
 // (§ 12.3): delat secret MOVEXUM_SCHEDULE_SECRET i header, konstant tid.
 
 export const runtime = 'nodejs';

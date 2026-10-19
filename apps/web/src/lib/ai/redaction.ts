@@ -101,7 +101,7 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   'screening_requests',
   // Ärenden i Bedömning excellens (§ 51.10): underlag + manuella svar per bolag.
   'screening_cases',
-  // Deltagarlistor och e-postkampanjer (§ 53.5, § 54): deltagarrader bär
+  // Deltagarlistor och e-postkampanjer (§ 53.5, § 55): deltagarrader bär
   // e-post och gästens kost/allergi (kan vara art. 9), mottagarrader bär
   // hashade adresser och leveransstatus, spärrlistan maskade adresser,
   // händelseloggen leverantörsdata — inget av det ska nå modellen rått.

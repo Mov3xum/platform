@@ -8,7 +8,7 @@ export type CheckInResult =
   | { ok: false; reason: 'lank' | 'fel_event' | 'tenant' | 'spara' };
 
 /**
- * Incheckning vid dörren (CLAUDE.md § 54.11): personalen skannar gästens
+ * Incheckning vid dörren (CLAUDE.md § 55.11): personalen skannar gästens
  * QR-kod (svarslänkens token) på sin inloggade telefon. Token → deltagarrad
  * via superuser (som svarssidan), men BARA för en rad i personalens egen
  * tenant och för det event sidan tillhör — annars nekas. Idempotent: en

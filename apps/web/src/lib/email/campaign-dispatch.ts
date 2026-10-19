@@ -32,7 +32,7 @@ import { emailLinkSecret, hashEmail, signCalendarKey, signClickToken } from './s
 import { loadSuppressedHashes } from './suppression';
 
 /**
- * Utskickskärnan för kampanjer (CLAUDE.md § 54.4) — delad av "Skicka nu"
+ * Utskickskärnan för kampanjer (CLAUDE.md § 55.4) — delad av "Skicka nu"
  * och cron-vägen (`/api/internal/send-campaign`). Körs med superusern (cron
  * saknar session), så tenant-likhet mellan kampanj, event och mottagare
  * verifieras uttryckligen.
@@ -210,7 +210,7 @@ export async function resolveCampaignCandidates(pb: PocketBase, campaign: Campai
     }
   }
 
-  // Eventets deltagarlista som grupp (§ 54.3): samma rader som svaren, närvaron
+  // Eventets deltagarlista som grupp (§ 55.3): samma rader som svaren, närvaron
   // och målen bygger på. Kontakter/användare berikas ur sina poster (status,
   // samtycke, avregistrering gäller); en rad med bara e-post blir mottagare
   // ändå (`e:<signup>`), så en manuellt tillagd gäst aldrig faller bort.
@@ -434,7 +434,7 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
   try {
     suppressedHashes = await loadSuppressedHashes(pb, campaign.tenant, candidates.map((c) => (c.email ? hashEmail(c.email) : '')));
   } catch (err) {
-    return fail((err as { status?: number })?.status === 404 ? 'Spärrlistan saknas — kör migration 1700000201.' : 'Kunde inte läsa spärrlistan — inget skickades.');
+    return fail((err as { status?: number })?.status === 404 ? 'Spärrlistan saknas — kör migration 1700000203.' : 'Kunde inte läsa spärrlistan — inget skickades.');
   }
 
   // Redan skapade rader (avbrutet försök): återanvänd, skapa inte dubbletter.
@@ -449,7 +449,7 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
       if (key) existing.set(key, { id: r.id, status: r.status, signup: r.signup });
     }
   } catch (err) {
-    if ((err as { status?: number })?.status === 404) return fail('Kampanjkollektionerna saknas — kör migration 1700000201.');
+    if ((err as { status?: number })?.status === 404) return fail('Kampanjkollektionerna saknas — kör migration 1700000203.');
   }
 
   type Pending = { candidate: Candidate; rowId: string; hash: string; signupId?: string; token?: string };

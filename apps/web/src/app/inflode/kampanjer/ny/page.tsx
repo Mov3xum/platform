@@ -22,7 +22,7 @@ export const dynamic = 'force-dynamic';
 const MANAGE_ROLES = ['admin', 'incubator_lead', 'coach'] as const;
 
 /**
- * Ny kampanj (§ 54.3): välj en av Movexums mallstrukturer (eller en egen
+ * Ny kampanj (§ 55.3): välj en av Movexums mallstrukturer (eller en egen
  * sparad mall), koppla ev. ett event och ge kampanjen ett namn. Kampanjen
  * skapas som utkast och öppnas i editorn.
  */

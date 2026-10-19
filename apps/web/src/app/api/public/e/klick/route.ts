@@ -13,7 +13,7 @@ const WINDOW_MS = 60 * 1000;
 const MAX_PER_WINDOW = 120;
 
 /**
- * Klickspårning på egen domän (CLAUDE.md § 54.6). Token = mottagare +
+ * Klickspårning på egen domän (CLAUDE.md § 55.6). Token = mottagare +
  * kampanj + länkindex + HMAC; mål-URL:en tas ur kampanjens sparade
  * länklista — aldrig ur adressen (ingen öppen omdirigering). Räknar klick
  * per mottagare och per länk, unika mottagare på kampanjen. Ingen IP eller

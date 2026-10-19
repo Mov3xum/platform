@@ -1,7 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 /**
- * Signerade, tillståndslösa nycklar för e-postflödena (CLAUDE.md § 54) —
+ * Signerade, tillståndslösa nycklar för e-postflödena (CLAUDE.md § 55) —
  * ren modul (hemligheten skickas in), enhetstestad.
  *
  * - **Klickspårning** (`signClickToken`/`verifyClickToken`): länkar i ett

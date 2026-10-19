@@ -495,14 +495,14 @@ const CREATE_POLICIES: Record<
     user: { kind: 'roles', roles: STAFF_FULL },
     agent: { kind: 'allow' }
   },
-  // E-postkampanjer (§ 54): marknadsteamet (admin/incubator_lead/coach)
+  // E-postkampanjer (§ 55): marknadsteamet (admin/incubator_lead/coach)
   // bygger, schemalägger och skickar. Mejl till externa personer är ett
   // mänskligt beslut — agenten har inga verktyg här (människa-i-loopen).
   email_campaigns: {
     user: { kind: 'roles', roles: EVENT_MANAGE },
     agent: { kind: 'deny', reason: 'E-postkampanjer skapas och skickas av en människa under Marknadsverktyg → Kampanjer.' }
   },
-  // Spärrlistan (§ 54.1): manuella spärrar och import läggs av Movexum-
+  // Spärrlistan (§ 55.1): manuella spärrar och import läggs av Movexum-
   // personal; webhooken skriver via superusern.
   email_suppressions: {
     user: { kind: 'roles', roles: STAFF_FULL },

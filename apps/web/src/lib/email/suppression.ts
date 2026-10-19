@@ -10,7 +10,7 @@ import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { hashEmail } from './signed-tokens';
 
 /**
- * Spärrlistan (CLAUDE.md § 54.1) — adresser som ALDRIG får mejlas igen:
+ * Spärrlistan (CLAUDE.md § 55.1) — adresser som ALDRIG får mejlas igen:
  * hårda studsar, spamklagomål, avregistreringar utanför kontaktboken,
  * Mailchimps avregistrerade/rensade listor vid bytet och manuella spärrar.
  *
@@ -26,7 +26,7 @@ export const SUPPRESSIONS = 'email_suppressions';
 const CHUNK = 40;
 
 export const SUPPRESSION_MIGRATION_HINT =
-  'PocketBase saknar spärrlistan för e-post — kör migration 1700000201 (eller workflowen "Sync PocketBase").';
+  'PocketBase saknar spärrlistan för e-post — kör migration 1700000203 (eller workflowen "Sync PocketBase").';
 
 export interface SuppressionRow {
   id: string;

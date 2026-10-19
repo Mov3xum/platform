@@ -46,7 +46,7 @@ type Invitee = {
 };
 
 /**
- * Inbjudningar för ett event (CLAUDE.md § 53.5 / § 54): svarsöversikten
+ * Inbjudningar för ett event (CLAUDE.md § 53.5 / § 55): svarsöversikten
  * (inbjudna, öppnat, kommer, avböjt, inte svarat), eventets utskick och
  * startknapparna för nästa steg — inbjudan, påminnelse, "vi ses snart",
  * tack och utvärdering. Varje knapp skapar en KAMPANJ med eventets
@@ -100,7 +100,7 @@ export default async function EventInvitationsPage({
   }
   const { unsent, unanswered, coming, declined, opened } = tallyInvites(invitees);
   const attendedCount = invitees.filter((i) => ['attended', 'meeting', 'application', 'admitted'].includes(i.stage)).length;
-  // Utskicken för eventet (§ 54): inbjudningar, påminnelser, tack — alla är kampanjer.
+  // Utskicken för eventet (§ 55): inbjudningar, påminnelser, tack — alla är kampanjer.
   const campaignsRes = await listCampaigns(pb, user.tenant);
   const eventCampaigns = campaignsRes.campaigns.filter((c) => c.event === event.id);
 

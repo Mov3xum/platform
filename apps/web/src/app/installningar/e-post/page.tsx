@@ -1,4 +1,4 @@
-// Inställningar → E-post & leverans (CLAUDE.md § 54.10).
+// Inställningar → E-post & leverans (CLAUDE.md § 55.10).
 // Driftvyn för utskicken: är avsändardomänen verifierad i Resend (SPF/DKIM),
 // finns DMARC, är webhooken och länkhemligheten satta, hur ser studs- och
 // klagomålsnivån ut de senaste 30 dagarna, och spärrlistan (hashade adresser,
@@ -174,7 +174,7 @@ export default async function EpostPage() {
         </p>
         {suppressions.missing && (
           <p className="mt-2 text-sm" style={{ color: 'var(--movexum-morkgul)' }}>
-            Kollektionen saknas i PocketBase — kör migration 1700000201.
+            Kollektionen saknas i PocketBase — kör migration 1700000203.
           </p>
         )}
         {suppressions.error && !suppressions.missing && (

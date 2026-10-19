@@ -31,7 +31,7 @@ export interface BrowserContact {
   pendingRequests: number;
   hasEmail: boolean;
   hasPhone: boolean;
-  /** E-poststatus för utskick (§ 54): studsar/klagomål/avregistrerad. */
+  /** E-poststatus för utskick (§ 55): studsar/klagomål/avregistrerad. */
   emailStatus: ContactEmailStatus | null;
 }
 

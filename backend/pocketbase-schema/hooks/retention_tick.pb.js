@@ -91,7 +91,7 @@ cronAdd('movexum-retention-tick', '17 3 * * *', () => {
       params: { cut: cutoff(intEnv('MOVEXUM_RETENTION_COMPASS_SECURITY_DAYS', 365, 30, 3650)) }
     },
     {
-      // Webhook-händelser från e-posttjänsten (§ 54): leveranser/studsar per
+      // Webhook-händelser från e-posttjänsten (§ 55): leveranser/studsar per
       // kampanj — statistiken aggregeras på kampanjen, raderna behövs inte längre.
       collection: 'email_events',
       fields: ['created'],

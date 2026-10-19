@@ -11,7 +11,7 @@ const WINDOW_MS = 60 * 1000;
 const MAX_PER_WINDOW = 600;
 
 /**
- * Webhook från Resend (CLAUDE.md § 54.1): leveranser, studsar, klagomål.
+ * Webhook från Resend (CLAUDE.md § 55.1): leveranser, studsar, klagomål.
  * Signaturen (Svix, `RESEND_WEBHOOK_SECRET` på web-appen i Coolify)
  * verifieras INNAN något läses — en oautentiserad POST kan annars spärra
  * godtyckliga adresser. Payloaden är DATA och loggas aldrig rått. Svarar

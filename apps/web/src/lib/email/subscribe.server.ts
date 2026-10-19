@@ -10,7 +10,7 @@ import { emailLinkSecret, signSubscribeToken, verifySubscribeToken, type Subscri
 import { isSuppressed } from './suppression';
 
 /**
- * Nyhetsbrev med dubbel opt-in (CLAUDE.md § 54.9). Ingen rad skapas förrän
+ * Nyhetsbrev med dubbel opt-in (CLAUDE.md § 55.9). Ingen rad skapas förrän
  * personen klickat i bekräftelsemejlet — adressen ligger bara i den
  * signerade länken (48 h). Vid bekräftelse skapas/uppdateras kontakten med
  * `gdpr_consent` + `newsletter_consent` (källa `double_opt_in`). En spärrad
@@ -57,7 +57,7 @@ export async function startSubscription(input: {
   if (!token) return { ok: false, error: 'Tjänsten är inte konfigurerad (länkhemlighet saknas).' };
   const confirmUrl = `${input.baseUrl.replace(/\/+$/, '')}/e/bekrafta?k=${token}`;
   const from = resolveSender(process.env, 'invite');
-  // Samma renderare som alla andra utskick (§ 54): enkelt textmejl, ingen
+  // Samma renderare som alla andra utskick (§ 55): enkelt textmejl, ingen
   // klickspårning, inga avregistreringslänkar (ingen prenumeration finns än).
   const rendered = renderCampaignEmail({
     subject: `Bekräfta din prenumeration på ${tenant.name}s nyhetsbrev`,

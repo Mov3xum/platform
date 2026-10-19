@@ -6,7 +6,7 @@ import { dispatchCampaign } from '@/lib/email/campaign-dispatch';
 import { isAttendedStage, isInviteStage } from '@platform/shared';
 import { toSurvey, type Survey } from './store';
 
-// Utskick av utvärderingen till eventets deltagare (CLAUDE.md § 47.5 / § 54).
+// Utskick av utvärderingen till eventets deltagare (CLAUDE.md § 47.5 / § 55).
 // Delad kärna för BÅDE staffs "Skicka nu" och cron-vägen
 // (/api/internal/send-survey). Sedan konsolideringen 2026-10 är utskicket en
 // KAMPANJ från mallen "Tack och utvärdering" med mottagargruppen "närvarande"

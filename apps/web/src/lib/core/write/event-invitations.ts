@@ -10,7 +10,7 @@ import type { Actor, WriteResult } from './types';
 import { fail, ok } from './types';
 
 /**
- * Inbjudningar till event (CLAUDE.md § 53.5 / § 54) — det som är kvar i
+ * Inbjudningar till event (CLAUDE.md § 53.5 / § 55) — det som är kvar i
  * skrivlagret efter konsolideringen 2026-10: svarstoken (hash + generering)
  * och borttagning av en inbjudan. Själva inbjudandet, påminnelser och
  * uppföljning är KAMPANJER (`lib/email/campaign-dispatch.ts`): en inbjudan

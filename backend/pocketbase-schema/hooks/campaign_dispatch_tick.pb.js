@@ -1,6 +1,6 @@
 /// <reference path="../pb_data/types.d.ts" />
 
-// Kampanjutskick-ticker (CLAUDE.md § 54.4). Speglar survey_dispatch_tick:
+// Kampanjutskick-ticker (CLAUDE.md § 55.4). Speglar survey_dispatch_tick:
 // varje minut hittas `email_campaigns` med status `scheduled` och
 // `send_at <= now`, raden låses provisoriskt (send_at + 1h) och POSTas till
 // `/api/internal/send-campaign`, som gör själva utskicket (Resend) och

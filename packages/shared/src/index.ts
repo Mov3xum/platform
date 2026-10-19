@@ -1318,7 +1318,7 @@ export interface IncubatorEvent {
   planned_participants?: number;
   completed_at?: string;
   outcome_verdict?: string;
-  /** Svarssidans inställningar (migration 1700000201, § 54.11): gästfrågor, maxantal, påminnelser. */
+  /** Svarssidans inställningar (migration 1700000203, § 55.11): gästfrågor, maxantal, påminnelser. */
   rsvp_settings?: unknown;
   reminder_unanswered_sent_at?: string;
   reminder_confirmed_sent_at?: string;
@@ -1352,12 +1352,12 @@ export interface EventSignup {
   invite_sent_at?: string;
   invite_opened_at?: string;
   responded_at?: string;
-  /** Gästens svar på svarssidan (migration 1700000201, § 54.11). */
+  /** Gästens svar på svarssidan (migration 1700000203, § 55.11). */
   plus_ones?: number;
   diet?: string;
   custom_answer?: string;
   checked_in_at?: string;
-  /** Kampanjen inbjudan skickades från (§ 54). */
+  /** Kampanjen inbjudan skickades från (§ 55). */
   campaign?: string;
   created: string;
   updated: string;

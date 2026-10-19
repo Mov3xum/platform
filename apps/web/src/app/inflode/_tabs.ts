@@ -5,7 +5,7 @@ import type { PageTab } from '@/components/PageShell';
  * **Analys**, **Leads**, **Startupkompassen** (intag-moduler: formulär, quiz och
  * AI-chattar för startups och inflöde), **Events** (eventflöde, deltagare och
  * tratt, § 53), **Inbjudningar** (inbjudningar till event med svar, § 53.5),
- * **Kampanjer** (e-postutskick med mallar, spärrlista och statistik, § 54),
+ * **Kampanjer** (e-postutskick med mallar, spärrlista och statistik, § 55),
  * **Utvärdering** (digitala enkäter, § 47) och **Community** (alumni och
  * nätverk). Leads-fliken kan visa en badge med antal leads kvar i tratten.
  *

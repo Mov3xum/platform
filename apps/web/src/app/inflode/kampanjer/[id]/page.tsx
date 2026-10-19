@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic';
 const MANAGE_ROLES = ['admin', 'incubator_lead', 'coach'] as const;
 
 /**
- * En kampanj (CLAUDE.md § 54): utkast och schemalagda öppnas i editorn med
+ * En kampanj (CLAUDE.md § 55): utkast och schemalagda öppnas i editorn med
  * förhandsgranskning; skickade visar statistiken (levererat, studsar,
  * klagomål, klick per länk, avregistreringar) med mottagarna per status —
  * namn och organisation, aldrig e-postadresser (bara hashar lagras).

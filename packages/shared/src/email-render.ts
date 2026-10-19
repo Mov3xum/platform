@@ -1,10 +1,10 @@
-// Rendering av kampanjmejl (CLAUDE.md § 54) — ren, IO-fri.
+// Rendering av kampanjmejl (CLAUDE.md § 55) — ren, IO-fri.
 //
 // Blocken (email-campaigns.ts) blir tabellbaserad HTML som fungerar i Gmail,
 // Outlook och Apple Mail, plus en ren textversion. Modellen är enkel med
 // avsikt: inga webbtypsnitt (Gmail/Outlook laddar dem inte), inga externa
 // stilmallar, inga skript, inga spårningspixlar. Varje länk kan slussas genom
-// `trackLink` (klickspårning på egen domän, § 54.6) — avregistrering och
+// `trackLink` (klickspårning på egen domän, § 55.6) — avregistrering och
 // preferenscentret spåras aldrig.
 //
 // All text escapas FÖRE insättning (§ 10.3). Platshållare fylls i med

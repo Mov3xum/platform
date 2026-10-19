@@ -31,7 +31,7 @@ const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach'];
 
 const VALID_EVENT_STATUS: EventStatus[] = ['planned', 'live', 'completed', 'cancelled'];
 
-/** Svarssidans inställningar ur formuläret (§ 54.11) — normaliseras i @platform/shared. */
+/** Svarssidans inställningar ur formuläret (§ 55.11) — normaliseras i @platform/shared. */
 function rsvpSettingsFromForm(formData: FormData) {
   return normalizeEventRsvpSettings({
     plus_ones_max: formData.get('rsvp_plus_ones_max'),

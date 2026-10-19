@@ -18,7 +18,7 @@ const FAIL_TEXT: Record<string, string> = {
 };
 
 /**
- * Incheckning vid dörren (§ 54.11). Personalen skannar gästens QR-kod med
+ * Incheckning vid dörren (§ 55.11). Personalen skannar gästens QR-kod med
  * telefonen → den här inloggade sidan checkar in gästen direkt och visar
  * namn, medföljande och ev. kost. Utan token visas en kort instruktion.
  */

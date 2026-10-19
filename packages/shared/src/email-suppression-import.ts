@@ -1,4 +1,4 @@
-// Import av spärrlista vid byte från Mailchimp (CLAUDE.md § 54.2) — ren,
+// Import av spärrlista vid byte från Mailchimp (CLAUDE.md § 55.2) — ren,
 // IO-fri. Mailchimp exporterar listorna "unsubscribed" och "cleaned" som
 // separata CSV:er med kolumnen "Email Address" och tidsstämpeln
 // UNSUB_TIME respektive CLEANED_TIME. Avregistrerade, studsade och klagande

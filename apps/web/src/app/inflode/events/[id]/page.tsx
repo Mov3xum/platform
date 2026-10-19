@@ -123,7 +123,7 @@ export default async function EventDetailPage({
   }));
   const maxCount = Math.max(1, ...funnelData.map((f) => f.count));
 
-  // Svarssidans inställningar (§ 54.11): maxantal, väntelista, gästfrågor, påminnelser.
+  // Svarssidans inställningar (§ 55.11): maxantal, väntelista, gästfrågor, påminnelser.
   const rsvp = normalizeEventRsvpSettings(event.rsvp_settings);
   const seatsTaken = eventSeatsTaken(signups);
   const waitlisted = signups.filter((s) => s.stage === 'waitlist').length;
@@ -279,7 +279,7 @@ export default async function EventDetailPage({
         </div>
       </Card>
 
-      {/* ── Svarssida, påminnelser & incheckning (§ 54.11) ── */}
+      {/* ── Svarssida, påminnelser & incheckning (§ 55.11) ── */}
       <Card style={{ padding: 16, marginTop: 12 }}>
         <div className="mx-flex mx-items-c" style={{ flexWrap: 'wrap', gap: 24 }}>
           <Meta

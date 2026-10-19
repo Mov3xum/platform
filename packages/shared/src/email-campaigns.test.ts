@@ -119,7 +119,7 @@ test('normalizeEmailDesign + audience tolererar skräp', () => {
   assert.equal(audienceHasRecipients({ list: '', keys: [], event_group: null }), false);
 });
 
-test('eventGroupMatches: deltagarlistans steg per mottagargrupp (§ 54.3)', () => {
+test('eventGroupMatches: deltagarlistans steg per mottagargrupp (§ 55.3)', () => {
   const invitedUnsent = { stage: 'invited', invite_sent_at: '' };
   const invitedSent = { stage: 'invited', invite_sent_at: '2026-10-01 10:00:00.000Z' };
   assert.equal(eventGroupMatches('unsent', invitedUnsent), true);

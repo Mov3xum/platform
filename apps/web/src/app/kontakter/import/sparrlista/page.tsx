@@ -8,7 +8,7 @@ import { SuppressionImportForm } from './SuppressionImportForm';
 export const dynamic = 'force-dynamic';
 
 /**
- * Import av spärrlista (§ 54.2) — Mailchimps "unsubscribed"/"cleaned"-export
+ * Import av spärrlista (§ 55.2) — Mailchimps "unsubscribed"/"cleaned"-export
  * (eller valfri CSV/Excel med en e-postkolumn). Adresserna hashas och
  * spärras; motsvarande kontakter får e-poststatus och opt-out. Den som
  * avregistrerat sig i det gamla verktyget får aldrig ett mejl från det nya.

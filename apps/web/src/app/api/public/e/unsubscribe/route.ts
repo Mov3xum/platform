@@ -55,7 +55,7 @@ export async function POST(req: Request) {
     console.error('[unsubscribe] superuser unavailable');
     return oneClick ? NextResponse.json({ error: 'Försök igen senare.' }, { status: 503 }) : back('fel=spara');
   }
-  // `alla=1` (kampanjmejl, § 54.9): en-klicksavregistrering stänger av ALLA
+  // `alla=1` (kampanjmejl, § 55.9): en-klicksavregistrering stänger av ALLA
   // utskick — mottagaren förväntar sig att sluta få mejl. Utan flaggan
   // (inbjudningar, § 53.5) bara eventkategorin.
   const all = new URL(req.url).searchParams.get('alla') === '1' || form?.get('alla') === '1';

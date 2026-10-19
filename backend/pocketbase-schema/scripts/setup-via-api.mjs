@@ -5184,7 +5184,7 @@ await patchCollection('annual_wheel_items', [
 // Migration 1700000198: när mottagaren öppnade sin svarslänk (§ 53.5).
 await patchCollection('event_signups', [{ name: 'invite_opened_at', type: 'date', required: false }]);
 
-// Migration 1700000201: e-postkampanjer (§ 54) — kampanjer, mottagarrader,
+// Migration 1700000203: e-postkampanjer (§ 55) — kampanjer, mottagarrader,
 // spärrlista och webhook-händelser + fält på contacts/event_signups/
 // incubator_events. list/view staff/observer; kampanjer och spärrar pinnar
 // tenant + skapare vid create (§ 21.8); mottagarrader och händelser skrivs
@@ -5339,7 +5339,7 @@ await ensureCollection({
     { name: 'newsletter_consent_at', type: 'date', required: false },
     { name: 'newsletter_consent_source', type: 'text', required: false, max: 40 }
   ]);
-  // patchCollection ERSÄTTER select-värdena — hela listan (+ waitlist, § 54.11).
+  // patchCollection ERSÄTTER select-värdena — hela listan (+ waitlist, § 55.11).
   await patchCollection('event_signups', [
     { name: 'plus_ones', type: 'number', required: false, min: 0, max: 10, onlyInt: true },
     { name: 'diet', type: 'text', required: false, max: 300 },

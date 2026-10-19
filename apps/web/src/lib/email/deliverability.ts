@@ -4,7 +4,7 @@ import { resolveReplyTo, resolveSender, senderAddress } from '@/lib/mail-sender'
 import { isEmailConfigured, resendKeyLooksValid } from '@/lib/email';
 
 /**
- * Driftstatus för leveransbarhet (CLAUDE.md § 54.10) — det som avgör om
+ * Driftstatus för leveransbarhet (CLAUDE.md § 55.10) — det som avgör om
  * mejlen når inkorgen: verifierad avsändardomän i Resend (SPF/DKIM), DMARC-
  * post i DNS, svarsadress, webhook-hemlighet och klicklänkarnas hemlighet.
  * Läser Resends `/domains` med API-nyckeln (bara status, inga värden som

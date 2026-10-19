@@ -13,7 +13,7 @@ const ERROR_TEXT: Record<string, string> = {
 };
 
 /**
- * Preferenscentret (CLAUDE.md § 54.9) — publik, OINLOGGAD sida där mottagaren
+ * Preferenscentret (CLAUDE.md § 55.9) — publik, OINLOGGAD sida där mottagaren
  * väljer vilka utskick hen vill ha från Movexum. GET visar bara valen; POST
  * sparar. Visar förnamn och kategorier — aldrig e-postadressen.
  */

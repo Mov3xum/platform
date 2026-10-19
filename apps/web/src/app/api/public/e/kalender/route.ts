@@ -15,7 +15,7 @@ const WINDOW_MS = 60 * 1000;
 const MAX_PER_WINDOW = 60;
 
 /**
- * Kalenderfil (.ics) för ett event (CLAUDE.md § 54.11) — "Lägg i kalendern"
+ * Kalenderfil (.ics) för ett event (CLAUDE.md § 55.11) — "Lägg i kalendern"
  * i inbjudan och på svarssidan. Nås med svarslänkens token (`t`) eller den
  * signerade eventnyckeln ur mejlet (`e`); utan giltig nyckel 404. Innehåller
  * bara eventets namn, tid, plats och beskrivning — inga personuppgifter.

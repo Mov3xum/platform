@@ -19,7 +19,7 @@ import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { isRuleDenialStatus } from '@/lib/read-scaling';
 
 /**
- * Läsvägar för e-postkampanjer (CLAUDE.md § 54). Läser med användarens token
+ * Läsvägar för e-postkampanjer (CLAUDE.md § 55). Läser med användarens token
  * (RLS § 21) och faller tillbaka på superusern BARA vid PB v0.23.4:s tysta
  * regel-nekande (400/403/404) — aldrig på ett tomt resultat (en tom lista är
  * ett giltigt svar). Mottagarrader bär aldrig adresser, bara hash.
@@ -30,7 +30,7 @@ export const CAMPAIGN_RECIPIENTS = 'email_campaign_recipients';
 export const EMAIL_EVENTS = 'email_events';
 
 export const CAMPAIGN_MIGRATION_HINT =
-  'PocketBase saknar kampanjkollektionerna — kör migration 1700000201 (eller workflowen "Sync PocketBase").';
+  'PocketBase saknar kampanjkollektionerna — kör migration 1700000203 (eller workflowen "Sync PocketBase").';
 
 export interface CampaignRow {
   id: string;

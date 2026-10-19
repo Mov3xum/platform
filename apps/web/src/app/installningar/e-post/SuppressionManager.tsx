@@ -8,7 +8,7 @@ import { EMAIL_SUPPRESSION_REASON_LABELS, formatStockholmDateTime } from '@platf
 
 const idle: CampaignActionState = {};
 
-/** Spärrlistan (§ 54.1): maskerade adresser, orsak, källa; manuell spärr; borttagning för ledningen. */
+/** Spärrlistan (§ 55.1): maskerade adresser, orsak, källa; manuell spärr; borttagning för ledningen. */
 export function SuppressionManager({ rows, canDelete }: { rows: SuppressionRow[]; canDelete: boolean }) {
   const [state, action, pending] = useActionState(addSuppressionAction, idle);
   const [delState, setDelState] = useState<CampaignActionState | null>(null);

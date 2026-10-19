@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 /**
- * Verifiering av Resends webhook-signatur (CLAUDE.md § 54.1). Resend signerar
+ * Verifiering av Resends webhook-signatur (CLAUDE.md § 55.1). Resend signerar
  * med Svix: huvudena `svix-id`, `svix-timestamp`, `svix-signature`
  * ("v1,<base64>" — flera signaturer separerade med blanksteg vid nyckel-
  * rotation) och hemligheten `whsec_<base64>`. Signerat innehåll =
