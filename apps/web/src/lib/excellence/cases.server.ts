@@ -30,8 +30,8 @@ import {
 } from './cases';
 
 // Ärenden i Bedömning excellens (CLAUDE.md § 51.10). Varje körning,
-// omräkning och "hämta mer" sparar det senaste underlaget (utan verklig
-// huvudmans namn) och de manuella svaren på ärendet → ett påbörjat ärende
+// omräkning och "hämta mer" sparar det senaste underlaget (ägarbild med
+// namn, aldrig personnummer — § 51.11) och de manuella svaren på ärendet → ett påbörjat ärende
 // fortsätts utan nya debiterade registeranrop. Reads med användarens token
 // (RLS: staff/observer), med superuser-reserv vid PB v0.23.4:s tysta
 // regel-nekande och behörigheten prövad i koden (§ 21.3, samma mönster som

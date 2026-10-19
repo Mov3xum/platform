@@ -1365,7 +1365,7 @@ och kan renderas av samma UI oavsett leverantör.
 | Brevo     | FR (EU)   | Minimal       | Ingen AI. Endast aggregerade metrics synkas — inga e-postadresser. |
 | Howspace  | FI (EU)   | Begränsad     | AI-insights faller under art. 50 (transparenskrav). Vi synkar bara aggregerad statistik. |
 | Allabolag | SE        | Minimal       | Publik bolagsdata (org-nr, bolagsform, kommun, årsredovisningar). Ingen AI, inga personuppgifter för aktiebolag. För enskild firma exkluderas org-nr från AI-prompts (§ 9.3). **Status: implemented (stub)** — handler-skelettet skriver direkt till `startups`-registerfält och `startup_financials` (idempotent via unique-index `(startup, year)`). Produktion kräver leverantörsval via `MOVEXUM_ALLABOLAG_PROVIDER`-env (`mock`/`bolagsverket`/`roaring`/`creditsafe`); utan satt env returnerar handler ett tydligt fel. |
-| Roaring   | SE (EU)   | Begränsad     | **Implementerad (2026-09, § 11.8).** Grunddata, årsredovisningsposter (omsättning, anställda, **balansomslutning, eget kapital**), koncernstruktur och verklig huvudman. Ingen AI. Verklig huvudman är personuppgifter hos leverantören — vi läser dem transient och lagrar BARA andel/kontrollintervall + kontrollgrund (fast vokabulär) per person, aldrig namn/personnummer/födelsedatum. De anonyma raderna är **pseudonymiserade personuppgifter** (ett fåmansbolag med en ägare på 75–100 % är indirekt identifierbart mot det publika registret), inte "inga personuppgifter" — DPIA-bedömning + DPA med Roaring AB och kontroll att licensen täcker ändamålet (åtkomsten till registret över verkliga huvudmän är begränsad efter EU-domstolens dom C-37/20) krävs före produktion. |
+| Roaring   | SE (EU)   | Begränsad     | **Implementerad (2026-09, § 11.8).** Grunddata (inkl. SNI-koder), årsredovisningsposter (omsättning, anställda, **balansomslutning, eget kapital**), koncernstruktur, verklig huvudman och — bara vid uppslag — ägarnas andra bolag (verklig huvudman per person, § 51.11). Ingen AI. Verklig huvudman är personuppgifter hos leverantören — vi läser dem transient och lagrar BARA andel/kontrollintervall + kontrollgrund (fast vokabulär) per person, aldrig namn/personnummer/födelsedatum. De anonyma raderna är **pseudonymiserade personuppgifter** (ett fåmansbolag med en ägare på 75–100 % är indirekt identifierbart mot det publika registret), inte "inga personuppgifter" — DPIA-bedömning + DPA med Roaring AB och kontroll att licensen täcker ändamålet (åtkomsten till registret över verkliga huvudmän är begränsad efter EU-domstolens dom C-37/20) krävs före produktion. |
 | Bolagsverket | SE (myndighet) | Minimal | **Implementerad (2026-09, § 11.8).** API för värdefulla datamängder (kostnadsfritt, OAuth2): officiellt namn, bolagsform, registreringsdatum, SNI, status, säte. Ingen ägarbild, inga bokslutsposter. Primärkälla för grunddata. |
 | Breakit   | SE        | Minimal       | Provider-stub för framtida Premium-paywall. **Status: stub** — själva morgonagenten (`ai_breakit_morning`) använder den publika RSS-feeden via `web.ts`-whitelisten och behöver ingen credential. Premium-aktivering kräver kommersiellt avtal med Breakit + cookie-/session-stöd i `web.ts`. |
 
@@ -1601,7 +1601,8 @@ org-nr" och "Synka från <leverantör>" på bolagskortet (där knappen först
 öppnar valet; inget anropas förrän det bekräftats). Delarna är
 `basic` (grunddata), `financials` (bokslut inkl. beslutad utdelning, nedan),
 `group_structure` (koncernstruktur) och `beneficial_owners` (verklig
-huvudman); varje del är ett
+huvudman), plus den uppslagsbara `owner_engagements` (ägarnas andra bolag —
+bara Testa mot org-nr/Bedömning excellens, aldrig synk, § 51.11); varje del är ett
 eget API-anrop hos leverantören och endpointen visas vid kryssrutan
 (`partEndpoints`, env-medveten). Källa av sanning: den rena, enhetstestade
 `lib/integrations/company-registry/parts.ts`. Varje provider deklarerar
@@ -1724,14 +1725,15 @@ en synk anropade leverantören för. Speglat i `setup-via-api.mjs`
 (`REQUIRED_APP_FIELDS`); sparningen läser tillbaka raden och varnar vid
 schema-drift (§ 24.4). Ingen ny dataväg, ingen PII; riskklass oförändrad.
 
-**GDPR § 5 / § 9.3.** Fysiska personer i ägarbilden lagras UTAN namn,
-personnummer och födelsedatum — bara `owner_kind='person'` + andel/intervall
-+ kontrollgrund ur en **fast vokabulär**. **Namnet visas ändå på skärmen
-(2026-10-13, § 51.7):** `RegistryOwnershipEntry.person_name` bär huvudmannens
-för-/efternamn TRANSIENT från hämtningen till skärmen ("Testa mot org-nr" och
-Bedömning excellens) så personalen vet vem huvudmannen är; `writer.ts` bygger
-raden utan fältet, så det når aldrig `startup_ownership`, PDF:n, historiken
-eller AI. Personnummer, födelsedatum och adress läses aldrig (`controlBasisCategory`: shares/
+**GDPR § 5 / § 9.3.** Fysiska personer i `startup_ownership` lagras UTAN
+namn, personnummer och födelsedatum — bara `owner_kind='person'` +
+andel/intervall + kontrollgrund ur en **fast vokabulär**. **Namnet följer
+med i uppslag och bedömning (§ 51.7, utökat i § 51.11):**
+`RegistryOwnershipEntry.person_name` bär huvudmannens för-/efternamn till
+"Testa mot org-nr" och Bedömning excellens (skärm, PDF, ärende, körningens
+underlag); `writer.ts` bygger raden utan fältet, så det når aldrig
+`startup_ownership` eller AI. Personnummer används bara inne i Roaring-
+handlern för sökningen av ägarnas andra bolag (§ 51.11) och lagras aldrig. Personnummer, födelsedatum och adress läses aldrig (`controlBasisCategory`: shares/
 votes/board/agreement/other — leverantörens fritext kan bära namn och når
 aldrig databasen). En ägarrad utan giltigt org-nr för **juridisk** person
 (saknat, ogiltigt eller personnummer-derivat = enskild firma) behandlas
@@ -8716,10 +8718,11 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
   (`ExcellenceAssessment.cost`, § 11.8 "Kostnad per anrop"). Priserna anges
   av ledningen per leverantör — saknas de visas "pris ej angivet", aldrig en
   gissad siffra.
-- **"Okänt" ska gå att förklara (2026-10-12).** I registerläget visas
-  leverantörens svar per bolag SYNLIGT överst (inte hopfällt): vilken
-  sökväg som svarade, 404 = inga uppgifter, 403 = inte i paketet, vilka
-  fältnycklar svaret bar. `noRecordParts` (§ 11.8) gör att ett nystartat
+- **"Okänt" ska gå att förklara (2026-10-12, placering ändrad 2026-10-19
+  § 51.12).** I registerläget visas leverantörens svar per bolag under
+  **Underlag från registret** (hopfällt sist i rapporten, med en synlig
+  sammanfattningsrad överst som länkar dit): vilken sökväg som svarade,
+  404 = inga uppgifter, 403 = inte i paketet, vilka fältnycklar svaret bar. `noRecordParts` (§ 11.8) gör att ett nystartat
   bolag utan bokslut får "Inget bokslut i registret (nystartat?)" i
   tröskelraden och att fristående-frågan inte fastnar på "koncernstrukturen
   hämtades inte" när registret svarat "inga rader". Ägartabellen har
@@ -8903,11 +8906,15 @@ en separat panel "Manuella svar" med dropdowns för samma punkter — två listo
 in. Nu är det **EN rapport** (`AssessmentReport.tsx`, ersätter
 `AssessmentView` + `ManualFactsPanel`) där varje punkt ändras på platsen:
 
-- **Punkter (2026-10-16):** svaret sitter till HÖGER i raden — en väljare
-  med uttydda alternativ ("Nej — inte börsnoterat" / "Ja — aktierna är
-  upptagna till handel" / "Ej besvarad" resp. "Registret gäller") och, när
-  ett svar valts, ett motiveringsfält under. Ingen utfällning under punkten
-  och ingen "Ditt svar"-rad; utfallschippen till vänster är bara visning.
+- **Punkter (2026-10-16, justerat 2026-10-19 § 51.12):** svaret sitter till
+  HÖGER i raden — en väljare med uttydda alternativ ("Nej — inte
+  börsnoterat" / "Ja — aktierna är upptagna till handel" / "Ej besvarad"
+  resp. "Registret gäller") och, när ett svar valts, ett motiveringsfält
+  under. Väljaren visas direkt för punkter som är OKÄNT eller redan manuellt
+  besvarade; en punkt registret/plattformen avgjort visar bara länken
+  **Ändra**, som tar fram väljaren på samma plats. Ingen utfällning under
+  punkten och ingen "Ditt svar"-rad; utfallschippen till vänster är bara
+  visning och alltid synlig.
   Grundarpunkterna har länken "Ändra grundare". Gäller
   grundförutsättningarna per bolag (startup + anknutna med org-nr),
   "Fristående företag?", Vinnovas coachpunkter (inte marknadsredo,
@@ -8937,8 +8944,9 @@ in. Nu är det **EN rapport** (`AssessmentReport.tsx`, ersätter
   "Behövs: …" (det står under Saknat underlag).
 - **Inga instruktioner i formuläret (2026-10-16):** alla förklaringar —
   datadelar, kostnad, hur punkter besvaras, uppskattningar, aktieboken,
-  komplettering, var bedömningen sparas, PII — står i den hopfällda guiden
-  **"Så funkar det"** överst (`HowItWorks.tsx`). Formulär, rapport och
+  komplettering, var bedömningen sparas, PII — står i guiden **"Så funkar
+  det"** (`HowItWorks.tsx`; sedan 2026-10-19 en knapp i sidhuvudet som
+  öppnar guiden som överlägg, § 51.12). Formulär, rapport och
   kompletteringsrutan bär bara rubriker, etiketter och status. Ny instruktion
   ⇒ lägg den i guiden, inte som textstycke i rapporten.
 - Ingen ny dataväg, inga nya fält; samma skrivväg, samma personnummer-
@@ -9093,6 +9101,8 @@ kollega) eller till **bolaget**, som båda svarar direkt i systemet:
   rader, fortsatt aldrig `name`/`org_nr`). Personnummer, födelsedatum och
   adress läses aldrig (`normalize.test.ts`). Rättslig grund oförändrad
   (berättigat intresse, § 11.3 — DPA/licens med Roaring krävs).
+  **Ersatt av § 51.11 (2026-10-19):** namnet är inte längre transient i
+  bedömningen — det följer med till PDF:n, ärendet och körningens underlag.
 - **Systerbolag** ingår i koncernkartan sedan § 51.5 (`deriveGroupCompanies`,
   rollen "Systerbolag / annat bolag i koncernen").
 - **Hämta mer per bolag.** Koncernkartan har kolumnen **Hämta mer** i
@@ -9249,8 +9259,110 @@ fanns ingen överblick över vilka bolag som var under bedömning.
   `/aktivitet` med länk till ärendet. Ett klarmarkerat ärende kan öppnas
   och läsas; arbete i det sparas utan att statusen ändras.
 - Riskklass n/a (ingen AI). GDPR § 5: samma uppgifter som körningen redan
-  visade, lagrade utan transienta personnamn; `cascadeDelete` på
-  tenant/startup.
+  visade (ägarbild med namn, § 51.11 — aldrig personnummer);
+  `cascadeDelete` på tenant/startup.
+
+### 51.11 Ägarnas andra bolag & SNI-koder (2026-10-19)
+
+**Behov.** Koncernstrukturen visar bara bolag som hänger ihop via bolag. En
+ägare (fysisk person) kan äga andra bolag utanför koncernen — och verkar de
+på samma marknad som startup-bolaget är de anknutna via personen (bilaga I
+art. 3.3 fjärde stycket: företag med en kontrollrelation genom en fysisk
+person eller personer som agerar gemensamt är anknutna om de verkar på samma
+relevanta marknad eller angränsande marknader). Då ska båda bolagen klara
+kriterierna. Plattformen mäter "samma marknad" med **SNI-koden**.
+
+- **Ny datadel `owner_engagements` — "Ägarnas andra bolag"** (`parts.ts`,
+  `writes: 'none'`, `lookupOnly`, `requires: ['basic','beneficial_owners']`
+  som `parseRegistryParts` och kryssrutorna, `toggleRegistryPart`, lägger
+  till automatiskt). Bara vid uppslag (Testa mot org-nr, Bedömning
+  excellens) — aldrig vid synk till bolagskortet (`syncableParts`; handlern
+  deklarerar den som `lookupOnlyParts`, `handler.parts` är oförändrat).
+  "Hämta mer"/"Lägg till koncernbolag" erbjuder den inte (bara
+  startup-bolagets ägare söks).
+- **Roaring-flödet** (`providers/roaring/handler.ts`,
+  `fetchOwnerEngagements`): ur bolagets verklig huvudman-svar läses varje
+  fysisk huvudmans namn, andel och **personnummer**
+  (`roaringBeneficialOwnerPersons`, kandidatlista `PNR_PATHS`, Luhn-
+  validerat i `normalizePersonalNumber`). Personnumret används ENBART som
+  parameter i anropet `GET /se/beneficialowner/2.1/person/{personnummer}`
+  (env `ROARING_PERSON_ENGAGEMENT_PATH`, kommaseparerad kandidatlista, reserv
+  `/1.0/person`) och lämnar aldrig handlern — inte i `RegistryCompany`, noter,
+  loggar, underlag eller databas (fixturtester). **Formen bekräftad mot
+  Roarings OpenAPI-spec 2026-10-19:** bolagssvarets `person` bär
+  `firstNames[]` (lista), `middleName`, `surName`, `personalNumber`,
+  `coordinationNumber`, `birthDate` (läses aldrig); personsvaret är
+  `records[]` med en post per bolag, `association{companyId, companyName,
+  type}` — **utan andel och kontrollgrund** (personen är verklig huvudman,
+  > 25 % eller kontroll; tabellen visar "verklig huvudman (> 25 %)").
+  Tolkningen är ändå tolerant mot äldre/andra former
+  (`normalizeRoaringPersonEngagements`); enskilda firmor hoppas över. Varje hittat bolag får **grunddata** (overview
+  — SNI, registreringsdatum, status, form). Tak: 8 personer
+  (`ROARING_MAX_ENGAGEMENT_PERSONS`), 25 bolag
+  (`ROARING_MAX_ENGAGEMENT_COMPANIES`). Saknas personnumret i svaret noteras
+  postens FORM (nycklar, aldrig värden) — status `no_id`.
+- **Felsökning mot live (2026-10-19):** varje personuppslag noteras per
+  huvudman med format och utfall ("12 siffror → HTTP 400: … ; 10 siffror →
+  HTTP 200") — formatet i sökvägen är ospecificerat, så ett 400 provas om med
+  det andra formatet (12 ⇄ 10 siffror, `personalNumberVariants`). Roarings
+  eget felbesked (`{ error, message, attributes[] }`) följer med i
+  noteringen via `describeRoaringError` (ren, enhetstestad): attributens
+  VÄRDEN visas aldrig, siffersekvenser och e-post maskeras. Noteringarna
+  syns på sidan ("Svar från … per bolag" / "Noteringar från tolkningen") och
+  loggas som hopfälld grupp i webbläsarens konsol
+  (`company-registry/console-diagnostics.ts`, `[bolagsregister] …`) — samma
+  innehåll som sidan, inget personnummer.
+- **Kostnad:** ett anrop per huvudman (Roaring "Verklig Huvudman 2.1 –
+  Person", 50 credits i listpriset) + grunddata (10) per hittat bolag. Det
+  är inte "ett anrop per bolag", så handlern rapporterar faktiska anrop i
+  `RegistryCompany.extraCalls` och `runRegistryLookup` räknar kostnaden med
+  `addRegistryCalls` (ren, enhetstestad). Kryssrutan visar priset "per
+  huvudman, plus grunddata per hittat bolag" (`REGISTRY_PART_META.costUnit`);
+  prisformuläret har en egen rad (`ROARING_CREDITS_OWNER_ENGAGEMENTS`), men
+  "full hämtning per bolag" räknar bara synkbara delar.
+- **SNI-koder hämtas och visas.** `normalizeRoaringSni` läser huvudsaklig kod
+  (`industryCode`/`industryText`) och ev. listor (`industries[]` m.fl.,
+  objekt eller strängar), släpper "00000". `RegistryCompany.sni` →
+  `ScreeningBasic.sni`; visas per bolag i rapporten (rad under rubriken +
+  kolumn i koncernkartan), i PDF:n och i "Testa mot org-nr". Bara när
+  grunddata hämtades (`restrictToParts`).
+- **Regelmotorn** (`excellence-screening.ts`, rena + enhetstestade
+  `compareSni`/`classifyOwnerEngagements`, lager 4 i `deriveGroupCompanies`):
+  samma SNI-kod (fem siffror) ⇒ **anknutet** — bolaget prövas mot
+  grundförutsättningarna (grunddata ur engagemangsuppslaget räcker; bokslut
+  hämtas automatiskt för anknutna, `partsForRelated`), räknas in i
+  tröskelvärdet och de minimis för "ett enda företag", och gör startup-
+  bolaget icke-fristående. Samma SNI-grupp (tre första siffrorna) eller
+  saknad kod ⇒ **oklart** (fristående blir okänt med "avgör marknaden"),
+  annan bransch ⇒ räknas inte men listas. Andelen i det andra bolaget
+  styr inte klassningen (personer som agerar gemensamt kan ha
+  kontrollrelation även under 50 %); controllern avgör undantagen.
+- **Controllerns bedömning** per bolag: `screening_facts.person_links`
+  (`{ [orgNr]: { verdict: 'linked' | 'not_linked', note } }`,
+  normaliseras i `excellence-facts.ts`, personnummer saneras) vinner alltid
+  över SNI-jämförelsen. Sätts i rapportens sektion **Ägarnas andra bolag**
+  (en tabell per huvudman: bolag, andel, SNI, bransch-jämförelse, bedömning
+  med väljare + motivering) och sparas med "Spara och räkna om".
+- **Namnrestriktionerna borttagna i bedömningen (beslut 2026-10-19,
+  maintainer):** ägarbilden ska gå att läsa. Huvudmännens och koncernlistans
+  fysiska personers namn (`person_name`) följer nu med till rapporten,
+  PDF:n, ärendet (`screening_cases.context`) och körningen på bolagskortet
+  (`startup_screenings.context`) — `stripTransientNames` är borttagen. En
+  nod i koncernlistan som är en fysisk person/enskild firma behåller namnet
+  (aldrig org-nr). **Oförändrat:** personnummer, födelsedatum och adress
+  lagras/visas aldrig; `startup_ownership` (bolagskortets ägarbild) får inga
+  namn (`writer.ts`); AI-kontexten (`buildOwnershipContext`) anonymiserar
+  fortfarande personer; `screening_cases`/`startup_screenings` är
+  denylistade för AI.
+- **GDPR:** ändamål = statsstödskontroll (bilaga I-bedömningen kräver att
+  ägarens övriga bolag prövas); rättslig grund berättigat intresse.
+  Personuppgifterna (namn, vilka bolag en person äger) hämtas på
+  personalens uttryckliga val per bedömning, visas bara för
+  admin/incubator_lead/coach (modulen) och lagras i staff-scopade,
+  AI-denylistade kollektioner. **Före produktion:** DPIA-tillägg för
+  sökning på person (ny behandling — inte i `docs/privacy/` än) och kontroll
+  att Roaring-licensen täcker uppslag av verklig huvudman per person
+  (C-37/20, § 11.3). Riskklass (EU AI Act) n/a — ingen AI.
 
 ### 51.11 En sanning per uppgift — IRL, svar, ärenden och kompletteringar (2026-10-19)
 
@@ -9305,6 +9417,64 @@ bedömd", och bara den allra senaste raden lästes). Bindande sedan dess:
   förfrågan skapas inte — den befintliga returneras
   (`findDuplicateScreeningRequest`, ren + enhetstestad; lås per bolag).
 - Inga nya fält, kollektioner eller migrationer; riskklass n/a (ingen AI).
+
+### 51.12 Lugnare sida — ett huvud, utfallet först, numrerade sektioner (2026-10-19)
+
+**Behov.** Sidan kändes rörig: två huvuden för samma bolag (ärendets +
+rapportens), diagnostik (kostnad, leverantörens svar per bolag, varningar)
+mellan huvudet och utfallet, utfallet i en fyrkolumnig review-tabell, steg 1
+platt och lång, en dropdown på varje punkt och spara-raden ovanpå
+kompletteringsformuläret. Inget är borttaget — allt sitter på en annan plats
+eller visas senare. Beslut av maintainer 2026-10-19: **inga hopfällbara
+bolagsblock** — Ja/Nej/Okänt på varje punkt ska gå att läsa rakt av.
+
+- **Ett huvud** (`AssessmentHeader` i `ExcellenceWorkspace.tsx`, ersätter
+  `CaseHeader` + rapportens `<header>`): bolag, status-chip, org-nr ·
+  bolagsform · kommun · bransch, eyebrow "Färskt från Roaring · tid", senast
+  sparad/klarmarkerad av vem, och ALLA knappar på en rad (Bolagskortet,
+  Visa i Filer, Förhandsgranska/Ladda ned PDF, Hämta på nytt, Klarmarkera).
+  Hämtningsformuläret fälls ut INUTI huvudkortet; ett nytt ärende utan
+  bedömning visar bara formuläret. `caseError`/`fileError` ligger i huvudet.
+- **Utfallet först** (`report/VerdictSummary.tsx`): Statsstöd och Vinnova
+  som två stora chips med sin motivering, räknaren "N ja · N nej · N okänt"
+  och controllerns kommentar (Ändra/Skriv kommentar) i en rad under. Review-
+  tabellen finns kvar bara i PDF:n (Combly-ordningen gäller där).
+- **Hopp-nav + numrerade sektioner** (`report/ReportNav.tsx`,
+  `ReportSection` i `report/shared.tsx`; samma mönster som bolagskortets
+  `SectionNav`): Sammanfattning · 1 Grundförutsättningar · 2 Koncern & ägare
+  · 3 Fristående · 4 Tröskelvärden & de minimis · 5 Vinnova · 6 Excellens ·
+  Saknat underlag · Underlag. Steg-etiketterna (Steg 1–3) är eyebrows över
+  sina sektioner; Combly-ordningen är oförändrad.
+- **Koncern & ägare:** koncernkartan först (översikten), därefter de
+  anknutna bolagens block (ALLA synliga, med ägarbild) och sist ägarnas
+  andra bolag. "Vad registret svarade" är en rad under kartan.
+- **Underlag från registret** (`report/RegistryEvidence.tsx`, `<details>`
+  sist i rapporten, `#underlag`): kostnad, uppslag som inte kunde göras,
+  leverantörens svar per bolag och bokslut per bolag. En synlig
+  **sammanfattningsrad** överst ("Kostnad hos Roaring: 3 bolag = … · 2
+  uppslag kunde inte göras · 14 noteringar · Visa underlag", gul när något
+  saknas) gör att ingenting göms — det ligger bara inte mellan huvudet och
+  utfallet. Konsolloggen (`logRegistryDiagnostics`) är oförändrad.
+- **Begär komplettering inne i Saknat underlag** (`ScreeningRequestComposer`
+  utan eget kort): punkterna kommer därifrån; snabbknapparna ("Skicka allt
+  till coachen/bolaget") syns direkt, det fulla formuläret (välj punkter,
+  kollega, datum, meddelande, förhandsgranskning) bakom "Välj punkter,
+  kollega eller datum själv" — öppet direkt för bolag utanför plattformen
+  (bara kopiera-som-text finns). Spara-raden är därmed sist på sidan.
+- **"Så funkar det"** är en knapp i sidhuvudets åtgärdsrad som öppnar guiden
+  som överlägg (Esc/klick utanför stänger) — samma innehåll, inget i flödet,
+  även på ärendelistan.
+- **Färgdisciplin:** färg betyder utfall. Relation ("Anknutet"/"Partner"),
+  koncernroll, "Angivet manuellt" och "Uppslag gjort" ritas neutralt
+  (`NEUTRAL_TONE`); orange bara för NEJ/fel, gul bara för varningar/oklart;
+  SNI-jämförelsen "samma marknad" är neutral-stark, inte orange.
+- **Kod:** `AssessmentReport.tsx` är bara layouten; byggstenarna bor i
+  `report/` — `shared.tsx` (toner, etiketter, frågor, `CheckRow`,
+  `CheckList`, `EditToggle`, `ReportSection`), `OwnershipTable`,
+  `CompanyBlock`, `GroupMap` (+ hämta mer, täckningsnot, lägg till
+  koncernbolag), `OwnerEngagements`, `ThresholdsTable`, `FoundersTable`,
+  `IrlTable`, `VerdictSummary`, `RegistryEvidence`, `ReportNav`. Ingen ny
+  dataväg, inga nya fält, samma actions och samma skrivväg; riskklass n/a.
 
 ## 52. Bolagskortet — flikar & KTH Innovation Readiness Level (2026-10)
 
@@ -9735,6 +9905,154 @@ svarsöversikten. Migration **1700000197**.
 
 ---
 
+## 54. Studenter & talang — matchning mellan studenter och bolag (2026-10)
+
+### 54.1 Översikt
+
+`/talang` (modul `talang`, titel **Studenter & talang**, "Portfölj"-railen;
+staff/observer) kopplar ihop inkubatorbolagens kompetensbehov med studenter.
+Tre parter, tre ytor:
+
+| Part | Yta | Gör |
+| --- | --- | --- |
+| **Bolaget** (länkad `startup_member`, eller staff via Mitt bolag) | Mitt bolag → **Studenter & talang** (`/min-oversikt/talang`, kort på `/min-oversikt`) | Lägger upp **behov** (exjobb, praktik, deltid, anställning, projekt), skickar till granskning, pausar/avslutar, ser intressen, markerar dialog/match/avböjt + utfall, bläddrar bland sökbara studenter **anonymt** och föreslår ett behov |
+| **Movexum** | `/talang` (Behov · Studenter · Matchningar · Studentsidan) + bolagskortet → Team & nätverk → *Studenter & talang* | **Granskar och publicerar** (bolaget kan aldrig publicera själv), skapar behov åt bolag, föreslår studenter ur den deterministiska rankningen, hanterar studentprofiler, delar den publika länken/QR |
+| **Studenten** (privatperson, inget konto) | Publik sida `/s/<tenant-slug>` (tavla · `behov/<id>` · `registrera` · `logga-in` · `jag`) | Registrerar profil med hashtags, bekräftar e-post via magisk länk, söker publicerade behov, svarar på förslag, redigerar/pausar/förlänger/raderar sin profil |
+
+**Grundregler (bindande):**
+- **Ingen AI rankar, filtrerar eller bedömer studenter.** Rekrytering är
+  högrisk enligt EU AI Act bilaga III p. 4; matchningen är därför
+  **deterministisk** (`rankStudentsForNeed`/`rankNeedsForStudent`/
+  `scoreTalentPair` i `packages/shared/src/talent.ts`, enhetstestad):
+  hashtag-träff viktad med nivå (× `COMPETENCE_LEVEL_WEIGHT`), typ av
+  uppdrag, period, plats/distans — med läsbara skäl per rad. Människor
+  beslutar: Movexum/bolaget föreslår, studenten avgör. `student_profiles`
+  och `talent_interests` är **denylistade** för chattens `query_collection`
+  (`lib/ai/redaction.ts`); `talent_needs` (bolagens annonser) är läsbara.
+- **Bolaget ser studenten anonymt tills studenten själv tar kontakt.**
+  `anonymizeStudent` (lärosäte/program/nivå/hashtags/söker/tillgänglig/
+  ort/om mig — aldrig namn, e-post, LinkedIn). Namn + kontakt visas för
+  ETT bolag först när intresset är `new`/`dialogue`/`matched`
+  (`interestRevealsContact`), dvs. när studenten sökt eller tackat ja.
+- **Movexum granskar före publicering.** `canTransitionNeed`: bolaget går
+  `draft → pending_review → (paused|closed)`; bara staff sätter `published`
+  (RLS låser dessutom `status = "published"`, `published_at`, `reviewed_by`,
+  `review_note` för medlemmar). En textändring på ett publicerat behov går
+  tillbaka till granskning.
+- **Samma hashtag-vokabulär som personalens kompetensprofil** (§ 29.7,
+  `competence_tags` + seed, `TagPicker` i `components/talent/`). Studentens
+  fritext normaliseras till slug; personnummer-mönster avvisas.
+
+### 54.2 Datamodell (migration 1700000201)
+
+- **`talent_needs`**: `tenant`, `startup` (cascade), `title`, `kind`
+  (`exjobb|praktik|deltid|anstallning|projekt` — MÅSTE spegla
+  `TALENT_NEED_KINDS`), `description` (≤ 5000), `tags` (json, slugs ≤ 12),
+  `scope`, `starts_at`/`ends_at`, `compensation`, `compensation_note`,
+  `location`, `work_mode`, `supervisor`, `deadline`, `status`
+  (`draft|pending_review|published|paused|closed`), `anonymous` (dölj
+  bolagsnamnet publikt), `contact_user`, `review_note`, `published_at`,
+  `reviewed_by`, `created_by`. RLS: list/view medlem-scopad på `startup`
+  (§ 21.3); create pinnad (tenant + `created_by`, status bara
+  draft/pending_review, publiceringsfälten `:isset = false`); update staff
+  eller länkad medlem med publiceringsfälten + `startup`/`tenant` låsta;
+  delete staff eller medlem för `draft`.
+- **`student_profiles`**: `tenant`, `first_name`, `last_name`, `email`
+  (unikt per tenant), `university`, `program`, `level`, `graduation_year`,
+  `tags` (json `{tag, level}` ≤ 20), `seeking` (json, kinds),
+  `available_from`, `location`, `remote_ok`, `summary` (≤ 1500),
+  `linkedin_url`, `searchable`, `status` (`pending|active|paused|withdrawn`),
+  `consent_at`, `verified_at`, `last_active_at`, `expires_at`,
+  `access_token_hash` (SHA-256 av engångstoken), `token_expires_at`.
+  RLS: list/view staff/observer-only (bolaget ser BARA kurerade vyer i kod),
+  **create null** (bara servern — studenten har ingen session), update
+  staff, delete ledning. Inga betyg, inga art. 9-fält, inget CV (YAGNI +
+  dataminimering).
+- **`talent_interests`**: `tenant`, `need` (cascade), `student` (cascade),
+  `startup` (denormaliserat för RLS, alltid = need.startup), `status`
+  (`proposed|new|dialogue|matched|declined|withdrawn`), `initiated_by`
+  (`student|company|staff`), `message` (studentens hälsning ≤ 1000),
+  `company_note` (intern), `outcome` (`thesis_completed|
+  internship_completed|hired|not_completed`), `outcome_note`, `outcome_at`,
+  `responded_at`, `status_changed_at`, `changed_by`, `created_by`. Unikt
+  index `(need, student)`. RLS: list/view medlem-scopad; **create null**
+  (servern — publika routen eller skrivlagret efter verifiering); update
+  staff eller länkad medlem med identitetsfält + `message` låsta; delete
+  ledning.
+- Migration **1700000202** backfillar `talang` i `users.enabled_modules`
+  (§ 36.3-läxan). Allt speglas i `setup-via-api.mjs` (defs +
+  `FORCE_CREATE_RULES` för `talent_needs`) och asserteras i
+  `verify-baseline.mjs` (must-exist, `MUST_SCOPE_TO_MEMBER`,
+  `MUST_BE_STAFF_OR_OBSERVER`, `MUST_BE_SERVER_CREATE_ONLY`, AI-denylist).
+
+### 54.3 Flöden och kritiska filer
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/talent.ts` (+ `.test.ts`) | Vokabulär, validering (`validateTalentNeedInput`, `validateStudentProfileInput`), statusmaskiner (`canTransitionNeed`, `canTransitionInterest`), rankning, anonymisering, gallring |
+| `apps/web/src/lib/talent/data.ts` | Enda läsvägen (RLS) + kurerade superuser-vyer för bolaget (`listSearchableStudentsForStartup`, `listInterestsForStartup`) |
+| `apps/web/src/lib/core/write/talent.ts` | Skrivlager för bolag/Movexum: behov (skapa/redigera/status/radera), förslag till student, intressestatus + utfall, studentstatus/radering — RBAC, tenant, audit, notiser |
+| `apps/web/src/lib/talent/students.server.ts` | Studentens egna skrivningar (registrera, logga in, växla token, uppdatera, pausa/förläng/radera, söka, svara) — superuser EFTER tenant + sessionsprofil |
+| `apps/web/src/lib/talent/public.ts` | Tenant ur slug (superuser), publik projektion av behov (`toPublicNeed` — aldrig interna fält), vokabulär, sessionsprofil |
+| `apps/web/src/lib/talent/student-session.ts` (+ `.test.ts`) | Ren HMAC-modul: engångstoken + hash, signerad sessionscookie `mx_student` |
+| `apps/web/src/lib/talent/maintenance.ts` | Gallring (utgånget samtycke, obekräftade > 7 d) — lazy när Movexum öppnar studentlistan |
+| `apps/web/src/lib/actions/talent.ts` | Tunna server actions (grind: staff via modulen eller länkad medlem) |
+| `apps/web/src/app/api/public/s/[tenant]/{register,login,session,interest,profile}` | Studentens publika routes (rate-limit per IP, tenant ur slug, session ur cookie) |
+| `apps/web/src/app/s/[tenant]/**`, `components/talent/*` | Publik studentsida (mx-compass-språket), bolagets och Movexums UI |
+
+**Studentens session.** Registrering skapar profilen som `pending` och
+mejlar en magisk länk (`/s/<slug>/jag?t=<token>`); sidan visar BARA en knapp
+som POST:ar tokenen till `/api/public/s/<slug>/session` (en mejlskanner
+loggar aldrig in åt studenten, § 53.5-mönstret). Tokenen är 32 slumpbytes,
+bara hashen lagras, 30 min giltighet, förbrukas vid användning; cookien är
+HMAC-signerad (`MOVEXUM_STUDENT_SESSION_SECRET`, annars
+`MOVEXUM_INTEGRATION_KEY`), httpOnly/SameSite=Lax/Secure över https, 30
+dagar — inget lagras server-side. Registrering/inloggning svarar alltid
+"om adressen finns har vi skickat en länk" (ingen uppräkning). `/s/`,
+`/api/public/s/` är publika i middleware och renderas utan AppShell.
+
+**Notiser (§ 50):** `talent_need_review` (ledning + bolagets coacher när ett
+behov skickas in), `talent_need_published` (bolagets medlemmar när Movexum
+publicerar/pausar/skickar tillbaka), `talent_interest` (bolaget när en
+student söker), `talent_student_response` (bolaget + den som föreslog när
+studenten tackar ja/nej eller drar tillbaka). Studenten får mejl (Resend,
+`sendStudentEmail`) vid förslag och vid match/avböjt — aldrig vid interna
+statusbyten.
+
+**Spår i plattformen:** varje mutation av bolag/Movexum auditeras PII-fritt
+i `agent_actions` (behovets rubrik/typ/status, antal — aldrig studentens
+namn/e-post/meddelande) och mappas i `feed/agent-log.ts`; en match skriver
+en `activities`-rad på bolagskortet ("Matchad med student: <behov>") utan
+studentens namn. Metrikregistret (§ 41) får `talent_matches` (periodiskt)
+och `talent_needs_published` — kan kopplas som indikator i Mål & VP (§ 42).
+
+### 54.4 Regelefterlevnad
+
+- **GDPR:** studenten är en privatperson — rättslig grund **samtycke**
+  (kryssruta, `consent_at`, återkalleligt på egen sida); samtycket gäller
+  ett år (`STUDENT_PROFILE_RETENTION_DAYS`), profilen gallras automatiskt
+  därefter om studenten inte förlänger; obekräftade registreringar gallras
+  efter 7 dagar; "Ta bort min profil" raderar hårt (intressen kaskadraderas,
+  art. 17). Fritext personnummer-saneras och cappas (`cleanTalentText`).
+  DPIA: `docs/privacy/dpia-talent-matching.md` — **godkännande av
+  maintainer krävs före produktion**.
+- **EU AI Act:** riskklass n/a för matchningsmotorn (deterministisk, ingen
+  inferens). Bygg ALDRIG "AI föreslår topp 5 studenter" eller AI-
+  sammanfattning av studentprofiler utan ny DPIA + juridisk bedömning mot
+  bilaga III (högrisk).
+- **§ 21/ISO 27001:** RLS enligt ovan; skrivlagret verifierar bolags-
+  tillhörighet (`access.linkedStartups`) och roll innan `writeWithFallback`;
+  intressen skapas bara av servern. Känd begränsning: `talent_needs.createRule`
+  kan inte joina bolagstillhörighet (§ 21.3) — en medlem kan via direkt-API
+  skapa ett utkast för ett annat bolag i samma tenant; det syns bara för det
+  bolaget + Movexum och publiceras aldrig utan granskning.
+- **Inte byggt (medvetet):** CV-uppladdning, betyg, lärosätesportal,
+  påminnelsemejl inför gallring (studenten förlänger själv på sin sida),
+  chatt-verktyg för agenten, uppföljningsregler (§ 40-adapter) och
+  utvärderingsenkät efter avslutat uppdrag — nästa steg om behovet visar sig.
+
+---
+
 ## 55. E-postkampanjer — en motor för inbjudan, påminnelse och uppföljning (2026-10)
 
 ### 55.1 Varför och vad
@@ -9992,4 +10310,3 @@ Det viktigaste från Confetti, på eventet (en plats):
   steg nedgraderas aldrig. Eventsidan visar platser/väntelista/incheckade,
   gästfrågor och påminnelsestatus.
 - **Påminnelser**: § 55.4 (systemkampanjer).
-

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   describeRecordKeys,
+  describeRoaringError,
   describeShape,
   parseControlInterval,
   normalizeRoaringBeneficialOwners,
@@ -10,7 +11,12 @@ import {
   normalizeRoaringGroupMembers,
   normalizeRoaringGroupStructure,
   normalizeRoaringOverview,
+  normalizeRoaringPersonEngagements,
+  normalizeRoaringSni,
+  normalizePersonalNumber,
   parseRoaringPathList,
+  personalNumberVariants,
+  roaringBeneficialOwnerPersons,
   roaringReportsNoRecords
 } from './normalize';
 
@@ -195,7 +201,7 @@ test('normalizeRoaringCompany: samlar notes från alla delar', () => {
   assert.deepEqual(company.startup, {});
 });
 
-test('koncernstruktur: nod utan org-nr eller med personnummer-derivat blir anonym person', () => {
+test('koncernstruktur: nod utan org-nr eller med personnummer-derivat blir person med namn men utan org-nr', () => {
   const notes: string[] = [];
   const rows = normalizeRoaringGroupStructure(
     {
@@ -221,7 +227,8 @@ test('koncernstruktur: nod utan org-nr eller med personnummer-derivat blir anony
     assert.equal(p.name, undefined);
     assert.equal(p.org_nr, undefined);
   }
-  assert.ok(!JSON.stringify(rows).includes('Testsson'));
+  // Ägarbilden ska gå att läsa (§ 51.11): namnet följer med, personnumret aldrig.
+  assert.deepEqual(persons.map((p) => p.person_name).sort(), ['Anna Testsson', 'Annas Firma']);
   assert.ok(!JSON.stringify(rows).includes('8501011234'));
   assert.equal(rows.find((r) => r.owner_kind === 'company')?.org_nr, '5594427808');
 });
@@ -417,7 +424,7 @@ test('koncernstruktur (platt): moderbolag med bolagsnamn men id i okänt format 
   assert.ok(!json.includes('SE-WELLGO-001'), 'aldrig själva id-värdet i noten');
 });
 
-test('koncernstruktur: personnummer-derivat anonymiseras ÄVEN med bolagsliknande namn', () => {
+test('koncernstruktur: personnummer-derivat blir person ÄVEN med bolagsliknande namn (aldrig org-nr)', () => {
   const notes: string[] = [];
   const rows = normalizeRoaringGroupStructure(
     {
@@ -435,7 +442,8 @@ test('koncernstruktur: personnummer-derivat anonymiseras ÄVEN med bolagsliknand
   assert.equal(rows.length, 1);
   assert.equal(rows[0].owner_kind, 'person');
   assert.equal(rows[0].name, undefined);
-  assert.ok(!JSON.stringify(rows).includes('Annas'));
+  assert.equal(rows[0].person_name, 'Annas Firma AB');
+  assert.ok(!JSON.stringify(rows).includes('8501011234'));
 });
 
 test('verklig huvudman: juridisk person med id i okänt format behålls som bolag utan org-nr', () => {
@@ -758,4 +766,179 @@ test('koncernstruktur (platt): avvikande nycklar (nästlad lista, parentCompanyI
     ['5594427808', 100, undefined],
     ['5567036271', undefined, true]
   ]);
+});
+
+// ─── Ägarnas andra bolag + SNI (§ 51.11) ───────────────────────────────────
+
+test('SNI: huvudsaklig kod först + övriga ur listan, dubbletter och 00000 släpps', () => {
+  const list = normalizeRoaringSni({
+    industryCode: '62010',
+    industryText: 'Dataprogrammering',
+    industries: [{ code: '70220', text: 'Konsultverksamhet' }, { code: '62010' }, '00000', { sniCode: '58290', description: 'Utgivning av annan programvara' }]
+  });
+  assert.deepEqual(list, [
+    { code: '62010', text: 'Dataprogrammering', primary: true },
+    { code: '70220', text: 'Konsultverksamhet' },
+    { code: '58290', text: 'Utgivning av annan programvara' }
+  ]);
+  const notes: string[] = [];
+  const ov = normalizeRoaringOverview({ records: [{ companyName: 'X AB', companyRegistrationDate: '2020-01-01', statusTextHigh: 'Aktiv' }] }, notes);
+  assert.deepEqual(ov.sni, []);
+  assert.ok(notes.some((n) => n.includes('SNI-kod saknas')));
+});
+
+test('normalizeRoaringCompany: SNI-listan följer med när grunddata hämtades', () => {
+  const c = normalizeRoaringCompany('5595728790', { overview }, { isPersonal: false });
+  assert.equal(c.sni?.[0].code, '62010');
+  assert.equal(c.sni?.[0].primary, true);
+});
+
+test('normalizePersonalNumber: 10/12 siffror med Luhn, samordningsnummer, annat avvisas', () => {
+  assert.equal(normalizePersonalNumber('19800101-1234'), null); // fel kontrollsiffra
+  assert.equal(normalizePersonalNumber('198112189876'), '198112189876');
+  assert.equal(normalizePersonalNumber('811218-9876'), '8112189876');
+  assert.equal(normalizePersonalNumber('5595728790'), null); // org-nr (månad 95)
+  assert.equal(normalizePersonalNumber('abc'), null);
+});
+
+test('roaringBeneficialOwnerPersons: personnumret läses för sökningen, juridiska personer utelämnas', () => {
+  const persons = roaringBeneficialOwnerPersons({
+    records: [
+      {
+        beneficialOwners: [
+          { person: { firstName: 'Anna', lastName: 'Testsson', personalNumber: '198112189876' }, extentOfControl: 'Mer än 75 procent' },
+          { person: { firstName: 'Bo', lastName: 'Utan' }, extentOfControl: '25-50' },
+          { companyId: '5594427808', companyName: 'Wellgo Health AB', extentOfControl: '>75' }
+        ]
+      }
+    ]
+  });
+  assert.equal(persons.length, 2);
+  assert.equal(persons[0].name, 'Anna Testsson');
+  assert.equal(persons[0].personalNumber, '198112189876');
+  assert.equal(persons[0].pct_min, 75);
+  assert.equal(persons[1].personalNumber, undefined);
+  assert.ok(persons[1].shape?.includes('firstName'));
+});
+
+test('verklig huvudman per person: både "post per bolag" och "lista per person" tolkas; personens andel hittas', () => {
+  const notes: string[] = [];
+  // Post per bolag, andelen i bolagets huvudmannalista matchad på personnumret.
+  const a = normalizeRoaringPersonEngagements(
+    {
+      records: [
+        {
+          legalEntity: { companyId: '5567036271', companyName: 'Ewell AB' },
+          beneficialOwners: [
+            { person: { personalNumber: '196001011234' }, extentOfControl: '25-50' },
+            { person: { personalNumber: '198112189876' }, extentOfControl: 'Mer än 75 procent', controlTypes: ['Äger aktier'] }
+          ]
+        },
+        { legalEntity: { companyId: '8112189876', companyName: 'Annas Firma' }, extentOfControl: '>75' }
+      ]
+    },
+    '198112189876',
+    notes
+  );
+  assert.equal(a.length, 1);
+  assert.equal(a[0].org_nr, '5567036271');
+  assert.equal(a[0].name, 'Ewell AB');
+  assert.equal(a[0].pct_min, 75);
+  assert.equal(a[0].control_basis, 'shares');
+  assert.ok(notes.some((n) => n.includes('enskild')));
+  assert.ok(!JSON.stringify(a).includes('198112189876'));
+
+  // En post per person med en lista bolag.
+  const b = normalizeRoaringPersonEngagements(
+    {
+      records: [
+        {
+          person: { firstName: 'Anna' },
+          beneficialOwnerships: [
+            { legalEntity: { companyId: '556703-6271', companyName: 'Ewell AB' }, extentOfControl: { from: 50, to: 75 } },
+            { companyId: '5594427808', companyName: 'Konsult AB', extentOfControl: '25-50' },
+            { companyId: '5594427808', companyName: 'Konsult AB', extentOfControl: '25-50' }
+          ]
+        }
+      ]
+    },
+    '198112189876',
+    []
+  );
+  assert.deepEqual(
+    b.map((x) => [x.org_nr, x.pct_min, x.pct_max]),
+    [
+      ['5567036271', 50, 75],
+      ['5594427808', 25, 50]
+    ]
+  );
+});
+
+test('OpenAPI 2.1: huvudmannens namn (firstNames-lista) + personnummer, och personuppslaget med association', () => {
+  const persons = roaringBeneficialOwnerPersons({
+    records: [
+      {
+        caseId: '1',
+        legalEntity: { companyId: '5595728790', companyName: 'Combly AB' },
+        beneficialOwners: [
+          {
+            person: { firstNames: ['Anna', 'Maria'], surName: 'Testsson', personalNumber: '198112189876', birthDate: '1981-12-18' },
+            extentOfControl: { code: 'MORE_THAN_75', description: 'Mer än 75 procent' },
+            controlTypes: [{ code: 'AGER', description: 'Äger aktier' }]
+          },
+          { person: { firstNames: ['Bo'], surName: 'Samordning', coordinationNumber: '811278-9873' }, extentOfControl: { description: 'Mer än 25 men inte mer än 50 procent' } }
+        ],
+        status: { code: '0', description: 'Registrerad' }
+      }
+    ],
+    status: { code: 0, text: 'found' }
+  });
+  assert.equal(persons[0].name, 'Anna Maria Testsson');
+  assert.equal(persons[0].personalNumber, '198112189876');
+  assert.equal(persons[0].pct_min, 75);
+  assert.equal(persons[1].name, 'Bo Samordning');
+  assert.equal(persons[1].personalNumber, '8112789873');
+  assert.ok(!JSON.stringify(persons).includes('1981-12-18'));
+
+  const notes: string[] = [];
+  const eng = normalizeRoaringPersonEngagements(
+    {
+      records: [
+        { association: { companyId: '5567036271', companyName: 'Ewell AB', type: { code: 'X', description: 'Aktiebolag' } }, person: { firstNames: ['Anna'], surName: 'Testsson' } },
+        { association: { companyId: '5594427808', companyName: 'Wellgo Health AB' }, person: { firstNames: ['Anna'], surName: 'Testsson' } }
+      ],
+      status: { code: 0, text: 'found' }
+    },
+    '198112189876',
+    notes
+  );
+  assert.deepEqual(
+    eng.map((e) => [e.org_nr, e.name, e.pct_min]),
+    [
+      ['5567036271', 'Ewell AB', undefined],
+      ['5594427808', 'Wellgo Health AB', undefined]
+    ]
+  );
+});
+
+test('describeRoaringError: felbeskedet visas, skickade värden och personnummer aldrig', () => {
+  const body = JSON.stringify({
+    error: 'BadRequest',
+    message: 'Invalid personal number 198112189876',
+    attributes: [{ attribute: 'personalNumber', value: '198112189876' }]
+  });
+  const text = describeRoaringError(body);
+  assert.ok(text.startsWith('BadRequest: Invalid personal number'));
+  assert.ok(text.includes('fält: personalNumber'));
+  assert.ok(!text.includes('198112189876'));
+  assert.ok(text.includes('[12 siffror]'));
+  assert.equal(describeRoaringError(''), '');
+  assert.equal(describeRoaringError('<html><body>Gateway Timeout</body></html>'), 'Gateway Timeout');
+});
+
+test('personalNumberVariants: 12 ⇄ 10 siffror', () => {
+  const now = new Date('2026-10-19T00:00:00Z');
+  assert.deepEqual(personalNumberVariants('198112189876', now), ['198112189876', '8112189876']);
+  assert.deepEqual(personalNumberVariants('8112189876', now), ['8112189876', '198112189876']);
+  assert.deepEqual(personalNumberVariants('0503150004', now), ['0503150004', '200503150004']);
 });

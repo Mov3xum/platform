@@ -16,6 +16,7 @@ import type { StartupStatus } from '@/lib/labels';
 import { canManageStartupDeMinimis } from '@/lib/de-minimis/data';
 import { DeMinimisSection } from '@/app/startups/[id]/DeMinimisSection';
 import { SharedContactsCard } from './SharedContactsCard';
+import { TalentCard } from './TalentCard';
 import { ScreeningRequestsCard } from './ScreeningRequestsCard';
 import { StartupSupportChecksSection } from '@/app/startups/[id]/StartupSupportChecksSection';
 import { DocumentCompleteButton } from '@/app/education/documents/DocumentCompleteButton';
@@ -368,6 +369,9 @@ export default async function MinOversiktPage() {
           startupId={linkedId}
           isStaff={isStaff}
         />
+
+        {/* § 54 — bolagets behov mot studenter + nya intressen */}
+        <TalentCard pb={pb} tenantId={user.tenant} startupId={linkedId} />
 
         {/* § 45.4 — kontakter Movexum delat med bolaget via kontaktboken */}
         <SharedContactsCard tenantId={user.tenant} startupId={linkedId} />

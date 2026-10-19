@@ -21,7 +21,8 @@ export const dynamic = 'force-dynamic';
 //
 // Ärenden (§ 51.10): sidan listar aktuella ärenden; "Skapa ärende" (uppe till
 // höger) öppnar bolagsvalet, `?arende=<id>` fortsätter ett sparat ärende på
-// dess underlag utan nya registeranrop.
+// dess underlag utan nya registeranrop. Guiden "Så funkar det" är en knapp i
+// sidhuvudet som öppnar ett överlägg (§ 51.12) — inget i flödet.
 
 const FLASH: Record<string, { tone: 'ok' | 'warn'; text: string }> = {
   klarmarkerat: { tone: 'ok', text: 'Ärendet är klarmarkerat — slutbedömningen är sparad på bolagskortet och som PDF, och ärendet har flyttats till Avslutade.' },
@@ -79,11 +80,15 @@ export default async function BedomningExcellensPage({
     <PageShell
       title="Bedömning excellens"
       meta={<span className="text-sm text-foreground-subtle">Art. 22 GBER · de minimis · Vinnovas målgrupp — hela koncernen</span>}
-      actions={actions}
+      actions={
+        <>
+          <HowItWorks />
+          {actions}
+        </>
+      }
     >
       <div className="space-y-5">
         <Flash code={flashCode} />
-        <HowItWorks />
         {body}
       </div>
     </PageShell>

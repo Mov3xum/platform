@@ -75,6 +75,7 @@ export const FEEDBACK_AREAS: readonly FeedbackArea[] = [
   { id: 'uppdrag', module: 'uppdrag', label: 'Tvärfunktionella team', route: '/uppdrag' },
   { id: 'startups', module: 'startups', label: 'Bolag & bolagskort', route: '/startups' },
   { id: 'kontakter', module: 'kontakter', label: 'Kontaktbok', route: '/kontakter' },
+  { id: 'talang', module: 'talang', label: 'Studenter & talang', route: '/talang' },
   { id: 'de_minimis', module: 'de_minimis', label: 'De minimis', route: '/de-minimis' },
   { id: 'checkar', module: 'checkar', label: 'Stödcheckar', route: '/checkar' },
   { id: 'projekt', module: 'projekt', label: 'Projekt (finansiering)', route: '/projekt' },

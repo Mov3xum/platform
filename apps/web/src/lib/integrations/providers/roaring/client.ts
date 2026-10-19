@@ -6,7 +6,7 @@ import {
   OAuthTokenError
 } from '../../company-registry/oauth';
 import { assertAllowedBaseUrl } from '../../company-registry/types';
-import { parseRoaringPathList, roaringReportsNoRecords } from './normalize';
+import { describeRoaringError, parseRoaringPathList, roaringReportsNoRecords } from './normalize';
 
 // Roaring (roaring.io, Stockholm) — REST/JSON, OAuth2 client credentials.
 //
@@ -49,6 +49,10 @@ import { parseRoaringPathList, roaringReportsNoRecords } from './normalize';
 //                     /{companyId} ger BARA senaste året utan utdelning och
 //                     ligger kvar som reserv (403/404).
 //   koncernstruktur   se-company-group-structure-1.0  → /se/company/group-structure/1.0/{companyId}
+//   ägarnas andra     se-beneficialowner-2.1 per PERSON → /se/beneficialowner/2.1/person/{personnummer}
+//   bolag (§ 51.11)   (ett anrop per fysisk huvudman; personnumret ur bolagets
+//                     huvudmannasvar, används bara för anropet) + grunddata
+//                     (overview) per hittat bolag för SNI-koden.
 //   verklig huvudman  se-beneficialowner-2.1 (2.0 avvecklad 2025-01-15). Uppslag
 //                     per bolag är dokumenterat som …/beneficialowner/1.0/company/
 //                     {companyId} (och …/person/{pnr} per person) — därför provas
@@ -81,7 +85,11 @@ export const ROARING_DEFAULT_PATHS = {
     '/se/beneficialowner/2.1/company',
     '/se/beneficialowner/2.1',
     '/se/beneficialowner/1.0/company'
-  ]
+  ],
+  // Ägarnas andra bolag (§ 51.11): verklig huvudman per PERSON — katalogen
+  // dokumenterar …/person/{personnummer} bredvid …/company/{orgnr}. Svaret
+  // listar bolagen personen är huvudman för (> 25 % eller kontroll).
+  personEngagements: ['/se/beneficialowner/2.1/person', '/se/beneficialowner/1.0/person']
 } as const;
 
 /** Kandidatlista per API (env vinner; kommaseparerad, prioritetsordning). */
@@ -92,8 +100,14 @@ export const ROARING_PATHS = {
   groupStructure: () =>
     parseRoaringPathList(process.env.ROARING_GROUP_STRUCTURE_PATH, [...ROARING_DEFAULT_PATHS.groupStructure]),
   beneficialOwners: () =>
-    parseRoaringPathList(process.env.ROARING_BENEFICIAL_OWNER_PATH, [...ROARING_DEFAULT_PATHS.beneficialOwners])
+    parseRoaringPathList(process.env.ROARING_BENEFICIAL_OWNER_PATH, [...ROARING_DEFAULT_PATHS.beneficialOwners]),
+  personEngagements: () =>
+    parseRoaringPathList(process.env.ROARING_PERSON_ENGAGEMENT_PATH, [...ROARING_DEFAULT_PATHS.personEngagements])
 };
+
+/** Tak per uppslag för ägarnas andra bolag (varje anrop debiteras). */
+export const ROARING_MAX_ENGAGEMENT_PERSONS = 8;
+export const ROARING_MAX_ENGAGEMENT_COMPANIES = 25;
 
 /**
  * Antal räkenskapsår bokslutsdelen begär (`?years=`, spec-default 5).
@@ -173,6 +187,9 @@ export async function roaringGet(
       return { ok: true, data, path };
     } catch (err) {
       if (err instanceof IntegrationFetchError) {
+        // Leverantörens eget felbesked (maskerat) — syns i noteringarna och konsolen.
+        const detail = describeRoaringError(err.bodySnippet);
+        const withDetail = (reason: string) => (detail ? `${reason} Roaring: ${detail}` : reason);
         if (err.status === 401 && attempt === 0) {
           invalidateClientCredentialsToken(tokenOpts(c));
           try {
@@ -186,12 +203,13 @@ export async function roaringGet(
           ok: false,
           status: err.status,
           path,
-          reason:
+          reason: withDetail(
             err.status === 404
               ? 'Inga uppgifter i detta API för bolaget.'
               : err.status === 403
                 ? 'API:t ingår inte i kontots paket (403).'
                 : `Roaring svarade HTTP ${err.status}.`
+          )
         };
       }
       return { ok: false, status: 0, reason: 'Kunde inte nå Roaring (nätverksfel).', path };

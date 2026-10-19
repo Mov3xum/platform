@@ -5,6 +5,8 @@ import { BRAND, rgb01, LOGO_RATIO } from '@/lib/documents/brand';
 import { loadLogoPng, loadPdfFonts } from '@/lib/documents/assets';
 import {
   GROUP_ROLE_LABEL,
+  SNI_MATCH_LABEL,
+  formatSni,
   SCREENING_REQUEST_STATUS_LABEL,
   formatStockholmDateTime,
   MATURITY_PHASE_LABEL,
@@ -265,7 +267,7 @@ function ownershipTable(ctx: Ctx, caption: string, rows: ScreeningOwnershipEntry
       const [cap, vot] = shareCells(o);
       const name =
         o.owner_kind === 'person'
-          ? 'Fysisk person (namn lagras inte)'
+          ? `${o.person_name || 'Fysisk person (namn saknas i svaret)'}${o.indirect ? ' (indirekt)' : ''}`
           : `${o.name || '–'}${o.org_nr ? ` ${formatOrgNr(o.org_nr)}` : ''}${o.indirect ? ' (indirekt)' : ''}`;
       return [name, OWNER_KIND_LABEL[o.owner_kind] ?? o.owner_kind, cap, vot, o.part ? PART_LABEL[o.part] : '–'];
     }),
@@ -276,11 +278,14 @@ function ownershipTable(ctx: Ctx, caption: string, rows: ScreeningOwnershipEntry
 function companyBlock(ctx: Ctx, c: CompanyAssessment, subjectName: string) {
   const title = c.name || formatOrgNr(c.orgNr) || 'Okänt bolag';
   subTitle(ctx, c.role === 'subject' ? `Kan ${title} ta emot företagsstöd?` : `${title}${c.orgNr ? ` · ${formatOrgNr(c.orgNr)}` : ''}`);
+  if (c.basic?.sni?.length) {
+    drawLines(ctx, `SNI: ${c.basic.sni.map((x) => `${formatSni(x)}${x.primary && c.basic!.sni!.length > 1 ? ' (huvudsaklig)' : ''}`).join(' · ')}`, { size: 9, color: INK_SOFT, gap: 4 });
+  }
   if (c.role !== 'subject') {
     drawLines(
       ctx,
       `${c.relationLabel ?? ''}${c.groupRole ? ` · ${GROUP_ROLE_LABEL[c.groupRole]}` : ''} · ${c.shareLabel ?? ''}${c.indirect ? ' (indirekt)' : ''} — ${c.reason ?? ''}${
-        c.relation === 'linked' && !c.groupRole && !c.transitive
+        c.relation === 'linked' && !c.groupRole && !c.transitive && !c.personLink
           ? ` ${title} kontrollerar mer än 50 % och är därmed ett anknutet företag till ${subjectName}.`
           : c.relation === 'linked'
             ? ` Anknutet företag till ${subjectName} — 100 % av uppgifterna räknas in och grundförutsättningarna prövas.`
@@ -412,7 +417,7 @@ export async function buildExcellenceAssessmentPdf(a: ExcellenceAssessment): Pro
   const refDate = new Date(a.assessedAt);
   table(
     ctx,
-    ['Bolag', 'Plats i koncernen', 'Relation', 'Andel', 'Registrerat · ålder', 'Status', 'Underlag'],
+    ['Bolag', 'Plats i koncernen', 'Relation', 'Andel', 'SNI', 'Registrerat · ålder', 'Status', 'Underlag'],
     result.companies.map((c) => {
       const reg = c.basic?.registeredAt?.slice(0, 10);
       const regDate = reg ? new Date(`${reg}T00:00:00Z`) : null;
@@ -423,7 +428,9 @@ export async function buildExcellenceAssessmentPdf(a: ExcellenceAssessment): Pro
           : [
               c.manualDeclared
                 ? 'Angivet manuellt (aktiebok/avtal)'
-                : c.groupRole ? `${GROUP_ROLE_LABEL[c.groupRole]}${typeof c.level === 'number' ? ` (nivå ${c.level})` : ''}` : c.transitive ? 'Andra ledet' : c.indirect ? 'Indirekt ägare/innehav' : 'Direkt ägare/innehav',
+                : c.personLink && !c.groupRole
+                  ? `Ägs av ägaren ${c.personLink.personName ?? ''} · ${c.personLink.manual ? 'bedömt av controllern' : SNI_MATCH_LABEL[c.personLink.sniMatch].toLowerCase()}`
+                  : c.groupRole ? `${GROUP_ROLE_LABEL[c.groupRole]}${typeof c.level === 'number' ? ` (nivå ${c.level})` : ''}` : c.transitive ? 'Andra ledet' : c.indirect ? 'Indirekt ägare/innehav' : 'Direkt ägare/innehav',
               c.via ? `via ${c.via}` : ''
             ]
               .filter(Boolean)
@@ -433,14 +440,46 @@ export async function buildExcellenceAssessmentPdf(a: ExcellenceAssessment): Pro
         place,
         c.role === 'subject' ? '—' : (c.relationLabel ?? ''),
         c.role === 'subject' ? '' : (c.shareLabel ?? ''),
+        c.basic?.sni?.length ? c.basic.sni.map((x) => x.code).join(', ') : '–',
         age,
         c.basic?.bolagStatus ?? '–',
         c.dataFetched ? 'Uppslag gjort' : 'Inget uppslag'
       ];
     }),
-    [2.4, 2.2, 1.5, 1, 1.9, 1, 1.2],
+    [2.3, 2.2, 1.4, 0.9, 1, 1.8, 0.9, 1.1],
     { size: 8 }
   );
+
+  // Ägarnas andra bolag (§ 51.11) — samma tabell som skärmvyn.
+  if (result.ownerEngagements) {
+    subTitle(ctx, 'Ägarnas andra bolag');
+    if (result.ownerEngagements.length === 0) {
+      drawLines(ctx, 'Inga fysiska huvudmän i registret — inga andra bolag att söka.', { size: 9, color: INK_SOFT, gap: 6 });
+    }
+    for (const p of result.ownerEngagements) {
+      drawLines(
+        ctx,
+        `${p.person_name || 'Huvudman (namn saknas i svaret)'} — äger ${p.subjectShareLabel} av ${subjectName}${
+          p.status === 'none' ? ' · inga andra bolag i registret' : p.status === 'no_id' || p.status === 'failed' ? ` · kunde inte sökas: ${p.reason ?? 'okänt fel'}` : ''
+        }`,
+        { size: 9, font: 'bold', gap: 3 }
+      );
+      if (p.companies.length === 0) continue;
+      table(
+        ctx,
+        ['Bolag', 'Andel', 'SNI', 'Bransch', 'Bedömning'],
+        p.companies.map((c) => [
+          `${c.name || '–'}${c.org_nr ? ` ${formatOrgNr(c.org_nr)}` : ''}`,
+          c.shareLabel,
+          c.basic?.sni?.length ? c.basic.sni.map(formatSni).join('; ') : (c.note ?? '–'),
+          `${SNI_MATCH_LABEL[c.sniMatch]}${c.matchedCode ? ` ${c.matchedCode}` : ''}`,
+          `${c.relation === 'linked' ? 'Anknutet — prövas' : c.relation === 'uncertain' ? 'Oklart' : 'Räknas inte'}: ${c.reason}`
+        ]),
+        [2.2, 1, 2.4, 1.3, 4],
+        { size: 8 }
+      );
+    }
+  }
 
   subTitle(ctx, 'Fristående företag?');
   checks(ctx, [result.standalone]);

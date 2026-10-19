@@ -391,7 +391,7 @@ export default async function IntegrationDetailPage({
             tenantIntegrationId={tenantIntegration!.id}
             providerSlug={slug}
             providerName={provider.name}
-            parts={registryHandler.parts}
+            parts={[...registryHandler.parts, ...(registryHandler.lookupOnlyParts ?? [])]}
             pricing={registryPricing}
             portfolioCompanies={registryStats?.startupsWithOrgNr}
           />
@@ -401,7 +401,7 @@ export default async function IntegrationDetailPage({
           <RegistryLookupForm
             providerSlug={slug}
             providerName={provider.name}
-            registryParts={registryHandler?.parts ?? []}
+            registryParts={registryHandler ? [...registryHandler.parts, ...(registryHandler.lookupOnlyParts ?? [])] : []}
             partEndpoints={registryPartEndpoints}
             pricing={registryPricing ?? undefined}
             pricingHref={pricingHref}
