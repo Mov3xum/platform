@@ -10289,6 +10289,44 @@ den andra filen laddades aldrig — enkätens schemalagda utskick har inte
 gått. Konstanten är borttagen i båda (cron-strängen inline). **Deklarera
 aldrig något på toppnivå i en hook-fil** — allt inne i hanteraren (§ 21.8).
 
+### 55.9 Bilder i mejl — uppladdning i bildblocket (2026-10-19)
+
+Bildblocket tar en **uppladdad bild** (knapp, dra-och-släpp eller klistra in i
+editorn) eller en absolut https-adress. Mallarna **Eventinbjudan**, **Save the
+date** och **Nyhetsbrev** har en färdig, valfri bildplats högst upp; de
+textburna mallarna (påminnelser, Tack och utvärdering, Personligt mejl) har
+ingen — de ska hamna i Primär (§ 55.5). Blocket kan ändå läggas till i vilken
+kampanj som helst via "Lägg till block".
+
+| Fil | Syfte |
+|---|---|
+| `packages/shared/src/email-media.ts` (+ `.test.ts`) | REN: mime/storlek (`validateEmailImageFile`: PNG/JPG/WEBP/GIF, 8 MB — ingen SVG), sökvägsformat (`emailMediaPath`/`isEmailMediaPath`), `absolutizeEmailAssetUrl` |
+| `backend/pocketbase-schema/migrations/1700000204_create_email_media.js` | Collection `email_media` (riktiga PB-filer; list/view staff/observer, createRule roll-lös med tenant-pin, update/delete personal) |
+| `apps/web/src/app/api/inflode/kampanjer/media/route.ts` | Upload-route (admin/incubator_lead/coach, rate-limit 60/10 min, § 18.2-mönstret) → `{ url }` |
+| `apps/web/src/app/api/public/e/bild/[id]/[filename]/route.ts` | Samma-origin-proxy — serverar ENBART postens eget filnamn, `Cache-Control: public, immutable` |
+| `apps/web/src/app/inflode/kampanjer/[id]/ImageBlockField.tsx` | Blockets editor: förhandsvisning, byt/ta bort, adressfält som reserv, alt + länk |
+
+- **Sökvägen är app-relativ** (`/api/public/e/bild/<id>/<fil>`) i blocket.
+  Mejlklienter kräver absoluta adresser, så renderaren får `assetBase` (=
+  utskickets `APP_URL`/bas) och absolutiserar vid utskick och testmejl;
+  editorns förhandsgranskning körs på samma origin och behöver ingen bas. Ett
+  domänbyte lämnar därför inga döda bilder i sparade kampanjer, och
+  mejlklienten ser bara appens domän (samma som länkarna) — aldrig PB-hosten
+  (§ 23.7-incidenten). `normalizeEmailBlocks` godtar BARA den egna
+  bildsökvägen eller https — främmande relativa sökvägar rensas.
+- **Nedskalning i webbläsaren** (`resizeImageFile`, längsta sida
+  `EMAIL_IMAGE_MAX_EDGE` = 1200 px = 520 px i mejlet × 2) innan uppladdning;
+  routen är gränsen (samma validator). Bredd/höjd sparas på posten.
+- **Tomt bildblock** (mallens plats utan bild) renderas inte och stoppar inte
+  utskicket — editorn säger att blocket inte visas. Leveranskontrollen
+  varnar oförändrat vid bild-tungt innehåll (`imageCount` mot textlängd).
+- **Publikt by design:** den som har mejlet har bilden; marknadsmaterial utan
+  PII (editorn uppmanar: inga bilder med personuppgifter). Filnamnet (kan
+  bära namn) visas bara för personalen och loggas aldrig. Speglat i
+  `setup-via-api.mjs` (+ `FORCE_CREATE_RULES`), asserterat i
+  `verify-baseline.mjs` (must-exist, `MUST_BE_STAFF_OR_OBSERVER`). Ingen
+  AI-väg; riskklass n/a. Agenten har inget verktyg för bilder.
+
 ### 55.11 Svarssidan — gästfrågor, maxantal, biljett, påminnelser, incheckning
 
 Det viktigaste från Confetti, på eventet (en plats):

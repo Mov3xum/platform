@@ -574,6 +574,8 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
       },
       reasonText: emailReasonText(c.reason, campaign.category, campaign.consent_mode),
       orgName,
+      // Uppladdade bilder (app-relativa sökvägar) blir absoluta mot utskickets bas (§ 55.9).
+      assetBase: baseUrl,
       trackLink: (url, index) => {
         const t = secret ? signClickToken({ recipientId: p.rowId, campaignId: campaign.id, index }, secret) : null;
         return t ? `${baseUrl}/api/public/e/klick?c=${t}` : url;
@@ -698,7 +700,8 @@ export async function sendCampaignTest(pb: PocketBase, tenant: string, campaignI
       calendar: ev?.starts_at ? `${base}/api/public/e/kalender?e=${signCalendarKey(ev.id, emailLinkSecret()) ?? ''}` : null
     },
     reasonText: emailReasonText('contact', campaign.category, campaign.consent_mode),
-    orgName
+    orgName,
+    assetBase: base
   });
   const res = await sendOne({
     key: 'test',

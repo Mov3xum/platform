@@ -1844,6 +1844,7 @@ export * from './event-invitations';
 export * from './event-rsvp';
 export * from './email-campaigns';
 export * from './email-render';
+export * from './email-media';
 export * from './email-suppression-import';
 export * from './org-posts';
 export * from './home';

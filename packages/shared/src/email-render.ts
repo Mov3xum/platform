@@ -10,6 +10,7 @@
 // All text escapas FÖRE insättning (§ 10.3). Platshållare fylls i med
 // `renderMergeFields` på ren text och escapas därefter.
 
+import { absolutizeEmailAssetUrl } from './email-media';
 import {
   EMAIL_ACCENT_HEX,
   renderMergeFields,
@@ -45,6 +46,12 @@ export interface EmailRenderInput {
   orgName: string;
   /** Wrappar en innehållslänk för klickspårning. Default: oförändrad. */
   trackLink?: (url: string, index: number) => string;
+  /**
+   * Appens publika bas-URL (APP_URL) — uppladdade bilder lagras som app-
+   * relativa sökvägar och måste bli absoluta i mejlet (§ 55.9). Utan bas
+   * lämnas sökvägen (editorns förhandsgranskning på samma origin).
+   */
+  assetBase?: string | null;
 }
 
 export interface EmailRenderOutput {
@@ -155,7 +162,7 @@ export function renderCampaignEmail(input: EmailRenderInput): EmailRenderOutput 
         break;
       }
       case 'image': {
-        const src = resolveUrl(b.url);
+        const src = absolutizeEmailAssetUrl(resolveUrl(b.url), input.assetBase);
         if (!src) break;
         imageCount++;
         const alt = merge(b.alt);

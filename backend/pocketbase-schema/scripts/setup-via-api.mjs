@@ -5518,6 +5518,43 @@ await patchCollection('startups', [], {
   }
 });
 
+// Migration 1700000204: email_media — uppladdade bilder till kampanjernas
+// bildblock (§ 55.9). Riktiga PB-filer, serverade via appens egen origin-
+// proxy (/api/public/e/bild/<id>/<fil>); list/view staff/observer, createRule
+// roll-lös med tenant-pin (rollen enforce:as i upload-routen).
+await ensureCollection({
+  id: 'email_media_collection',
+  name: 'email_media',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'uploaded_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    {
+      name: 'file',
+      type: 'file',
+      required: true,
+      maxSelect: 1,
+      maxSize: 8388608,
+      // MÅSTE spegla EMAIL_IMAGE_MIMES i packages/shared/src/email-media.ts.
+      mimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+      thumbs: ['600x0', '1200x0']
+    },
+    { name: 'name', type: 'text', required: false, max: 200 },
+    { name: 'mime', type: 'text', required: false, max: 150 },
+    { name: 'size_bytes', type: 'number', required: false, min: 0 },
+    { name: 'width', type: 'number', required: false, min: 0 },
+    { name: 'height', type: 'number', required: false, min: 0 }
+  ],
+  indexes: ['CREATE INDEX idx_email_media_tenant ON email_media (tenant)'],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  createRule: `${ANY_AUTH} && @request.auth.tenant != "" && @request.body.tenant = @request.auth.tenant`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`
+});
+
 // Migration 1700000049: tool_runs assignment-flow fields + status enum-utökning.
 await patchToolRunsCollection(
   [
@@ -5782,6 +5819,7 @@ const FORCE_CREATE_RULES = {
   contact_groups: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
   email_campaigns: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
   email_suppressions: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  email_media: `${ANY_AUTH} && @request.auth.tenant != "" && @request.body.tenant = @request.auth.tenant`,
   // Önskemål & buggar (§ 49, migration 1700000176) — roll-enforcement i server-actionen.
   feedback_items: `${ANY_AUTH} && @request.auth.tenant != ""`,
   competence_tags: `${ANY_AUTH} && @request.auth.tenant != "" && @request.body.created_by = @request.auth.id && @request.body.status = "suggested" && @request.body.tenant = @request.auth.tenant`,
