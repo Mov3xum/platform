@@ -13,6 +13,7 @@
 // oavsett avsändare. `checkEmailDeliverability` varnar för det som brukar
 // klassas som skräppost INNAN utskicket.
 
+import { isEmailMediaPath } from './email-media';
 import type { InviteReason } from './event-invitations';
 
 // ── Kategorier (preferenscentret) ───────────────────────────────────────────
@@ -353,10 +354,12 @@ export function normalizeEmailBlocks(raw: unknown): EmailBlock[] {
       case 'image': {
         const url = typeof r.url === 'string' ? r.url.trim() : '';
         const href = typeof r.href === 'string' ? r.href.trim() : '';
+        const isUploadedImage: boolean = isEmailMediaPath(url as unknown);
         out.push({
           id,
           type: 'image',
-          url: isSafeEmailUrl(url) && !url.startsWith('{{') ? url : '',
+          // Uppladdad kampanjbild (app-relativ sökväg, § 55.9) eller en absolut https-adress.
+          url: isUploadedImage || (isSafeEmailUrl(url) && !url.startsWith('{{')) ? url : '',
           alt: cleanLine(r.alt, EMAIL_SHORT_MAX),
           href: isSafeEmailUrl(href) ? href : ''
         });
@@ -598,7 +601,8 @@ export function validateEmailCampaignForSend(
   }
   for (const b of c.blocks) {
     if (b.type === 'button' && (!b.url || !b.label)) return { ok: false, error: 'En knapp saknar text eller länk.' };
-    if (b.type === 'image' && !b.url) return { ok: false, error: 'En bild saknar adress.' };
+    // Ett bildblock utan bild (mallens valfria bildplats) renderas inte och
+    // stoppar inte utskicket — editorn visar att det är tomt.
   }
   if (ctx.recipients <= 0 && !c.audience.event_group) return { ok: false, error: 'Välj minst en mottagare.' };
   return { ok: true };
@@ -701,6 +705,7 @@ export const EMAIL_TEMPLATES: readonly EmailTemplateStructure[] = [
     subject: 'Inbjudan: {{event.namn}}',
     preheader: '{{event.tid}} · {{event.plats}} — svara med ett klick.',
     blocks: [
+      { type: 'image', url: '', alt: '', href: '' },
       H('{{event.namn}}'),
       { type: 'event_details' },
       P('Hej {{förnamn|du}}!\n\nVi vill gärna se dig på {{event.namn}}. Berätta kort vad träffen handlar om, vem den är för och varför det är värt tiden.'),
@@ -735,6 +740,7 @@ export const EMAIL_TEMPLATES: readonly EmailTemplateStructure[] = [
     subject: 'Save the date: {{event.namn}}',
     preheader: 'Boka {{event.tid}} i kalendern.',
     blocks: [
+      { type: 'image', url: '', alt: '', href: '' },
       H('Save the date'),
       { type: 'event_details' },
       P('Vi planerar {{event.namn}} och vill att du bokar in dagen redan nu. Inbjudan med program och anmälan kommer längre fram.'),
@@ -785,6 +791,7 @@ export const EMAIL_TEMPLATES: readonly EmailTemplateStructure[] = [
     subject: 'Nytt från Movexum',
     preheader: 'Det viktigaste från inkubatorn den här månaden.',
     blocks: [
+      { type: 'image', url: '', alt: '', href: '' },
       H('Nytt från Movexum'),
       P('Hej {{förnamn|du}}! Här är det viktigaste från inkubatorn och startupscenen i regionen.'),
       { type: 'divider' },

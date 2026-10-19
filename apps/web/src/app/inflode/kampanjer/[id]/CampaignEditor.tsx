@@ -20,6 +20,7 @@ import {
 } from '@/lib/actions/email-campaigns';
 import type { InviteListMeta, InviteOption, InviteOptionsResult } from '@/lib/actions/invitations';
 import type { CampaignRow } from '@/lib/email/campaign-data';
+import { ImageBlockField } from './ImageBlockField';
 import {
   CONTACT_CATEGORIES,
   CONTACT_CATEGORY_LABELS,
@@ -204,16 +205,7 @@ function BlockEditor({
           </select>
         </div>
       )}
-      {block.type === 'image' && (
-        <div className="grid gap-2">
-          <input className={input} value={block.url} maxLength={2000} placeholder="Bildens adress (https://…)" onChange={(e) => onChange({ ...block, url: e.target.value })} />
-          <div className="grid gap-2 sm:grid-cols-2">
-            <input className={input} value={block.alt} maxLength={200} placeholder="Alternativtext (vad bilden visar)" onChange={(e) => onChange({ ...block, alt: e.target.value })} />
-            <input className={input} value={block.href} maxLength={2000} placeholder="Länk vid klick (valfritt)" onChange={(e) => onChange({ ...block, href: e.target.value })} />
-          </div>
-          <span className="mx-t-xs mx-muted">Håll mejlet textburet — en stor bild och lite text är en klassisk skräppostsignal.</span>
-        </div>
-      )}
+      {block.type === 'image' && <ImageBlockField block={block} onChange={onChange} />}
       {block.type === 'spacer' && (
         <select className={input} value={block.size} onChange={(e) => onChange({ ...block, size: (e.target.value as 's' | 'm' | 'l') || 'm' })}>
           <option value="s">Liten</option>

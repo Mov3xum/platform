@@ -162,6 +162,8 @@ async function verifyCollectionsExist() {
     'email_campaign_recipients',
     'email_suppressions',
     'email_events',
+    // Kampanjbilder (§ 55.9, migration 1700000204).
+    'email_media',
     // Önskemål & buggar (§ 49, migration 1700000176) — intern backlog.
     'feedback_items',
     // Kompetens-hashtags (§ 29.7, migration 1700000178) — tenantens vokabulär.
@@ -502,6 +504,8 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   'email_campaign_recipients',
   'email_suppressions',
   'email_events',
+  // Kampanjbilder (§ 55.9, migration 1700000204) → staff/observer-only.
+  'email_media',
   // Önskemål & buggar (§ 49, migration 1700000176). Intern backlog för
   // Movexum-personal (kort + ledningens svar) → staff/observer-only.
   'feedback_items',
