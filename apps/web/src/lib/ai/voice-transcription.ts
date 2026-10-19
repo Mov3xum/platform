@@ -142,17 +142,35 @@ export interface UnsupportedLanguageInfo {
 }
 
 /**
- * Tolkar Mistrals 400-svar för ett språkhint modellen inte stödjer:
- *   {"object":"error","message":"Got unsupported language `sv`, should be one
- *    of: ['ar', 'en', ...]", ...}
+ * Mistrals formuleringar för ett avvisat språkhint. Formuleringen har bytts
+ * minst en gång (incident 2026-10-19: den nya texten matchades inte, så
+ * omförsöket utan hint kördes aldrig och varje mötessegment föll) — lägg
+ * till en rad här i stället för att skriva om den befintliga.
+ */
+const UNSUPPORTED_LANGUAGE_PATTERNS: RegExp[] = [
+  // "Got unsupported language `sv`, should be one of: [...]"
+  /unsupported\s+language\s*:?\s*[`'"]?\s*([a-z]{2,3}(?:-[a-z]{2,4})?)\s*[`'"]?/i,
+  // "Model 'voxtral-mini-transcribe-2602' does not support language 'sv', should be one of: [...]"
+  /(?:does\s+not|doesn'?t|do\s+not)\s+support\s+(?:the\s+)?language\s*:?\s*[`'"]?\s*([a-z]{2,3}(?:-[a-z]{2,4})?)\s*[`'"]?/i,
+  // "Language 'sv' is not supported"
+  /language\s*:?\s*[`'"]?\s*([a-z]{2,3}(?:-[a-z]{2,4})?)\s*[`'"]?\s+is\s+not\s+supported/i
+];
+
+/**
+ * Tolkar Mistrals 400-svar för ett språkhint modellen inte stödjer, t.ex.
+ *   {"object":"error","message":"Model 'voxtral-mini-transcribe-2602' does not
+ *    support language 'sv', should be one of: ['ar', 'en', ...]", ...}
  * Tolerant mot citattecken/backticks/whitespace och mot att listan saknas.
  * Returnerar null för alla andra fel (formatfel etc.) — de ska INTE utlösa
  * ett omförsök utan hint.
  */
 export function parseUnsupportedLanguage(body: string): UnsupportedLanguageInfo | null {
   if (!body) return null;
-  const match =
-    /unsupported\s+language\s*:?\s*[`'"]?\s*([a-z]{2,3}(?:-[a-z]{2,4})?)\s*[`'"]?/i.exec(body);
+  let match: RegExpExecArray | null = null;
+  for (const pattern of UNSUPPORTED_LANGUAGE_PATTERNS) {
+    match = pattern.exec(body);
+    if (match) break;
+  }
   if (!match) return null;
   const language = match[1].toLowerCase();
   const list = /one\s+of\s*:?\s*\[([^\]]*)\]/i.exec(body);

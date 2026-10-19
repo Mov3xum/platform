@@ -113,6 +113,19 @@ test('parseUnsupportedLanguage tolkar Mistrals faktiska 400-svar (incidenten)', 
   ]);
 });
 
+test('parseUnsupportedLanguage tolkar Mistrals nya formulering (incident 2026-10-19)', () => {
+  const body =
+    '{"object":"error","message":"Model \'voxtral-mini-transcribe-2602\' does not support language \'sv\', ' +
+    "should be one of: ['ar', 'en', 'de', 'es', 'fr', 'hi', 'it', 'nl', 'pt', 'zh', 'ru', 'ko', 'ja']\"," +
+    '"type":"invalid_request_error","param":null,"code":null}';
+  const info = parseUnsupportedLanguage(body);
+  assert.ok(info);
+  assert.equal(info.language, 'sv');
+  assert.equal(info.supported.length, 13);
+  assert.equal(parseUnsupportedLanguage("Language 'sv' is not supported")?.language, 'sv');
+  assert.equal(parseUnsupportedLanguage("Model doesn't support language `sv`")?.language, 'sv');
+});
+
 test('parseUnsupportedLanguage: tolerant mot citattecken och saknad lista', () => {
   assert.deepEqual(parseUnsupportedLanguage('Unsupported language "sv"'), {
     language: 'sv',

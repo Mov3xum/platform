@@ -5646,7 +5646,10 @@ request-fel (aldrig retry) och autodetekt-omförsöket låg bara i tom-svar-
 grenen (422) → VARJE segment föll och både röstknappen och hela mötesläget
 gav tomt transkript ("Got unsupported language `sv`"). Nu kör
 `transcribeSpeech` en **parametertrappa** per provider (ren, enhetstestad
-logik i `lib/ai/voice-transcription.ts`): (1) 400 "unsupported language" →
+logik i `lib/ai/voice-transcription.ts`): (1) 400 "unsupported language" /
+"does not support language" (Mistral bytte formulering 2026-10 — den nya
+texten matchades inte, omförsöket kördes aldrig och mötena blev tomma igen;
+mönstren ligger i `UNSUPPORTED_LANGUAGE_PATTERNS`, lägg till rader där) →
 hintet släpps och anropet görs om DIREKT (ett 400 avvisas innan ljudet
 bearbetas — ingen kostnad), och avvisningen **minns per provider+modell** i
 processen (`LanguageHintMemory`, 6 h TTL) så efterföljande segment går rätt
