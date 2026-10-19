@@ -127,7 +127,8 @@ export async function listConnectedRegistries(pb: PocketBase, tenantId: string):
           ? {
               slug: p.slug,
               name: p.name,
-              parts: registry.parts,
+              // Bedömningen är ett uppslag — även delar som bara gäller uppslag (§ 51.11).
+              parts: [...registry.parts, ...(registry.lookupOnlyParts ?? [])],
               partEndpoints: registry.partEndpoints?.(),
               pricing: resolveRegistryPricing(p.slug, pricing)
             }
@@ -340,8 +341,37 @@ export function groupFactsFromRegistry(company: RegistryCompany, fallbackName?: 
           registeredAt: company.startup.company_registered_at,
           bolagStatus: company.startup.bolag_status,
           bolagsform: company.startup.bolagsform,
-          isPersonal: company.isPersonal
+          isPersonal: company.isPersonal,
+          sni: company.sni && company.sni.length > 0 ? company.sni : undefined
         }
+      : undefined,
+    // Ägarnas andra bolag (§ 51.11) — bara när delen hämtades.
+    ownerEngagements: fetched.includes('owner_engagements')
+      ? (company.ownerEngagements ?? []).map((e) => ({
+          person_name: e.person_name,
+          subject_capital_pct: e.subject_capital_pct,
+          subject_pct_min: e.subject_pct_min,
+          subject_pct_max: e.subject_pct_max,
+          status: e.status,
+          reason: e.reason,
+          companies: e.companies.map((c) => ({
+            org_nr: c.org_nr ? (normalizeOrgNr(c.org_nr) ?? undefined) : undefined,
+            name: c.name,
+            capital_pct: c.capital_pct,
+            pct_min: c.pct_min,
+            pct_max: c.pct_max,
+            control_basis: c.control_basis,
+            note: c.note,
+            basic: c.basic
+              ? {
+                  registeredAt: c.basic.registered_at,
+                  bolagStatus: c.basic.bolag_status,
+                  bolagsform: c.basic.bolagsform,
+                  sni: c.basic.sni && c.basic.sni.length > 0 ? c.basic.sni : undefined
+                }
+              : undefined
+          }))
+        }))
       : undefined,
     // "Inga uppgifter" (404 hos leverantören — nystartat bolag utan bokslut)
     // är ett SVAR, inte ett uteblivet uppslag: tom lista i stället för

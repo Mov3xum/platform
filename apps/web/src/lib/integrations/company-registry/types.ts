@@ -6,10 +6,11 @@
  * till `startups`, `startup_financials` och `startup_ownership`.
  *
  * Dataminimering (CLAUDE.md § 10.2, § 11.4): formen innehåller BARA
- * whitelistade verksamhetsfält. Fysiska personer i ägarbilden bär inget namn
- * och inget personnummer — bara att det är en person och hur stor andel/vilket
- * kontrollintervall som gäller (det räcker för Bizmaker-kartans regler om
- * fristående/partner/anknutet företag och grundarägande ≥ 75 %).
+ * whitelistade verksamhetsfält. Fysiska personer i ägarbilden bär namnet
+ * (`person_name`, § 51.11 — ägarbilden ska gå att läsa i bedömningen) men
+ * ALDRIG personnummer, födelsedatum eller adress. Personnumret används bara
+ * inne i Roaring-handlern för att söka personens andra bolag och lämnar den
+ * aldrig.
  */
 
 import type { RegistryPartId } from './parts';
@@ -28,6 +29,47 @@ export interface RegistryStartupPatch {
   bolag_status?: BolagStatus;
   /** ISO-datum (YYYY-MM-DD) — bolagets registreringsdatum. */
   company_registered_at?: string;
+}
+
+/** En SNI-kod ur bolagsregistret (huvudsaklig + ev. övriga näringsgrenar). */
+export interface RegistrySni {
+  code: string;
+  text?: string;
+  primary?: boolean;
+}
+
+/** Ett av en ägares andra bolag (ur verklig huvudman per person, § 51.11). */
+export interface RegistryEngagementCompany {
+  org_nr?: string;
+  name?: string;
+  capital_pct?: number;
+  pct_min?: number;
+  pct_max?: number;
+  control_basis?: string;
+  /** Grunddata för bolaget när den hämtades (SNI, ålder, status, form). */
+  basic?: {
+    registered_at?: string;
+    bolag_status?: BolagStatus;
+    bolagsform?: string;
+    sni?: RegistrySni[];
+  };
+  /** Varför grunddata saknas (PII-fri). */
+  note?: string;
+}
+
+/**
+ * En fysisk ägares (verklig huvudmans) övriga bolag. Namnet följer med för
+ * visning; personnumret som sökningen gjordes på gör det ALDRIG.
+ */
+export interface RegistryOwnerEngagement {
+  person_name?: string;
+  /** Personens andel av det uppslagna bolaget (ur verklig huvudman). */
+  subject_capital_pct?: number;
+  subject_pct_min?: number;
+  subject_pct_max?: number;
+  status: 'ok' | 'none' | 'no_id' | 'failed';
+  reason?: string;
+  companies: RegistryEngagementCompany[];
 }
 
 export interface RegistryFinancialsYear {
@@ -74,11 +116,11 @@ export interface RegistryOwnershipEntry {
   /** Bolagsnamn. Tomt för fysiska personer (dataminimering). */
   name?: string;
   /**
-   * TRANSIENT: en fysisk persons namn (för- och efternamn) ur verklig
-   * huvudman — visas bara på skärmen direkt efter hämtningen så personalen
-   * vet VEM huvudmannen är (§ 51.7). Skrivs ALDRIG till databasen
-   * (`writer.ts` bygger raden utan fältet), aldrig till PDF/historik, aldrig
-   * till AI. Personnummer, födelsedatum och adress läses aldrig.
+   * En fysisk persons namn (för- och efternamn) ur verklig huvudman eller
+   * koncernlistan — visas i förhandsgranskningen och i Bedömning excellens
+   * (skärm, PDF, ärende) så ägarbilden går att läsa (§ 51.11). Skrivs inte
+   * till `startup_ownership` (`writer.ts`) och når aldrig AI-kontexten.
+   * Personnummer, födelsedatum och adress läses aldrig in i formen.
    */
   person_name?: string;
   /** Org-nr (10 siffror) för juridiska personer. Tomt för fysiska personer. */
@@ -132,6 +174,17 @@ export interface RegistryCompany {
   ownership: RegistryOwnershipEntry[];
   /** Hela koncernen ur koncernregistret (bara när datadelen `group_structure` hämtades och svaret var en koncernlista). */
   group?: RegistryGroupMember[];
+  /** Bolagets SNI-koder (huvudsaklig först) — bara när grunddata hämtades. */
+  sni?: RegistrySni[];
+  /** Ägarnas andra bolag (bara när datadelen `owner_engagements` hämtades, § 51.11). */
+  ownerEngagements?: RegistryOwnerEngagement[];
+  /**
+   * Faktiska anrop för delar som inte är "ett anrop per bolag" — ägarnas
+   * andra bolag: `owner_engagements` = antal huvudmän som söktes, `basic` =
+   * grunddata per hittat bolag. Kostnaden för uppslaget räknas som valda
+   * delar UTOM `owner_engagements` × 1 + dessa (`addRegistryCalls`).
+   */
+  extraCalls?: Partial<Record<RegistryPartId, number>>;
   /**
    * Datadelar som hämtades MED LYCKAT RESULTAT. Bara dessa skrivs; en del som
    * inte valdes, eller vars anrop föll, lämnar befintliga värden orörda.

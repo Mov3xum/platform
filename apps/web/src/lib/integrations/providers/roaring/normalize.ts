@@ -11,10 +11,13 @@
  * innan portföljen synkas. Okända fält ignoreras — vi skriver hellre inget än
  * fel.
  *
- * Dataminimering (CLAUDE.md § 11.4): verklig huvudman/styrelse innehåller
- * namn och personnummer. Normaliseraren tar ENBART andel/kontrollintervall
- * och kontrollgrund per person — inget namn, inget födelsedatum, inget
- * personnummer lämnar den här funktionen.
+ * Dataminimering (CLAUDE.md § 11.4, § 51.11): verklig huvudman innehåller
+ * namn och personnummer. Normaliseraren tar namn, andel/kontrollintervall och
+ * kontrollgrund per person — ägarbilden ska gå att läsa. Födelsedatum och
+ * adress läses aldrig. Personnumret läses BARA av
+ * `roaringBeneficialOwnerPersons`, som handlern använder för att söka
+ * personens andra bolag; det lämnar aldrig handlern (aldrig i
+ * RegistryCompany, noter, loggar eller databas).
  */
 import { isPersonalOrgNr, isValidOrgNr, normalizeOrgNr } from '../../company-registry/orgnr';
 import {
@@ -29,7 +32,9 @@ import {
   parsePctInterval,
   pickFirst,
   type RegistryCompany,
+  type RegistryEngagementCompany,
   type RegistryFinancialsYear,
+  type RegistrySni,
   type RegistryGroupMember,
   type RegistryOwnershipEntry,
   type RegistryStartupPatch
@@ -144,15 +149,60 @@ function allRecords(raw: unknown): Record<string, unknown>[] {
   return [raw as Record<string, unknown>];
 }
 
+const SNI_LIST_KEYS = ['industries', 'industryCodes', 'sniCodes', 'sni', 'naceCodes', 'allIndustries', 'secondaryIndustries', 'otherIndustries', 'businessIndustries'];
+const SNI_CODE_KEYS = ['code', 'industryCode', 'sniCode', 'naceCode', 'id', 'value'];
+const SNI_TEXT_KEYS = ['text', 'industryText', 'sniText', 'description', 'name', 'label'];
+
+/**
+ * Bolagets SNI-koder: huvudsaklig (`industryCode`/`industryText`) först, sedan
+ * varje kod i en lista (`industries[]` m.fl. — som objekt `{ code, text }`
+ * eller som strängar). Dubbletter slås ihop; "00000" (uppgift saknas) och
+ * annat som inte är en kod släpps.
+ */
+export function normalizeRoaringSni(rec: Record<string, unknown>): RegistrySni[] {
+  const out: RegistrySni[] = [];
+  const push = (codeRaw: unknown, textRaw: unknown, primary: boolean) => {
+    const code = asString(codeRaw)?.replace(/[^0-9]/g, '');
+    if (!code || code.length < 2 || code.length > 5 || /^0+$/.test(code)) return;
+    const text = asString(textRaw)?.slice(0, 200);
+    const prev = out.find((x) => x.code === code);
+    if (prev) {
+      if (!prev.text && text) prev.text = text;
+      if (primary) prev.primary = true;
+      return;
+    }
+    out.push({ code, ...(text ? { text } : {}), ...(primary ? { primary: true } : {}) });
+  };
+  push(
+    pickFirst(rec, ['industryCode', 'sniCode', 'industry.code', 'primaryIndustryCode', 'primaryIndustry.code']),
+    pickFirst(rec, ['industryText', 'sniText', 'industry.text', 'primaryIndustryText', 'primaryIndustry.text']),
+    true
+  );
+  for (const key of SNI_LIST_KEYS) {
+    const v = rec[key];
+    if (!Array.isArray(v)) continue;
+    for (const item of v.slice(0, 20)) {
+      if (item && typeof item === 'object') {
+        const o = item as Record<string, unknown>;
+        const primaryFlag = pickFirst(o, ['primary', 'isPrimary', 'main', 'isMain']);
+        push(pickFirst(o, SNI_CODE_KEYS), pickFirst(o, SNI_TEXT_KEYS), primaryFlag === true || primaryFlag === 'true');
+      } else push(item, undefined, false);
+    }
+  }
+  // Huvudsaklig först.
+  return out.sort((a, b) => Number(!!b.primary) - Number(!!a.primary));
+}
+
 export function normalizeRoaringOverview(raw: unknown, notes: string[]): {
   name?: string;
   patch: RegistryStartupPatch;
+  sni: RegistrySni[];
 } {
   const rec = firstRecord(raw);
   const patch: RegistryStartupPatch = {};
   if (!rec) {
     notes.push('Roaring overview: tomt svar.');
-    return { patch };
+    return { patch, sni: [] };
   }
 
   const name = asString(pickFirst(rec, ['companyName', 'name', 'legalName']));
@@ -198,7 +248,9 @@ export function normalizeRoaringOverview(raw: unknown, notes: string[]): {
   if (registered) patch.company_registered_at = registered;
   else notes.push('Roaring overview: registreringsdatum saknas.');
 
-  return { name, patch };
+  const sniList = normalizeRoaringSni(rec);
+  if (sniList.length === 0) notes.push('Roaring overview: SNI-kod saknas i svaret.');
+  return { name, patch, sni: sniList };
 }
 
 const YEAR_PATHS = ['toDate', 'accountsClosingDate', 'periodEnd', 'period.toDate', 'endDate', 'year', 'fiscalYear'];
@@ -419,7 +471,8 @@ function describeIdShape(raw: string | undefined): string {
 /**
  * En nod utan giltigt org-nr för juridisk person (saknat id, ogiltigt id,
  * eller ett personnummer-derivat = enskild firma/fysisk person) blir en
- * ANONYM person-rad: inget namn, inget org-nr — bara andel (GDPR § 5).
+ * person-rad med namn men utan org-nr (personnumret lämnar aldrig
+ * normaliseraren, § 51.11).
  */
 function companyEntry(
   n: GroupNode,
@@ -447,9 +500,13 @@ function companyEntry(
         indirect: indirect || undefined
       };
     }
+    // Fysisk person (eller enskild firma): namnet följer med för visning
+    // (§ 51.11) — personnummer/org-nr aldrig.
+    const personName = n.name ? n.name.replace(/\d[\d\s-]*\d/g, '').replace(/\s+/g, ' ').trim().slice(0, 120) : '';
     return {
       direction,
       owner_kind: 'person',
+      ...(personName ? { person_name: personName } : {}),
       capital_pct: n.pct,
       voting_pct: n.votes,
       indirect: indirect || undefined
@@ -844,10 +901,10 @@ export function beneficialOwnerName(o: Record<string, unknown>): string | undefi
 }
 
 /**
- * Verklig huvudman → person-rader med andel/intervall och kontrollgrund.
- * Namnet (för-/efternamn) följer med TRANSIENT i `person_name` för visning
- * på skärmen (§ 51.7) — aldrig till databasen/PDF/AI; personnummer,
- * födelsedatum och adress läses aldrig.
+ * Verklig huvudman → person-rader med namn, andel/intervall och
+ * kontrollgrund. Namnet (för-/efternamn) visas i förhandsgranskningen och i
+ * Bedömning excellens (§ 51.11) — aldrig i `startup_ownership` eller AI.
+ * Personnummer, födelsedatum och adress läses aldrig här.
  */
 export function normalizeRoaringBeneficialOwners(raw: unknown, notes: string[]): RegistryOwnershipEntry[] {
   const rec = firstRecord(raw);
@@ -950,6 +1007,209 @@ export function normalizeRoaringBeneficialOwners(raw: unknown, notes: string[]):
   return out;
 }
 
+// ─── Ägarnas andra bolag (§ 51.11) ─────────────────────────────────────────
+
+/** Fältnamn för en huvudmans personnummer (2.1: `person{…}`; äldre: toppnivå). */
+const PNR_PATHS = [
+  'person.personalNumber',
+  'person.personalIdentityNumber',
+  'person.personalIdNumber',
+  'person.personNumber',
+  'person.nationalIdentityNumber',
+  'person.nationalId',
+  'person.socialSecurityNumber',
+  'person.identityNumber',
+  'person.idNumber',
+  'personalNumber',
+  'personalIdentityNumber',
+  'personNumber',
+  'nationalIdentityNumber',
+  'socialSecurityNumber'
+];
+
+/**
+ * Personnummer eller samordningsnummer (10 eller 12 siffror, Luhn över de tio
+ * sista) → siffrorna som de kom (12 behålls — Roaring tar båda). Allt annat ⇒ null.
+ */
+export function normalizePersonalNumber(v: unknown): string | null {
+  const s = asString(v);
+  if (!s) return null;
+  const digits = s.replace(/[^0-9]/g, '');
+  const ten = digits.length === 12 ? digits.slice(2) : digits.length === 10 ? digits : null;
+  if (!ten) return null;
+  const mm = Number(ten.slice(2, 4));
+  const dd = Number(ten.slice(4, 6));
+  if (mm < 1 || mm > 12) return null;
+  if (!((dd >= 1 && dd <= 31) || (dd >= 61 && dd <= 91))) return null;
+  return isValidOrgNr(ten) ? digits : null;
+}
+
+/**
+ * En fysisk huvudman med det som behövs för att söka personens andra bolag.
+ * `personalNumber` är TRANSIENT: bara Roaring-handlern läser den, för
+ * uppslaget — den får aldrig hamna i RegistryCompany, noter, loggar eller DB.
+ */
+export interface RoaringBeneficialOwnerPerson {
+  personalNumber?: string;
+  name?: string;
+  capital_pct?: number;
+  pct_min?: number;
+  pct_max?: number;
+  control_basis?: string;
+  /** Formen på posten (nycklar, aldrig värden) när personnumret saknas — för diagnosnoten. */
+  shape?: string;
+}
+
+function beneficialOwnerItems(raw: unknown): Record<string, unknown>[] {
+  const rec = firstRecord(raw);
+  if (!rec) return [];
+  for (const key of BO_LIST_KEYS) {
+    const v = rec[key];
+    if (Array.isArray(v)) return v.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object');
+  }
+  const recs = allRecords(raw);
+  if (recs.length > 1 || (recs[0] && !BO_LIST_KEYS.some((k) => k in recs[0]))) return recs;
+  return [];
+}
+
+/** Fysiska huvudmän ur ett verklig huvudman-svar (juridiska personer utelämnas). */
+export function roaringBeneficialOwnerPersons(raw: unknown): RoaringBeneficialOwnerPerson[] {
+  const out: RoaringBeneficialOwnerPerson[] = [];
+  for (const o of beneficialOwnerItems(raw)) {
+    const rawId = asString(pickFirst(o, ['companyId', 'organisationNumber', 'orgNr', 'organizationNumber']));
+    const org = normalizeOrgNr(rawId);
+    if (isLegalEntityOrgNr(org || undefined)) continue;
+    if (looksLikeCompanyName(asString(pickFirst(o, ['companyName', 'legalName'])))) continue;
+    const capital = parseControlInterval(pickFirst(o, BO_CAPITAL_PATHS));
+    const person: RoaringBeneficialOwnerPerson = {
+      name: beneficialOwnerName(o),
+      control_basis: controlBasisCategory(controlText(pickFirst(o, BO_CONTROL_PATHS)))
+    };
+    if (capital) {
+      if (capital.min === capital.max) person.capital_pct = capital.min;
+      person.pct_min = capital.min;
+      person.pct_max = capital.max;
+    }
+    const pnr = normalizePersonalNumber(pickFirst(o, PNR_PATHS));
+    if (pnr) person.personalNumber = pnr;
+    else person.shape = 'person' in o ? describeShape('person', o.person, 1) : Object.keys(o).slice(0, 12).join(',');
+    out.push(person);
+  }
+  return out;
+}
+
+const ENGAGEMENT_LIST_KEYS = [
+  'beneficialOwnerships',
+  'beneficialOwnerOf',
+  'beneficialOwnerIn',
+  'ownerships',
+  'engagements',
+  'companyEngagements',
+  'companies',
+  'legalEntities',
+  'controls'
+];
+const ENGAGEMENT_ID_PATHS = [
+  'legalEntity.companyId',
+  'legalEntity.organisationNumber',
+  'legalEntity.organizationNumber',
+  'legalEntity.orgNr',
+  'company.companyId',
+  'company.organisationNumber',
+  'companyId',
+  'organisationNumber',
+  'organizationNumber',
+  'orgNr'
+];
+const ENGAGEMENT_NAME_PATHS = ['legalEntity.companyName', 'legalEntity.name', 'company.companyName', 'company.name', 'companyName', 'legalName'];
+
+function hasEngagementCompany(o: Record<string, unknown>): boolean {
+  return pickFirst(o, ENGAGEMENT_ID_PATHS) !== undefined || (!!o.legalEntity && typeof o.legalEntity === 'object');
+}
+
+function sameTen(a: string, b: string): boolean {
+  return a.slice(-10) === b.slice(-10);
+}
+
+/**
+ * Verklig huvudman PER PERSON (`/se/beneficialowner/2.1/person/{personnummer}`)
+ * → bolagen personen är huvudman för, med personens andel. Formen kan inte
+ * verifieras från byggmiljön, så både "en post per bolag" (`legalEntity` +
+ * `extentOfControl`, eller bolagets `beneficialOwners[]` där personen slås
+ * upp på personnumret) och "en post per person med en lista bolag"
+ * (`beneficialOwnerships[]` m.fl.) tolkas. Enskilda firmor (org-nr =
+ * personnummer) och poster utan org-nr/bolagsnamn hoppas över.
+ */
+export function normalizeRoaringPersonEngagements(
+  raw: unknown,
+  personalNumber: string | undefined,
+  notes: string[]
+): RegistryEngagementCompany[] {
+  const items: Record<string, unknown>[] = [];
+  for (const rec of allRecords(raw)) {
+    if (hasEngagementCompany(rec)) {
+      items.push(rec);
+      continue;
+    }
+    for (const key of ENGAGEMENT_LIST_KEYS) {
+      const v = rec[key];
+      if (!Array.isArray(v)) continue;
+      for (const x of v) if (x && typeof x === 'object') items.push(x as Record<string, unknown>);
+    }
+  }
+  const out: RegistryEngagementCompany[] = [];
+  const seen = new Set<string>();
+  let personal = 0;
+  let unparsed = 0;
+  for (const item of items) {
+    const rawId = asString(pickFirst(item, ENGAGEMENT_ID_PATHS));
+    const org = normalizeOrgNr(rawId) || undefined;
+    if (org && isPersonalOrgNr(org)) {
+      personal++;
+      continue;
+    }
+    const name = asString(pickFirst(item, ENGAGEMENT_NAME_PATHS));
+    const legal = isLegalEntityOrgNr(org) ? org : undefined;
+    if (!legal && !looksLikeCompanyName(name)) {
+      unparsed++;
+      continue;
+    }
+    const key = legal ?? `name:${(name ?? '').toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    // Personens andel: på posten själv, annars i bolagets huvudmannalista
+    // (matchad på personnumret, eller den enda raden).
+    let source: Record<string, unknown> = item;
+    if (pickFirst(item, BO_CAPITAL_PATHS) === undefined) {
+      const list = BO_LIST_KEYS.map((k) => item[k]).find((v) => Array.isArray(v)) as unknown[] | undefined;
+      const owners = (list ?? []).filter((x): x is Record<string, unknown> => !!x && typeof x === 'object');
+      const match =
+        (personalNumber
+          ? owners.find((x) => {
+              const p = normalizePersonalNumber(pickFirst(x, PNR_PATHS));
+              return !!p && sameTen(p, personalNumber);
+            })
+          : undefined) ?? (owners.length === 1 ? owners[0] : undefined);
+      if (match) source = match;
+    }
+    const capital = parseControlInterval(pickFirst(source, BO_CAPITAL_PATHS));
+    const entry: RegistryEngagementCompany = {
+      ...(legal ? { org_nr: legal } : {}),
+      ...(name ? { name } : {}),
+      control_basis: controlBasisCategory(controlText(pickFirst(source, BO_CONTROL_PATHS)))
+    };
+    if (capital) {
+      if (capital.min === capital.max) entry.capital_pct = capital.min;
+      entry.pct_min = capital.min;
+      entry.pct_max = capital.max;
+    }
+    out.push(entry);
+  }
+  if (personal > 0) notes.push(`Roaring ägarnas andra bolag: ${personal} enskild(a) firma(or) hoppades över (org-nr = personnummer).`);
+  if (unparsed > 0) notes.push(`Roaring ägarnas andra bolag: ${unparsed} post(er) utan org-nr/bolagsnamn kunde inte tolkas.`);
+  return out;
+}
+
 export function normalizeRoaringCompany(
   orgNr: string,
   bundle: RoaringRawBundle,
@@ -958,8 +1218,8 @@ export function normalizeRoaringCompany(
   const notes: string[] = [];
   // Grunddata normaliseras bara när den delen hämtades (valbara delar, § 11.8)
   // — annars skulle "tomt svar" noteras för ett API som aldrig anropades.
-  const { name, patch } =
-    'overview' in bundle ? normalizeRoaringOverview(bundle.overview, notes) : { name: undefined, patch: {} };
+  const { name, patch, sni } =
+    'overview' in bundle ? normalizeRoaringOverview(bundle.overview, notes) : { name: undefined, patch: {}, sni: [] as RegistrySni[] };
   const financials = bundle.financials
     ? normalizeRoaringFinancials(bundle.financials, notes, opts.amountMultiplier ?? 1)
     : [];
@@ -988,6 +1248,7 @@ export function normalizeRoaringCompany(
     financials,
     ownership,
     group,
+    ...(sni.length > 0 ? { sni } : {}),
     notes
   };
 }

@@ -15,7 +15,8 @@ import {
   registryPartCostLabel,
   registryPricingEnvKeys,
   registryPricingFromEnv,
-  validateRegistryPricingInput
+  validateRegistryPricingInput,
+  addRegistryCalls
 } from './pricing';
 
 test('parseRegistryPricingJson: tolerant — ogiltiga tal och okända nycklar släpps', () => {
@@ -115,7 +116,8 @@ test('leverantörens publicerade listpris: Roaring 0,20 kr/credit + credits per 
     basic: 10,
     financials: 35,
     group_structure: 150,
-    beneficial_owners: 50
+    beneficial_owners: 50,
+    owner_engagements: 50
   });
   assert.ok(roaring.sourceUrl.startsWith('https://help.roaring.io/'));
   assert.match(roaring.publishedAt, /^\d{4}-\d{2}-\d{2}$/);
@@ -189,4 +191,21 @@ test('sumRegistryCosts: olika delar per bolag summeras per uppslag; en opristt d
   assert.equal(partial.complete, false);
   assert.deepEqual(partial.unpricedParts, ['financials']);
   assert.equal(sumRegistryCosts([]).complete, false);
+});
+
+test('addRegistryCalls: ägarnas andra bolag — ett anrop per huvudman + grunddata per hittat bolag', () => {
+  const pricing = { creditsPerPart: { basic: 10, beneficial_owners: 50, owner_engagements: 50 }, sekPerCredit: 0.2, source: 'tenant' } as unknown as RegistryPricing;
+  const base = estimateRegistryCost(pricing, ['basic', 'beneficial_owners'], 1);
+  const total = addRegistryCalls(base, pricing, { owner_engagements: 2, basic: 3 });
+  assert.equal(total.calls, 2 + 2 + 3);
+  assert.equal(total.credits, 10 + 50 + 2 * 50 + 3 * 10);
+  assert.equal(total.sek, total.credits! * 0.2);
+  assert.ok(total.parts.includes('owner_engagements'));
+  assert.equal(total.complete, true);
+  // Del utan pris ⇒ nedre gräns.
+  const noPrice = addRegistryCalls(base, { ...pricing, creditsPerPart: { basic: 10, beneficial_owners: 50 } } as RegistryPricing, { owner_engagements: 1 });
+  assert.deepEqual(noPrice.unpricedParts, ['owner_engagements']);
+  assert.equal(noPrice.complete, false);
+  // Inga extra anrop ⇒ oförändrad.
+  assert.deepEqual(addRegistryCalls(base, pricing, {}), base);
 });

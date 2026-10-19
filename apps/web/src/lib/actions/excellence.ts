@@ -188,7 +188,7 @@ export async function assessExcellenceAction(
     // Anknutna bolag som själva är portföljbolag får sina sparade fakta.
     const related: GroupCompanyFacts[] = [];
     const financialsByOrg: Record<string, ScreeningFinancialsYear[]> = { [platform.orgNr]: platform.financials };
-    for (const ref of deriveGroupCompanies(subject, [], facts.group_companies).slice(0, MAX_RELATED_COMPANIES)) {
+    for (const ref of deriveGroupCompanies(subject, [], facts.group_companies, facts.person_links).slice(0, MAX_RELATED_COMPANIES)) {
       if (!ref.org_nr || ref.relation === 'exempt') continue;
       const id = await findStartupByOrgNr(pb, user.tenant, ref.org_nr);
       const f = id ? await loadPlatformStartupFacts(pb, user.tenant, id) : null;
@@ -419,7 +419,9 @@ async function followGroupLookups(
   let overflow = 0;
   let partsHint = false;
   for (let round = 0; round < 2; round++) {
-    const refs = subject.basic?.isPersonal ? [] : deriveGroupCompanies(subject, related, facts.group_companies).filter((r) => r.relation !== 'exempt');
+    const refs = subject.basic?.isPersonal
+      ? []
+      : deriveGroupCompanies(subject, related, facts.group_companies, facts.person_links).filter((r) => r.relation !== 'exempt');
     const pending = refs.filter((r) => {
       const key = r.org_nr ?? `name:${r.name ?? ''}`;
       return !lookedUp.has(key) && !skipped.has(key);
@@ -445,7 +447,9 @@ async function followGroupLookups(
       }
       const parts = partsForRelated(ref, args.requestedParts);
       if (parts.length === 0) {
-        partsHint = true;
+        // Ägarnas andra bolag har redan grunddata (SNI) ur engagemangsuppslaget;
+        // bara anknutna behöver bokslut — inget att hämta är inget fel.
+        if (!ref.personLink) partsHint = true;
         skipped.add(key);
         continue;
       }
@@ -619,11 +623,18 @@ export async function addGroupCompanyAction(
  * och bokslut (tröskelvärde) av det som valdes; verklig huvudman bara för
  * moderbolagen (indirekt grundarägande). Ett bolag ur ägarbilden som INTE
  * ligger i koncernlistan (partner/oklart ur verklig huvudman) hämtas med
- * hela valet, så dess egen koncern (andra ledet) blir känd.
+ * hela valet, så dess egen koncern (andra ledet) blir känd. Ägarnas andra
+ * bolag (§ 51.11) hämtar bara bokslut — och bara när de räknas som anknutna.
  */
 function partsForRelated(ref: RelatedCompanyRef, requested: RegistryPartId[]): RegistryPartId[] {
-  if (!ref.groupRole && !ref.transitive) return requested;
-  return requested.filter((p) => p !== 'group_structure' && (p !== 'beneficial_owners' || ref.groupRole === 'parent'));
+  // Ägarnas andra bolag söks bara för startup-bolaget (§ 51.11).
+  const base = requested.filter((p) => p !== 'owner_engagements');
+  // Ett av ägarnas andra bolag har redan grunddata (SNI, ålder, status) ur
+  // engagemangsuppslaget — ett anknutet behöver bara bokslutet (tröskelvärde,
+  // utdelning); ett oklart slås inte upp förrän relationen avgjorts.
+  if (ref.personLink) return ref.relation === 'linked' ? base.filter((p) => p === 'financials') : [];
+  if (!ref.groupRole && !ref.transitive) return base;
+  return base.filter((p) => p !== 'group_structure' && (p !== 'beneficial_owners' || ref.groupRole === 'parent'));
 }
 
 /**

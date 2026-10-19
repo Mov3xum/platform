@@ -13,6 +13,7 @@ produktion. Ingenting skrivs till databasen förrän steg 5.
 | Bokslut | `se-company-economy-overview-2.1` → `/se/company/economy-overview/2.1/{orgnr}` (reserv `1.1`) | **Bekräftad mot riktigt svar 2026-10-12.** En post per räkenskapsår: `fromDate`, `toDate`, `currency`, `numberOfEmployees`, `plSales` (nettoomsättning → `revenue_sek`), `plNetOperatingIncome` (rörelsens intäkter — noteras om den avviker från `plSales`), `plEbit`, `plProfitLossAfterFinItems`, `plNetProfitLoss` (→ `net_result_sek`), `bsShareCapital`, `bsTotalEquity` (→ `equity_sek`), `bsTotalLongTermDebts`, `bsTotalCurrentLiabilities`, **`bsTotalEquityAndLiabilities` (→ `balance_sheet_sek`; balansomslutningen finns bara på skuldsidan)**, KPI-fält (`kpi*Percent`). Personalkostnad/bolagsskatt saknas i API:t. Belopp i TSEK (multiplikator 1000) |
 | Koncernstruktur | `se-company-group-structure-1.0` → `/se/company/group-structure/1.0/{orgnr}` | Bekräftad. **Platt lista** `groupCompanies[]` med `companyId`, `companyName`, `countryCode`, `companyLevel`, `motherCompanyId`, `ownedPercentage` |
 | Verklig huvudman | `se-beneficialowner-2.1` (2.0 avvecklad 2025-01-15). Per bolag: `/se/beneficialowner/2.1/company/{orgnr}`, reserv `/se/beneficialowner/2.1/{orgnr}` och `/se/beneficialowner/1.0/company/{orgnr}` | **`/2.1/company/` bekräftad 2026-10-12.** Svarar `caseId`, `changeDate`, `legalEntity{type,companyId,companyName}`, `beneficialOwners[person,extentOfControl,controlTypes]`, `status{description,code}`, `registrationDateTime`. `person` läses aldrig; `extentOfControl` tolkas som text/objekt/kod inkl. Bolagsverkets ordalydelser ("Mer än 25 men inte mer än 50 procent", `MORE_THAN_75`); `controlTypes[]` mappas till fast vokabulär. Formen INUTI `extentOfControl`/`controlTypes` visas i fältnyckel-noten (två nivåer) — kan intervallet inte tolkas säger en egen not det |
+| Ägarnas andra bolag (§ 51.11) | Verklig huvudman per person: `/se/beneficialowner/2.1/person/{personnummer}`, reserv `/1.0/person` (env `ROARING_PERSON_ENGAGEMENT_PATH`) + grunddata per hittat bolag | **Overifierad form.** Personnumret läses ur bolagets huvudmannasvar (`person.personalNumber` m.fl. kandidater) och används bara som parameter. Svaret tolkas både som "post per bolag" (`legalEntity` + `extentOfControl`, eller bolagets `beneficialOwners[]`) och "post per person" (`beneficialOwnerships[]`). Förhandsgranskningen noterar sökvägen och fältnycklarna (aldrig värden); saknas personnumret visas postens form |
 | "Inga poster" | Roaring kan svara HTTP 200 med `records not found` i kuvertet | Hanteras som 404 (nästa kandidat provas) |
 | Sandbox | Samma värd som produktion. Sandbox-applikationens nycklar ger testdata. | Bekräftad |
 
@@ -91,6 +92,15 @@ verifieras genom att köra förhandsgranskningen mot sandboxen.
    paketet). Beloppen antas vara i TSEK som övriga bokslutsposter
    (`ROARING_AMOUNT_MULTIPLIER`); utdelningsvillkoret i bedömningen avgörs
    av 0 eller inte och påverkas inte av enheten.
+7c. **Verifiera ägarnas andra bolag.** Kör "Testa mot org-nr" med delen
+   "Ägarnas andra bolag" (Grunddata och Verklig huvudman bockas i
+   automatiskt) på ett bolag vars ägare ni VET äger andra bolag. Kontrollera
+   i noteringarna: (a) att personnumret fanns i huvudmannasvaret (annars
+   "personnummer saknas … (form: …)" — lägg fältnamnet i `PNR_PATHS` i
+   `normalize.ts`), (b) vilken sökväg som svarade för personuppslaget och
+   vilka fältnycklar svaret bar (rätta `ENGAGEMENT_*`-kandidaterna vid
+   behov), och (c) att varje hittat bolag fick SNI-kod. Stäm av kostnaden
+   (ett anrop per huvudman + grunddata per bolag) mot Konsumering.
 8. **Synka ett bolag** från bolagskortet ("Synka från Roaring") och
    kontrollera Finansiell historik + Ägarbild. Först därefter "Synka nu"
    för hela portföljen.
@@ -100,5 +110,8 @@ verifieras genom att köra förhandsgranskningen mot sandboxen.
 - DPA med Roaring AB + kontroll att licensen täcker verklig huvudman
   (CLAUDE.md § 11.3, C-37/20).
 - Byt till produktionsapplikationens nyckelpar (koppla från + anslut igen).
-- Fysiska personer lagras aldrig med namn/personnummer — det är
-  normaliserarens och `writer.ts` ansvar, inte leverantörens.
+- Fysiska personer lagras aldrig med namn/personnummer i `startup_ownership`
+  — det är `writer.ts` ansvar. Namn visas i uppslag och Bedömning excellens;
+  personnummer används bara för personuppslaget och lagras aldrig (§ 51.11).
+- DPIA-tillägg för sökning av ägarnas andra bolag (uppslag per person) och
+  kontroll att licensen täcker verklig huvudman per person.

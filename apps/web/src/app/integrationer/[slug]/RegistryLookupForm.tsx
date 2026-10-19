@@ -146,6 +146,19 @@ export function RegistryLookupForm({ providerSlug, providerName, registryParts, 
                   </div>
                 ))}
               </dl>
+              {c.sni && c.sni.length > 0 && (
+                <p className="mt-2 text-[12.5px] text-foreground">
+                  <span className="font-semibold text-foreground-subtle">SNI-koder: </span>
+                  {c.sni.map((x, i) => (
+                    <span key={x.code} className="mx-tnum">
+                      {i > 0 ? ' · ' : ''}
+                      {x.code}
+                      {x.text ? ` ${x.text}` : ''}
+                      {x.primary && c.sni!.length > 1 ? ' (huvudsaklig)' : ''}
+                    </span>
+                  ))}
+                </p>
+              )}
               {c.isPersonal && (
                 <p className="mt-2 text-xs text-foreground-muted">
                   Enskild firma — org-nr är ett personnummer och exkluderas ur AI-kontexten.
@@ -211,7 +224,7 @@ export function RegistryLookupForm({ providerSlug, providerName, registryParts, 
                         <span className="mr-2 rounded-md bg-canvas-muted px-1.5 py-0.5 text-[10.5px] font-medium text-foreground-muted">
                           {o.direction === 'owner' ? 'Ägare' : 'Innehav'}
                         </span>
-                        {o.owner_kind === 'person' ? (o.person_name ? `${o.person_name} (visas bara här — lagras inte)` : 'Fysisk person') : o.name || o.org_nr || 'Okänd'}
+                        {o.owner_kind === 'person' ? o.person_name || 'Fysisk person (namn saknas i svaret)' : o.name || o.org_nr || 'Okänd'}
                         <span className="ml-2 text-foreground-subtle">
                           {OWNER_KIND_LABEL[o.owner_kind] || o.owner_kind}
                           {o.indirect ? ' · indirekt' : ''}
@@ -228,6 +241,56 @@ export function RegistryLookupForm({ providerSlug, providerName, registryParts, 
                     </li>
                   ))}
                 </ul>
+              )}
+            </div>
+          )}
+
+          {asked.includes('owner_engagements') && (
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
+                Ägarnas andra bolag ({c.ownerEngagements?.length ?? 0} huvudmän)
+              </p>
+              {!c.ownerEngagements || c.ownerEngagements.length === 0 ? (
+                <p className="mt-1 text-foreground-muted">Inga fysiska huvudmän att söka (se noteringarna).</p>
+              ) : (
+                <div className="mt-2 space-y-2">
+                  {c.ownerEngagements.map((p, i) => (
+                    <div key={i} className="rounded-xl border border-default">
+                      <p className="bg-canvas-subtle px-3 py-1.5 text-[12.5px] font-semibold text-foreground">
+                        {p.person_name || 'Huvudman (namn saknas i svaret)'}
+                        <span className="ml-2 font-normal text-foreground-muted">
+                          {p.status === 'ok'
+                            ? `${p.companies.length} andra bolag`
+                            : p.status === 'none'
+                              ? 'inga andra bolag i registret'
+                              : `kunde inte sökas: ${p.reason ?? 'okänt fel'}`}
+                        </span>
+                      </p>
+                      {p.companies.length > 0 && (
+                        <ul className="divide-y divide-default">
+                          {p.companies.map((co, j) => (
+                            <li key={j} className="flex flex-wrap justify-between gap-2 px-3 py-1.5 text-[12px]">
+                              <span className="text-foreground">
+                                {co.name || '–'}
+                                {co.org_nr ? <span className="ml-2 text-foreground-subtle mx-tnum">{co.org_nr}</span> : null}
+                                <span className="block text-foreground-muted mx-tnum">
+                                  {co.basic?.sni?.length
+                                    ? `SNI ${co.basic.sni.map((x) => `${x.code}${x.text ? ` ${x.text}` : ''}`).join(' · ')}`
+                                    : co.note || 'SNI-kod saknas'}
+                                </span>
+                              </span>
+                              <span className="text-foreground-muted mx-tnum">
+                                {pct(co.capital_pct) ||
+                                  (typeof co.pct_min === 'number' && typeof co.pct_max === 'number' ? `${co.pct_min}–${co.pct_max} %` : '–')}
+                                {co.control_basis ? ` · ${CONTROL_LABEL[co.control_basis] || co.control_basis}` : ''}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           )}

@@ -8,7 +8,9 @@
 //   financials        → årsrader inkl. beslutad utdelning, personalkostnad och
 //                       bolagsskatt (startup_financials)
 //   group_structure   → moder-/dotterbolag (startup_ownership)
-//   beneficial_owners → verklig huvudman, anonymt (startup_ownership)
+//   beneficial_owners → verklig huvudman (startup_ownership)
+//   owner_engagements → ägarnas andra bolag (bara uppslag/bedömning, § 51.11 —
+//                       skrivs aldrig; kräver grunddata + verklig huvudman)
 // En provider deklarerar vilka delar den stödjer; personalen väljer en
 // delmängd före varje hämtning. Det som inte väljs anropas inte och skrivs
 // inte — befintliga värden från tidigare hämtningar lämnas orörda.
@@ -17,7 +19,8 @@ export const REGISTRY_PART_IDS = [
   'basic',
   'financials',
   'group_structure',
-  'beneficial_owners'
+  'beneficial_owners',
+  'owner_engagements'
 ] as const;
 
 export type RegistryPartId = (typeof REGISTRY_PART_IDS)[number];
@@ -25,8 +28,14 @@ export type RegistryPartId = (typeof REGISTRY_PART_IDS)[number];
 export interface RegistryPartMeta {
   label: string;
   description: string;
-  /** Vilken tabell delen skriver till. */
-  writes: 'startup' | 'financials' | 'ownership';
+  /** Vilken tabell delen skriver till (`none` = bara uppslag, skrivs aldrig). */
+  writes: 'startup' | 'financials' | 'ownership' | 'none';
+  /** Delar som måste hämtas samtidigt (läggs till automatiskt av `parseRegistryParts`). */
+  requires?: RegistryPartId[];
+  /** Bara för uppslag (Testa mot org-nr, Bedömning excellens) — aldrig vid synk till bolagskortet. */
+  lookupOnly?: boolean;
+  /** När priset inte är "per bolag": vad ett anrop avser (visas vid priset). */
+  costUnit?: string;
 }
 
 export const REGISTRY_PART_META: Record<RegistryPartId, RegistryPartMeta> = {
@@ -48,10 +57,44 @@ export const REGISTRY_PART_META: Record<RegistryPartId, RegistryPartMeta> = {
   },
   beneficial_owners: {
     label: 'Verklig huvudman',
-    description: 'Ägarandel och kontrollgrund per huvudman — utan namn eller personnummer.',
+    description: 'Huvudmännen med namn, ägarandel och kontrollgrund (personnummer lagras aldrig).',
     writes: 'ownership'
+  },
+  owner_engagements: {
+    label: 'Ägarnas andra bolag',
+    description:
+      'För varje fysisk huvudman: vilka andra bolag personen äger eller kontrollerar, med SNI-kod. Bolag på samma marknad (samma SNI-kod) räknas som anknutna — båda bolagen ska klara kriterierna. Ett anrop per huvudman + grunddata per hittat bolag.',
+    writes: 'none',
+    requires: ['basic', 'beneficial_owners'],
+    lookupOnly: true,
+    costUnit: 'per huvudman, plus grunddata per hittat bolag'
   }
 };
+
+/**
+ * Valet efter att `id` slagits på/av: beroenden följer med när en del slås på,
+ * och delar som kräver en avslagen del slås av — i providerns ordning.
+ */
+export function toggleRegistryPart(
+  selected: readonly RegistryPartId[],
+  id: RegistryPartId,
+  supported: readonly RegistryPartId[]
+): RegistryPartId[] {
+  const next = new Set(selected);
+  if (next.has(id)) {
+    next.delete(id);
+    for (const p of supported) if (REGISTRY_PART_META[p].requires?.includes(id)) next.delete(p);
+  } else {
+    next.add(id);
+    for (const dep of REGISTRY_PART_META[id].requires ?? []) if (supported.includes(dep)) next.add(dep);
+  }
+  return supported.filter((p) => next.has(p));
+}
+
+/** Delar som får väljas vid synk till bolagskortet (inte de som bara gäller uppslag). */
+export function syncableParts(parts: readonly RegistryPartId[]): RegistryPartId[] {
+  return parts.filter((p) => !REGISTRY_PART_META[p].lookupOnly);
+}
 
 /** Delar som skriver bokslutsrader (`startup_financials`), i deklarerad ordning. */
 export function financialsParts(parts: readonly RegistryPartId[]): RegistryPartId[] {
@@ -92,6 +135,13 @@ export function parseRegistryParts(
       return { ok: false, error: `Okänd datadel för leverantören: ${id.slice(0, 40)}` };
     }
     wanted.add(id);
+  }
+  // Beroenden (t.ex. ägarnas andra bolag kräver verklig huvudman + grunddata)
+  // läggs till när providern har dem — kostnaden visas därför för hela paketet.
+  for (const id of [...wanted]) {
+    for (const dep of REGISTRY_PART_META[id as RegistryPartId].requires ?? []) {
+      if (supported.includes(dep)) wanted.add(dep);
+    }
   }
   const parts = supported.filter((p) => wanted.has(p));
   if (parts.length === 0) return { ok: false, error: 'Välj minst en datadel att hämta.' };

@@ -7,9 +7,12 @@ import {
   type ScreeningFinancialsYear,
   type ScreeningFounderRow,
   type ScreeningGroupMember,
+  type ScreeningEngagementCompany,
   type ScreeningIrl,
+  type ScreeningOwnerEngagement,
   type ScreeningOwnerKind,
-  type ScreeningOwnershipEntry
+  type ScreeningOwnershipEntry,
+  type ScreeningSni
 } from '@platform/shared';
 // Relativa importer: modulen är ren och körs i Node-testrunnern (ingen `@/`-alias där).
 import { REGISTRY_PART_IDS, type RegistryPartId } from '../integrations/company-registry/parts';
@@ -23,8 +26,9 @@ import type { ExcellenceAssessmentSubject } from './types';
 // eftersom det då är klientdata byggs det om fält för fält här (typ, enum,
 // intervall, längd, antal) innan motorn ser det. Allt okänt släpps; ett
 // trasigt underlag ger `null` (ny körning krävs), aldrig ett undantag.
-// Innehållet är bara det vyn redan visade (fysiska personer utan namn) och
-// hamnar i den inloggades egna Filer — ingen ny dataväg.
+// Innehållet är bara det vyn redan visade (ägarbild med namn, aldrig
+// personnummer, § 51.11) och lagras i ärendet/bolagskortets körning — båda
+// staff-scopade och denylistade för AI.
 
 export const ASSESSMENT_CONTEXT_MAX_BYTES = 800_000;
 
@@ -98,6 +102,70 @@ function basic(v: unknown): ScreeningBasic | undefined {
   const form = str(o.bolagsform, 60);
   if (form) out.bolagsform = form;
   if (o.isPersonal === true) out.isPersonal = true;
+  const sniList = sni(o.sni);
+  if (sniList.length > 0) out.sni = sniList;
+  return out;
+}
+
+function sni(v: unknown): ScreeningSni[] {
+  if (!Array.isArray(v)) return [];
+  const out: ScreeningSni[] = [];
+  for (const x of v.slice(0, 20)) {
+    const o = obj(x);
+    const code = str(o?.code, 10);
+    if (!o || !code || !/^\d{2,5}$/.test(code)) continue;
+    const row: ScreeningSni = { code };
+    const text = str(o.text, 200);
+    if (text) row.text = text;
+    if (o.primary === true) row.primary = true;
+    out.push(row);
+  }
+  return out;
+}
+
+const ENGAGEMENT_STATUSES: ReadonlySet<string> = new Set(['ok', 'none', 'no_id', 'failed']);
+
+function engagements(v: unknown): ScreeningOwnerEngagement[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out: ScreeningOwnerEngagement[] = [];
+  for (const e of v.slice(0, 20)) {
+    const o = obj(e);
+    if (!o) continue;
+    const status = typeof o.status === 'string' && ENGAGEMENT_STATUSES.has(o.status) ? (o.status as ScreeningOwnerEngagement['status']) : 'failed';
+    const row: ScreeningOwnerEngagement = { status, companies: [] };
+    const pn = str(o.person_name, 120);
+    if (pn) row.person_name = pn;
+    const reason = str(o.reason, 400);
+    if (reason) row.reason = reason;
+    for (const k of ['subject_capital_pct', 'subject_pct_min', 'subject_pct_max'] as const) {
+      const n = pct(o[k]);
+      if (n !== undefined) row[k] = n;
+    }
+    if (Array.isArray(o.companies)) {
+      for (const c of o.companies.slice(0, 40)) {
+        const co = obj(c);
+        if (!co) continue;
+        const company: ScreeningEngagementCompany = {};
+        const nr = orgNr(co.org_nr);
+        if (nr) company.org_nr = nr;
+        const name = str(co.name, 200);
+        if (name) company.name = name;
+        if (!company.org_nr && !company.name) continue;
+        for (const k of ['capital_pct', 'pct_min', 'pct_max'] as const) {
+          const n = pct(co[k]);
+          if (n !== undefined) company[k] = n;
+        }
+        const basis = str(co.control_basis, 20);
+        if (basis && /^[a-z_]{1,20}$/.test(basis)) company.control_basis = basis;
+        const b = basic(co.basic);
+        if (b) company.basic = b;
+        const note = str(co.note, 400);
+        if (note) company.note = note;
+        row.companies.push(company);
+      }
+    }
+    out.push(row);
+  }
   return out;
 }
 
@@ -128,9 +196,8 @@ function ownership(v: unknown): ScreeningOwnershipEntry[] {
     if (!o) continue;
     const kind = typeof o.owner_kind === 'string' && OWNER_KINDS.has(o.owner_kind) ? (o.owner_kind as ScreeningOwnerKind) : 'other';
     const entry: ScreeningOwnershipEntry = { direction: o.direction === 'holding' ? 'holding' : 'owner', owner_kind: kind };
-    // Fysiska personer bär aldrig namn/org-nr (§ 11.8 GDPR) — tvingas här igen.
-    // Huvudmannens namn följer bara med TRANSIENT (`person_name`, § 51.7):
-    // samma session, samma skärm — aldrig PDF/historik/DB.
+    // Fysiska personer bär namn (`person_name`, § 51.11) men aldrig org-nr
+    // (enskild firma = personnummer) — tvingas här igen.
     if (kind !== 'person') {
       const name = str(o.name, 200);
       if (name) entry.name = name;
@@ -199,6 +266,8 @@ function groupFacts(v: unknown): GroupCompanyFacts | null {
   };
   const members = groupMembers(o.groupMembers);
   if (members) facts.groupMembers = members;
+  const eng = engagements(o.ownerEngagements);
+  if (eng) facts.ownerEngagements = eng;
   const dm = obj(o.deMinimis);
   const used = num(dm?.usedEur);
   if (dm && used !== undefined && used >= 0 && (dm.source === 'platform' || dm.source === 'certificate')) {
@@ -262,24 +331,6 @@ function cost(v: unknown): RegistryCostEstimate | undefined {
 /** Bygger underlaget till en JSON-sträng för rundturen (`<input type=hidden>`). */
 export function serializeAssessmentContext(ctx: AssessmentContext): string {
   return JSON.stringify(ctx);
-}
-
-/**
- * Underlaget för LAGRING på bolagskortet (`startup_screenings.context`,
- * § 51.8): verklig huvudmans namn är transient (visas bara på skärmen,
- * § 51.7) och strippas ur varje ägarrad innan något persisteras.
- */
-export function stripTransientNames(ctx: AssessmentContext): AssessmentContext {
-  const strip = (c: GroupCompanyFacts): GroupCompanyFacts => ({
-    ...c,
-    ownership: c.ownership.map((o) => {
-      if (!('person_name' in o)) return o;
-      const { person_name: _n, ...rest } = o;
-      void _n;
-      return rest;
-    })
-  });
-  return { ...ctx, input: { ...ctx.input, subject: strip(ctx.input.subject), related: ctx.input.related.map(strip) } };
 }
 
 /**

@@ -10,7 +10,7 @@ import {
   type ExcellenceAssessmentState
 } from '@/lib/actions/excellence';
 import { RegistryPartsPicker, useRegistryPartSelection } from '@/components/integrations/RegistryPartsPicker';
-import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
+import { syncableParts, type RegistryPartId } from '@/lib/integrations/company-registry/parts';
 import type { RegistryPricing } from '@/lib/integrations/company-registry/pricing';
 import { AssessmentReport } from './AssessmentReport';
 import { ScreeningRequestComposer } from './ScreeningRequestComposer';
@@ -342,7 +342,14 @@ export function ExcellenceWorkspace({
             onUpdated={onUpdated}
             fetchMore={
               current.mode === 'register' && canFetch && provider && current.subject.orgNr
-                ? { providerSlug: provider.slug, providerName: provider.name, parts: provider.parts, endpoints: provider.partEndpoints, pricing: provider.pricing }
+                ? {
+                    providerSlug: provider.slug,
+                    providerName: provider.name,
+                    // Ägarnas andra bolag söks bara för startup-bolaget (§ 51.11).
+                    parts: syncableParts(provider.parts),
+                    endpoints: provider.partEndpoints,
+                    pricing: provider.pricing
+                  }
                 : undefined
             }
           />

@@ -20,6 +20,7 @@ const STEPS: { title: string; items: string[] }[] = [
     items: [
       'Välj ett portföljbolag eller skriv ett org-nr (bolaget behöver inte finnas i plattformen).',
       'Hämta från bolagsregistret: bocka i de datadelar som ska begäras ut — ingen är förvald, varje anrop debiteras. För en komplett bedömning: Koncernstruktur (hela koncernen: moder-, syster- och dotterbolag), Grunddata (ålder, status, bolagsform — avgör även börsnotering), Bokslut (tröskelvärden och utdelning) och Verklig huvudman (fristående, indirekt grundarägande).',
+      'Ägarnas andra bolag: för varje fysisk huvudman söks vilka andra bolag personen äger eller kontrollerar, och varje hittat bolag får sin SNI-kod (ett anrop per huvudman + grunddata per bolag; kräver Grunddata och Verklig huvudman, som bockas i automatiskt).',
       `Varje bolag i koncernen slås därefter upp med grunddata + bokslut av ditt val (verklig huvudman bara för moderbolag), högst ${MAX_RELATED_COMPANIES} bolag. Kostnaden för hela bedömningen visas i resultatet — leverantörens faktura är facit.`,
       'Bedöm sparade data: använder det som redan finns på bolagskortet, utan nya anrop. Systerbolag syns bara vid en färsk hämtning med Koncernstruktur.',
       'Grundarägande, registrerat de minimis-stöd, IRL och excellensflaggan tas från plattformen när bolaget finns här.'
@@ -30,7 +31,8 @@ const STEPS: { title: string; items: string[] }[] = [
     items: [
       'Steg 1 prövar art. 22 GBER eller de minimis: grundförutsättningar för startup-bolaget och varje anknutet bolag, ägarbild, koncernkarta, fristående, tröskelvärden och de minimis. Steg 2 prövar Vinnovas målgrupp, steg 3 excellent inkubation.',
       'Varje punkt får Ja / Nej / Okänt med källa (bolagsregister, plattformen eller manuell kontroll). Inget gissas och inget beslut fattas här — beslutet registreras som förut på bolagskortet.',
-      'Koncernkartan visar varför ett bolag räknas in: moder-, syster- och dotterbolag är anknutna (100 %), partnerföretag (25–50 %) räknas med sin andel.',
+      'Koncernkartan visar varför ett bolag räknas in: moder-, syster- och dotterbolag är anknutna (100 %), partnerföretag (25–50 %) räknas med sin andel. SNI-koderna visas per bolag.',
+      'Ägarnas andra bolag: har ett bolag som en ägare äger samma SNI-kod som startup-bolaget räknas det som anknutet via ägaren (samma marknad, bilaga I art. 3.3) — båda bolagen ska klara kriterierna och räknas samman. Samma SNI-grupp eller saknad kod blir oklart; annan bransch räknas inte. Du kan ändra bedömningen per bolag (t.ex. om marknaden är angränsande eller ägaren inte kontrollerar bolaget).',
       'Registerdata sparas inte på bolagskortet — synka bolagskortet separat om du vill behålla den.'
     ]
   },
@@ -56,7 +58,8 @@ const STEPS: { title: string; items: string[] }[] = [
     title: 'Var bedömningen sparas',
     items: [
       'Slutbedömningen (när ärendet klarmarkeras) sparas som PDF i dina Filer (i bolagets mapp) och, för portföljbolag, på bolagskortet under Ekonomi & statsstöd → Statsstöd & Vinnova med historik och vad som ändrats sedan förra slutbedömningen.',
-      'Skriv aldrig personuppgifter i motiveringar och kommentarer. Namn på verkliga huvudmän visas bara på skärmen och lagras inte.'
+      'Ägarbilden visas med namn på verkliga huvudmän — på skärmen, i PDF:n och i ärendet. Personnummer används bara för att söka ägarnas andra bolag och sparas aldrig.',
+      'Skriv aldrig personuppgifter i motiveringar och kommentarer.'
     ]
   }
 ];

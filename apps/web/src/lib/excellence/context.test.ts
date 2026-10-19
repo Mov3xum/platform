@@ -96,3 +96,39 @@ test('ogiltigt eller för stort underlag ger null — aldrig ett undantag', () =
   assert.equal(parseAssessmentContext(JSON.stringify({ ...ctx, input: { ...ctx.input, sekPerEur: 0 } })), null);
   assert.equal(parseAssessmentContext('x'.repeat(ASSESSMENT_CONTEXT_MAX_BYTES + 1)), null);
 });
+
+test('underlaget: SNI, ägarnas andra bolag och huvudmännens namn överlever rundturen — orimliga värden släpps', () => {
+  const withEng: AssessmentContext = {
+    ...ctx,
+    input: {
+      ...ctx.input,
+      subject: {
+        ...ctx.input.subject,
+        basic: { ...ctx.input.subject.basic, sni: [{ code: '62010', text: 'Dataprogrammering', primary: true }, { code: 'x1' } as never] },
+        ownership: [{ direction: 'owner', owner_kind: 'person', person_name: 'Anna Testsson', pct_min: 75, pct_max: 100 }],
+        ownerEngagements: [
+          {
+            person_name: 'Anna Testsson',
+            subject_pct_min: 75,
+            subject_pct_max: 100,
+            status: 'ok',
+            companies: [
+              { org_nr: '5567036271', name: 'Ewell AB', pct_min: 75, pct_max: 100, basic: { registeredAt: '2006-05-10', sni: [{ code: '62010' }] } },
+              { name: '', org_nr: 'nej' }
+            ]
+          },
+          { status: 'påhittad' as never, companies: [] }
+        ]
+      }
+    }
+  };
+  const back = parseAssessmentContext(serializeAssessmentContext(withEng));
+  assert.ok(back);
+  assert.deepEqual(back!.input.subject.basic?.sni, [{ code: '62010', text: 'Dataprogrammering', primary: true }]);
+  assert.equal(back!.input.subject.ownership[0].person_name, 'Anna Testsson');
+  const eng = back!.input.subject.ownerEngagements!;
+  assert.equal(eng[0].person_name, 'Anna Testsson');
+  assert.equal(eng[0].companies.length, 1);
+  assert.equal(eng[0].companies[0].basic?.sni?.[0].code, '62010');
+  assert.equal(eng[1].status, 'failed');
+});

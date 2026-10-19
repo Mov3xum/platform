@@ -92,3 +92,18 @@ test('normalizeScreeningFacts: manuellt angivna koncernbolag — org-nr normalis
   assert.equal(summarizeScreeningFacts(f).group_companies, 2);
   assert.deepEqual(normalizeScreeningFacts({ group_companies: 'nej' }).group_companies, []);
 });
+
+test('person_links: bara giltiga org-nr och bedömningar, personnummer saneras', () => {
+  const f = normalizeScreeningFacts({
+    person_links: {
+      '556703-6271': { verdict: 'not_linked', note: 'Annan marknad, ägare 19800101-1234' },
+      '5590000006': { verdict: 'linked' },
+      '8001011234': { verdict: 'linked' },
+      '5560000001': { verdict: 'kanske' }
+    }
+  });
+  assert.deepEqual(Object.keys(f.person_links ?? {}).sort(), ['5567036271', '5590000006']);
+  assert.equal(f.person_links?.['5567036271'].verdict, 'not_linked');
+  assert.ok(!f.person_links?.['5567036271'].note?.includes('19800101'));
+  assert.equal(isEmptyScreeningFacts(normalizeScreeningFacts({ person_links: { '5590000006': { verdict: 'linked' } } })), false);
+});
