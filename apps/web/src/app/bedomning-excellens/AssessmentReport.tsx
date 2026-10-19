@@ -40,6 +40,7 @@ import {
 } from '@/lib/actions/excellence';
 import { REGISTRY_PART_META, type RegistryPartId } from '@/lib/integrations/company-registry/parts';
 import { estimateRegistryCost, formatRegistryCost, registryPartCostLabel, type RegistryPricing } from '@/lib/integrations/company-registry/pricing';
+import { logRegistryDiagnostics } from '@/lib/integrations/company-registry/console-diagnostics';
 
 // EN interaktiv rapport (CLAUDE.md § 51.9). Bedömningen visas i samma ordning
 // som referensbedömningen "Bedömning Vinnova Combly", och varje punkt som
@@ -975,6 +976,27 @@ export function AssessmentReport({ assessment, fetchMore, onUpdated }: Props) {
   useEffect(() => {
     if (state.assessment) onUpdated(state.assessment);
   }, [state.assessment, onUpdated]);
+
+  // Felsökning mot live: leverantörens svar per bolag i DevTools-konsolen.
+  useEffect(() => {
+    if (assessment.mode !== 'register') return;
+    logRegistryDiagnostics({
+      title: `${assessment.providerName ?? 'Bolagsregistret'}: Bedömning excellens — ${assessment.subject.name || assessment.subject.orgNr}`,
+      notes: assessment.notes.map((n) => ({ label: `${n.name || ''} ${n.orgNr}`.trim(), notes: n.notes })),
+      warnings: assessment.lookupWarnings,
+      data: {
+        Kostnad: assessment.cost,
+        'Ägarnas andra bolag': assessment.result.ownerEngagements,
+        'Bolag i bedömningen': assessment.result.companies.map((c) => ({
+          bolag: c.name,
+          orgNr: c.orgNr,
+          relation: c.relationLabel ?? 'startup-bolaget',
+          sni: c.basic?.sni?.map((x) => x.code).join(', '),
+          uppslag: c.dataFetched
+        }))
+      }
+    });
+  }, [assessment]);
 
   // Ny körning/omräkning ⇒ rapporten följer den och alla redigeringar stängs.
   useEffect(() => {

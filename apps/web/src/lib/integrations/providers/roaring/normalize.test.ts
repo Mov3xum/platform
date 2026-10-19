@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   describeRecordKeys,
+  describeRoaringError,
   describeShape,
   parseControlInterval,
   normalizeRoaringBeneficialOwners,
@@ -14,6 +15,7 @@ import {
   normalizeRoaringSni,
   normalizePersonalNumber,
   parseRoaringPathList,
+  personalNumberVariants,
   roaringBeneficialOwnerPersons,
   roaringReportsNoRecords
 } from './normalize';
@@ -917,4 +919,26 @@ test('OpenAPI 2.1: huvudmannens namn (firstNames-lista) + personnummer, och pers
       ['5594427808', 'Wellgo Health AB', undefined]
     ]
   );
+});
+
+test('describeRoaringError: felbeskedet visas, skickade värden och personnummer aldrig', () => {
+  const body = JSON.stringify({
+    error: 'BadRequest',
+    message: 'Invalid personal number 198112189876',
+    attributes: [{ attribute: 'personalNumber', value: '198112189876' }]
+  });
+  const text = describeRoaringError(body);
+  assert.ok(text.startsWith('BadRequest: Invalid personal number'));
+  assert.ok(text.includes('fält: personalNumber'));
+  assert.ok(!text.includes('198112189876'));
+  assert.ok(text.includes('[12 siffror]'));
+  assert.equal(describeRoaringError(''), '');
+  assert.equal(describeRoaringError('<html><body>Gateway Timeout</body></html>'), 'Gateway Timeout');
+});
+
+test('personalNumberVariants: 12 ⇄ 10 siffror', () => {
+  const now = new Date('2026-10-19T00:00:00Z');
+  assert.deepEqual(personalNumberVariants('198112189876', now), ['198112189876', '8112189876']);
+  assert.deepEqual(personalNumberVariants('8112189876', now), ['8112189876', '198112189876']);
+  assert.deepEqual(personalNumberVariants('0503150004', now), ['0503150004', '200503150004']);
 });

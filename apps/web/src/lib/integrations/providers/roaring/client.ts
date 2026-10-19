@@ -6,7 +6,7 @@ import {
   OAuthTokenError
 } from '../../company-registry/oauth';
 import { assertAllowedBaseUrl } from '../../company-registry/types';
-import { parseRoaringPathList, roaringReportsNoRecords } from './normalize';
+import { describeRoaringError, parseRoaringPathList, roaringReportsNoRecords } from './normalize';
 
 // Roaring (roaring.io, Stockholm) — REST/JSON, OAuth2 client credentials.
 //
@@ -187,6 +187,9 @@ export async function roaringGet(
       return { ok: true, data, path };
     } catch (err) {
       if (err instanceof IntegrationFetchError) {
+        // Leverantörens eget felbesked (maskerat) — syns i noteringarna och konsolen.
+        const detail = describeRoaringError(err.bodySnippet);
+        const withDetail = (reason: string) => (detail ? `${reason} Roaring: ${detail}` : reason);
         if (err.status === 401 && attempt === 0) {
           invalidateClientCredentialsToken(tokenOpts(c));
           try {
@@ -200,12 +203,13 @@ export async function roaringGet(
           ok: false,
           status: err.status,
           path,
-          reason:
+          reason: withDetail(
             err.status === 404
               ? 'Inga uppgifter i detta API för bolaget.'
               : err.status === 403
                 ? 'API:t ingår inte i kontots paket (403).'
                 : `Roaring svarade HTTP ${err.status}.`
+          )
         };
       }
       return { ok: false, status: 0, reason: 'Kunde inte nå Roaring (nätverksfel).', path };

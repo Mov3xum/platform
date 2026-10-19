@@ -21,6 +21,7 @@ import {
   normalizeRoaringCompany,
   normalizeRoaringOverview,
   normalizeRoaringPersonEngagements,
+  personalNumberVariants,
   roaringBeneficialOwnerPersons,
   type RoaringRawBundle
 } from './normalize';
@@ -34,6 +35,11 @@ function responseNote(label: string, outcome: RoaringFetchOutcome): string {
   if (!outcome.ok) return `Roaring ${label} (${outcome.path}): ${outcome.reason}`;
   const keys = describeRecordKeys(outcome.data);
   return `Roaring ${label} (${outcome.path}) svarade med fälten: ${keys.length > 0 ? keys.join(', ') : '(tomt)'}`;
+}
+
+/** Sant när grunddatasvaret inte gav någon SNI-kod (för diagnosnoten). */
+function sniMissing(data: unknown): boolean {
+  return normalizeRoaringOverview(data, []).sni.length === 0;
 }
 
 /** Kör `fn` över listan med högst `limit` samtidiga anrop, i ordning. */
@@ -80,10 +86,25 @@ async function fetchOwnerEngagements(
 
   let answered = false;
   const engagements: RegistryOwnerEngagement[] = [];
-  const results = await mapLimit(searchable, 3, async (p) => ({
-    person: p,
-    outcome: await roaringGetFirst(c, ROARING_PATHS.personEngagements(), p.personalNumber!)
-  }));
+  // Personnumrets format i sökvägen är inte specificerat ("string") — provas
+  // som det kom (oftast 12 siffror); avvisas det (400) provas det andra
+  // formatet. Varje försök noteras PII-fritt (antal siffror, aldrig värdet),
+  // så en körning mot live visar exakt vad Roaring svarade.
+  let calls = 0;
+  const results = await mapLimit(searchable, 3, async (p) => {
+    const tried: string[] = [];
+    let outcome: RoaringFetchOutcome | undefined;
+    for (const variant of personalNumberVariants(p.personalNumber!)) {
+      calls++;
+      outcome = await roaringGetFirst(c, ROARING_PATHS.personEngagements(), variant);
+      tried.push(
+        `${variant.length} siffror → ${outcome.ok ? 'HTTP 200' : `HTTP ${outcome.status || 'nätverksfel'}: ${outcome.reason}`} (${outcome.path})`
+      );
+      if (outcome.ok || outcome.status !== 400) break;
+    }
+    return { person: p, outcome: outcome!, tried };
+  });
+  results.forEach(({ tried }, i) => notes.push(`Roaring ägarnas andra bolag — huvudman ${i + 1}: ${tried.join('; ')}`));
   for (const { person, outcome } of results) {
     const base: Omit<RegistryOwnerEngagement, 'status' | 'companies'> = {
       person_name: person.name,
@@ -136,8 +157,10 @@ async function fetchOwnerEngagements(
     const targets = unique.get(orgNr) ?? [];
     if (!outcome.ok) {
       for (const t of targets) t.note = `Grunddata kunde inte hämtas: ${outcome.reason}`;
+      notes.push(`Roaring grunddata för ägarbolag (${outcome.path}): HTTP ${outcome.status || 'nätverksfel'} — ${outcome.reason}`);
       continue;
     }
+    if (sniMissing(outcome.data)) notes.push(`Roaring grunddata för ägarbolag (${outcome.path}): SNI-kod saknas — svaret bar fälten ${describeRecordKeys(outcome.data).join(', ') || '(tomt)'}`);
     const ov = normalizeRoaringOverview(outcome.data, []);
     for (const t of targets) {
       t.name = t.name ?? ov.name;
@@ -152,7 +175,7 @@ async function fetchOwnerEngagements(
   for (const list of [...unique.entries()].filter(([k]) => !orgNrs.includes(k)).map(([, v]) => v)) {
     for (const t of list) t.note = 'Grunddata hämtades inte (tak för antal bolag per uppslag).';
   }
-  return { engagements, personCalls: searchable.length, overviewCalls: orgNrs.length, answered };
+  return { engagements, personCalls: calls, overviewCalls: orgNrs.length, answered };
 }
 
 // Roaring — bolagsregister-provider (CLAUDE.md § 11.8). Hämtar upp till fyra

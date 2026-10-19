@@ -82,6 +82,43 @@ export function roaringReportsNoRecords(raw: unknown): boolean {
   return false;
 }
 
+/** Maskerar allt som kan vara ett personnummer, org-nr eller en e-postadress i en felsträng. */
+function maskIdentifiers(text: string): string {
+  return text
+    .replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, '[e-post]')
+    .replace(/\d[\d\s-]{4,}\d/g, (m) => `[${m.replace(/\D/g, '').length} siffror]`);
+}
+
+/**
+ * Leverantörens felsvar i läsbar, PII-fri form för noteringarna och
+ * konsolen: `{ error, message, attributes[{attribute, value}] }` (400 enligt
+ * OpenAPI-specarna) → "BadRequest: <message> (fält: personalNumber)". Värdet i
+ * `attributes` visas ALDRIG (det är det skickade personnumret/org-nr:et);
+ * siffersekvenser och e-post i texten maskeras. Annan text kapas till 200 tecken.
+ */
+export function describeRoaringError(bodySnippet: string | undefined): string {
+  const raw = (bodySnippet ?? '').trim();
+  if (!raw) return '';
+  try {
+    const o = JSON.parse(raw) as Record<string, unknown>;
+    if (o && typeof o === 'object') {
+      const err = asString(o.error);
+      const msg = asString(o.message) ?? asString(o.error_description) ?? asString(o.detail);
+      const attrs = Array.isArray(o.attributes)
+        ? o.attributes
+            .map((a) => (a && typeof a === 'object' ? asString((a as Record<string, unknown>).attribute) : undefined))
+            .filter((x): x is string => !!x)
+        : [];
+      const parts = [err, msg].filter(Boolean).join(': ');
+      const text = `${parts}${attrs.length > 0 ? ` (fält: ${attrs.join(', ')})` : ''}`;
+      if (text) return maskIdentifiers(text).slice(0, 300);
+    }
+  } catch {
+    /* inte JSON */
+  }
+  return maskIdentifiers(raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()).slice(0, 200);
+}
+
 /**
  * Env-lista av endpoint-kandidater ("/a/1.0, /b/2.0"). Tom/whitespace →
  * fallback. Bara absoluta sökvägar (börjar med "/") behålls — en felskriven
@@ -1052,6 +1089,20 @@ export function normalizePersonalNumber(v: unknown): string | null {
   if (mm < 1 || mm > 12) return null;
   if (!((dd >= 1 && dd <= 31) || (dd >= 61 && dd <= 91))) return null;
   return isValidOrgNr(ten) ? digits : null;
+}
+
+/**
+ * Personnumret i de format Roaring kan vilja ha i sökvägen — det som kom
+ * först (OpenAPI-specen säger bara "string"), därefter det andra (12 ⇄ 10
+ * siffror). Sekel för 10 siffror: 20xx om året inte passerats, annars 19xx.
+ */
+export function personalNumberVariants(pnr: string, now: Date = new Date()): string[] {
+  const digits = pnr.replace(/[^0-9]/g, '');
+  if (digits.length === 12) return [digits, digits.slice(2)];
+  if (digits.length !== 10) return [digits];
+  const yy = Number(digits.slice(0, 2));
+  const century = yy <= now.getUTCFullYear() % 100 ? '20' : '19';
+  return [digits, `${century}${digits}`];
 }
 
 /**

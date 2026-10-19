@@ -12,6 +12,7 @@ import {
 import { RegistryPartsPicker, useRegistryPartSelection } from '@/components/integrations/RegistryPartsPicker';
 import { syncableParts, type RegistryPartId } from '@/lib/integrations/company-registry/parts';
 import type { RegistryPricing } from '@/lib/integrations/company-registry/pricing';
+import { logRegistryDiagnostics } from '@/lib/integrations/company-registry/console-diagnostics';
 import { AssessmentReport } from './AssessmentReport';
 import { ScreeningRequestComposer } from './ScreeningRequestComposer';
 
@@ -93,6 +94,10 @@ export function ExcellenceWorkspace({
   senderName
 }: Props) {
   const [state, formAction, pending] = useActionState(assessExcellenceAction, initialState);
+  // Ett uppslag som fallerade helt (t.ex. grunddata avvisades) syns även i DevTools-konsolen.
+  useEffect(() => {
+    if (state.error) logRegistryDiagnostics({ title: 'Bedömning excellens', error: state.error });
+  }, [state.error]);
   const canFetch = canLookup && registries.length > 0;
   const caseStartup = initialCase?.startupId && startups.some((s) => s.id === initialCase.startupId) ? initialCase.startupId : undefined;
   const [target, setTarget] = useState<'portfolio' | 'orgnr'>(

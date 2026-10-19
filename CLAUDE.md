@@ -9293,6 +9293,17 @@ kriterierna. Plattformen mäter "samma marknad" med **SNI-koden**.
   (`ROARING_MAX_ENGAGEMENT_PERSONS`), 25 bolag
   (`ROARING_MAX_ENGAGEMENT_COMPANIES`). Saknas personnumret i svaret noteras
   postens FORM (nycklar, aldrig värden) — status `no_id`.
+- **Felsökning mot live (2026-10-19):** varje personuppslag noteras per
+  huvudman med format och utfall ("12 siffror → HTTP 400: … ; 10 siffror →
+  HTTP 200") — formatet i sökvägen är ospecificerat, så ett 400 provas om med
+  det andra formatet (12 ⇄ 10 siffror, `personalNumberVariants`). Roarings
+  eget felbesked (`{ error, message, attributes[] }`) följer med i
+  noteringen via `describeRoaringError` (ren, enhetstestad): attributens
+  VÄRDEN visas aldrig, siffersekvenser och e-post maskeras. Noteringarna
+  syns på sidan ("Svar från … per bolag" / "Noteringar från tolkningen") och
+  loggas som hopfälld grupp i webbläsarens konsol
+  (`company-registry/console-diagnostics.ts`, `[bolagsregister] …`) — samma
+  innehåll som sidan, inget personnummer.
 - **Kostnad:** ett anrop per huvudman (Roaring "Verklig Huvudman 2.1 –
   Person", 50 credits i listpriset) + grunddata (10) per hittat bolag. Det
   är inte "ett anrop per bolag", så handlern rapporterar faktiska anrop i

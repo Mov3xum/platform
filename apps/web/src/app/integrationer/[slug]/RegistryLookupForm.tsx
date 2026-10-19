@@ -1,6 +1,7 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useEffect } from 'react';
+import { logRegistryDiagnostics } from '@/lib/integrations/company-registry/console-diagnostics';
 import {
   previewRegistryLookupAction,
   type RegistryLookupState
@@ -58,6 +59,24 @@ const CONTROL_LABEL: Record<string, string> = {
 export function RegistryLookupForm({ providerSlug, providerName, registryParts, partEndpoints, pricing, pricingHref }: Props) {
   const [state, formAction, pending] = useActionState(previewRegistryLookupAction, initialState);
   const c = state.company;
+  // Felsökning mot live: hela svaret + noteringarna i DevTools-konsolen.
+  useEffect(() => {
+    if (!state.company && !state.error) return;
+    logRegistryDiagnostics({
+      title: `${providerName}: Testa mot org-nr`,
+      error: state.error,
+      notes: state.company ? [{ label: state.company.name || state.company.org_nr, notes: state.company.notes }] : [],
+      data: state.company
+        ? {
+            'Begärda delar': state.requestedParts,
+            'Hämtade delar': state.company.fetchedParts,
+            'Inga uppgifter hos leverantören (404)': state.company.noRecordParts,
+            Kostnad: state.cost,
+            'Tolkat svar': state.company
+          }
+        : undefined
+    });
+  }, [state, providerName]);
   const showPicker = registryParts.length > 1;
   const selection = useRegistryPartSelection(providerSlug, registryParts);
   const nothingSelected = showPicker && selection.selected.length === 0;

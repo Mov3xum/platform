@@ -101,6 +101,10 @@ verifieras genom att köra förhandsgranskningen mot sandboxen.
    vilka fältnycklar svaret bar (rätta `ENGAGEMENT_*`-kandidaterna vid
    behov), och (c) att varje hittat bolag fick SNI-kod. Stäm av kostnaden
    (ett anrop per huvudman + grunddata per bolag) mot Konsumering.
+   Allt syns även i webbläsarens konsol (DevTools → Console, gruppen
+   `[bolagsregister] …`): per huvudman vilket personnummerformat som
+   provades och vad Roaring svarade, inklusive Roarings felbesked vid 400
+   (maskerat — skickade värden visas aldrig).
 8. **Synka ett bolag** från bolagskortet ("Synka från Roaring") och
    kontrollera Finansiell historik + Ägarbild. Först därefter "Synka nu"
    för hela portföljen.
