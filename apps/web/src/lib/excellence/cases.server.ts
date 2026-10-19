@@ -3,6 +3,7 @@ import type PocketBase from 'pocketbase';
 import {
   type Role,
   normalizeScreeningFacts,
+  normalizeScreeningRunSummary,
   summarizeScreeningRun,
   type ScreeningManualFacts,
   type ScreeningVerdict,
@@ -17,14 +18,17 @@ import { pbStatus } from '@/lib/pb-error';
 import { isRuleDenialStatus } from '@/lib/read-scaling';
 import { hasRole } from '@/lib/rbac';
 import { parseAssessmentContext, type AssessmentContext } from './context';
-import { storableContext } from './history.server';
+import { SCREENINGS, storableContext } from './history.server';
 import type { ExcellenceAssessment } from './types';
 import {
   isScreeningCaseId,
   normalizeScreeningCaseStatus,
+  planCaseSync,
   resolveCaseTarget,
   type CaseCandidate,
-  type ScreeningCaseStatus
+  type CaseRef,
+  type ScreeningCaseStatus,
+  type ScreeningRunRef
 } from './cases';
 
 // Ärenden i Bedömning excellens (CLAUDE.md § 51.10). Varje körning,
@@ -234,22 +238,27 @@ export async function loadScreeningCase(pb: PocketBase, viewer: CaseViewer, id: 
   return { row, context: json ? parseAssessmentContext(json) : null, facts: normalizeScreeningFacts(raw.facts ?? null) };
 }
 
-/** Pågående ärende för ett bolag (org-nr eller portföljbolag), senast sparat först. */
-export async function findOpenScreeningCase(
+/**
+ * Bolagets ärende (org-nr eller portföljbolag): pågående före klarmarkerat,
+ * senast sparat först. `onlyOpen` begränsar till pågående.
+ */
+export async function findScreeningCase(
   pb: PocketBase,
   viewer: CaseViewer,
-  by: { orgNr?: string; startupId?: string }
+  by: { orgNr?: string; startupId?: string; onlyOpen?: boolean }
 ): Promise<ScreeningCaseRow | null> {
   if (!mayRead(viewer) || (!by.orgNr && !by.startupId)) return null;
+  const status = by.onlyOpen ? ' && status = "open"' : '';
   try {
     const res = await readWithReserve(
       pb,
       (c) =>
         c.collection(SCREENING_CASES).getList<RawRow>(1, 1, {
           filter: by.orgNr
-            ? c.filter('tenant = {:t} && status = "open" && org_nr = {:o}', { t: viewer.tenant, o: by.orgNr })
-            : c.filter('tenant = {:t} && status = "open" && startup = {:s}', { t: viewer.tenant, s: by.startupId ?? '' }),
-          sort: '-updated',
+            ? c.filter(`tenant = {:t}${status} && org_nr = {:o}`, { t: viewer.tenant, o: by.orgNr })
+            : c.filter(`tenant = {:t}${status} && startup = {:s}`, { t: viewer.tenant, s: by.startupId ?? '' }),
+          // "open" > "done" i textordning → pågående först.
+          sort: '-status,-updated',
           expand: EXPAND,
           fields: LIST_FIELDS
         }),
@@ -262,11 +271,14 @@ export async function findOpenScreeningCase(
   }
 }
 
-/** Pågående ärenden per org-nr (för "det finns redan ett ärende"-tipset i skapa-formuläret). */
-export async function openCasesByOrgNr(pb: PocketBase, viewer: CaseViewer): Promise<Record<string, { id: string; name?: string }>> {
-  const { cases } = await listScreeningCases(pb, viewer, 'open', 500);
-  const out: Record<string, { id: string; name?: string }> = {};
-  for (const c of cases) if (!out[c.org_nr]) out[c.org_nr] = { id: c.id, name: c.subject_name };
+/** Ärenden per org-nr, pågående före klarmarkerade (för "det finns redan ett ärende"-tipset i skapa-formuläret). */
+export async function casesByOrgNr(
+  pb: PocketBase,
+  viewer: CaseViewer
+): Promise<Record<string, { id: string; name?: string; status: ScreeningCaseStatus }>> {
+  const [open, done] = await Promise.all([listScreeningCases(pb, viewer, 'open', 500), listScreeningCases(pb, viewer, 'done', 500)]);
+  const out: Record<string, { id: string; name?: string; status: ScreeningCaseStatus }> = {};
+  for (const c of [...open.cases, ...done.cases]) if (!out[c.org_nr]) out[c.org_nr] = { id: c.id, name: c.subject_name, status: c.status };
   return out;
 }
 
@@ -278,8 +290,9 @@ export type SaveCaseResult =
 /**
  * Sparar en bedömning i ett ärende (§ 51.10): underlaget (utan transienta
  * personnamn), de manuella svaren och utfallen. Målet väljs
- * av `resolveCaseTarget` (uttryckligt ärende → pågående ärende för samma
- * org-nr → nytt). Fail-soft: anroparen visar felet, bedömningen visas ändå.
+ * av `resolveCaseTarget` (uttryckligt ärende → bolagets ärende → nytt). En
+ * ändring i ett klarmarkerat ärende gör det pågående igen. Fail-soft:
+ * anroparen visar felet, bedömningen visas ändå.
  */
 export async function saveAssessmentToCase(
   pb: PocketBase,
@@ -293,8 +306,8 @@ export async function saveAssessmentToCase(
   const toCandidate = (r: { id: string; org_nr?: string; status?: string } | null): CaseCandidate | null =>
     r && r.org_nr ? { id: r.id, org_nr: r.org_nr, status: normalizeScreeningCaseStatus(r.status) } : null;
   const requested = opts.caseId ? toCandidate(await readCase(pb, viewer, opts.caseId, 'id,tenant,org_nr,status')) : null;
-  const openForOrg = requested ? null : await findOpenScreeningCase(pb, viewer, { orgNr });
-  const target = resolveCaseTarget({ orgNr, requested, openForOrg: toCandidate(openForOrg), create: opts.create });
+  const existing = requested && requested.org_nr === orgNr ? null : await findScreeningCase(pb, viewer, { orgNr });
+  const target = resolveCaseTarget({ orgNr, requested, existingForOrg: toCandidate(existing), create: opts.create });
   if (target.kind === 'skip') return { ok: 'skip' };
 
   const context = storableContext(assessment.context);
@@ -321,10 +334,14 @@ export async function saveAssessmentToCase(
 
   try {
     if (target.kind === 'update') {
+      // En ändring i ett klarmarkerat ärende → pågående igen. Slutbedömningens
+      // PDF (file_id/file_name) ligger kvar i Filer och på bolagskortet.
+      const patch = target.reopen ? { ...payload, status: 'open', completed_at: '', completed_by: '' } : payload;
       const rec = await writeWithFallback(pb, (c) =>
-        c.collection(SCREENING_CASES).update<{ id: string; tenant?: string; status?: string }>(target.id, payload)
+        c.collection(SCREENING_CASES).update<{ id: string; tenant?: string; status?: string; subject_name?: string; startup?: string }>(target.id, patch)
       );
       if (rec.tenant && rec.tenant !== actor.tenant) return { ok: false, error: 'Ärendet fick fel tenant — kontakta Movexum.' };
+      if (target.reopen) await logReopen(pb, actor, rec.id, { subject_name: rec.subject_name, startup: rec.startup });
       return { ok: true, id: rec.id, created: false, status: normalizeScreeningCaseStatus(rec.status) };
     }
     const rec = await writeWithFallback(pb, (c) =>
@@ -389,4 +406,201 @@ export async function setScreeningCaseStatus(
     after_value: { status, subject_name: raw.subject_name, startup: raw.startup || undefined }
   });
   return { ok: true, name: raw.subject_name };
+}
+
+/** Audit (PII-fritt) när ett klarmarkerat ärende blir pågående igen av en ändring. */
+async function logReopen(pb: PocketBase, actor: Actor, id: string, row: { subject_name?: string; startup?: string }): Promise<void> {
+  await logAgentAction(pb, {
+    actor,
+    action_type: 'update',
+    collection: SCREENING_CASES,
+    record_id: id,
+    field: 'status',
+    before_value: { status: 'done' },
+    after_value: { status: 'open', reason: 'changed', subject_name: row.subject_name, startup: row.startup || undefined }
+  });
+}
+
+/**
+ * Något i bolagets underlag ändrades utanför ärendevyn (t.ex. ett besvarat
+ * kompletteringsärende, § 51.6): ett klarmarkerat ärende för bolaget blir
+ * pågående igen. Anroparen har redan verifierat ändringen — svaren kan komma
+ * från en bolagsmedlem, som inte läser ärenden, så skrivningen går via
+ * superusern (fallback: användarens token). Fail-soft.
+ */
+export async function reopenCaseAfterChange(pb: PocketBase, actor: Actor, startupId: string): Promise<void> {
+  if (!startupId) return;
+  const su = await getSuperuserPb();
+  const client = su.ok ? su.pb : pb;
+  try {
+    const res = await client.collection(SCREENING_CASES).getList<RawRow>(1, 1, {
+      filter: client.filter('tenant = {:t} && startup = {:s}', { t: actor.tenant, s: startupId }),
+      sort: '-status,-updated',
+      fields: 'id,tenant,status,subject_name,startup'
+    });
+    const row = res.items[0];
+    if (!row || row.tenant !== actor.tenant || normalizeScreeningCaseStatus(row.status) !== 'done') return;
+    await client.collection(SCREENING_CASES).update(row.id, { status: 'open', completed_at: '', completed_by: '' });
+    await logReopen(pb, actor, row.id, row);
+  } catch (err) {
+    console.error('[excellence] case reopen failed', { status: pbStatus(err), userId: actor.id });
+  }
+}
+
+interface RawRun {
+  id: string;
+  tenant?: string;
+  startup?: string;
+  org_nr?: string;
+  subject_name?: string;
+  mode?: string;
+  provider?: string;
+  state_aid_outcome?: string;
+  vinnova_outcome?: string;
+  excellence_verdict?: string;
+  summary?: unknown;
+  assessed_by?: string;
+  assessed_at?: string;
+  created?: string;
+  context?: unknown;
+}
+
+/**
+ * Håller ärendelistan i takt med körningarna på bolagskortet (§ 51.10,
+ * `planCaseSync`): bolag som bedömts utan ärende (före ärendena, eller via
+ * "Räkna om" på bolagskortet) får ett pågående ärende med körningens
+ * underlag, och ett klarmarkerat ärende vars bolag bedömts efter
+ * klarmarkeringen blir pågående igen. Körs när modulens personal öppnar
+ * listan; fail-soft (listan visas ändå).
+ */
+export async function syncCasesFromScreenings(pb: PocketBase, actor: Actor): Promise<{ created: number; reopened: number }> {
+  const none = { created: 0, reopened: 0 };
+  if (!hasRole(actor.roles, ['admin', 'incubator_lead', 'coach'])) return none;
+  const viewer = { tenant: actor.tenant, roles: actor.roles };
+  try {
+    const [runsRes, casesRes] = await Promise.all([
+      readWithReserve(
+        pb,
+        (c) =>
+          c.collection(SCREENINGS).getList<RawRun>(1, 500, {
+            filter: c.filter('tenant = {:t}', { t: actor.tenant }),
+            sort: '-assessed_at',
+            fields: 'id,tenant,startup,org_nr,assessed_at,created'
+          }),
+        (r) => r.items.length === 0
+      ),
+      readWithReserve(
+        pb,
+        (c) =>
+          c.collection(SCREENING_CASES).getList<RawRow & { completed_at?: string }>(1, 500, {
+            filter: c.filter('tenant = {:t}', { t: actor.tenant }),
+            sort: '-updated',
+            fields: 'id,tenant,startup,org_nr,status,completed_at'
+          }),
+        // Ett tyst nekat svar (0 rader) får aldrig tolkas som "inga ärenden" — då skapades dubbletter.
+        (r) => r.items.length === 0
+      )
+    ]);
+    const runs: ScreeningRunRef[] = runsRes.items
+      .filter((r) => r.tenant === actor.tenant && r.startup)
+      .map((r) => ({ id: r.id, startup: r.startup!, org_nr: r.org_nr || undefined, assessed_at: r.assessed_at || r.created || '' }));
+    if (runs.length === 0) return none;
+    const cases: CaseRef[] = casesRes.items
+      .filter((c) => c.tenant === actor.tenant && c.org_nr)
+      .map((c) => ({
+        id: c.id,
+        startup: c.startup || undefined,
+        org_nr: c.org_nr!,
+        status: normalizeScreeningCaseStatus(c.status),
+        completed_at: c.completed_at || undefined
+      }));
+    const plan = planCaseSync(runs, cases);
+    // Kunde inte alla ärenden läsas avgörs inte vilka bolag som saknar ärende — skapa inget då.
+    if (casesRes.totalItems > casesRes.items.length) plan.create = [];
+
+    let reopened = 0;
+    for (const id of plan.reopen) {
+      try {
+        const rec = await writeWithFallback(pb, (c) =>
+          c.collection(SCREENING_CASES).update<{ id: string; subject_name?: string; startup?: string }>(id, {
+            status: 'open',
+            completed_at: '',
+            completed_by: ''
+          })
+        );
+        await logReopen(pb, actor, id, rec);
+        reopened++;
+      } catch (err) {
+        console.error('[excellence] case sync reopen failed', { status: pbStatus(err), userId: actor.id });
+      }
+    }
+
+    let created = 0;
+    for (const ref of plan.create) {
+      try {
+        const run = await readWithReserve<RawRun | null>(
+          pb,
+          (c) =>
+            c.collection(SCREENINGS).getOne<RawRun>(ref.id, {
+              fields:
+                'id,tenant,startup,org_nr,subject_name,mode,provider,state_aid_outcome,vinnova_outcome,excellence_verdict,summary,assessed_by,assessed_at,created,context'
+            }),
+          (r) => !r
+        );
+        if (!run || run.tenant !== actor.tenant || !run.startup) continue;
+        let orgNr = run.org_nr || '';
+        let name = run.subject_name || '';
+        if (!orgNr || !name) {
+          const st = await readWithReserve<{ tenant?: string; org_nr?: string; name?: string } | null>(
+            pb,
+            (c) => c.collection('startups').getOne(run.startup!, { fields: 'id,tenant,org_nr,name' }),
+            (r) => !r
+          ).catch(() => null);
+          if (st && st.tenant === actor.tenant) {
+            orgNr = orgNr || (st.org_nr || '').replace(/\D/g, '');
+            name = name || st.name || '';
+          }
+        }
+        if (!/^\d{10}$/.test(orgNr)) continue;
+        // Ett ärende kan ha skapats sedan listan lästes (parallell flik) — ingen dubblett.
+        if (await findScreeningCase(pb, viewer, { orgNr })) continue;
+        const summary = normalizeScreeningRunSummary(run.summary);
+        const json = typeof run.context === 'string' ? run.context : run.context ? JSON.stringify(run.context) : '';
+        const context = json && parseAssessmentContext(json) ? json : '';
+        const payload: Record<string, unknown> = {
+          tenant: actor.tenant,
+          created_by: actor.id,
+          status: 'open',
+          org_nr: orgNr,
+          subject_name: name.slice(0, 200),
+          startup: run.startup,
+          mode: run.mode === 'saved' ? 'saved' : 'register',
+          provider: (run.provider || '').slice(0, 60),
+          state_aid_outcome: STATE_AID.find((v) => v === run.state_aid_outcome) ?? '',
+          vinnova_outcome: VINNOVA.find((v) => v === run.vinnova_outcome) ?? '',
+          excellence_verdict: VERDICTS.find((v) => v === run.excellence_verdict) ?? '',
+          unknown_count: summary ? summary.counts.unknown : 0,
+          last_assessed_at: run.assessed_at || run.created || '',
+          last_assessed_by: run.assessed_by || ''
+        };
+        // Körningens underlag är redan lagrat utan transienta personnamn (§ 51.8).
+        if (context) payload.context = context;
+        const rec = await writeWithFallback(pb, (c) => c.collection(SCREENING_CASES).create<{ id: string }>(payload));
+        await logAgentAction(pb, {
+          actor,
+          action_type: 'create',
+          collection: SCREENING_CASES,
+          record_id: rec.id,
+          after_value: { subject_name: name, startup: run.startup, status: 'open', source: 'screening_history' }
+        });
+        created++;
+      } catch (err) {
+        console.error('[excellence] case sync create failed', { status: pbStatus(err), userId: actor.id });
+      }
+    }
+    return { created, reopened };
+  } catch (err) {
+    if (pbStatus(err) !== 404) console.error('[excellence] case sync failed', { status: pbStatus(err), userId: actor.id });
+    return none;
+  }
 }

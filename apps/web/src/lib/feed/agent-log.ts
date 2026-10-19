@@ -881,7 +881,8 @@ function mapRow(
       const href = row.record_id ? `/bedomning-excellens?arende=${row.record_id}` : '/bedomning-excellens';
       if (action === 'create') return { title: `${name ? `${name}: ` : ''}ärende i Bedömning excellens skapat`, href, icon: 'shield' };
       const done = str(after.status) === 'done';
-      return { title: `${name ? `${name}: ` : ''}ärende i Bedömning excellens ${done ? 'klarmarkerat' : 'öppnat igen'}`, href, icon: done ? 'check' : 'shield' };
+      const verb = done ? 'klarmarkerat' : str(after.reason) === 'changed' ? 'ändrat — pågående igen' : 'öppnat igen';
+      return { title: `${name ? `${name}: ` : ''}ärende i Bedömning excellens ${verb}`, href, icon: done ? 'check' : 'shield' };
     }
     case 'screening_requests': {
       const name = str(after.startup_name);

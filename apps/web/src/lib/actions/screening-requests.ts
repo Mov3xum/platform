@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { answerScreeningRequest, closeScreeningRequest, createScreeningRequest } from '@/lib/core/write/screening-requests';
+import { reopenCaseAfterChange } from '@/lib/excellence/cases.server';
 import type { Actor } from '@/lib/core/write/types';
 
 // Begäran om komplettering (CLAUDE.md § 51.6) — server actions ovanpå det
@@ -67,6 +68,11 @@ export async function answerScreeningRequestAction(
   const pb = await getServerPb();
   const res = await answerScreeningRequest(pb, actorOf(user), { requestId, answers }, { linkedStartups: user.linkedStartups });
   if (!res.ok) return { error: res.error };
+  // Nya svar ändrar bedömningens underlag → ett klarmarkerat ärende blir pågående igen (§ 51.10).
+  if (res.value.newlyAnswered > 0) {
+    await reopenCaseAfterChange(pb, actorOf(user), res.value.startup);
+    revalidatePath('/bedomning-excellens');
+  }
   revalidatePath(`/komplettering/${requestId}`);
   revalidatePath('/min-oversikt');
   revalidatePath('/inkorg');

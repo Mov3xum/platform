@@ -9188,7 +9188,8 @@ fanns ingen överblick över vilka bolag som var under bedömning.
   **Avslutade** (`?visa=avslutade`) visar klarmarkerade med **Öppna igen**.
   **Skapa ärende** uppe till höger (`?ny=1`) öppnar bolagsvalet; ärendet
   skapas när första bedömningen sparas. Bolagskortets länk (`?startup=<id>`)
-  går direkt in i ett pågående ärende för bolaget när ett finns.
+  går direkt in i bolagets ärende när ett finns (pågående före
+  klarmarkerat). **Ett ärende per bolag.**
 - **Datamodell — `screening_cases` (migration 1700000200).** `tenant`,
   `startup` (bara portföljbolag), `org_nr`, `subject_name`, `status`
   (`open | done`, MÅSTE spegla `SCREENING_CASE_STATUSES`), `mode`,
@@ -9208,10 +9209,30 @@ fanns ingen överblick över vilka bolag som var under bedömning.
   `saveAssessmentToCase`. Rapportens formulär bär
   `case_id`; målet väljs av den rena `resolveCaseTarget`: uttryckligt ärende
   **för samma org-nr** (ett id för ett annat bolag skrivs aldrig över) →
-  pågående ärende för org-numret (ingen dubblett när "Skapa ärende" körs för
-  ett bolag som redan har ett) → nytt. Omräkningen från bolagskortet (§ 51.8)
-  fyller på ett pågående ärende men skapar inget. Fail-soft: kan ärendet
-  inte sparas visas bedömningen ändå med `caseError`.
+  bolagets befintliga ärende, pågående före klarmarkerat (ingen dubblett när
+  "Skapa ärende" körs för ett bolag som redan har ett) → nytt. Omräkningen
+  från bolagskortet (§ 51.8) fyller på bolagets ärende och skapar ett om det
+  saknas. Fail-soft: kan ärendet inte sparas visas bedömningen ändå med
+  `caseError`.
+- **En ändring gör ärendet pågående igen (beslut 2026-10-19).** Det
+  klarmarkerade läget gäller bara slutbedömningen som arkiverades. Varje
+  ändring efteråt flyttar ärendet tillbaka till Aktuella (`status = open`,
+  `completed_*` nollställs, slutbedömningens PDF ligger kvar i Filer och på
+  bolagskortet): sparat i ärendevyn (`resolveCaseTarget` → `reopen`),
+  bolagskortets omräkning, ett besvarat kompletteringsärende
+  (`reopenCaseAfterChange` efter `answerScreeningRequest` — via superusern
+  eftersom en bolagsmedlem kan svara men inte läser ärenden) och en körning
+  på bolagskortet som är nyare än klarmarkeringen. Auditen bär
+  `reason: 'changed'` → feeden "ändrat — pågående igen".
+- **Inget bedömt bolag faller bort.** När modulens personal öppnar listan
+  kör `syncCasesFromScreenings` den rena, enhetstestade `planCaseSync`:
+  ett portföljbolag med körningar i `startup_screenings` men utan ärende
+  (bedömt före ärendena, eller via bolagskortet) får ett pågående ärende med
+  den senaste körningens underlag, utfall och bedömare (audit `source:
+  'screening_history'`), högst 20 per laddning; ett klarmarkerat ärende vars
+  bolag bedömts efter klarmarkeringen blir pågående igen. Kan inte alla
+  ärenden läsas skapas inget (aldrig dubbletter). Bolag utanför plattformen
+  har ingen historik och dyker upp först när de bedöms.
 - **Fortsätt utan Roaring.** `?arende=<id>` → `loadCaseAssessment`
   (`compute.server.ts`) räknar om på ärendets underlag — ingen leverantör,
   ingen PDF, ingen historikrad. Svaren: för ett portföljbolag bolagskortets
@@ -9245,7 +9266,7 @@ fanns ingen överblick över vilka bolag som var under bedömning.
   PDF). Status auditeras i `agent_actions`
   (PII-fritt: bolagsnamn + status, aldrig org-nr/svar) → Bolagsnytt/
   `/aktivitet` med länk till ärendet. Ett klarmarkerat ärende kan öppnas
-  och läsas; arbete i det sparas utan att statusen ändras.
+  och läsas; sparas en ändring i det blir det pågående igen.
 - Riskklass n/a (ingen AI). GDPR § 5: samma uppgifter som körningen redan
   visade, lagrade utan transienta personnamn; `cascadeDelete` på
   tenant/startup.

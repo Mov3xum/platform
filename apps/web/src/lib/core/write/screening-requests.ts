@@ -197,6 +197,10 @@ export interface AnswerScreeningRequestInput {
 export interface AnsweredScreeningRequest {
   id: string;
   status: ScreeningRequestStatus;
+  /** Bolaget förfrågan gäller (för att öppna ett klarmarkerat ärende igen, § 51.10). */
+  startup: string;
+  /** Punkter som fick svar i just det här anropet. */
+  newlyAnswered: number;
   answered: number;
   total: number;
   rejected: string[];
@@ -296,7 +300,7 @@ export async function answerScreeningRequest(
     }
   }
 
-  return ok({ id: row.id, status: nextStatus, answered, total: applied.items.length, rejected: applied.rejectedKeys, factsSaved, factsSchemaMissing, warnings });
+  return ok({ id: row.id, startup: row.startup, newlyAnswered: applied.answeredKeys.length, status: nextStatus, answered, total: applied.items.length, rejected: applied.rejectedKeys, factsSaved, factsSchemaMissing, warnings });
 }
 
 // ── Avsluta ─────────────────────────────────────────────────────────────────

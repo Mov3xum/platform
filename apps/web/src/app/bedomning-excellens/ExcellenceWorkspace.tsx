@@ -55,7 +55,7 @@ interface Props {
   initialCase?: CaseInfo;
   initialAssessment?: ExcellenceAssessment;
   /** Pågående ärenden per org-nr — tips om att fortsätta i stället för att hämta igen. */
-  openCasesByOrg: Record<string, { id: string; name?: string }>;
+  openCasesByOrg: Record<string, { id: string; name?: string; status: 'open' | 'done' }>;
   /** Kollegor en begäran om komplettering kan gå till (§ 51.6). */
   coaches: Array<{ id: string; name: string }>;
   /** Den inloggades visningsnamn (avsändare i den kopierade texten). */
@@ -319,11 +319,11 @@ export function ExcellenceWorkspace({
 
           {existingCase && (
             <p className="mt-4 rounded-xl bg-canvas-subtle px-3 py-2 text-[12.5px] text-foreground-muted">
-              Det finns ett pågående ärende för {existingCase.name || 'bolaget'}.{' '}
+              Det finns {existingCase.status === 'done' ? 'ett klarmarkerat' : 'ett pågående'} ärende för {existingCase.name || 'bolaget'}.{' '}
               <Link href={`/bedomning-excellens?arende=${existingCase.id}`} className="font-semibold text-link hover:underline">
-                Fortsätt ärendet
+                {existingCase.status === 'done' ? 'Öppna ärendet' : 'Fortsätt ärendet'}
               </Link>{' '}
-              utan ny hämtning — en ny körning fyller på det.
+              utan ny hämtning — en ny körning fyller på det{existingCase.status === 'done' ? ' och gör det pågående igen' : ''}.
             </p>
           )}
 

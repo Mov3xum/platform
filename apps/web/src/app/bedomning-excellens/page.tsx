@@ -5,7 +5,7 @@ import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import { PageShell } from '@/components/PageShell';
 import { listConnectedRegistries, listScreenableStartups } from '@/lib/excellence/data.server';
 import { listAssignableResourcesForTenant } from '@/lib/assignments/collaboration';
-import { findOpenScreeningCase, listScreeningCases, openCasesByOrgNr } from '@/lib/excellence/cases.server';
+import { casesByOrgNr, findScreeningCase, listScreeningCases, syncCasesFromScreenings } from '@/lib/excellence/cases.server';
 import { loadCaseAssessment } from '@/lib/excellence/compute.server';
 import { isScreeningCaseId } from '@/lib/excellence/cases';
 import { ExcellenceWorkspace, type CaseInfo } from './ExcellenceWorkspace';
@@ -92,6 +92,9 @@ export default async function BedomningExcellensPage({
   // Listan (standard): aktuella ärenden, eller avslutade med ?visa=avslutade.
   if (!caseId && sp.ny !== '1' && !initialStartupId) {
     const view = sp.visa === 'avslutade' ? 'done' : 'open';
+    // Bolag som bedömts utan ärende (före ärendena, via bolagskortet) blir
+    // pågående ärenden; ändrade klarmarkerade ärenden kommer tillbaka hit.
+    if (canManage) await syncCasesFromScreenings(pb, { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles });
     const [current, other] = await Promise.all([
       listScreeningCases(pb, viewer, view),
       listScreeningCases(pb, viewer, view === 'open' ? 'done' : 'open', 1)
@@ -104,10 +107,11 @@ export default async function BedomningExcellensPage({
     );
   }
 
-  // Från bolagskortet: finns ett pågående ärende för bolaget fortsätter vi i det.
+  // Från bolagskortet: finns ett ärende för bolaget fortsätter vi i det
+  // (pågående före klarmarkerat — en ändring gör det pågående igen).
   if (!caseId && initialStartupId) {
-    const open = await findOpenScreeningCase(pb, viewer, { startupId: initialStartupId });
-    if (open) redirect(`/bedomning-excellens?arende=${open.id}`);
+    const existing = await findScreeningCase(pb, viewer, { startupId: initialStartupId });
+    if (existing) redirect(`/bedomning-excellens?arende=${existing.id}`);
   }
 
   let initialCase: CaseInfo | undefined;
@@ -140,7 +144,7 @@ export default async function BedomningExcellensPage({
     canLookup ? listConnectedRegistries(pb, user.tenant) : Promise.resolve([]),
     // Kollegor en begäran om komplettering kan gå till (§ 51.6) — aldrig den inloggade själv.
     listAssignableResourcesForTenant(pb, user.tenant).then((rows) => rows.filter((r) => r.id !== user.id)),
-    caseId ? Promise.resolve({}) : openCasesByOrgNr(pb, viewer)
+    caseId ? Promise.resolve({}) : casesByOrgNr(pb, viewer)
   ]);
   const senderName = user.name && !user.name.includes('@') ? user.name : undefined;
 

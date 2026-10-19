@@ -30,7 +30,7 @@ import { upsertGroupCompany } from '@/lib/excellence/merge';
 import { renderExcellenceAssessmentPdf, storeExcellenceAssessmentPdf } from '@/lib/excellence/assessment-store.server';
 import { loadLatestScreeningContext, storeScreeningRun } from '@/lib/excellence/history.server';
 import { computeAssessment, loadCaseAssessment, refreshPlatformInContext } from '@/lib/excellence/compute.server';
-import { findOpenScreeningCase, loadScreeningCase, saveAssessmentToCase, setScreeningCaseStatus } from '@/lib/excellence/cases.server';
+import { findScreeningCase, loadScreeningCase, saveAssessmentToCase, setScreeningCaseStatus } from '@/lib/excellence/cases.server';
 import { isScreeningCaseId } from '@/lib/excellence/cases';
 import { pbStatus } from '@/lib/pb-error';
 import { redirect } from 'next/navigation';
@@ -146,15 +146,15 @@ async function finishAssessment(
 /**
  * Manuella svar sparade i ärendet för ett bolag utanför plattformen: det
  * uttryckliga ärendet (om det gäller samma org-nr), annars det pågående
- * ärendet för org-numret. Null när inget ärende finns.
+ * ärendet för org-numret (pågående före klarmarkerat). Null när inget ärende finns.
  */
 async function caseFactsFor(pb: PocketBase, user: SessionUser, caseId: string | undefined, orgNr: string): Promise<ScreeningManualFacts | null> {
   const viewer = { tenant: user.tenant, roles: user.roles };
   const explicit = caseId ? await loadScreeningCase(pb, viewer, caseId) : null;
   if (explicit && explicit.row.org_nr === orgNr) return explicit.facts;
-  const open = await findOpenScreeningCase(pb, viewer, { orgNr });
-  if (!open) return null;
-  return (await loadScreeningCase(pb, viewer, open.id))?.facts ?? null;
+  const existing = await findScreeningCase(pb, viewer, { orgNr });
+  if (!existing) return null;
+  return (await loadScreeningCase(pb, viewer, existing.id))?.facts ?? null;
 }
 
 /** Ärendet en rapport/åtgärd hör till (`case_id` i formuläret), validerat. */
@@ -659,16 +659,17 @@ export async function recomputeLatestScreeningAction(formData: FormData): Promis
     cost: undefined,
     assessedAt: new Date().toISOString()
   };
-  // Ett pågående ärende för bolaget fylls på med omräkningen (§ 51.10) —
-  // från bolagskortet skapas inget nytt ärende.
-  const openCase = await findOpenScreeningCase(pb, { tenant: user.tenant, roles: user.roles }, { startupId });
+  // Omräkningen är en ändring: bolagets ärende fylls på (ett klarmarkerat
+  // blir pågående igen) och saknas ärende skapas ett (§ 51.10).
+  const existing = await findScreeningCase(pb, { tenant: user.tenant, roles: user.roles }, { startupId });
   try {
-    await finishAssessment(pb, user, ctx, platform!.facts, { saveFacts: false, recomputed: true, caseId: openCase?.id, createCase: false, archive: 'always' });
+    await finishAssessment(pb, user, ctx, platform!.facts, { saveFacts: false, recomputed: true, caseId: existing?.id, createCase: true, archive: 'always' });
   } catch (err) {
     console.error('[excellence] recompute failed', { status: pbStatus(err), userId: user.id });
     done('fel');
   }
   revalidatePath(`/startups/${startupId}`);
+  revalidatePath('/bedomning-excellens');
   done('ok');
 }
 
