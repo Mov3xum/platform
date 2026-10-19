@@ -17,6 +17,11 @@ interface Props {
   meta?: ReactNode;
   actions?: ReactNode;
   tabs?: PageTab[];
+  /**
+   * Aktiv flik när flikarna skiljs åt av query-parametrar och inte av sökväg
+   * (t.ex. områdena på /mal). Utelämnad ⇒ den flik vars sökväg matchar.
+   */
+  activeTabId?: string | null;
   rightPanel?: ReactNode;
   /** Slå av intern scroll-kontainer om innehållet redan hanterar scroll. */
   scroll?: boolean;
@@ -52,6 +57,7 @@ export function PageShell({
   meta,
   actions,
   tabs,
+  activeTabId,
   rightPanel,
   scroll = true,
   noPad = false,
@@ -91,7 +97,10 @@ export function PageShell({
             {tabs && tabs.length > 0 && (
               <nav className="mx-startup-tabs" aria-label="Vyer">
                 {(() => {
-                  const activeHref = resolveActiveTab(pathname, tabs);
+                  const activeHref =
+                    activeTabId !== undefined
+                      ? (tabs.find((t) => t.id === activeTabId)?.href ?? null)
+                      : resolveActiveTab(pathname, tabs);
                   return tabs.map((t) => {
                   const active = t.href === activeHref;
                   return (

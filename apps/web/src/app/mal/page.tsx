@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
-import { PageShell } from '@/components/PageShell';
+import { PageShell, type PageTab } from '@/components/PageShell';
 import { loadGoalWorkspace } from '@/lib/goals/data';
 import { currentQuarter } from '@/lib/core/write';
 import {
@@ -15,6 +15,7 @@ import {
   type Role
 } from '@platform/shared';
 import { GoalsView } from './GoalsView';
+import { ALL_SECTIONS_TAB, goalSections, goalsQuery } from './sections';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,11 +55,24 @@ export default async function MalPage({
     focusArea: isGoalFocusArea(sp.fokus) ? sp.fokus : null,
     query: str('sok', 200) || null
   };
-  // Valt område i sidomenyn (gruppens nyckel); okänd nyckel ⇒ alla visas.
-  const initialSection = str('omrade') || null;
 
   const pb = await getServerPb();
   const ws = await loadGoalWorkspace(pb, user.tenant, user.id, user.roles, year);
+
+  // Områdena i vald gruppering blir flikraden i sidhuvudet — samma flikar som
+  // på övriga sidor. Okänt område i URL:en ⇒ "Alla".
+  const personName = (id: string) => ws.people.find((p) => p.id === id)?.name ?? null;
+  const sections =
+    ws.period && !ws.schemaMissing ? goalSections(ws.tree, ws.tree.nodes, grouping, { personName, filterActive: false }) : [];
+  const omrade = str('omrade');
+  const section = sections.some((s) => s.key === omrade) ? omrade : null;
+  const period = ws.period;
+  const tabHref = (key: string | null) =>
+    period ? `/mal?${goalsQuery({ ar: period.year, q: quarter }, grouping, initialFilter, key)}` : '/mal';
+  const tabs: PageTab[] = [
+    { id: ALL_SECTIONS_TAB, label: 'Alla', href: tabHref(null) },
+    ...sections.map((s) => ({ id: s.key, label: s.label, href: tabHref(s.key) }))
+  ];
 
   return (
     <PageShell
@@ -68,6 +82,8 @@ export default async function MalPage({
           {ws.period ? `${ws.period.title || ws.period.year} · ${ws.tree.indicatorCount} indikatorer` : 'Inget verksamhetsår ännu'}
         </span>
       }
+      tabs={sections.length > 1 ? tabs : undefined}
+      activeTabId={section ?? ALL_SECTIONS_TAB}
     >
       <GoalsView
         workspace={ws}
@@ -75,7 +91,7 @@ export default async function MalPage({
         focusGoal={focusGoal}
         initialGrouping={grouping}
         initialFilter={initialFilter}
-        initialSection={initialSection}
+        section={section}
         currentUserId={user.id}
         canReport={hasRole(user.roles, STAFF_ROLES)}
         canManage={hasRole(user.roles, LEAD_ROLES)}

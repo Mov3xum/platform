@@ -7315,13 +7315,16 @@ eller **Ansvarig**. Trafikljuset räknar det filtrerade urvalet och är
 klickbart (filtrerar på statusen). Filter och gruppering speglas i URL:en
 (`?grupp=team&team=marknad&niva=team&ansvarig=<id>&status=risk&sok=…`,
 `history.replaceState` — ingen serverrunda) så en vy kan delas.
-**Sidomeny (2026-10):** grupperna i vald gruppering (fokusområden, team,
-nivåer eller ansvariga) listas i en hoppmeny till vänster (klistrad på
-desktop, chips på mobil) med antal mål och en orange/gul prick när något mål
-har risk/försenad i kvartalet; ett klick visar bara det området
-(`?omrade=<nyckel>`, "Alla" visar allt) och trafikljuset räknar då bara det
-området. Byte av gruppering nollställer valet; ett område som filtret döljer
-släpps. Varje
+**Områdesflikar (2026-10):** grupperna i vald gruppering (fokusområden, team,
+nivåer eller ansvariga) är sidans flikrad i sidhuvudet — samma `PageShell`-
+flikar som på övriga sidor (inte en egen sidomeny). Flikarna skiljs åt av
+query (`?omrade=<nyckel>`, "Alla" utan), så `PageShell.activeTabId` anger
+aktiv flik i stället för sökvägsmatchning. Sidan räknar ut områdena och
+validerar `omrade` (okänt ⇒ Alla) med den rena `app/mal/sections.ts`
+(`goalSections`, `goalsQuery` — delas med `GoalsView`, ingen
+'use client'-modul, § 37.1). Ett område visar bara sina mål och trafikljuset
+räknar bara dem; byte av gruppering är en navigering som nollställer området.
+Varje
 målkort visar nivå, team/delteam, ansvarig, "↳ Bidrar till …" (hopp till
 målet; släpper filtret om det döljer målet) och "N mål bidrar hit" med
 varje bidragande måls status. All filter-/grupperingslogik är ren och
