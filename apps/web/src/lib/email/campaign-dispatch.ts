@@ -95,6 +95,7 @@ interface ContactRowX {
 }
 
 const CHUNK = 40;
+const CAMPAIGN_ROWS_HINT = 'Kör migration 1700000203 (eller workflowen "Sync PocketBase") om kampanjkollektionerna saknas eller har gammalt schema.';
 
 function anyOf(pb: PocketBase, field: string, values: readonly string[]): string {
   const params: Record<string, string> = {};
@@ -455,6 +456,13 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
   type Pending = { candidate: Candidate; rowId: string; hash: string; signupId?: string; token?: string };
   const pending: Pending[] = [];
   let suppressed = 0;
+  let alreadySent = 0;
+  let rowErrors = 0;
+  let rowErrorStatus: number | undefined;
+  // Varför en mottagare inte får mejlet — summeras i felet när INGEN kan nås,
+  // så "0 skickade" aldrig blir ett tyst "Skickat".
+  const skipReasons = new Map<string, number>();
+  const noteSkip = (why: string) => skipReasons.set(why, (skipReasons.get(why) ?? 0) + 1);
   for (const c of candidates) {
     const hash = c.email ? hashEmail(c.email) : '';
     let status: EmailRecipientStatus = 'pending';
@@ -467,7 +475,18 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
       why = 'Adressen är spärrad (studs, klagomål eller avregistrering)';
     }
     const prior = existing.get(c.key);
-    if (prior && prior.status !== 'pending') continue; // redan hanterad i ett tidigare försök
+    // Redan hanterad i ett tidigare försök — men en rad som FÖLL ("failed",
+    // t.ex. Resend avvisade förra gången) ska skickas igen: det är hela
+    // poängen med att kampanjen går tillbaka till utkast. Utan det blev
+    // andra försöket ett tyst "0 mejl skickade" med status Skickat.
+    if (prior && prior.status !== 'pending' && prior.status !== 'failed') {
+      if (prior.status === 'sent') alreadySent++;
+      else {
+        suppressed++;
+        noteSkip('Hoppades över redan i ett tidigare försök');
+      }
+      continue;
+    }
     let rowId = prior?.id;
     try {
       if (!rowId) {
@@ -487,13 +506,32 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
         rowId = row.id;
       } else if (status !== 'pending') {
         await pb.collection(CAMPAIGN_RECIPIENTS).update(rowId, { status, fail_reason: why });
+      } else if (prior?.status === 'failed') {
+        await pb.collection(CAMPAIGN_RECIPIENTS).update(rowId, { status: 'pending', fail_reason: '' }).catch(() => undefined);
       }
     } catch (err) {
+      // En mottagarrad som inte kan skrivas får ALDRIG tyst falla bort ur
+      // utskicket — räknas och redovisas (PII-fritt: bara PB-status).
+      rowErrors++;
+      rowErrorStatus ??= (err as { status?: number })?.status;
       console.error('[campaigns] recipient row failed', { status: (err as { status?: number })?.status });
       continue;
     }
     if (status === 'pending' && c.email) pending.push({ candidate: c, rowId, hash, signupId: c.signupId ?? prior?.signup });
-    else suppressed++;
+    else {
+      suppressed++;
+      noteSkip(why || 'Hoppades över');
+    }
+  }
+
+  if (rowErrors > 0 && pending.length === 0) {
+    return fail(
+      `Mottagarraderna kunde inte sparas i PocketBase${rowErrorStatus ? ` (HTTP ${rowErrorStatus})` : ''} — inget skickades. ${CAMPAIGN_ROWS_HINT}`
+    );
+  }
+  if (pending.length === 0 && alreadySent === 0) {
+    const detail = [...skipReasons.entries()].map(([why, n]) => `${n} × ${why.toLowerCase()}`).join(', ');
+    return fail(`Ingen av de ${candidates.length} mottagarna kan nås${detail ? ` (${detail})` : ''}. Kontrollera mottagarna under "Kontrollera mottagarna" och rätta adresser eller samtycke innan du skickar igen.`);
   }
 
   // Rader i eventets deltagarlista: svarsknappar skapar inbjudna rader för nya
@@ -600,8 +638,8 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
   }
 
   let sent = 0;
-  let failed = 0;
-  let failReason: string | undefined;
+  let failed = rowErrors;
+  let failReason: string | undefined = rowErrors > 0 ? `${rowErrors} mottagarrader kunde inte sparas i PocketBase` : undefined;
   if (messages.length > 0) {
     const outcomes = await sendEmailBatch(messages);
     const sentAt = new Date().toISOString();
@@ -631,7 +669,7 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
       ...(everythingFailed ? {} : { sent_at: new Date().toISOString() }),
       send_at: '',
       recipients_count: candidates.length,
-      sent_count: (campaign.status === 'sending' ? campaign.sent_count : 0) + sent,
+      sent_count: alreadySent + sent,
       failed_count: failed,
       suppressed_count: suppressed,
       link_clicks: { urls: links, counts: campaign.link_clicks.urls.length === links.length ? campaign.link_clicks.counts : links.map(() => 0) },

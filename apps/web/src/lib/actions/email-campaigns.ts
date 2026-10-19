@@ -175,8 +175,14 @@ export async function sendCampaignNowAction(id: string): Promise<CampaignActionS
   revalidate(id);
   if (!res.ok) return { error: res.error };
   const v = res.value;
-  const parts = [`${v.sent} mejl skickade`, v.suppressed ? `${v.suppressed} hoppades över (spärrade/avregistrerade)` : '', v.failed ? `${v.failed} misslyckades${v.failReason ? ` (${v.failReason.replace(/\.$/, '')})` : ''}` : ''].filter(Boolean);
-  return { ok: true, notice: `${parts.join(' · ')}.` };
+  const parts = [
+    `${v.sent} mejl skickade`,
+    v.suppressed ? `${v.suppressed} hoppades över (saknar e-post, spärrade eller avregistrerade — se "Mottagare per status")` : '',
+    v.failed ? `${v.failed} misslyckades${v.failReason ? ` (${v.failReason.replace(/\.$/, '')})` : ''}` : ''
+  ].filter(Boolean);
+  const notice = `${parts.join(' · ')}.`;
+  // Inte alla nådde fram — gul banner så det inte läses som ett helt lyckat utskick.
+  return v.failed > 0 || v.suppressed > 0 ? { ok: true, warning: notice } : { ok: true, notice };
 }
 
 export async function sendTestAction(id: string): Promise<CampaignActionState> {
