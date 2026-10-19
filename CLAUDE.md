@@ -8719,10 +8719,11 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
   (`ExcellenceAssessment.cost`, § 11.8 "Kostnad per anrop"). Priserna anges
   av ledningen per leverantör — saknas de visas "pris ej angivet", aldrig en
   gissad siffra.
-- **"Okänt" ska gå att förklara (2026-10-12).** I registerläget visas
-  leverantörens svar per bolag SYNLIGT överst (inte hopfällt): vilken
-  sökväg som svarade, 404 = inga uppgifter, 403 = inte i paketet, vilka
-  fältnycklar svaret bar. `noRecordParts` (§ 11.8) gör att ett nystartat
+- **"Okänt" ska gå att förklara (2026-10-12, placering ändrad 2026-10-19
+  § 51.12).** I registerläget visas leverantörens svar per bolag under
+  **Underlag från registret** (hopfällt sist i rapporten, med en synlig
+  sammanfattningsrad överst som länkar dit): vilken sökväg som svarade,
+  404 = inga uppgifter, 403 = inte i paketet, vilka fältnycklar svaret bar. `noRecordParts` (§ 11.8) gör att ett nystartat
   bolag utan bokslut får "Inget bokslut i registret (nystartat?)" i
   tröskelraden och att fristående-frågan inte fastnar på "koncernstrukturen
   hämtades inte" när registret svarat "inga rader". Ägartabellen har
@@ -8906,11 +8907,15 @@ en separat panel "Manuella svar" med dropdowns för samma punkter — två listo
 in. Nu är det **EN rapport** (`AssessmentReport.tsx`, ersätter
 `AssessmentView` + `ManualFactsPanel`) där varje punkt ändras på platsen:
 
-- **Punkter (2026-10-16):** svaret sitter till HÖGER i raden — en väljare
-  med uttydda alternativ ("Nej — inte börsnoterat" / "Ja — aktierna är
-  upptagna till handel" / "Ej besvarad" resp. "Registret gäller") och, när
-  ett svar valts, ett motiveringsfält under. Ingen utfällning under punkten
-  och ingen "Ditt svar"-rad; utfallschippen till vänster är bara visning.
+- **Punkter (2026-10-16, justerat 2026-10-19 § 51.12):** svaret sitter till
+  HÖGER i raden — en väljare med uttydda alternativ ("Nej — inte
+  börsnoterat" / "Ja — aktierna är upptagna till handel" / "Ej besvarad"
+  resp. "Registret gäller") och, när ett svar valts, ett motiveringsfält
+  under. Väljaren visas direkt för punkter som är OKÄNT eller redan manuellt
+  besvarade; en punkt registret/plattformen avgjort visar bara länken
+  **Ändra**, som tar fram väljaren på samma plats. Ingen utfällning under
+  punkten och ingen "Ditt svar"-rad; utfallschippen till vänster är bara
+  visning och alltid synlig.
   Grundarpunkterna har länken "Ändra grundare". Gäller
   grundförutsättningarna per bolag (startup + anknutna med org-nr),
   "Fristående företag?", Vinnovas coachpunkter (inte marknadsredo,
@@ -8940,8 +8945,9 @@ in. Nu är det **EN rapport** (`AssessmentReport.tsx`, ersätter
   "Behövs: …" (det står under Saknat underlag).
 - **Inga instruktioner i formuläret (2026-10-16):** alla förklaringar —
   datadelar, kostnad, hur punkter besvaras, uppskattningar, aktieboken,
-  komplettering, var bedömningen sparas, PII — står i den hopfällda guiden
-  **"Så funkar det"** överst (`HowItWorks.tsx`). Formulär, rapport och
+  komplettering, var bedömningen sparas, PII — står i guiden **"Så funkar
+  det"** (`HowItWorks.tsx`; sedan 2026-10-19 en knapp i sidhuvudet som
+  öppnar guiden som överlägg, § 51.12). Formulär, rapport och
   kompletteringsrutan bär bara rubriker, etiketter och status. Ny instruktion
   ⇒ lägg den i guiden, inte som textstycke i rapporten.
 - Ingen ny dataväg, inga nya fält; samma skrivväg, samma personnummer-
@@ -9412,6 +9418,64 @@ bedömd", och bara den allra senaste raden lästes). Bindande sedan dess:
   förfrågan skapas inte — den befintliga returneras
   (`findDuplicateScreeningRequest`, ren + enhetstestad; lås per bolag).
 - Inga nya fält, kollektioner eller migrationer; riskklass n/a (ingen AI).
+
+### 51.12 Lugnare sida — ett huvud, utfallet först, numrerade sektioner (2026-10-19)
+
+**Behov.** Sidan kändes rörig: två huvuden för samma bolag (ärendets +
+rapportens), diagnostik (kostnad, leverantörens svar per bolag, varningar)
+mellan huvudet och utfallet, utfallet i en fyrkolumnig review-tabell, steg 1
+platt och lång, en dropdown på varje punkt och spara-raden ovanpå
+kompletteringsformuläret. Inget är borttaget — allt sitter på en annan plats
+eller visas senare. Beslut av maintainer 2026-10-19: **inga hopfällbara
+bolagsblock** — Ja/Nej/Okänt på varje punkt ska gå att läsa rakt av.
+
+- **Ett huvud** (`AssessmentHeader` i `ExcellenceWorkspace.tsx`, ersätter
+  `CaseHeader` + rapportens `<header>`): bolag, status-chip, org-nr ·
+  bolagsform · kommun · bransch, eyebrow "Färskt från Roaring · tid", senast
+  sparad/klarmarkerad av vem, och ALLA knappar på en rad (Bolagskortet,
+  Visa i Filer, Förhandsgranska/Ladda ned PDF, Hämta på nytt, Klarmarkera).
+  Hämtningsformuläret fälls ut INUTI huvudkortet; ett nytt ärende utan
+  bedömning visar bara formuläret. `caseError`/`fileError` ligger i huvudet.
+- **Utfallet först** (`report/VerdictSummary.tsx`): Statsstöd och Vinnova
+  som två stora chips med sin motivering, räknaren "N ja · N nej · N okänt"
+  och controllerns kommentar (Ändra/Skriv kommentar) i en rad under. Review-
+  tabellen finns kvar bara i PDF:n (Combly-ordningen gäller där).
+- **Hopp-nav + numrerade sektioner** (`report/ReportNav.tsx`,
+  `ReportSection` i `report/shared.tsx`; samma mönster som bolagskortets
+  `SectionNav`): Sammanfattning · 1 Grundförutsättningar · 2 Koncern & ägare
+  · 3 Fristående · 4 Tröskelvärden & de minimis · 5 Vinnova · 6 Excellens ·
+  Saknat underlag · Underlag. Steg-etiketterna (Steg 1–3) är eyebrows över
+  sina sektioner; Combly-ordningen är oförändrad.
+- **Koncern & ägare:** koncernkartan först (översikten), därefter de
+  anknutna bolagens block (ALLA synliga, med ägarbild) och sist ägarnas
+  andra bolag. "Vad registret svarade" är en rad under kartan.
+- **Underlag från registret** (`report/RegistryEvidence.tsx`, `<details>`
+  sist i rapporten, `#underlag`): kostnad, uppslag som inte kunde göras,
+  leverantörens svar per bolag och bokslut per bolag. En synlig
+  **sammanfattningsrad** överst ("Kostnad hos Roaring: 3 bolag = … · 2
+  uppslag kunde inte göras · 14 noteringar · Visa underlag", gul när något
+  saknas) gör att ingenting göms — det ligger bara inte mellan huvudet och
+  utfallet. Konsolloggen (`logRegistryDiagnostics`) är oförändrad.
+- **Begär komplettering inne i Saknat underlag** (`ScreeningRequestComposer`
+  utan eget kort): punkterna kommer därifrån; snabbknapparna ("Skicka allt
+  till coachen/bolaget") syns direkt, det fulla formuläret (välj punkter,
+  kollega, datum, meddelande, förhandsgranskning) bakom "Välj punkter,
+  kollega eller datum själv" — öppet direkt för bolag utanför plattformen
+  (bara kopiera-som-text finns). Spara-raden är därmed sist på sidan.
+- **"Så funkar det"** är en knapp i sidhuvudets åtgärdsrad som öppnar guiden
+  som överlägg (Esc/klick utanför stänger) — samma innehåll, inget i flödet,
+  även på ärendelistan.
+- **Färgdisciplin:** färg betyder utfall. Relation ("Anknutet"/"Partner"),
+  koncernroll, "Angivet manuellt" och "Uppslag gjort" ritas neutralt
+  (`NEUTRAL_TONE`); orange bara för NEJ/fel, gul bara för varningar/oklart;
+  SNI-jämförelsen "samma marknad" är neutral-stark, inte orange.
+- **Kod:** `AssessmentReport.tsx` är bara layouten; byggstenarna bor i
+  `report/` — `shared.tsx` (toner, etiketter, frågor, `CheckRow`,
+  `CheckList`, `EditToggle`, `ReportSection`), `OwnershipTable`,
+  `CompanyBlock`, `GroupMap` (+ hämta mer, täckningsnot, lägg till
+  koncernbolag), `OwnerEngagements`, `ThresholdsTable`, `FoundersTable`,
+  `IrlTable`, `VerdictSummary`, `RegistryEvidence`, `ReportNav`. Ingen ny
+  dataväg, inga nya fält, samma actions och samma skrivväg; riskklass n/a.
 
 ## 52. Bolagskortet — flikar & KTH Innovation Readiness Level (2026-10)
 
