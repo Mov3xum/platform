@@ -886,15 +886,23 @@ function controlText(v: unknown, depth = 0): unknown {
 }
 
 /** Namnfält för en fysisk huvudman (2.1: `person{firstName,lastName}`; äldre: toppnivå). ALDRIG personnummer/födelsedatum. */
-const BO_FIRST_NAME_PATHS = ['person.firstName', 'person.givenName', 'firstName', 'givenName', 'firstNames'];
+// OpenAPI se-beneficialowner 2.1 (mottagen 2026-10-19): `PersonDetails` =
+// `firstNames[]` (LISTA), `middleName`, `surName`, `personalNumber`,
+// `coordinationNumber`, `birthDate` (läses aldrig), `citizenship`, `countryResidence`.
+const BO_FIRST_NAME_PATHS = ['person.firstNames', 'person.firstName', 'person.givenName', 'firstNames', 'firstName', 'givenName'];
+const BO_MIDDLE_NAME_PATHS = ['person.middleName', 'middleName'];
 const BO_LAST_NAME_PATHS = ['person.lastName', 'person.surName', 'person.surname', 'person.familyName', 'lastName', 'surName', 'surname', 'familyName'];
 const BO_FULL_NAME_PATHS = ['person.name', 'person.fullName', 'fullName', 'name'];
 
 /** För- och efternamn ur huvudmannens post — bara namnet, cappat, utan siffror (ett personnummer i namnfältet strippas). */
 export function beneficialOwnerName(o: Record<string, unknown>): string | undefined {
-  const first = asString(pickFirst(o, BO_FIRST_NAME_PATHS));
+  // Förnamn kan komma som lista (2.1: `firstNames: ["Anna", "Maria"]`).
+  const names = (v: unknown): string | undefined =>
+    Array.isArray(v) ? v.map((x) => asString(x)).filter(Boolean).join(' ') || undefined : asString(v);
+  const first = names(pickFirst(o, BO_FIRST_NAME_PATHS));
+  const middle = names(pickFirst(o, BO_MIDDLE_NAME_PATHS));
   const last = asString(pickFirst(o, BO_LAST_NAME_PATHS));
-  const full = first || last ? [first, last].filter(Boolean).join(' ') : asString(pickFirst(o, BO_FULL_NAME_PATHS));
+  const full = first || last ? [first, middle, last].filter(Boolean).join(' ') : asString(pickFirst(o, BO_FULL_NAME_PATHS));
   if (!full) return undefined;
   const cleaned = full.replace(/\d[\d\s-]*\d/g, '').replace(/\s+/g, ' ').trim();
   return cleaned ? cleaned.slice(0, 120) : undefined;
@@ -1020,7 +1028,9 @@ const PNR_PATHS = [
   'person.socialSecurityNumber',
   'person.identityNumber',
   'person.idNumber',
+  'person.coordinationNumber',
   'personalNumber',
+  'coordinationNumber',
   'personalIdentityNumber',
   'personNumber',
   'nationalIdentityNumber',
@@ -1109,7 +1119,12 @@ const ENGAGEMENT_LIST_KEYS = [
   'legalEntities',
   'controls'
 ];
+// OpenAPI 2.1 `/person/{personalNumber}` (2026-10-19): `records[]` med EN
+// post per bolag: `association{companyId, companyName, type}` + `person{namn}`.
+// Svaret bär INGEN andel/kontrollgrund — bara att personen är verklig
+// huvudman (> 25 % eller kontroll på annat sätt).
 const ENGAGEMENT_ID_PATHS = [
+  'association.companyId',
   'legalEntity.companyId',
   'legalEntity.organisationNumber',
   'legalEntity.organizationNumber',
@@ -1121,10 +1136,14 @@ const ENGAGEMENT_ID_PATHS = [
   'organizationNumber',
   'orgNr'
 ];
-const ENGAGEMENT_NAME_PATHS = ['legalEntity.companyName', 'legalEntity.name', 'company.companyName', 'company.name', 'companyName', 'legalName'];
+const ENGAGEMENT_NAME_PATHS = ['association.companyName', 'legalEntity.companyName', 'legalEntity.name', 'company.companyName', 'company.name', 'companyName', 'legalName'];
 
 function hasEngagementCompany(o: Record<string, unknown>): boolean {
-  return pickFirst(o, ENGAGEMENT_ID_PATHS) !== undefined || (!!o.legalEntity && typeof o.legalEntity === 'object');
+  return (
+    pickFirst(o, ENGAGEMENT_ID_PATHS) !== undefined ||
+    (!!o.legalEntity && typeof o.legalEntity === 'object') ||
+    (!!o.association && typeof o.association === 'object')
+  );
 }
 
 function sameTen(a: string, b: string): boolean {

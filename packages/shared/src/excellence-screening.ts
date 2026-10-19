@@ -629,10 +629,13 @@ export function classifyOwnerEngagements(
       .map((c): OwnerEngagementCompanyView => {
         const cmp = compareSni(subject.basic?.sni, c.basic?.sni);
         const share = engagementShare(c);
-        const shareText = shareLabel(share);
+        // Personuppslaget (Roaring 2.1) anger ingen andel — bara att personen
+        // är verklig huvudman (> 25 % eller kontroll på annat sätt).
+        const shareText = share ? shareLabel(share) : 'verklig huvudman (> 25 %)';
         const manual = c.org_nr ? personLinks?.[c.org_nr] : undefined;
         const base = { ...c, sniMatch: cmp.match, matchedCode: cmp.code, shareLabel: shareText, manual };
-        const who = `${person} äger ${shareLabel(subjectRange)} av ${subjectName} och ${shareText} av ${c.name || c.org_nr || 'bolaget'}`;
+        const other = c.name || c.org_nr || 'bolaget';
+        const who = `${person} äger ${shareLabel(subjectRange)} av ${subjectName} och ${share ? `${shareText} av ${other}` : `är verklig huvudman i ${other} (mer än 25 % eller kontroll)`}`;
         if (manual) {
           return manual.verdict === 'linked'
             ? { ...base, relation: 'linked', reason: `Bedömt av controllern: anknutet via ${person} (samma eller angränsande marknad)${manual.note ? ` — ${manual.note}` : ''}.` }

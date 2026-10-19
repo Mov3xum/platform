@@ -9280,11 +9280,15 @@ kriterierna. Plattformen mäter "samma marknad" med **SNI-koden**.
   parameter i anropet `GET /se/beneficialowner/2.1/person/{personnummer}`
   (env `ROARING_PERSON_ENGAGEMENT_PATH`, kommaseparerad kandidatlista, reserv
   `/1.0/person`) och lämnar aldrig handlern — inte i `RegistryCompany`, noter,
-  loggar, underlag eller databas (fixturtester). Svaret tolkas tolerant
-  (`normalizeRoaringPersonEngagements`: "en post per bolag" med
-  `legalEntity` + andel eller bolagets `beneficialOwners[]` matchad på
-  personnumret, eller "en post per person" med `beneficialOwnerships[]`);
-  enskilda firmor hoppas över. Varje hittat bolag får **grunddata** (overview
+  loggar, underlag eller databas (fixturtester). **Formen bekräftad mot
+  Roarings OpenAPI-spec 2026-10-19:** bolagssvarets `person` bär
+  `firstNames[]` (lista), `middleName`, `surName`, `personalNumber`,
+  `coordinationNumber`, `birthDate` (läses aldrig); personsvaret är
+  `records[]` med en post per bolag, `association{companyId, companyName,
+  type}` — **utan andel och kontrollgrund** (personen är verklig huvudman,
+  > 25 % eller kontroll; tabellen visar "verklig huvudman (> 25 %)").
+  Tolkningen är ändå tolerant mot äldre/andra former
+  (`normalizeRoaringPersonEngagements`); enskilda firmor hoppas över. Varje hittat bolag får **grunddata** (overview
   — SNI, registreringsdatum, status, form). Tak: 8 personer
   (`ROARING_MAX_ENGAGEMENT_PERSONS`), 25 bolag
   (`ROARING_MAX_ENGAGEMENT_COMPANIES`). Saknas personnumret i svaret noteras

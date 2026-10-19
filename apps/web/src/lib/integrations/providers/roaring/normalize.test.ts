@@ -871,3 +871,50 @@ test('verklig huvudman per person: både "post per bolag" och "lista per person"
     ]
   );
 });
+
+test('OpenAPI 2.1: huvudmannens namn (firstNames-lista) + personnummer, och personuppslaget med association', () => {
+  const persons = roaringBeneficialOwnerPersons({
+    records: [
+      {
+        caseId: '1',
+        legalEntity: { companyId: '5595728790', companyName: 'Combly AB' },
+        beneficialOwners: [
+          {
+            person: { firstNames: ['Anna', 'Maria'], surName: 'Testsson', personalNumber: '198112189876', birthDate: '1981-12-18' },
+            extentOfControl: { code: 'MORE_THAN_75', description: 'Mer än 75 procent' },
+            controlTypes: [{ code: 'AGER', description: 'Äger aktier' }]
+          },
+          { person: { firstNames: ['Bo'], surName: 'Samordning', coordinationNumber: '811278-9873' }, extentOfControl: { description: 'Mer än 25 men inte mer än 50 procent' } }
+        ],
+        status: { code: '0', description: 'Registrerad' }
+      }
+    ],
+    status: { code: 0, text: 'found' }
+  });
+  assert.equal(persons[0].name, 'Anna Maria Testsson');
+  assert.equal(persons[0].personalNumber, '198112189876');
+  assert.equal(persons[0].pct_min, 75);
+  assert.equal(persons[1].name, 'Bo Samordning');
+  assert.equal(persons[1].personalNumber, '8112789873');
+  assert.ok(!JSON.stringify(persons).includes('1981-12-18'));
+
+  const notes: string[] = [];
+  const eng = normalizeRoaringPersonEngagements(
+    {
+      records: [
+        { association: { companyId: '5567036271', companyName: 'Ewell AB', type: { code: 'X', description: 'Aktiebolag' } }, person: { firstNames: ['Anna'], surName: 'Testsson' } },
+        { association: { companyId: '5594427808', companyName: 'Wellgo Health AB' }, person: { firstNames: ['Anna'], surName: 'Testsson' } }
+      ],
+      status: { code: 0, text: 'found' }
+    },
+    '198112189876',
+    notes
+  );
+  assert.deepEqual(
+    eng.map((e) => [e.org_nr, e.name, e.pct_min]),
+    [
+      ['5567036271', 'Ewell AB', undefined],
+      ['5594427808', 'Wellgo Health AB', undefined]
+    ]
+  );
+});
