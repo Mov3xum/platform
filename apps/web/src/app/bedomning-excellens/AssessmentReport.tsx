@@ -370,6 +370,7 @@ function GroupCompanyFetch({
   return (
     <form action={formAction} className="min-w-[240px] space-y-1.5 rounded-xl border border-default bg-canvas-subtle px-2.5 py-2">
       <input type="hidden" name="context" value={assessment.context} />
+      <input type="hidden" name="case_id" value={assessment.caseId ?? ''} />
       <input type="hidden" name="facts" value={JSON.stringify(facts)} />
       <input type="hidden" name="org_nr" value={company.orgNr} />
       <input type="hidden" name="parts_present" value="1" />
@@ -689,6 +690,7 @@ function AddGroupCompanyForm({
               </span>
               <form action={formAction}>
                 <input type="hidden" name="context" value={assessment.context} />
+                <input type="hidden" name="case_id" value={assessment.caseId ?? ''} />
                 <input type="hidden" name="facts" value={factsJson} />
                 <input type="hidden" name="org_nr" value={g.org_nr} />
                 <input type="hidden" name="remove" value="1" />
@@ -707,6 +709,7 @@ function AddGroupCompanyForm({
       ) : (
         <form action={formAction} className="space-y-2 rounded-xl border border-default bg-canvas-subtle px-3 py-3">
           <input type="hidden" name="context" value={assessment.context} />
+          <input type="hidden" name="case_id" value={assessment.caseId ?? ''} />
           <input type="hidden" name="facts" value={factsJson} />
           <p className="text-[11px] font-semibold uppercase tracking-wider text-foreground-muted">Lägg till koncernbolag</p>
           <div className="grid gap-2 sm:grid-cols-[140px_minmax(0,1fr)_90px_160px_150px]">
@@ -870,6 +873,7 @@ export function AssessmentReport({ assessment, fetchMore, onUpdated }: Props) {
           (lägg till / hämta mer) ligga inne i rapporten utan nästlade <form>. */}
       <form id={FACTS_FORM_ID} action={formAction}>
         <input type="hidden" name="context" value={assessment.context} />
+        <input type="hidden" name="case_id" value={assessment.caseId ?? ''} />
         <input type="hidden" name="facts" value={JSON.stringify(facts)} />
       </form>
 

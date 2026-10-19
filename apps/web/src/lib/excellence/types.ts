@@ -75,6 +75,13 @@ export interface ExcellenceAssessment {
   requests?: AssessmentRequestSummary[];
   /** Sant när körningen räknades om på sparat underlag (inga nya leverantörsanrop). */
   recomputed?: boolean;
+  /** Ärendet bedömningen sparades i (§ 51.10) — följer med i rapportens formulär. */
+  caseId?: string;
+  caseStatus?: 'open' | 'done';
+  /** Sant när körningen skapade ärendet (inte fyllde på ett befintligt). */
+  caseCreated?: boolean;
+  /** Ärendet kunde inte sparas — bedömningen visas ändå (fail-soft). */
+  caseError?: string;
 }
 
 export interface AssessmentRequestSummary {

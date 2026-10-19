@@ -164,6 +164,8 @@ async function verifyCollectionsExist() {
     // Bedömning excellens (§ 51.6, migration 1700000191) — historik + begäran om komplettering.
     'startup_screenings',
     'screening_requests',
+    // Ärenden i Bedömning excellens (§ 51.10, migration 1700000200).
+    'screening_cases',
     'capital_rounds',
     'intellectual_property',
     'startup_kpis',
@@ -491,6 +493,9 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   // Bedömning excellens (§ 51.6, migration 1700000191). Statsstödsbedömningar
   // (utfall, punkter, PDF) är internt underlag → staff/observer-only.
   'startup_screenings',
+  // Ärenden i Bedömning excellens (§ 51.10, migration 1700000200) — internt
+  // statsstödsunderlag per bolag → staff/observer-only.
+  'screening_cases',
   // Finansieringsprojekt/arbetspaket och stödcheck-regler (§ 46). Intern
   // projektekonomi och uppföljningsstyrning → staff/observer-only.
   'funding_projects',

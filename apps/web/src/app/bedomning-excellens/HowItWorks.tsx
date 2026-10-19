@@ -6,6 +6,15 @@ import { MAX_RELATED_COMPANIES } from '@platform/shared';
 
 const STEPS: { title: string; items: string[] }[] = [
   {
+    title: 'Ärenden',
+    items: [
+      'Varje bolag du bedömer blir ett ärende. Skapa ärende uppe till höger, välj bolag och kör bedömningen — ärendet skapas när första bedömningen sparas.',
+      'Ärendet sparas varje gång du hämtar, räknar om eller hämtar mer. Öppna det från listan och fortsätt där du slutade — ingen ny hämtning från Roaring.',
+      'Skapar du ett ärende för ett bolag som redan har ett pågående ärende fylls det befintliga på i stället (med den nya hämtningen).',
+      'Klarmarkera när bedömningen är färdig: ärendet försvinner ur listan över aktuella ärenden men finns kvar under Avslutade och kan öppnas igen.'
+    ]
+  },
+  {
     title: '1. Välj bolag och vad som ska hämtas',
     items: [
       'Välj ett portföljbolag eller skriv ett org-nr (bolaget behöver inte finnas i plattformen).',

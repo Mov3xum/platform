@@ -99,6 +99,8 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   // grundarnamn/andel/engagemang + fri text) — når AI aldrig rått.
   'startup_screenings',
   'screening_requests',
+  // Ärenden i Bedömning excellens (§ 51.10): underlag + manuella svar per bolag.
+  'screening_cases',
   'agent_memory' // agentens tvärsessions-scratchpad (1700000079)
 ]);
 
