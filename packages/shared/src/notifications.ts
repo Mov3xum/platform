@@ -21,6 +21,7 @@ export const NOTIFICATION_CATEGORIES = [
   'avtal',
   'kontakter',
   'stodcheckar',
+  'talang',
   'plattform'
 ] as const;
 export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
@@ -63,6 +64,11 @@ export const NOTIFICATION_CATEGORY_META: Record<
     label: 'Stödcheckar',
     description: 'Ansökningar, kompletteringar, kommentarer och beslut.',
     icon: 'shield'
+  },
+  talang: {
+    label: 'Studenter & talang',
+    description: 'Intresseanmälningar från studenter, behov som granskas och publiceras.',
+    icon: 'cap'
   },
   plattform: {
     label: 'Plattformen',
@@ -122,7 +128,12 @@ export const NOTIFICATION_KINDS = [
   'feedback_done',
   // Bedömning excellens (§ 51.6)
   'screening_request',
-  'screening_answered'
+  'screening_answered',
+  // Studenter & talang (§ 54)
+  'talent_interest',
+  'talent_need_review',
+  'talent_need_published',
+  'talent_student_response'
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
@@ -360,6 +371,44 @@ export const NOTIFICATION_CATALOG: Record<NotificationKind, NotificationKindMeta
     category: 'stodcheckar',
     priority: 'normal',
     audience: 'staff',
+    groupable: true,
+    defaults: NORMAL_DEFAULTS
+  },
+  talent_interest: {
+    label: 'Ny intresseanmälan från student',
+    description: 'När en student söker ett av ert bolags behov eller tackar ja till ett förslag.',
+    icon: 'cap',
+    category: 'talang',
+    priority: 'normal',
+    audience: 'all',
+    groupable: true,
+    defaults: NORMAL_DEFAULTS
+  },
+  talent_need_review: {
+    label: 'Behov väntar på granskning',
+    description: 'När ett bolag skickar in ett behov (exjobb, praktik …) som Movexum ska granska och publicera.',
+    icon: 'inbox',
+    category: 'talang',
+    priority: 'normal',
+    audience: 'staff',
+    defaults: NORMAL_DEFAULTS
+  },
+  talent_need_published: {
+    label: 'Ert behov är publicerat',
+    description: 'När Movexum publicerar, pausar eller skickar tillbaka ert behov till studenterna.',
+    icon: 'check',
+    category: 'talang',
+    priority: 'normal',
+    audience: 'member',
+    defaults: NORMAL_DEFAULTS
+  },
+  talent_student_response: {
+    label: 'Svar från student',
+    description: 'När en student tackar ja eller nej till ett förslag, eller drar tillbaka sitt intresse.',
+    icon: 'message',
+    category: 'talang',
+    priority: 'normal',
+    audience: 'all',
     groupable: true,
     defaults: NORMAL_DEFAULTS
   }

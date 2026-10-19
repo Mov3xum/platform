@@ -148,6 +148,21 @@ export {
   type AccessContext,
   type DecisionResult
 } from './support-checks';
+// Studenter & talang (§ 54)
+export {
+  createTalentNeed,
+  updateTalentNeed,
+  setTalentNeedStatus,
+  deleteTalentNeed,
+  proposeStudentForNeed,
+  setInterestStatus,
+  setStudentProfileStatus,
+  deleteStudentProfile,
+  talentNeedPath,
+  type TalentAccess,
+  type TalentNeedResult,
+  type InterestResult
+} from './talent';
 export { logAgentAction } from './audit';
 export {
   canWriteField,

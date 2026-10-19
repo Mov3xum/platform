@@ -201,6 +201,26 @@ const COMPUTERS: Record<MetricKey, Computer> = {
     return value('partners_count', n);
   },
 
+  // Studenter & talang (§ 54): bara räknare, aldrig rader — studentprofiler är PII.
+  async talent_matches(ctx) {
+    const period = requirePeriod(ctx, 'talent_matches');
+    const n = await countWhere(
+      ctx.pb,
+      'talent_interests',
+      ctx.pb.filter('tenant = {:t} && status = "matched" && status_changed_at >= {:from} && status_changed_at < {:to}', {
+        t: ctx.tenant,
+        from: pbDay(period.from),
+        to: pbDay(period.to)
+      })
+    );
+    return value('talent_matches', n);
+  },
+
+  async talent_needs_published(ctx) {
+    const n = await countWhere(ctx.pb, 'talent_needs', ctx.pb.filter('tenant = {:t} && status = "published"', { t: ctx.tenant }));
+    return value('talent_needs_published', n);
+  },
+
   async workshops_in_progress(ctx) {
     const n = await countWhere(
       ctx.pb,

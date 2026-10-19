@@ -14,6 +14,7 @@ export const MODULE_ICONS: Record<string, string> = {
   kontakter: 'user',
   de_minimis: 'shield',
   bedomning_excellens: 'star',
+  talang: 'cap',
   checkar: 'check',
   projekt: 'graph',
   upphandlingar: 'briefcase',

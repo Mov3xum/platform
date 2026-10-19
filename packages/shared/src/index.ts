@@ -1417,7 +1417,7 @@ export interface ModuleGroup {
 
 export const RAIL_GROUPS: ModuleGroup[] = [
   { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'mal', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
-  { label: 'Portfölj', modules: ['startups', 'kontakter', 'de_minimis', 'bedomning_excellens', 'checkar', 'projekt', 'upphandlingar', 'investerare'] },
+  { label: 'Portfölj', modules: ['startups', 'kontakter', 'talang', 'de_minimis', 'bedomning_excellens', 'checkar', 'projekt', 'upphandlingar', 'investerare'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
   { label: 'System', modules: ['agenter', 'kunskapsbas', 'onskemal', 'installningar', 'min_profil'] }
 ];
@@ -1608,6 +1608,14 @@ export const coreModules: ModuleDefinition[] = [
       'Projekt och arbetspaket som stöd tas ur (Vinnova Excellens, TVV, EoI …) med budget, upparbetning och kassabok över beviljade checkar.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
     route: '/projekt'
+  },
+  {
+    id: 'talang',
+    title: 'Studenter & talang',
+    description:
+      'Matchning mellan studenter och bolag: bolagen publicerar behov (exjobb, praktik, deltid, anställning, projekt), studenter registrerar profil på en publik sida, Movexum granskar och mäklar. Deterministisk matchning på hashtags — ingen AI bedömer studenter.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/talang'
   },
   {
     id: 'kontakter',
@@ -1862,6 +1870,7 @@ export * from './procurement';
 export * from './contacts';
 export * from './contact-groups';
 export * from './feedback';
+export * from './talent';
 export * from './agent-memory';
 export * from './funding';
 export * from './support-checks';
