@@ -7,9 +7,11 @@
 // skriver sent_at/sent_count. Delat secret MOVEXUM_SCHEDULE_SECRET (§ 12.3).
 // Fail-soft: en trasig rad blockerar aldrig resten.
 
-const TICK_INTERVAL = '* * * * *';
-
-cronAdd('movexum-survey-dispatch-tick', TICK_INTERVAL, () => {
+// Alla hook-filer evalueras i SAMMA JSVM-scope — en toppnivå-konstant med
+// samma namn i två filer ger "Identifier has already been declared" och den
+// andra filen laddas aldrig (incident 2026-10-19: survey_dispatch_tick
+// registrerades inte). Deklarera därför aldrig något på toppnivå.
+cronAdd('movexum-survey-dispatch-tick', '* * * * *', () => {
   // PB:s JSVM kör hanteraren i en isolerad kontext — variabler deklarerade
   // UTANFÖR handlern finns inte här (ReferenceError). Konstanten bor därför
   // inne i handlern.

@@ -37,10 +37,10 @@ export function isEventType(value: unknown): value is EventType {
  * Inbjudans steg (§ 53.5) — före tratten. En inbjuden som tackar ja blir
  * `signup`; ett nej blir `declined`. Ingen av dem räknas som anmäld.
  */
-export const EVENT_INVITE_STAGES: readonly EventSignupStage[] = ['invited', 'declined'];
+export const EVENT_INVITE_STAGES: readonly EventSignupStage[] = ['invited', 'declined', 'waitlist'];
 
 /** Steg i tratten (allt utom inbjudans steg). */
-export type EventFunnelStage = Exclude<EventSignupStage, 'invited' | 'declined'>;
+export type EventFunnelStage = Exclude<EventSignupStage, 'invited' | 'declined' | 'waitlist'>;
 
 /** Trattens ordning — ett senare steg innebär alla tidigare. */
 export const EVENT_SIGNUP_STAGES: readonly EventFunnelStage[] = [
@@ -55,6 +55,7 @@ export const EVENT_SIGNUP_STAGES: readonly EventFunnelStage[] = [
 export const EVENT_ALL_SIGNUP_STAGES: readonly EventSignupStage[] = [
   'invited',
   'declined',
+  'waitlist',
   'signup',
   'attended',
   'meeting',
@@ -65,6 +66,7 @@ export const EVENT_ALL_SIGNUP_STAGES: readonly EventSignupStage[] = [
 export const EVENT_SIGNUP_STAGE_LABEL: Record<EventSignupStage, string> = {
   invited: 'Inbjuden',
   declined: 'Avböjt',
+  waitlist: 'Väntelista',
   signup: 'Anmäld',
   attended: 'Närvarande',
   meeting: 'Möte bokat',

@@ -36,6 +36,7 @@ export interface ParticipantRow {
 const STAGE_VARIANT: Record<EventSignupStage, 'default' | 'cyan' | 'purple' | 'copper' | 'green'> = {
   invited: 'default',
   declined: 'default',
+  waitlist: 'default',
   signup: 'cyan',
   attended: 'default',
   meeting: 'purple',

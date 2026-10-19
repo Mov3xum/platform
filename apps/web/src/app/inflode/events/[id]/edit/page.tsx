@@ -10,7 +10,7 @@ import {
 } from '@/lib/actions/events';
 import { EventForm } from '@/components/EventForm';
 import { ConfirmDeleteButton } from '@/components/ConfirmDeleteButton';
-import type { IncubatorEvent } from '@platform/shared';
+import { normalizeEventRsvpSettings, type IncubatorEvent } from '@platform/shared';
 
 export default async function EditEventPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -62,7 +62,8 @@ export default async function EditEventPage({ params }: { params: Promise<{ id: 
             ends_at: event.ends_at ?? undefined,
             location: event.location ?? undefined,
             description: event.description ?? undefined,
-            accent: event.accent ?? 'cyan'
+            accent: event.accent ?? 'cyan',
+            rsvp_settings: normalizeEventRsvpSettings(event.rsvp_settings)
           }}
         />
       </div>

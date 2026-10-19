@@ -148,6 +148,24 @@ export {
   type AccessContext,
   type DecisionResult
 } from './support-checks';
+export {
+  createEmailCampaign,
+  updateEmailCampaign,
+  deleteEmailCampaign,
+  saveCampaignAsTemplate,
+  previewCampaignRecipients,
+  scheduleEmailCampaign,
+  cancelEmailCampaignSchedule,
+  sendEmailCampaignNow,
+  sendEmailCampaignTest,
+  addManualSuppression,
+  deleteSuppression,
+  importSuppressions,
+  setNewsletterConsent,
+  campaignPath,
+  type CampaignWriteResult,
+  type SuppressionImportResult
+} from './email-campaigns';
 export { logAgentAction } from './audit';
 export {
   canWriteField,

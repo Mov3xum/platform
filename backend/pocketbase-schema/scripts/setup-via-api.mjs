@@ -5184,6 +5184,175 @@ await patchCollection('annual_wheel_items', [
 // Migration 1700000198: när mottagaren öppnade sin svarslänk (§ 53.5).
 await patchCollection('event_signups', [{ name: 'invite_opened_at', type: 'date', required: false }]);
 
+// Migration 1700000201: e-postkampanjer (§ 54) — kampanjer, mottagarrader,
+// spärrlista och webhook-händelser + fält på contacts/event_signups/
+// incubator_events. list/view staff/observer; kampanjer och spärrar pinnar
+// tenant + skapare vid create (§ 21.8); mottagarrader och händelser skrivs
+// bara av servern (createRule null). Select-värdena MÅSTE spegla
+// packages/shared/src/email-campaigns.ts.
+await ensureCollection({
+  id: 'email_campaigns_collection',
+  name: 'email_campaigns',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'title', type: 'text', required: true, min: 1, max: 120 },
+    { name: 'subject', type: 'text', required: false, max: 150 },
+    { name: 'preheader', type: 'text', required: false, max: 200 },
+    { name: 'category', type: 'select', required: true, maxSelect: 1, values: ['events', 'newsletter', 'program', 'other'] },
+    { name: 'consent_mode', type: 'select', required: true, maxSelect: 1, values: ['legitimate_interest', 'consent_only'] },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['draft', 'scheduled', 'sending', 'sent', 'cancelled'] },
+    { name: 'template_key', type: 'text', required: false, max: 40 },
+    { name: 'blocks', type: 'json', required: false, maxSize: 400000 },
+    { name: 'design', type: 'json', required: false, maxSize: 2000 },
+    { name: 'audience', type: 'json', required: false, maxSize: 600000 },
+    { name: 'sender_name', type: 'text', required: false, max: 80 },
+    { name: 'sender_user', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'event', type: 'relation', required: false, collectionId: 'incubator_events_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'send_at', type: 'date', required: false },
+    { name: 'sent_at', type: 'date', required: false },
+    { name: 'send_base_url', type: 'text', required: false, max: 300 },
+    { name: 'recipients_count', type: 'number', required: false, min: 0, onlyInt: true },
+    { name: 'sent_count', type: 'number', required: false, min: 0, onlyInt: true },
+    { name: 'failed_count', type: 'number', required: false, min: 0, onlyInt: true },
+    { name: 'suppressed_count', type: 'number', required: false, min: 0, onlyInt: true },
+    { name: 'bounced_count', type: 'number', required: false, min: 0, onlyInt: true },
+    { name: 'complained_count', type: 'number', required: false, min: 0, onlyInt: true },
+    { name: 'unsubscribed_count', type: 'number', required: false, min: 0, onlyInt: true },
+    { name: 'clicked_count', type: 'number', required: false, min: 0, onlyInt: true },
+    { name: 'link_clicks', type: 'json', required: false, maxSize: 60000 },
+    { name: 'is_template', type: 'bool', required: false },
+    { name: 'last_test_at', type: 'date', required: false },
+    { name: 'last_error', type: 'text', required: false, max: 300 },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_email_campaigns_tenant ON email_campaigns (tenant)',
+    'CREATE INDEX idx_email_campaigns_tenant_status ON email_campaigns (tenant, status)',
+    'CREATE INDEX idx_email_campaigns_send_at ON email_campaigns (send_at)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  createRule: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`
+});
+{
+  const campaignsCol = await pb.collections.getOne('email_campaigns');
+  const contactsCol = await pb.collections.getOne('contacts');
+  const signupsCol = await pb.collections.getOne('event_signups');
+  await ensureCollection({
+    id: 'email_campaign_recipients_collection',
+    name: 'email_campaign_recipients',
+    type: 'base',
+    fields: [
+      { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+      { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+      { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+      { name: 'campaign', type: 'relation', required: true, collectionId: campaignsCol.id, cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+      { name: 'contact', type: 'relation', required: false, collectionId: contactsCol.id, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+      { name: 'user', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+      { name: 'startup', type: 'relation', required: false, collectionId: 'startups_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+      { name: 'signup', type: 'relation', required: false, collectionId: signupsCol.id, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+      { name: 'name', type: 'text', required: false, max: 200 },
+      { name: 'organization', type: 'text', required: false, max: 200 },
+      { name: 'email_hash', type: 'text', required: false, max: 64 },
+      { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['pending', 'sent', 'failed', 'bounced', 'complained', 'unsubscribed', 'suppressed'] },
+      { name: 'sent_at', type: 'date', required: false },
+      { name: 'provider_message_id', type: 'text', required: false, max: 100 },
+      { name: 'click_count', type: 'number', required: false, min: 0, onlyInt: true },
+      { name: 'first_clicked_at', type: 'date', required: false },
+      { name: 'fail_reason', type: 'text', required: false, max: 300 }
+    ],
+    indexes: [
+      'CREATE INDEX idx_email_recipients_campaign ON email_campaign_recipients (campaign)',
+      'CREATE INDEX idx_email_recipients_tenant_hash ON email_campaign_recipients (tenant, email_hash)',
+      'CREATE INDEX idx_email_recipients_message ON email_campaign_recipients (provider_message_id)'
+    ],
+    listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+    viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+    createRule: null,
+    updateRule: null,
+    deleteRule: null
+  });
+  await ensureCollection({
+    id: 'email_suppressions_collection',
+    name: 'email_suppressions',
+    type: 'base',
+    fields: [
+      { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+      { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+      { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+      { name: 'email_hash', type: 'text', required: true, min: 64, max: 64 },
+      { name: 'email_masked', type: 'text', required: false, max: 254 },
+      { name: 'reason', type: 'select', required: true, maxSelect: 1, values: ['bounce', 'complaint', 'unsubscribe', 'import', 'manual'] },
+      { name: 'source', type: 'text', required: false, max: 60 },
+      { name: 'note', type: 'text', required: false, max: 200 },
+      { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+    ],
+    indexes: [
+      'CREATE UNIQUE INDEX idx_email_suppressions_tenant_hash ON email_suppressions (tenant, email_hash)',
+      'CREATE INDEX idx_email_suppressions_tenant_reason ON email_suppressions (tenant, reason)'
+    ],
+    listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+    viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+    createRule: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+    updateRule: null,
+    deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+  });
+  const recipientsCol = await pb.collections.getOne('email_campaign_recipients');
+  await ensureCollection({
+    id: 'email_events_collection',
+    name: 'email_events',
+    type: 'base',
+    fields: [
+      { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+      { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+      { name: 'tenant', type: 'relation', required: false, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 0, maxSelect: 1 },
+      { name: 'type', type: 'select', required: true, maxSelect: 1, values: ['delivered', 'bounced', 'complained', 'delivery_delayed', 'opened', 'clicked', 'unsubscribed'] },
+      { name: 'campaign', type: 'relation', required: false, collectionId: campaignsCol.id, cascadeDelete: true, minSelect: 0, maxSelect: 1 },
+      { name: 'recipient', type: 'relation', required: false, collectionId: recipientsCol.id, cascadeDelete: true, minSelect: 0, maxSelect: 1 },
+      { name: 'provider_message_id', type: 'text', required: false, max: 100 },
+      { name: 'detail', type: 'text', required: false, max: 200 },
+      { name: 'at', type: 'date', required: false }
+    ],
+    indexes: [
+      'CREATE INDEX idx_email_events_tenant_created ON email_events (tenant, created)',
+      'CREATE INDEX idx_email_events_campaign ON email_events (campaign)'
+    ],
+    listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+    viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+    createRule: null,
+    updateRule: null,
+    deleteRule: null
+  });
+  await patchCollection('contacts', [
+    { name: 'email_status', type: 'select', required: false, maxSelect: 1, values: ['bounced', 'complained', 'unsubscribed'] },
+    { name: 'email_status_at', type: 'date', required: false },
+    { name: 'email_opt_out', type: 'json', required: false, maxSize: 2000 },
+    { name: 'newsletter_consent', type: 'bool', required: false },
+    { name: 'newsletter_consent_at', type: 'date', required: false },
+    { name: 'newsletter_consent_source', type: 'text', required: false, max: 40 }
+  ]);
+  // patchCollection ERSÄTTER select-värdena — hela listan (+ waitlist, § 54.11).
+  await patchCollection('event_signups', [
+    { name: 'plus_ones', type: 'number', required: false, min: 0, max: 10, onlyInt: true },
+    { name: 'diet', type: 'text', required: false, max: 300 },
+    { name: 'custom_answer', type: 'text', required: false, max: 300 },
+    { name: 'checked_in_at', type: 'date', required: false },
+    { name: 'campaign', type: 'relation', required: false, collectionId: campaignsCol.id, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ], {
+    stage: { values: ['invited', 'declined', 'waitlist', 'signup', 'attended', 'meeting', 'application', 'admitted'] }
+  });
+  await patchCollection('incubator_events', [
+    { name: 'rsvp_settings', type: 'json', required: false, maxSize: 4000 },
+    { name: 'reminder_unanswered_sent_at', type: 'date', required: false },
+    { name: 'reminder_confirmed_sent_at', type: 'date', required: false }
+  ]);
+}
+
 // Migration 1700000194: incubator_events.wheel_item — eventet genomför en
 // årshjulsaktivitet (§ 53). Målkollektionens id slås upp på namnet (§ 30.4 p. 1).
 const annualWheelItemsCol = await pb.collections.getOne('annual_wheel_items');
@@ -5470,6 +5639,8 @@ const FORCE_CREATE_RULES = {
   contact_requests: `${ANY_AUTH} && @request.auth.tenant != ""`,
   // Egna grupper i kontaktboken (§ 45.8, migration 1700000199) — pinnad skapare.
   contact_groups: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  email_campaigns: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  email_suppressions: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
   // Önskemål & buggar (§ 49, migration 1700000176) — roll-enforcement i server-actionen.
   feedback_items: `${ANY_AUTH} && @request.auth.tenant != ""`,
   competence_tags: `${ANY_AUTH} && @request.auth.tenant != "" && @request.body.created_by = @request.auth.id && @request.body.status = "suggested" && @request.body.tenant = @request.auth.tenant`,

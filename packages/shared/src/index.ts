@@ -1318,6 +1318,10 @@ export interface IncubatorEvent {
   planned_participants?: number;
   completed_at?: string;
   outcome_verdict?: string;
+  /** Svarssidans inställningar (migration 1700000201, § 54.11): gästfrågor, maxantal, påminnelser. */
+  rsvp_settings?: unknown;
+  reminder_unanswered_sent_at?: string;
+  reminder_confirmed_sent_at?: string;
   created: string;
   updated: string;
 }
@@ -1325,6 +1329,7 @@ export interface IncubatorEvent {
 export type EventSignupStage =
   | 'invited'
   | 'declined'
+  | 'waitlist'
   | 'signup'
   | 'attended'
   | 'meeting'
@@ -1345,7 +1350,15 @@ export interface EventSignup {
   contact?: string;
   invited_at?: string;
   invite_sent_at?: string;
+  invite_opened_at?: string;
   responded_at?: string;
+  /** Gästens svar på svarssidan (migration 1700000201, § 54.11). */
+  plus_ones?: number;
+  diet?: string;
+  custom_answer?: string;
+  checked_in_at?: string;
+  /** Kampanjen inbjudan skickades från (§ 54). */
+  campaign?: string;
   created: string;
   updated: string;
   expand?: {
@@ -1820,6 +1833,10 @@ export function resolveUserModules(input: {
 export * from './event-time';
 export * from './event-participants';
 export * from './event-invitations';
+export * from './event-rsvp';
+export * from './email-campaigns';
+export * from './email-render';
+export * from './email-suppression-import';
 export * from './org-posts';
 export * from './home';
 export * from './followup-rules';

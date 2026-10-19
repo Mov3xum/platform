@@ -22,7 +22,7 @@ test('isEventSignupStage känner alla steg, inklusive inbjudans', () => {
   assert.equal(isEventSignupStage('invited'), true);
   assert.equal(isEventSignupStage('okänt'), false);
   assert.equal(isEventSignupStage(null), false);
-  assert.equal(EVENT_ALL_SIGNUP_STAGES.length, 7);
+  assert.equal(EVENT_ALL_SIGNUP_STAGES.length, 8);
   assert.equal(isInviteStage('declined'), true);
   assert.equal(isInviteStage('signup'), false);
 });

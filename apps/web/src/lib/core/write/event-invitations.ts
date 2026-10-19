@@ -53,7 +53,7 @@ export function hashRsvpToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
-function newRsvpToken(): string {
+export function newRsvpToken(): string {
   return randomBytes(32).toString('base64url');
 }
 

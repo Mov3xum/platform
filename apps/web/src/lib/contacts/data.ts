@@ -7,8 +7,7 @@ import {
   isContactRequestStatus,
   type ContactCategory,
   type ContactRequestStatus,
-  type Role
-} from '@platform/shared';
+  type Role, isContactEmailStatus, type ContactEmailStatus } from '@platform/shared';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { escFilter } from '@/lib/pb-filter';
 
@@ -48,6 +47,16 @@ export interface ContactRow {
   owners: string[];
   /** Egna grupper (§ 45.8). Tom lista mot ett schema utan migration 1700000199. */
   groups: string[];
+  /** E-poststatus för utskick (§ 54): tomt = ok. */
+  email_status: ContactEmailStatus | null;
+  email_status_at: string | null;
+  /** Avstängda utskickskategorier (`all` = alla). */
+  email_opt_out: string[];
+  newsletter_consent: boolean;
+  newsletter_consent_at: string | null;
+  newsletter_consent_source: string | null;
+  /** Avregistrerad från inbjudningar (§ 53.5). */
+  invite_opt_out: boolean;
   created_by: string | null;
   created?: string;
   updated?: string;
@@ -131,6 +140,13 @@ export function normalizeContact(raw: Record<string, unknown>): ContactRow {
     gdpr_consent_at: str(raw.gdpr_consent_at),
     owners: ids(raw.owners),
     groups: ids(raw.groups),
+    email_status: isContactEmailStatus(raw.email_status) ? raw.email_status : null,
+    email_status_at: str(raw.email_status_at),
+    email_opt_out: Array.isArray(raw.email_opt_out) ? raw.email_opt_out.filter((v): v is string => typeof v === 'string') : [],
+    newsletter_consent: raw.newsletter_consent === true,
+    newsletter_consent_at: str(raw.newsletter_consent_at),
+    newsletter_consent_source: str(raw.newsletter_consent_source),
+    invite_opt_out: raw.invite_opt_out === true,
     created_by: str(raw.created_by),
     created: str(raw.created) ?? undefined,
     updated: str(raw.updated) ?? undefined

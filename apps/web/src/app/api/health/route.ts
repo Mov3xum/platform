@@ -38,7 +38,11 @@ export async function GET(): Promise<NextResponse> {
         configured: isEmailConfigured(),
         key_format_ok: resendKeyLooksValid(),
         sender_domain: senderAddress(resolveSender(process.env, 'default')).split('@')[1] ?? null,
-        invite_sender_domain: senderAddress(resolveSender(process.env, 'invite')).split('@')[1] ?? null
+        invite_sender_domain: senderAddress(resolveSender(process.env, 'invite')).split('@')[1] ?? null,
+        // Kampanjer (§ 54): webhooken för studsar/klagomål och länkhemligheten.
+        webhook_secret_set: Boolean((process.env.RESEND_WEBHOOK_SECRET ?? '').trim()),
+        link_secret_set: Boolean((process.env.MOVEXUM_UNSUBSCRIBE_SECRET ?? process.env.MOVEXUM_INTEGRATION_KEY ?? '').trim()),
+        app_url_set: Boolean((process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? '').trim())
       },
       checked_at: new Date().toISOString()
     },

@@ -15,6 +15,7 @@ import {
   isEventType,
   defaultEvaluationTemplateRef,
   isStarterTemplateRef,
+  normalizeEventRsvpSettings,
   parseDateTimeInput
 } from '@platform/shared';
 import type {
@@ -29,6 +30,19 @@ import type {
 const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach'];
 
 const VALID_EVENT_STATUS: EventStatus[] = ['planned', 'live', 'completed', 'cancelled'];
+
+/** Svarssidans inställningar ur formuläret (§ 54.11) — normaliseras i @platform/shared. */
+function rsvpSettingsFromForm(formData: FormData) {
+  return normalizeEventRsvpSettings({
+    plus_ones_max: formData.get('rsvp_plus_ones_max'),
+    ask_diet: formData.get('rsvp_ask_diet') === 'on',
+    custom_question: formData.get('rsvp_custom_question'),
+    capacity: formData.get('rsvp_capacity'),
+    waitlist: formData.get('rsvp_waitlist') === 'on',
+    remind_unanswered_days: formData.get('rsvp_remind_unanswered_days'),
+    remind_confirmed_days: formData.get('rsvp_remind_confirmed_days')
+  });
+}
 
 export type EventCreateWarning = 'arshjul' | 'utvardering';
 
@@ -109,6 +123,7 @@ export async function createEventAction(
       location: location || null,
       description: description || null,
       accent,
+      rsvp_settings: rsvpSettingsFromForm(formData),
       ...(wheelItem ? { wheel_item: wheelItem } : {}),
       signups_count: 0,
       attended_count: 0,
@@ -381,7 +396,8 @@ export async function updateEventAction(
       ends_at: endsAt ? endsAt.toISOString() : null,
       location: location || null,
       description: description || null,
-      accent
+      accent,
+      rsvp_settings: rsvpSettingsFromForm(formData)
     });
     revalidatePath('/inflode/events');
     revalidatePath(`/inflode/events/${id}`);

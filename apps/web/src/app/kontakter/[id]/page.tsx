@@ -26,6 +26,7 @@ import {
 import { RequestPanel, type RequestView, type StartupOption } from './RequestPanel';
 import { DeleteContactButton } from './DeleteContactButton';
 import { ContactGroupsPanel } from './ContactGroupsPanel';
+import { EmailConsentPanel } from './EmailConsentPanel';
 import { BackLink, GdprBanner, Initials, OwnerChip, Panel, btnGhost, fmtDate } from '../ui';
 
 export const dynamic = 'force-dynamic';
@@ -187,6 +188,19 @@ export default async function KontaktPage({
               </div>
             </dl>
           </Panel>
+
+          <EmailConsentPanel
+            contactId={contact.id}
+            hasEmail={Boolean(contact.email)}
+            emailStatus={contact.email_status}
+            emailStatusAt={contact.email_status_at}
+            optOut={contact.email_opt_out}
+            inviteOptOut={contact.invite_opt_out}
+            newsletterConsent={contact.newsletter_consent}
+            newsletterConsentAt={contact.newsletter_consent_at}
+            newsletterConsentSource={contact.newsletter_consent_source}
+            canEdit={canEdit}
+          />
 
           <Panel title="Ägare">
             {contact.owners.length === 0 ? (

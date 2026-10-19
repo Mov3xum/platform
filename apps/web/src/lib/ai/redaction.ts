@@ -101,6 +101,15 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   'screening_requests',
   // Ärenden i Bedömning excellens (§ 51.10): underlag + manuella svar per bolag.
   'screening_cases',
+  // Deltagarlistor och e-postkampanjer (§ 53.5, § 54): deltagarrader bär
+  // e-post och gästens kost/allergi (kan vara art. 9), mottagarrader bär
+  // hashade adresser och leveransstatus, spärrlistan maskade adresser,
+  // händelseloggen leverantörsdata — inget av det ska nå modellen rått.
+  // Kampanjerna själva (`email_campaigns`: text, ämne, status) är läsbara.
+  'event_signups',
+  'email_campaign_recipients',
+  'email_suppressions',
+  'email_events',
   'agent_memory' // agentens tvärsessions-scratchpad (1700000079)
 ]);
 

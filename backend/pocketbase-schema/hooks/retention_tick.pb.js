@@ -25,6 +25,7 @@
 //   MOVEXUM_RETENTION_AGENT_ACTIONS_DAYS         default 1095 (golv 365)
 //   MOVEXUM_RETENTION_COMPASS_SECURITY_DAYS      default 365 (golv 30)
 //   MOVEXUM_RETENTION_WEB_CACHE_DAYS             default 2
+//   MOVEXUM_RETENTION_EMAIL_EVENTS_DAYS          default 730 (golv 90)
 // Ogiltiga värden faller tillbaka på default; värden under golvet höjs till
 // golvet (en felskriven env får aldrig radera audit-spåret).
 //
@@ -88,6 +89,14 @@ cronAdd('movexum-retention-tick', '17 3 * * *', () => {
       fields: ['created'],
       filter: 'created < {:cut}',
       params: { cut: cutoff(intEnv('MOVEXUM_RETENTION_COMPASS_SECURITY_DAYS', 365, 30, 3650)) }
+    },
+    {
+      // Webhook-händelser från e-posttjänsten (§ 54): leveranser/studsar per
+      // kampanj — statistiken aggregeras på kampanjen, raderna behövs inte längre.
+      collection: 'email_events',
+      fields: ['created'],
+      filter: 'created < {:cut}',
+      params: { cut: cutoff(intEnv('MOVEXUM_RETENTION_EMAIL_EVENTS_DAYS', 730, 90, 3650)) }
     },
     {
       collection: 'web_cache',
