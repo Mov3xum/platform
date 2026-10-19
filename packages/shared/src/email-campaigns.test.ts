@@ -98,7 +98,7 @@ test('normalizeEmailCampaignContent + validering för utskick', () => {
   const none = validateEmailCampaignForSend(c, { hasEvent: true, recipients: 0 });
   assert.ok(!none.ok && /mottagare/.test(none.error));
   const newsletter = normalizeEmailCampaignContent({ title: 'N', category: 'newsletter' });
-  assert.equal(newsletter.consent_mode, 'consent_only', 'nyhetsbrev kräver samtycke som default');
+  assert.equal(newsletter.consent_mode, 'legitimate_interest', 'även nyhetsbrev går på berättigat intresse som default — bara samtycke väljs uttryckligen');
 });
 
 test('normalizeEmailDesign + audience tolererar skräp', () => {

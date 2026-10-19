@@ -89,8 +89,17 @@ export function isEmailConsentMode(v: unknown): v is EmailConsentMode {
   return typeof v === 'string' && (EMAIL_CONSENT_MODES as readonly string[]).includes(v);
 }
 
-export function defaultConsentMode(category: EmailCategory): EmailConsentMode {
-  return category === 'newsletter' ? 'consent_only' : 'legitimate_interest';
+/**
+ * Rättslig grund som förval (§ 55.3): berättigat intresse med avregistrering
+ * i varje mejl — även för nyhetsbrev. Kontaktboken är Movexums B2B-nätverk
+ * (bolag, partners, myndigheter), och "bara samtycke" som förval för
+ * nyhetsbrev gjorde att VARJE kontakt utan registrerat nyhetsbrevssamtycke
+ * tyst hoppades över (incident 2026-10-19: två nyhetsbrev "skickades" till
+ * noll mottagare). "Bara samtycke" väljs uttryckligen i editorn när
+ * utskicket går till privatpersoner.
+ */
+export function defaultConsentMode(_category: EmailCategory): EmailConsentMode {
+  return 'legitimate_interest';
 }
 
 // ── Mottagarstatus ──────────────────────────────────────────────────────────

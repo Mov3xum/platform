@@ -10163,8 +10163,17 @@ sidan av — skapa en mall (`EMAIL_TEMPLATES`) och gå via kampanjmotorn.
 - **Rättslig grund per utskick**: `legitimate_interest` (kontaktnätet nås på
   berättigat intresse med avregistrering i varje mejl; bolag och personal som
   del av programmet) eller `consent_only` (bara kontakter med
-  `newsletter_consent` — användare/bolag utesluts). Nyhetsbrev får
-  `consent_only` som standard. En kontakt som stängt av kategorin
+  `newsletter_consent` — användare/bolag utesluts). **Förvalet är
+  berättigat intresse för ALLA kategorier, även nyhetsbrev** (ändrat
+  2026-10-19: med `consent_only` som förval hoppades varje kontakt utan
+  registrerat nyhetsbrevssamtycke tyst över, och två nyhetsbrev "skickades"
+  till noll mottagare utan att något nådde Resend). "Bara samtycke" väljs
+  uttryckligen i editorn för utskick till privatpersoner. "Skicka nu" räknar
+  först mottagarna som faktiskt nås (`previewRecipientsAction`) och visar
+  "N av M" i bekräftelsen; når ingen fram stoppas utskicket med orsakerna,
+  och motorn (`dispatchCampaign`) låter aldrig ett utskick utan ett enda
+  skickat mejl sluta som Skickat — det går tillbaka till utkast med
+  `last_error`. Fallerade mottagarrader skickas om vid nästa försök. En kontakt som stängt av kategorin
   (`email_opt_out`) eller har `email_status` får aldrig mejlet; orsaken syns
   i "Kontrollera mottagarna" och på mottagarraden.
 - **Mallstrukturer (`EMAIL_TEMPLATES`)**: Eventinbjudan (eventuppgifter +

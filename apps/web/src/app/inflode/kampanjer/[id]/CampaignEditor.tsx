@@ -461,10 +461,34 @@ export function CampaignEditor({
     mark(setBlocks)(next);
   };
 
+  // Innan något skickas: spara, räkna mottagarna som faktiskt nås och visa
+  // det i bekräftelsen. Når ingen fram (saknar e-post, spärrad, utan
+  // samtycke) stoppas utskicket här med orsakerna — aldrig ett "Skickat"
+  // med noll mejl (incident 2026-10-19).
   const sendNow = () => {
     if (picked.size === 0 && !hasGroup) return setState({ error: 'Välj mottagare först.' });
-    if (!window.confirm(`Skicka "${subject || title}" till ${summary.join(', ')} nu? Det går inte att ångra.`)) return;
-    save(() => sendCampaignNowAction(campaign.id));
+    run(async () => {
+      const saved = await saveCampaignAction(payload());
+      if (!saved.ok) return saved;
+      setDirty(false);
+      const preview = await previewRecipientsAction(campaign.id);
+      setRecipientPreview(preview);
+      if (!preview.ok) return preview;
+      const total = preview.total ?? 0;
+      const sendable = preview.sendable ?? 0;
+      if (sendable === 0) {
+        const reasons = new Map<string, number>();
+        for (const b of preview.blocked ?? []) reasons.set(b.why, (reasons.get(b.why) ?? 0) + 1);
+        const why = [...reasons.entries()].map(([w, n]) => `${n} × ${w.toLowerCase()}`).join(', ');
+        const consentHint = consentMode === 'consent_only' ? ' Rättslig grund är "bara samtycke" — byt till berättigat intresse för att nå kontaktnätet, eller registrera nyhetsbrevssamtycke på kontaktkorten.' : '';
+        return { error: `Inget skickades: ingen av de ${total} mottagarna kan nås${why ? ` (${why})` : ''}.${consentHint}` };
+      }
+      const skipped = total - sendable;
+      const ask = `Skicka "${subject || title}" till ${sendable} av ${total} (${summary.join(', ')}) nu?${skipped ? ` ${skipped} hoppas över — se "Kontrollera mottagarna".` : ''} Det går inte att ångra.`;
+      if (!window.confirm(ask)) return { ok: false, notice: 'Utskicket avbröts.' };
+      const sent = await sendCampaignNowAction(campaign.id);
+      return sent.ok && saved.warning ? { ...sent, warning: saved.warning } : sent;
+    }, () => router.refresh());
   };
   const schedule = () => {
     if (!sendAt) return setState({ error: 'Välj en tidpunkt.' });
