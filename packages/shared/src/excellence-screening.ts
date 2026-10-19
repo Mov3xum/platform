@@ -19,7 +19,8 @@ import {
   type CompanyManualAnswers,
   type ManualAnswer,
   type ScreeningManualFacts,
-  type ManualGroupCompanyFact
+  type ManualGroupCompanyFact,
+  type PersonLinkFact
 } from './excellence-facts';
 
 export type ScreeningVerdict = 'yes' | 'no' | 'unknown';
@@ -34,7 +35,11 @@ export interface ScreeningOwnershipEntry {
   owner_kind: ScreeningOwnerKind;
   name?: string;
   org_nr?: string;
-  /** TRANSIENT: fysisk persons namn ur verklig huvudman — bara skärmen, aldrig PDF/historik/DB (§ 51.7). */
+  /**
+   * Fysisk persons namn (för- och efternamn) ur verklig huvudman/koncernlistan.
+   * Visas i bedömningen, PDF:n och ärendet så ägarbilden går att läsa
+   * (§ 51.11); personnummer bär raden aldrig.
+   */
   person_name?: string;
   capital_pct?: number;
   voting_pct?: number;
@@ -60,11 +65,86 @@ export interface ScreeningFinancialsYear {
   dividend_reported?: boolean;
 }
 
+/** En SNI-kod (svensk näringsgrensindelning) ur bolagsregistret. */
+export interface ScreeningSni {
+  /** Koden som leverantören gav den (oftast 5 siffror, t.ex. "62010"). */
+  code: string;
+  text?: string;
+  /** Bolagets huvudsakliga näringsgren. */
+  primary?: boolean;
+}
+
 export interface ScreeningBasic {
   registeredAt?: string;
   bolagStatus?: string;
   bolagsform?: string;
   isPersonal?: boolean;
+  /** Bolagets SNI-koder (huvudsaklig först) — avgör "samma marknad" för ägarnas andra bolag (§ 51.11). */
+  sni?: ScreeningSni[];
+}
+
+/**
+ * Ett annat bolag som en ägare (fysisk person) till startup-bolaget äger eller
+ * kontrollerar — ur verklig huvudman per person (§ 51.11). Personens andel
+ * av bolaget som intervall/exakt; grunddata (SNI) när den hämtades.
+ */
+export interface ScreeningEngagementCompany {
+  org_nr?: string;
+  name?: string;
+  capital_pct?: number;
+  pct_min?: number;
+  pct_max?: number;
+  /** Fast vokabulär: shares | votes | board | agreement | other. */
+  control_basis?: string;
+  /** Grunddata för bolaget (SNI, ålder, status). `undefined` ⇒ hämtades inte. */
+  basic?: ScreeningBasic;
+  /** Varför grunddata saknas (PII-fritt). */
+  note?: string;
+}
+
+export interface ScreeningOwnerEngagement {
+  /** Ägarens namn (fysisk person). */
+  person_name?: string;
+  /** Ägarens andel av startup-bolaget (ur verklig huvudman). */
+  subject_capital_pct?: number;
+  subject_pct_min?: number;
+  subject_pct_max?: number;
+  /**
+   * Uppslaget per person: `ok` = bolag hittades, `none` = personen äger inga
+   * andra bolag enligt registret, `no_id` = personnummer saknades i
+   * huvudmannens post (kan inte sökas), `failed` = anropet föll.
+   */
+  status: 'ok' | 'none' | 'no_id' | 'failed';
+  /** PII-fri orsak vid `failed`/`no_id`. */
+  reason?: string;
+  companies: ScreeningEngagementCompany[];
+}
+
+export type SniMatch = 'same' | 'near' | 'different' | 'unknown';
+
+export const SNI_MATCH_LABEL: Record<SniMatch, string> = {
+  same: 'Samma SNI-kod',
+  near: 'Närliggande bransch',
+  different: 'Annan bransch',
+  unknown: 'SNI-kod saknas'
+};
+
+/** Hur ett av ägarnas andra bolag klassades (§ 51.11). */
+export interface OwnerEngagementCompanyView extends ScreeningEngagementCompany {
+  sniMatch: SniMatch;
+  /** Koden som matchade (samma kod eller samma SNI-grupp). */
+  matchedCode?: string;
+  /** `linked` = anknutet via fysisk person, `uncertain` = oklart, `none` = räknas inte. */
+  relation: 'linked' | 'uncertain' | 'none';
+  reason: string;
+  /** Controllerns bedömning när den finns. */
+  manual?: PersonLinkFact;
+  shareLabel: string;
+}
+
+export interface OwnerEngagementView extends Omit<ScreeningOwnerEngagement, 'companies'> {
+  subjectShareLabel: string;
+  companies: OwnerEngagementCompanyView[];
 }
 
 /** Bilaga I-relation mellan startup-bolaget och ett annat företag. */
@@ -121,6 +201,16 @@ export interface RelatedCompanyRef {
   transitive?: boolean;
   /** Sant när controllern själv angett bolaget (aktiebok/avtal) — registret bar det inte (§ 51.8). */
   manualDeclared?: boolean;
+  /** Bolaget kom med via en ägare (fysisk person) som också äger det — "Ägarnas andra bolag" (§ 51.11). */
+  personLink?: PersonLinkRef;
+}
+
+export interface PersonLinkRef {
+  personName?: string;
+  sniMatch: SniMatch;
+  matchedCode?: string;
+  /** Controllern avgjorde relationen själv. */
+  manual?: boolean;
 }
 
 /** Ett bolag i koncernen med den data som hämtats för det. */
@@ -148,6 +238,12 @@ export interface GroupCompanyFacts {
    * (manuellt svar). `undefined` ⇒ okänt.
    */
   deMinimis?: { usedEur: number; source: 'platform' | 'certificate'; note?: string };
+  /**
+   * Ägarnas andra bolag (bara startup-bolaget, § 51.11): per fysisk ägare de
+   * bolag personen äger/kontrollerar utanför koncernen. `undefined` ⇒ inte
+   * hämtat (datadelen "Ägarnas andra bolag").
+   */
+  ownerEngagements?: ScreeningOwnerEngagement[];
 }
 
 export interface ScreeningFounderRow {
@@ -238,6 +334,8 @@ export interface CompanyAssessment {
   transitive?: boolean;
   /** Angivet manuellt av controllern (aktiebok/avtal), inte ur registret. */
   manualDeclared?: boolean;
+  /** Kom med via en ägare som också äger bolaget (samma marknad, § 51.11). */
+  personLink?: PersonLinkRef;
   dataFetched: boolean;
   basic?: ScreeningBasic;
   /** Grundförutsättningarna i Comblys ordning: ekonomisk verksamhet, < 5 år, börsnoterat, utdelning, koncentration, övertagit verksamhet. */
@@ -271,6 +369,8 @@ export interface ExcellenceScreeningResult {
   comment?: string;
   /** Underlag som saknas — en rad per OKÄNT-punkt (dedupe). */
   missing: string[];
+  /** Ägarnas andra bolag med SNI-jämförelse och klassning (`undefined` ⇒ inte hämtat). */
+  ownerEngagements?: OwnerEngagementView[];
   /** Alla punkter platt (för räkning). */
   checks: ScreeningCheck[];
 }
@@ -457,6 +557,122 @@ export function deriveRelatedCompanies(ownership: ScreeningOwnershipEntry[]): Re
 }
 
 /**
+ * SNI-kod → bara siffror (2–5). "00000"/"0" (uppgift saknas hos SCB) och
+ * annat som inte är en kod blir null.
+ */
+export function normalizeSniCode(code: string | undefined | null): string | null {
+  if (!code) return null;
+  const digits = String(code).replace(/\D/g, '');
+  if (digits.length < 2 || digits.length > 5) return null;
+  if (/^0+$/.test(digits)) return null;
+  return digits;
+}
+
+/**
+ * Jämför två bolags SNI-koder (§ 51.11). `same` = någon kod är identisk
+ * (bilaga I art. 3.3 st. 4: samma relevanta marknad — SNI är plattformens
+ * mått på det), `near` = samma SNI-grupp (tre första siffrorna — kan vara
+ * samma eller angränsande marknad), `different` = ingen gemensam grupp,
+ * `unknown` = någon sida saknar kod.
+ */
+export function compareSni(
+  a: readonly ScreeningSni[] | undefined,
+  b: readonly ScreeningSni[] | undefined
+): { match: SniMatch; code?: string } {
+  const ca = (a ?? []).map((x) => normalizeSniCode(x.code)).filter((x): x is string => !!x);
+  const cb = (b ?? []).map((x) => normalizeSniCode(x.code)).filter((x): x is string => !!x);
+  if (ca.length === 0 || cb.length === 0) return { match: 'unknown' };
+  for (const x of ca) if (cb.includes(x)) return { match: 'same', code: x };
+  for (const x of ca) {
+    if (x.length < 3) continue;
+    const hit = cb.find((y) => y.length >= 3 && y.slice(0, 3) === x.slice(0, 3));
+    if (hit) return { match: 'near', code: x.slice(0, 3) };
+  }
+  return { match: 'different' };
+}
+
+/** "62010 Dataprogrammering" — kod + text, för visning. */
+export function formatSni(s: ScreeningSni): string {
+  const code = normalizeSniCode(s.code) ?? s.code;
+  return s.text ? `${code} ${s.text}` : code;
+}
+
+function engagementShare(c: ScreeningEngagementCompany): { min: number; max: number } | null {
+  return ownershipShareRange({ direction: 'owner', owner_kind: 'person', capital_pct: c.capital_pct, pct_min: c.pct_min, pct_max: c.pct_max });
+}
+
+/**
+ * Ägarnas andra bolag (§ 51.11) — bilaga I art. 3.3 fjärde stycket: företag
+ * som har en kontrollrelation genom en fysisk person (eller personer som
+ * agerar gemensamt) är också anknutna om de bedriver verksamhet på samma
+ * relevanta marknad eller angränsande marknader. Plattformen mäter marknaden
+ * med SNI-koden:
+ *   samma kod      ⇒ anknutet — båda bolagen prövas mot kriterierna
+ *   samma grupp    ⇒ oklart (samma eller angränsande marknad?)
+ *   kod saknas     ⇒ oklart (hämta grunddata för bolaget)
+ *   annan bransch  ⇒ räknas inte (listas)
+ * Controllerns bedömning (`person_links`) vinner alltid.
+ */
+export function classifyOwnerEngagements(
+  subject: Pick<GroupCompanyFacts, 'orgNr' | 'name' | 'basic' | 'ownerEngagements'>,
+  personLinks?: Record<string, PersonLinkFact>
+): OwnerEngagementView[] | undefined {
+  if (!subject.ownerEngagements) return undefined;
+  const subjectName = subject.name || 'startup-bolaget';
+  return subject.ownerEngagements.map((p) => {
+    const person = p.person_name || 'Ägaren';
+    const subjectRange = ownershipShareRange({
+      direction: 'owner',
+      owner_kind: 'person',
+      capital_pct: p.subject_capital_pct,
+      pct_min: p.subject_pct_min,
+      pct_max: p.subject_pct_max
+    });
+    const companies = p.companies
+      .filter((c) => !(c.org_nr && c.org_nr === subject.orgNr))
+      .map((c): OwnerEngagementCompanyView => {
+        const cmp = compareSni(subject.basic?.sni, c.basic?.sni);
+        const share = engagementShare(c);
+        // Personuppslaget (Roaring 2.1) anger ingen andel — bara att personen
+        // är verklig huvudman (> 25 % eller kontroll på annat sätt).
+        const shareText = share ? shareLabel(share) : 'verklig huvudman (> 25 %)';
+        const manual = c.org_nr ? personLinks?.[c.org_nr] : undefined;
+        const base = { ...c, sniMatch: cmp.match, matchedCode: cmp.code, shareLabel: shareText, manual };
+        const other = c.name || c.org_nr || 'bolaget';
+        const who = `${person} äger ${shareLabel(subjectRange)} av ${subjectName} och ${share ? `${shareText} av ${other}` : `är verklig huvudman i ${other} (mer än 25 % eller kontroll)`}`;
+        if (manual) {
+          return manual.verdict === 'linked'
+            ? { ...base, relation: 'linked', reason: `Bedömt av controllern: anknutet via ${person} (samma eller angränsande marknad)${manual.note ? ` — ${manual.note}` : ''}.` }
+            : { ...base, relation: 'none', reason: `Bedömt av controllern: inte anknutet${manual.note ? ` — ${manual.note}` : ''}.` };
+        }
+        if (cmp.match === 'same') {
+          return {
+            ...base,
+            relation: 'linked',
+            reason: `${who}; båda har SNI-kod ${cmp.code} ⇒ samma relevanta marknad. Anknutna via fysisk person (bilaga I art. 3.3 st. 4) — båda bolagen ska klara kriterierna och räknas samman.`
+          };
+        }
+        if (cmp.match === 'near') {
+          return {
+            ...base,
+            relation: 'uncertain',
+            reason: `${who}; samma SNI-grupp (${cmp.code}) men olika koder — avgör om bolagen verkar på samma eller angränsande marknad.`
+          };
+        }
+        if (cmp.match === 'unknown') {
+          return {
+            ...base,
+            relation: 'uncertain',
+            reason: `${who}; SNI-kod saknas för ${c.basic?.sni?.length ? subjectName : (c.name || 'bolaget')} — kan inte jämföra marknaderna.`
+          };
+        }
+        return { ...base, relation: 'none', reason: `${who}; annan bransch — räknas inte som anknutet (om marknaden inte är angränsande).` };
+      });
+    return { ...p, subjectShareLabel: shareLabel(subjectRange), companies };
+  });
+}
+
+/**
  * HELA koncernen — bilaga I i tre lager, i den ordning servern och regelträdet
  * behöver den:
  *
@@ -480,7 +696,8 @@ export function deriveRelatedCompanies(ownership: ScreeningOwnershipEntry[]): Re
 export function deriveGroupCompanies(
   subject: GroupCompanyFacts,
   related: GroupCompanyFacts[],
-  manual: readonly ManualGroupCompanyFact[] = []
+  manual: readonly ManualGroupCompanyFact[] = [],
+  personLinks?: Record<string, PersonLinkFact>
 ): RelatedCompanyRef[] {
   const rank: Record<ScreeningRelation, number> = { linked: 3, partner: 2, uncertain: 1, exempt: 0 };
   const out = new Map<string, RelatedCompanyRef>();
@@ -505,7 +722,8 @@ export function deriveGroupCompanies(
       via: prev.via ?? ref.via,
       level: prev.level ?? ref.level,
       transitive: prev.transitive && ref.transitive,
-      manualDeclared: prev.manualDeclared || ref.manualDeclared || undefined
+      manualDeclared: prev.manualDeclared || ref.manualDeclared || undefined,
+      personLink: prev.personLink ?? ref.personLink
     });
   };
 
@@ -655,7 +873,42 @@ export function deriveGroupCompanies(
       }
     }
   }
+
+  // 4. Ägarnas andra bolag (fysisk person + samma marknad, § 51.11).
+  for (const p of classifyOwnerEngagements(subject, personLinks) ?? []) {
+    for (const c of p.companies) {
+      if (c.relation === 'none') continue;
+      const k = keyOf(c.org_nr, c.name, '');
+      if (!k) continue;
+      add(
+        {
+          name: c.name,
+          org_nr: c.org_nr,
+          direction: 'holding',
+          relation: c.relation,
+          sharePct: undefined,
+          shareLabel: c.shareLabel,
+          reason: c.reason,
+          indirect: true,
+          via: p.person_name,
+          transitive: false,
+          personLink: { personName: p.person_name, sniMatch: c.sniMatch, matchedCode: c.matchedCode, manual: c.manual ? true : undefined }
+        },
+        k
+      );
+    }
+  }
   return [...out.values()];
+}
+
+/** Grunddata för ett av ägarnas andra bolag ur engagemangsuppslaget (SNI m.m.). */
+function engagementBasicFor(subject: GroupCompanyFacts, orgNr: string | undefined): ScreeningBasic | undefined {
+  if (!orgNr) return undefined;
+  for (const p of subject.ownerEngagements ?? []) {
+    const hit = p.companies.find((c) => c.org_nr === orgNr && c.basic);
+    if (hit) return hit.basic;
+  }
+  return undefined;
 }
 
 /**
@@ -976,8 +1229,25 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
 
   // Anknutna / partner / oklara — hela koncernen (egen ägarbild +
   // koncernregistrets lista + andra ledet ur uppslagna bolag).
-  const refs = subject.basic?.isPersonal ? [] : deriveGroupCompanies(subject, input.related, manual?.group_companies ?? []);
+  const refs = subject.basic?.isPersonal ? [] : deriveGroupCompanies(subject, input.related, manual?.group_companies ?? [], manual?.person_links);
   const factsByOrg = new Map(input.related.map((r) => [r.orgNr, r]));
+  const emptyFacts = (r: RelatedCompanyRef): GroupCompanyFacts => ({
+    orgNr: r.org_nr ?? '',
+    name: r.name,
+    dataFetched: false,
+    ownership: [],
+    groupStructureFetched: false,
+    beneficialOwnersFetched: false
+  });
+  // Ägarnas andra bolag bär sin grunddata (SNI, ålder, status) ur
+  // engagemangsuppslaget — den används när bolaget inte slagits upp separat.
+  const factsFor = (r: RelatedCompanyRef): GroupCompanyFacts => {
+    const facts = r.org_nr ? factsByOrg.get(r.org_nr) : undefined;
+    const eng = r.personLink ? engagementBasicFor(subject, r.org_nr) : undefined;
+    if (!eng) return facts ?? emptyFacts(r);
+    const base = facts ?? emptyFacts(r);
+    return base.basic ? base : { ...base, basic: eng, dataFetched: true };
+  };
   const linkedRefs = refs.filter((r) => r.relation === 'linked');
   const partnerRefs = refs.filter((r) => r.relation === 'partner');
   const uncertainRefs = refs.filter((r) => r.relation === 'uncertain');
@@ -985,14 +1255,7 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
   for (const r of refs) {
     if (r.relation === 'exempt') continue;
     const facts = r.org_nr ? factsByOrg.get(r.org_nr) : undefined;
-    const base: GroupCompanyFacts = facts ?? {
-      orgNr: r.org_nr ?? '',
-      name: r.name,
-      dataFetched: false,
-      ownership: [],
-      groupStructureFetched: false,
-      beneficialOwnersFetched: false
-    };
+    const base = factsFor(r);
     const conditions = r.relation === 'linked' ? conditionsFor(base, ref, manual?.companies[base.orgNr]).map(push) : [];
     companies.push({
       orgNr: base.orgNr,
@@ -1008,6 +1271,7 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
       level: r.level,
       transitive: r.transitive,
       manualDeclared: r.manualDeclared,
+      personLink: r.personLink,
       dataFetched: base.dataFetched,
       basic: base.basic,
       conditions,
@@ -1025,6 +1289,16 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
         if (r.groupRole === 'sibling') return `${name} (systerbolag${r.via ? ` under ${r.via}` : ''})`;
         if (r.transitive) return `${name} (via ${r.via ?? 'annat bolag'})`;
         if (r.manualDeclared) return `${name} (angivet manuellt, ${r.direction === 'owner' ? 'äger' : 'ägs'} ${r.shareLabel})`;
+        if (r.personLink) {
+          const why = r.personLink.manual
+            ? 'bedömt av controllern'
+            : r.personLink.sniMatch === 'same'
+              ? `samma SNI-kod ${r.personLink.matchedCode ?? ''}`.trim()
+              : r.personLink.sniMatch === 'near'
+                ? `närliggande bransch ${r.personLink.matchedCode ?? ''}`.trim()
+                : 'SNI-kod saknas';
+          return `${name} (ägs av ${r.personLink.personName ?? 'en ägare'} ${r.shareLabel}, ${why})`;
+        }
         return `${name} (${r.direction === 'owner' ? 'äger' : 'ägs'} ${r.shareLabel})`;
       })
       .join(', ');
@@ -1074,13 +1348,27 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
       needs: 'Hämta koncernstruktur (moder-/dotterbolag).'
     };
   } else if (uncertainRefs.length > 0) {
+    const viaPerson = uncertainRefs.filter((r) => r.personLink);
+    const viaShare = uncertainRefs.filter((r) => !r.personLink);
     standalone = {
       id: 'standalone',
       label: 'Fristående företag',
       verdict: 'unknown',
-      detail: `Andelen kan inte avgöras för: ${describe(uncertainRefs)}.`,
+      detail: [
+        viaShare.length > 0 ? `Andelen kan inte avgöras för: ${describe(viaShare)}.` : '',
+        viaPerson.length > 0
+          ? `Ägarnas andra bolag som kan verka på samma marknad: ${describe(viaPerson)} — avgör relationen under "Ägarnas andra bolag".`
+          : ''
+      ]
+        .filter(Boolean)
+        .join(' '),
       source: 'register',
-      needs: 'Exakt kapital-/röstandel ur aktieboken.'
+      needs: [
+        viaShare.length > 0 ? 'Exakt kapital-/röstandel ur aktieboken.' : '',
+        viaPerson.length > 0 ? 'Om ägarnas andra bolag verkar på samma eller angränsande marknad (SNI-kod / verksamhet).' : ''
+      ]
+        .filter(Boolean)
+        .join(' ')
     };
   } else {
     // Koncernregistret visar bara majoritetsrelationer. "Inga partners" kan
@@ -1115,7 +1403,11 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
             id: 'standalone',
             label: 'Fristående företag',
             verdict: 'yes',
-            detail: `Inget moder-/dotterbolag i koncernregistret, och fysiska personer äger direkt minst ${formatPct(directPersonMin)} — det ryms ingen bolagsägare med 25 % eller mer. Kontrollera att ingen ägare är knuten till annat företag på samma marknad.`,
+            detail: `Inget moder-/dotterbolag i koncernregistret, och fysiska personer äger direkt minst ${formatPct(directPersonMin)} — det ryms ingen bolagsägare med 25 % eller mer. ${
+              subject.ownerEngagements
+                ? 'Ägarnas andra bolag är kontrollerade: inget av dem verkar på samma marknad enligt SNI-koden.'
+                : 'Kontrollera att ingen ägare äger annat företag på samma marknad (datadelen "Ägarnas andra bolag").'
+            }`,
             source: 'register'
           }
         : {
@@ -1174,16 +1466,7 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
     };
   };
   rows.push(rowFor(subject, 'subject', 1));
-  for (const r of linkedRefs) {
-    const facts = r.org_nr ? factsByOrg.get(r.org_nr) : undefined;
-    rows.push(
-      rowFor(
-        facts ?? { orgNr: r.org_nr ?? '', name: r.name, dataFetched: false, ownership: [], groupStructureFetched: false, beneficialOwnersFetched: false },
-        'linked',
-        1
-      )
-    );
-  }
+  for (const r of linkedRefs) rows.push(rowFor(factsFor(r), 'linked', 1));
   for (const r of partnerRefs) {
     const facts = r.org_nr ? factsByOrg.get(r.org_nr) : undefined;
     rows.push(
@@ -1600,7 +1883,8 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
     excellence,
     comment: manual?.comment,
     missing,
-    checks: all
+    checks: all,
+    ownerEngagements: subject.basic?.isPersonal ? undefined : classifyOwnerEngagements(subject, manual?.person_links)
   };
 }
 

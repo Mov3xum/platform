@@ -150,6 +150,10 @@ export function middleware(req: NextRequest) {
     pathname.startsWith('/u/') ||
     // Svar på inbjudningar (§ 53.5): /e/svar?t=<token>.
     pathname.startsWith('/e/') ||
+    // Studenter & talang (§ 54): publik studentsida /s/<tenant-slug>/… (egen
+    // session via HMAC-cookie, ingen användarsession).
+    pathname === '/s' ||
+    pathname.startsWith('/s/') ||
     pathname.startsWith('/api/public/') ||
     PWA_PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));
 

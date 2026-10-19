@@ -39,6 +39,8 @@ export interface CompanyRegistrySpec {
   credentialFields: CredentialField[];
   /** Datadelar providern kan hämta, i visningsordning. */
   parts: RegistryPartId[];
+  /** Delar som bara hämtas vid uppslag (skrivs aldrig) — t.ex. ägarnas andra bolag (§ 51.11). */
+  lookupOnlyParts?: RegistryPartId[];
   /** Leverantörens endpoint per del (visas vid kryssrutorna). */
   partEndpoints?(): Partial<Record<RegistryPartId, string>>;
   /** Verifierar inloggningsuppgifterna mot leverantören utan att skriva något. */
@@ -117,6 +119,8 @@ function restrictToParts(company: RegistryCompany, requested: RegistryPartId[]):
     financials: financialsParts(fetched).length > 0 ? company.financials : [],
     ownership: company.ownership.filter((e) => (e.part ? own.includes(e.part) : own.length > 0)),
     group: fetched.includes('group_structure') ? company.group : undefined,
+    sni: fetched.includes('basic') ? company.sni : undefined,
+    ownerEngagements: fetched.includes('owner_engagements') ? company.ownerEngagements : undefined,
     fetchedParts: fetched
   };
 }
@@ -169,13 +173,17 @@ export function createCompanyRegistryHandler(spec: CompanyRegistrySpec): Company
     complianceNote: spec.complianceNote,
     credentialFields: spec.credentialFields,
     parts: [...spec.parts],
+    lookupOnlyParts: spec.lookupOnlyParts ? [...spec.lookupOnlyParts] : undefined,
     partEndpoints: spec.partEndpoints,
     testConnection: (creds) => spec.testConnection(creds),
 
     async lookup(orgNrRaw, creds, requestedParts) {
       const orgNr = normalizeOrgNr(orgNrRaw);
       if (!orgNr) throw new Error('Ogiltigt organisationsnummer (10 siffror krävs).');
-      const requested = partsForOrgNr(orgNr, resolveParts(spec.parts, requestedParts));
+      // Uppslag får även de delar som bara gäller uppslag; utan val hämtas
+      // bara de vanliga delarna (som förut).
+      const lookupParts = [...spec.parts, ...(spec.lookupOnlyParts ?? [])];
+      const requested = partsForOrgNr(orgNr, requestedParts ? resolveParts(lookupParts, requestedParts) : [...spec.parts]);
       const company = restrictToParts(await spec.fetchCompany(orgNr, creds, requested), requested);
       if (isPersonalOrgNr(orgNr) || company.isPersonal) {
         company.isPersonal = true;

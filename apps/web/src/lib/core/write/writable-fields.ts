@@ -465,7 +465,28 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
     comment: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
     // Manuellt värde = mänsklig bedömning; beräknade värden hämtar skrivlagret själv ur registret.
     value: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Uppmätta värden anges av en människa (eller räknas ur data) — inte av agenten.' } }
-  }
+  },
+  // Studenter & talang (§ 54): bolagets annons mot studenter. Bolaget (länkad
+  // medlem) och staff redigerar texten; publicering/granskning är staff-fält
+  // (`reviewTalentNeed`). Agenten nekad (privatpersoner i andra änden).
+  talent_needs: Object.fromEntries(
+    [
+      'title', 'kind', 'description', 'tags', 'scope', 'starts_at', 'ends_at', 'compensation',
+      'compensation_note', 'location', 'work_mode', 'supervisor', 'deadline', 'anonymous', 'status'
+    ].map((f) => [f, { user: { kind: 'any-role' }, agent: { kind: 'deny', reason: 'Behov mot studenter redigeras av en människa.' } }])
+  ) as Record<string, FieldPolicy>,
+  talent_interests: Object.fromEntries(
+    ['status', 'company_note', 'outcome', 'outcome_note'].map((f) => [
+      f,
+      { user: { kind: 'any-role' }, agent: { kind: 'deny', reason: 'Matchningar med studenter hanteras av en människa.' } }
+    ])
+  ) as Record<string, FieldPolicy>,
+  student_profiles: Object.fromEntries(
+    ['status', 'searchable'].map((f) => [
+      f,
+      { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Studentprofiler hanteras av Movexum-personal.' } }
+    ])
+  ) as Record<string, FieldPolicy>
 };
 
 /** Vilka collections som har create-stöd via det delade lagret. */
@@ -513,6 +534,22 @@ const CREATE_POLICIES: Record<
   contact_groups: {
     user: { kind: 'roles', roles: STAFF_FULL },
     agent: { kind: 'deny', reason: 'Grupper i kontaktboken hanteras av en människa under Kontaktbok → Grupper.' }
+  },
+  // Studenter & talang (§ 54). Behov skapas av bolaget (länkad medlem — verifieras
+  // i skrivlagret) eller staff; intressen av bolaget/Movexum (förslag till en
+  // student) — studentens egna skrivningar går via den publika routen utan
+  // actor. Agenten har inga verktyg här (privatpersoner, art. 14).
+  talent_needs: {
+    user: { kind: 'any-role' },
+    agent: { kind: 'deny', reason: 'Behov mot studenter skapas av bolaget eller Movexum i UI:t.' }
+  },
+  talent_interests: {
+    user: { kind: 'any-role' },
+    agent: { kind: 'deny', reason: 'Förslag till studenter skickas av en människa i Studenter & talang.' }
+  },
+  student_profiles: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'deny', reason: 'Studentprofiler hanteras av studenten själv eller Movexum-personal.' }
   },
   // Bedömning excellens (§ 51.6) — begäran om komplettering skickas av
   // controllern (admin/incubator_lead/coach, finkontroll i skrivlagret);

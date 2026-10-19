@@ -16,7 +16,9 @@ import type { ExcellenceAssessment } from '@/lib/actions/excellence';
 // "Begär komplettering" (CLAUDE.md § 51.6): punkterna ur bedömningens
 // "Saknat underlag" blir en förfrågan till coachen eller till bolaget, som
 // svarar direkt i systemet (/komplettering/<id>). Samma lista går att
-// kopiera som text för ett mejl eller ett möte.
+// kopiera som text för ett mejl eller ett möte. Ligger INNE i sektionen
+// "Saknat underlag" (§ 51.12): snabbknapparna syns direkt, det fulla
+// formuläret (välj punkter, kollega, datum) bakom en länk.
 
 interface Props {
   assessment: ExcellenceAssessment;
@@ -42,6 +44,8 @@ export function ScreeningRequestComposer({ assessment, coaches, senderName }: Pr
   const [message, setMessage] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [copied, setCopied] = useState(false);
+  // Bolag utanför plattformen kan bara kopiera texten — då visas formuläret direkt.
+  const [showForm, setShowForm] = useState(!assessment.subject.startupId);
 
   // Nytt underlag eller ny mottagare ⇒ förvalet följer.
   useEffect(() => {
@@ -72,18 +76,11 @@ export function ScreeningRequestComposer({ assessment, coaches, senderName }: Pr
     }
   };
 
-  if (all.length === 0) {
-    return (
-      <section className="rounded-2xl border border-default bg-surface px-5 py-4">
-        <h3 className="text-[14px] font-semibold text-foreground">Begär komplettering</h3>
-        <p className="mt-1 text-[12.5px] text-foreground-muted">Inget saknat underlag att fråga om.</p>
-      </section>
-    );
-  }
+  if (all.length === 0) return null;
 
   return (
-    <section className="rounded-2xl border border-default bg-surface px-5 py-5">
-      <h3 className="text-[14px] font-semibold text-foreground">Begär komplettering</h3>
+    <div className="border-t border-default pt-3">
+      <h4 className="text-[13px] font-semibold text-foreground">Begär komplettering</h4>
       {!startupId && (
         <p className="mt-1 text-[12.5px] text-foreground-muted">Bolaget finns inte i plattformen — kopiera listan som text.</p>
       )}
@@ -116,10 +113,13 @@ export function ScreeningRequestComposer({ assessment, coaches, senderName }: Pr
               </button>
             </form>
           )}
-          <span className="text-[12px] text-foreground-subtle">Vill du välja punkter, kollega eller datum — använd formuläret nedan.</span>
+          <button type="button" onClick={() => setShowForm((v) => !v)} aria-expanded={showForm} className="text-[12px] font-semibold text-link hover:underline">
+            {showForm ? 'Dölj formuläret' : 'Välj punkter, kollega eller datum själv'}
+          </button>
         </div>
       )}
 
+      {showForm && (
       <form action={formAction} className="mt-3 space-y-3">
         <input type="hidden" name="startup_id" value={startupId ?? ''} />
         <input type="hidden" name="screening_id" value={assessment.history?.runId ?? ''} />
@@ -213,6 +213,7 @@ export function ScreeningRequestComposer({ assessment, coaches, senderName }: Pr
           </button>
         </div>
       </form>
+      )}
 
       {state.created && (
         <p className={`mt-3 rounded-xl px-3 py-2 text-[12.5px] ${OK_TONE}`}>
@@ -238,11 +239,13 @@ export function ScreeningRequestComposer({ assessment, coaches, senderName }: Pr
         </p>
       )}
 
-      <details className="mt-3">
-        <summary className="cursor-pointer text-[12px] font-semibold text-foreground-muted">Förhandsgranska texten</summary>
-        <pre className="mt-2 whitespace-pre-wrap rounded-xl border border-default bg-canvas px-3 py-2 text-[12px] text-foreground">{text}</pre>
-      </details>
-      {chosen.length === 0 && <p className={`mt-2 inline-block rounded-full px-2.5 py-1 text-[12px] ${WARN_TONE}`}>Välj minst en punkt.</p>}
-    </section>
+      {showForm && (
+        <details className="mt-3">
+          <summary className="cursor-pointer text-[12px] font-semibold text-foreground-muted">Förhandsgranska texten</summary>
+          <pre className="mt-2 whitespace-pre-wrap rounded-xl border border-default bg-canvas px-3 py-2 text-[12px] text-foreground">{text}</pre>
+        </details>
+      )}
+      {showForm && chosen.length === 0 && <p className={`mt-2 inline-block rounded-full px-2.5 py-1 text-[12px] ${WARN_TONE}`}>Välj minst en punkt.</p>}
+    </div>
   );
 }

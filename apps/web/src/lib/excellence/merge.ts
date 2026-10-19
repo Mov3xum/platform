@@ -28,7 +28,8 @@ export function mergeGroupCompanyFacts(existing: GroupCompanyFacts | undefined, 
     groupStructureFetched: existing.groupStructureFetched || fresh.groupStructureFetched,
     beneficialOwnersFetched: existing.beneficialOwnersFetched || fresh.beneficialOwnersFetched,
     groupMembers: fresh.groupMembers !== undefined ? fresh.groupMembers : existing.groupMembers,
-    deMinimis: fresh.deMinimis ?? existing.deMinimis
+    deMinimis: fresh.deMinimis ?? existing.deMinimis,
+    ownerEngagements: fresh.ownerEngagements !== undefined ? fresh.ownerEngagements : existing.ownerEngagements
   };
 }
 

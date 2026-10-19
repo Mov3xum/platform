@@ -110,6 +110,11 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   'email_campaign_recipients',
   'email_suppressions',
   'email_events',
+  // Studenter & talang (§ 54): studentprofiler (namn, e-post, fritext om en
+  // privatperson) och intresseanmälningar (meddelanden). Behoven
+  // (`talent_needs`) är bolagens egna annonser och förblir läsbara.
+  'student_profiles',
+  'talent_interests',
   'agent_memory' // agentens tvärsessions-scratchpad (1700000079)
 ]);
 

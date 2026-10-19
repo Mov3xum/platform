@@ -78,8 +78,10 @@ export interface RecordsHandler extends BaseIntegrationHandler {
 
 export interface CompanyRegistryHandler extends BaseIntegrationHandler {
   kind: 'company_registry';
-  /** Datadelar providern kan hämta, i visningsordning (§ 11.8). */
+  /** Datadelar providern kan hämta OCH synka till bolagskortet, i visningsordning (§ 11.8). */
   parts: RegistryPartId[];
+  /** Delar som bara finns vid uppslag (Testa mot org-nr, Bedömning excellens) — aldrig vid synk (§ 51.11). */
+  lookupOnlyParts?: RegistryPartId[];
   /** Leverantörens endpoint per del — visas vid kryssrutorna. */
   partEndpoints?(): Partial<Record<RegistryPartId, string>>;
   syncRegistry(

@@ -171,6 +171,10 @@ async function verifyCollectionsExist() {
     'screening_requests',
     // Ärenden i Bedömning excellens (§ 51.10, migration 1700000200).
     'screening_cases',
+    // Studenter & talang (§ 54, migration 1700000201).
+    'talent_needs',
+    'student_profiles',
+    'talent_interests',
     'capital_rounds',
     'intellectual_property',
     'startup_kpis',
@@ -437,7 +441,10 @@ const MUST_SCOPE_TO_MEMBER = [
   'support_check_documents',
   // Bedömning excellens (§ 51.6): bolaget ser/svarar på en begäran om
   // komplettering BARA när den är ställd till bolaget (recipient_kind).
-  'screening_requests'
+  'screening_requests',
+  // Studenter & talang (§ 54): bolaget ser sina egna behov och intressen.
+  'talent_needs',
+  'talent_interests'
 ];
 
 const MUST_BE_STAFF_OR_OBSERVER = [
@@ -507,6 +514,9 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   // Ärenden i Bedömning excellens (§ 51.10, migration 1700000200) — internt
   // statsstödsunderlag per bolag → staff/observer-only.
   'screening_cases',
+  // Studentprofiler (§ 54, migration 1700000201): privatpersoners uppgifter —
+  // bolaget ser dem BARA anonymiserat via kod, aldrig via RLS.
+  'student_profiles',
   // Finansieringsprojekt/arbetspaket och stödcheck-regler (§ 46). Intern
   // projektekonomi och uppföljningsstyrning → staff/observer-only.
   'funding_projects',
@@ -604,7 +614,9 @@ function verifyImmutableCollections(collections) {
 // notiser till vem som helst, i valfri tenant, med valfri länk. Notiser och
 // notisinställningar är STRIKT ägaren-bara: list/view måste vara
 // `@request.auth.id = user` och får aldrig öppnas för staff/tenant.
-const MUST_BE_SERVER_CREATE_ONLY = ['notifications'];
+// Studentprofiler och intressen (§ 54) skapas bara av servern: studenten har
+// ingen användarsession, och ett intresse får aldrig förfalskas av ett bolag.
+const MUST_BE_SERVER_CREATE_ONLY = ['notifications', 'student_profiles', 'talent_interests'];
 const MUST_BE_OWNER_ONLY = ['notifications', 'notification_preferences'];
 
 function verifyNotificationRules(collections) {
@@ -613,8 +625,8 @@ function verifyNotificationRules(collections) {
     if (!col) continue;
     if (col.createRule !== null && col.createRule !== undefined) {
       fail(
-        `${name}.createRule måste vara null (bara servern skapar notiser), är \`${String(col.createRule)}\`.\n` +
-          'Kör migration 1700000186 eller setup-via-api.mjs.'
+        `${name}.createRule måste vara null (bara servern skapar raderna), är \`${String(col.createRule)}\`.\n` +
+          'Kör migration 1700000186/1700000201 eller setup-via-api.mjs.'
       );
     }
   }
@@ -715,7 +727,8 @@ const AI_DENYLIST = new Set([
   'tenant_integrations', 'user_app_integrations', 'user_mistral_connectors',
   'chat_threads', 'user_files', 'user_file_chunks', 'deep_jobs',
   'org_knowledge', 'org_knowledge_chunks', 'agent_memory',
-  'notifications', 'notification_preferences', 'rate_limits', 'app_locks'
+  'notifications', 'notification_preferences', 'rate_limits', 'app_locks',
+  'student_profiles', 'talent_interests'
 ]);
 
 // PII-stavningar som substring-maskern INTE redan fångar. Förankrade till `_`

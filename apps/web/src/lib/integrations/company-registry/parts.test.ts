@@ -7,8 +7,7 @@ import {
   ownershipReplaceMode,
   parseRegistryParts,
   REGISTRY_PART_IDS,
-  type RegistryPartId
-} from './parts';
+  type RegistryPartId, syncableParts, toggleRegistryPart } from './parts';
 
 const ROARING: RegistryPartId[] = ['basic', 'financials', 'group_structure', 'beneficial_owners'];
 const BOLAGSVERKET: RegistryPartId[] = ['basic'];
@@ -58,5 +57,17 @@ test('ersättningsläget för ägarbilden', () => {
 
 test('etiketterna finns för varje del', () => {
   assert.equal(describeRegistryParts(['basic', 'financials']), 'Grunddata, Bokslut');
-  assert.equal(describeRegistryParts([...REGISTRY_PART_IDS]).split(', ').length, 4);
+  assert.equal(describeRegistryParts([...REGISTRY_PART_IDS]).split(', ').length, REGISTRY_PART_IDS.length);
+});
+
+test('ägarnas andra bolag: beroenden läggs till, delen gäller bara uppslag', () => {
+  const ALL = ['basic', 'financials', 'group_structure', 'beneficial_owners', 'owner_engagements'] as const;
+  const parsed = parseRegistryParts(['owner_engagements'], [...ALL]);
+  assert.deepEqual(parsed, { ok: true, parts: ['basic', 'beneficial_owners', 'owner_engagements'] });
+  assert.deepEqual(syncableParts([...ALL]), ['basic', 'financials', 'group_structure', 'beneficial_owners']);
+  // Kryssrutorna: på ⇒ beroenden följer med; av med ett beroende ⇒ delen som kräver det slås av.
+  assert.deepEqual(toggleRegistryPart([], 'owner_engagements', [...ALL]), ['basic', 'beneficial_owners', 'owner_engagements']);
+  assert.deepEqual(toggleRegistryPart(['basic', 'beneficial_owners', 'owner_engagements'], 'beneficial_owners', [...ALL]), ['basic']);
+  // En provider utan beroendet får bara det den stödjer.
+  assert.deepEqual(parseRegistryParts(['owner_engagements'], ['basic', 'owner_engagements']), { ok: true, parts: ['basic', 'owner_engagements'] });
 });
