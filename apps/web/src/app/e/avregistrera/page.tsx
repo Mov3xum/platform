@@ -17,9 +17,21 @@ const ERROR_TEXT: Record<string, string> = {
 export default async function UnsubscribePage({
   searchParams
 }: {
-  searchParams: Promise<{ k?: string; klart?: string; fel?: string }>;
+  searchParams: Promise<{ k?: string; klart?: string; fel?: string; alla?: string; test?: string }>;
 }) {
-  const { k, klart, fel } = await searchParams;
+  const { k, klart, fel, alla, test } = await searchParams;
+  if (test) {
+    return (
+      <main className="mx-compass-landing" style={{ ['--mx-accent' as string]: 'var(--movexum-morkbla)' }}>
+        <div className="mx-compass-wrap">
+          <div className="mx-compass-head">
+            <h1 className="mx-compass-title">Testlänk</h1>
+            <p className="mx-compass-body">Det här är en länk från ett testmejl. I ett riktigt utskick avregistrerar den mottagaren.</p>
+          </div>
+        </div>
+      </main>
+    );
+  }
   const valid = Boolean(verifyUnsubscribeKey(k, unsubscribeSecret()));
   const error = fel && ERROR_TEXT[fel] ? ERROR_TEXT[fel] : !klart && !valid ? ERROR_TEXT.lank : null;
 
@@ -39,14 +51,27 @@ export default async function UnsubscribePage({
             <>
               <h1 className="mx-compass-title">Du är avregistrerad</h1>
               <p className="mx-compass-body">
-                Du får inga fler inbjudningar till event från Movexum. Har du redan tackat ja till ett event står
-                anmälan kvar. Vill du ändra dig, hör av dig till oss.
+                {alla
+                  ? 'Du får inga fler utskick från Movexum via e-post. Har du redan tackat ja till ett event står anmälan kvar.'
+                  : 'Du får inga fler inbjudningar till event från Movexum. Har du redan tackat ja till ett event står anmälan kvar.'}{' '}
+                Vill du ändra dig, hör av dig till oss.
               </p>
             </>
           ) : (
             <>
-              <h1 className="mx-compass-title">Avregistrera dig från inbjudningar</h1>
-              <p className="mx-compass-body">{error ?? 'Du slutar få inbjudningar till Movexums event via e-post.'}</p>
+              <h1 className="mx-compass-title">{alla ? 'Avregistrera dig från Movexums utskick' : 'Avregistrera dig från inbjudningar'}</h1>
+              <p className="mx-compass-body">
+                {error ?? (alla ? 'Du slutar få alla utskick från Movexum via e-post.' : 'Du slutar få inbjudningar till Movexums event via e-post.')}
+              </p>
+              {!error && (
+                <p className="mx-compass-body" style={{ fontSize: 13 }}>
+                  Vill du hellre välja vad du får?{' '}
+                  <a href={`/e/installningar?k=${encodeURIComponent(k ?? '')}`} style={{ color: 'var(--mx-accent)' }}>
+                    Hantera dina utskick
+                  </a>
+                  .
+                </p>
+              )}
             </>
           )}
         </div>
@@ -54,6 +79,7 @@ export default async function UnsubscribePage({
           <section className="mx-compass-card">
             <form method="post" action="/api/public/e/unsubscribe">
               <input type="hidden" name="k" value={k} />
+              {alla && <input type="hidden" name="alla" value="1" />}
               <button type="submit" className="mx-btn mx-primary">
                 Avregistrera mig
               </button>

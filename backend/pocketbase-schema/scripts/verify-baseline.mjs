@@ -157,6 +157,11 @@ async function verifyCollectionsExist() {
     'contact_requests',
     // Kontaktboken: egna grupper (§ 45.8, migration 1700000199).
     'contact_groups',
+    // E-postkampanjer (§ 55, migration 1700000203).
+    'email_campaigns',
+    'email_campaign_recipients',
+    'email_suppressions',
+    'email_events',
     // Önskemål & buggar (§ 49, migration 1700000176) — intern backlog.
     'feedback_items',
     // Kompetens-hashtags (§ 29.7, migration 1700000178) — tenantens vokabulär.
@@ -491,6 +496,12 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   'contact_requests',
   // Egna grupper i kontaktboken (§ 45.8, migration 1700000199) → staff/observer-only.
   'contact_groups',
+  // E-postkampanjer (§ 55, migration 1700000203): utskick, mottagarrader
+  // (hashade adresser), spärrlista och webhook-händelser → staff/observer-only.
+  'email_campaigns',
+  'email_campaign_recipients',
+  'email_suppressions',
+  'email_events',
   // Önskemål & buggar (§ 49, migration 1700000176). Intern backlog för
   // Movexum-personal (kort + ledningens svar) → staff/observer-only.
   'feedback_items',
@@ -1128,6 +1139,14 @@ const REQUIRED_APP_FIELDS = [
   { collection: 'contacts', fields: ['owners', 'organization', 'category'] },
   // Grupper i kontaktboken (§ 45.8, migration 1700000199).
   { collection: 'contacts', fields: ['groups'] },
+  // E-postkampanjer (§ 55, migration 1700000203): utan fälten "sparas"
+  // spärrstatus/preferenser/samtycke tyst bort, gästfrågor och incheckning
+  // försvinner och påminnelserna skickas aldrig.
+  { collection: 'contacts', fields: ['email_status', 'email_status_at', 'email_opt_out', 'newsletter_consent', 'newsletter_consent_at', 'newsletter_consent_source'] },
+  { collection: 'event_signups', fields: ['plus_ones', 'diet', 'custom_answer', 'checked_in_at', 'campaign'] },
+  // Kampanjens kopplade utvärdering (§ 55.3, migration 1700000203) — fyller {{utvärdering.länk}}.
+  { collection: 'email_campaigns', fields: ['survey', 'event', 'audience', 'blocks'] },
+  { collection: 'incubator_events', fields: ['rsvp_settings', 'reminder_unanswered_sent_at', 'reminder_confirmed_sent_at'] },
   // AI-minne (§ 16.4): kategori per notering = migration 1700000155. Saknas
   // fältet "sparas" kategorin från UI/memory_write men försvinner tyst.
   { collection: 'agent_memory', fields: ['category'] },
@@ -1203,7 +1222,8 @@ const REQUIRED_SELECT_VALUES = [
   { collection: 'goal_indicators', field: 'source', values: ['computed', 'manual', 'survey', 'activities'], migration: '1700000196' },
   { collection: 'goals', field: 'focus_area', values: ['projekt'], migration: '1700000198' },
   { collection: 'goal_status_entries', field: 'status', values: ['risk'], migration: '1700000198' },
-  { collection: 'event_signups', field: 'stage', values: ['invited', 'declined'], migration: '1700000197' }
+  { collection: 'event_signups', field: 'stage', values: ['invited', 'declined'], migration: '1700000197' },
+  { collection: 'event_signups', field: 'stage', values: ['waitlist'], migration: '1700000203' }
 ];
 
 const MUST_NOT_BE_REQUIRED = [

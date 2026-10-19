@@ -8213,9 +8213,8 @@ antal mottagare, schemalagd tid, utfört utskick och "Skicka igen".
 | `backend/pocketbase-schema/migrations/1700000151_extend_surveys_dispatch.js` | `surveys.send_at`/`sent_at`/`sent_count`/`send_base_url` |
 | `backend/pocketbase-schema/hooks/survey_dispatch_tick.pb.js` | PB-cron varje minut: `send_at <= now && sent_at = ''` → provisoriskt lås (+1 h) → POST `/api/internal/send-survey` |
 | `apps/web/src/app/api/internal/send-survey/route.ts` | Intern endpoint (delat secret `MOVEXUM_SCHEDULE_SECRET`, timing-safe, § 12.3) |
-| `apps/web/src/lib/surveys/dispatch.ts` | `dispatchSurveyInvites` — delad kärna för "Skicka nu" OCH cron (superuser, tenant-verifierad) |
+| `apps/web/src/lib/surveys/dispatch.ts` | `dispatchSurveyInvites` — delad kärna för "Skicka nu" OCH cron (superuser, tenant-verifierad). **Sedan 2026-10 (§ 55) skapar den en systemkampanj** från mallen "Tack och utvärdering" med mottagargruppen "närvarande" och låter kampanjmotorn rendera och skicka |
 | `apps/web/src/lib/surveys/recipients.ts` | `countSurveyRecipients` — bara ett tal till klienten |
-| `apps/web/src/lib/email.ts` | `sendSurveyInvites` (Resend, ett mejl per mottagare, batchar om 10, HTML-escapat) |
 | `apps/web/src/lib/actions/surveys.ts` | `sendSurveyNowAction` / `scheduleSurveySendAction` / `cancelSurveySendAction` |
 | `apps/web/src/components/surveys/SurveySendPanel.tsx` | Panelen (client) |
 
@@ -9726,16 +9725,19 @@ fylls aldrig i för hand. Migration **1700000196**.
 `/inflode/inbjudningar` (flik mellan Startupkompassen och Utvärdering) visar
 kommande event (och de senaste 30 dagarna) med läget inbjudna / kommer /
 avböjt / ej utskickade. Per event (`/inflode/inbjudningar/<id>`) och direkt
-på eventsidan ("Bjud in" i deltagarpanelen) väljer staff mottagare i
-**inbjudningspanelen**, bjuder in och följer svaren. Migration **1700000197**.
+på eventsidan ("Bjud in" i deltagarpanelen) startar staff utskicken —
+**sedan 2026-10 som kampanjer (§ 55): `InviteLauncher` skapar en kampanj
+från rätt mall med eventets deltagarlista som mottagargrupp och öppnar
+editorn**, där mottagare väljs/kompletteras och mejlet skickas. Fliken är
+svarsöversikten. Migration **1700000197**.
 
 | Fil | Syfte |
 |-----|-------|
 | `packages/shared/src/event-invitations.ts` (+ `.test.ts`) | `selectInviteRecipients` (kontakt/konto/bolagsadress, e-post, avregistrering, dubbletter, tak 500), `contactSearchWords`/`matchesContactSearch`, `rsvpOpen`, `stageForRsvp`, tokenformat |
 | `apps/web/src/lib/events/invite-candidates.ts` | Vem som kan bjudas in: kontaktsökning (kategori + ord), antal per kategori, hur ett bolag nås (`loadStartupReach`) — delas av listningen och skrivlagret |
-| `apps/web/src/components/invitations/InvitePanel.tsx` | Panelen (klient): flikarna Kontaktboken/Bolag, kategorichips med antal, kryssrutor, "Välj alla", ett utskick |
-| `apps/web/src/lib/core/write/event-invitations.ts` | Skrivlagret: `inviteToEvent` (kontakter + bolag), `sendEventInvitations` (pending/påminnelse), `hashRsvpToken` |
-| `apps/web/src/lib/email.ts` + `lib/mail-sender.ts` (+ `.test.ts`) | `sendEventInvites` — personlig svarslänk, HTML + text, avsändare/svarsadress från env, `List-Unsubscribe` |
+| `apps/web/src/components/invitations/InviteLauncher.tsx` | Startknapparna (klient): skapar en kampanj (inbjudan / ej utskickade / påminnelse / vi ses snart / tack och utvärdering) med eventets deltagarlista som mottagargrupp och öppnar editorn — skickar aldrig själv |
+| `apps/web/src/lib/core/write/event-invitations.ts` | Skrivlagret: `hashRsvpToken`/`newRsvpToken`, `removeEventInvitation`. Själva inbjudandet sker i kampanjmotorn (`lib/email/campaign-dispatch.ts`, § 55) som skapar de inbjudna raderna |
+| `lib/mail-sender.ts` (+ `.test.ts`) | Avsändare/svarsadress från env, `List-Unsubscribe`, `describeResendError` — delas av alla utskick |
 | `apps/web/src/lib/unsubscribe-key.ts` (+ `.test.ts`) + `app/e/avregistrera/page.tsx` + `app/api/public/e/unsubscribe/route.ts` | Stabil, signerad avregistrering (sida + en-klick) |
 | `apps/web/src/lib/events/rsvp.ts` + `app/e/svar/page.tsx` + `app/api/public/e/rsvp/route.ts` | Publik bekräftelsesida och svarsroute |
 | `apps/web/src/lib/events/counters.ts` | `recomputeEventCounters` — delad av eventsidan, inbjudningarna och svarsvägen |
@@ -9850,12 +9852,12 @@ på eventsidan ("Bjud in" i deltagarpanelen) väljer staff mottagare i
   försvinner med raden). Audit PII-fri (eventets namn + steg) → feeden "En
   inbjudan till "X" togs bort".
 - **Utan e-posttjänst kastar inget (incident 2026-10-17):** saknades
-  `RESEND_API_KEY` kastade `sendEventInvites` mitt i "Bjud in" — raderna var
-  redan skapade och sidan föll i "Server Components render" (500). Nu
-  kontrollerar `inviteToEvent`/`sendEventInvitations` och enkätutskicket
-  (§ 47.5) `isEmailConfigured()` INNAN något skrivs och svarar med ett tydligt
-  fel; ett misslyckat utskick efter att raderna skapats redovisas
-  (`sendError`) i stället för att kasta. Klientkomponenter som anropar server
+  `RESEND_API_KEY` kastade det dåvarande inbjudningsutskicket mitt i "Bjud
+  in" — raderna var redan skapade och sidan föll i "Server Components render"
+  (500). Nu kontrollerar kampanjmotorn (`dispatchCampaign`, § 55) och
+  enkätutskicket (§ 47.5) `isEmailConfigured()` INNAN något skrivs och svarar
+  med ett tydligt fel; ett misslyckat utskick redovisas per mottagarrad
+  (`failed` + orsak) i stället för att kasta. Klientkomponenter som anropar server
   actions direkt fångar kastade fel med `actionErrorMessage`
   (`lib/action-error.ts`) — en action får aldrig riva sidan.
 - **Resends orsak syns (2026-10-18):** ett avvisat mejl gav bara "N mejl
@@ -10048,3 +10050,263 @@ och `talent_needs_published` — kan kopplas som indikator i Mål & VP (§ 42).
   påminnelsemejl inför gallring (studenten förlänger själv på sin sida),
   chatt-verktyg för agenten, uppföljningsregler (§ 40-adapter) och
   utvärderingsenkät efter avslutat uppdrag — nästa steg om behovet visar sig.
+
+---
+
+## 55. E-postkampanjer — en motor för inbjudan, påminnelse och uppföljning (2026-10)
+
+### 55.1 Varför och vad
+
+Marknadsteamet körde Mailchimp (nyhetsbrev) och Confetti (inbjudningar) vid
+sidan av plattformen; största hindret för att byta var att mejlen skulle
+hamna i Primär-inkorgen, inte i Övrigt/skräppost. Kampanjmotorn ersätter
+båda och är byggd runt leveransbarhet: verifierad avsändardomän, låga studs-
+och klagomålsnivåer via en automatisk spärrlista, en-klicksavregistrering,
+textburna mallar utan spårningspixel och klickspårning på egen domän.
+
+**Röd tråd — EN väg genom Marknadsverktyget, inga parallella utskick:**
+
+| Steg | Var | Vad |
+|---|---|---|
+| 1. Event | Events | Skapa event med svarsinställningar (gästfrågor, maxantal, väntelista, påminnelser) och vald utvärderingsmall |
+| 2. Bjud in | Eventet / Inbjudningar → "Skapa inbjudan" | `InviteLauncher` skapar en kampanj från mallen Eventinbjudan, förkopplad till eventet; mottagare väljs i editorn |
+| 3. Svar | Eventet | Anmälda, väntelista, incheckning med QR, gästfrågor (`/e/svar`, § 55.11) |
+| 4. Påminn | Automatiskt (tick) eller knapp | Kampanj från mallen Påminnelse (inte svarat) eller Vi ses snart (anmälda, med biljett) till eventets deltagarlista |
+| 5. Följ upp | Automatiskt eller knapp | Kampanj Tack och utvärdering till närvarande med `{{utvärdering.länk}}` |
+| 6. Mål | Mål och VP | § 53.4, oförändrat |
+
+**Konsolideringen (2026-10-19):** de tidigare fyra mejlrenderarna
+(inbjudning, enkätutskick, nyhetsbrevsbekräftelse, kampanj) är nu EN
+(`renderCampaignEmail`). `sendEventInvites`, `sendSurveyInvites`,
+`inviteToEvent`, `sendEventInvitations`, `InvitePanel` och `InviteControls`
+är borttagna. Inbjudningar, påminnelser (manuella och automatiska) och
+utvärderingsutskick ÄR kampanjer och syns med statistik under
+Marknadsverktyg → Kampanjer. Lägg aldrig till ett nytt mejlutskick vid
+sidan av — skapa en mall (`EMAIL_TEMPLATES`) och gå via kampanjmotorn.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/email-campaigns.ts` (+ `.test.ts`) | REN domänlogik: kategorier, statusar, rättslig grund, block (`EmailBlock`, inkl. `event_details`/`rsvp`/`ticket`), design, mottagarurval (`EmailAudience` med `keys` + `event_group`), mallstrukturer (`EMAIL_TEMPLATES`), platshållare (`renderMergeFields`), leveranskontroll (`checkEmailDeliverability`), statistik (`emailCampaignRates`, `deliverabilityHealth`), spärrorsaker, webhook-typer |
+| `packages/shared/src/email-render.ts` | `renderCampaignEmail` — Outlook-säker tabell-HTML + ren text, kort-/enkel-layout, spårade innehållslänkar (aldrig avregistrering/personliga länkar) |
+| `packages/shared/src/email-suppression-import.ts` | Mailchimps unsubscribed/cleaned-export → spärrar |
+| `packages/shared/src/event-rsvp.ts` | Svarssidans inställningar, platsräkning, `.ics`, påminnelsefönster, incheckningssökväg (§ 55.11) |
+| `backend/pocketbase-schema/migrations/1700000203_email_campaigns.js` | `email_campaigns`, `email_campaign_recipients`, `email_suppressions`, `email_events`; `contacts`/`event_signups`/`incubator_events` utökade |
+| `apps/web/src/lib/email/campaign-dispatch.ts` | Utskicket: mottagare (`resolveCampaignCandidates`), spärrlista, inbjudna rader + svarstoken, rendering per mottagare, Resend i batchar, räknare; `sendCampaignTest` |
+| `apps/web/src/lib/email/{suppression,webhook-handler,webhook-signature,signed-tokens,send-batch,campaign-data,deliverability,preferences.server,subscribe.server}.ts` | Spärrlista, Resend-webhook (Svix-signatur), signerade länkar, batchning, läsvägar, driftstatus, preferenscenter, dubbel opt-in |
+| `apps/web/src/lib/core/write/email-campaigns.ts` | Skrivlagret: skapa/ändra/schemalägga/skicka/test/mall/radera, spärrar, samtycke; `createSystemCampaign` för servern |
+| `apps/web/src/lib/actions/email-campaigns.ts` | Server actions (RBAC admin/incubator_lead/coach) |
+| `apps/web/src/app/inflode/kampanjer/**` | Lista, mallväljare, editor med live-förhandsgranskning + leveranskontroll, statistik |
+| `apps/web/src/components/invitations/InviteLauncher.tsx` | Startknapparna på eventet och i Inbjudningar |
+| `apps/web/src/lib/events/reminders.ts` + `app/api/internal/event-reminders` + `hooks/event_reminder_tick.pb.js` | Automatiska påminnelser (timvis tick) → systemkampanjer |
+| `apps/web/src/lib/surveys/dispatch.ts` | Utvärderingsutskick → systemkampanj Tack och utvärdering |
+| `apps/web/src/app/api/public/e/{webhook/resend,klick,kalender,preferenser,prenumerera,bekrafta}/route.ts` + `app/e/{installningar,prenumerera,bekrafta}` | Publika ytor (ingen session): webhook, klickspårning, kalenderfil, preferenscenter, nyhetsbrev med dubbel opt-in |
+| `apps/web/src/app/installningar/e-post/**` | Inställningar → E-post & leverans |
+| `apps/web/src/app/kontakter/import/sparrlista/**` | Import av spärrlista |
+
+### 55.2 Datamodell (migration 1700000203)
+
+- **`email_campaigns`**: `tenant`, `title`, `subject`, `preheader`, `category`
+  (`events`/`newsletter`/`program`/`other`), `consent_mode`
+  (`legitimate_interest`/`consent_only`), `status` (`draft` → `scheduled` →
+  `sending` → `sent` | `cancelled`), `template_key`, `blocks` (json), `design`
+  (json), `audience` (json: `keys` + `event_group`), `sender_name`,
+  `sender_user` (svarsadress = kollegans e-post), `event`, `survey`
+  (kopplad utvärdering, fyller `{{utvärdering.länk}}`), `send_at`, `sent_at`,
+  `send_base_url`, räknare (`recipients/sent/failed/suppressed/bounced/
+  complained/unsubscribed/clicked_count`), `link_clicks` (json: urls +
+  counts), `is_template`, `last_test_at`, `last_error`, `created_by` (tomt
+  = systemkampanj). RLS: list/view staff/observer; create pinnar tenant +
+  skapare; update/delete Movexum-personal.
+- **`email_campaign_recipients`**: en rad per mottagare — `contact`/`user`/
+  `startup`/`signup`-relationer, `name`/`organization` (visning),
+  **`email_hash`** (SHA-256 — adressen själv lagras aldrig), `status`
+  (`pending`/`sent`/`failed`/`bounced`/`complained`/`unsubscribed`/
+  `suppressed`), `provider_message_id`, `click_count`, `first_clicked_at`,
+  `fail_reason`. Server-only (createRule null).
+- **`email_suppressions`**: spärrlistan — `email_hash` (unik per tenant),
+  `email_masked` (`a***@exempel.se`), `reason` (`bounce`/`complaint`/
+  `unsubscribe`/`import`/`manual`), `source`, `note`. Hårda studsar och
+  klagomål spärras automatiskt av webhooken; avregistrering av en adress
+  utan kontakt; import från Mailchimp; manuellt av personalen. **Enforce:as
+  vid varje utskick** (`loadSuppressedHashes`) oavsett mall.
+- **`email_events`**: PII-fri logg av leverantörens händelser (levererat/
+  studs/klagomål/klick/avregistrering) per kampanj och mottagarrad; gallras
+  efter 730 dagar (`MOVEXUM_RETENTION_EMAIL_EVENTS_DAYS`).
+- **`contacts`** += `email_status` (`bounced`/`complained`/`unsubscribed`),
+  `email_status_at`, `email_opt_out` (json: kategorier eller `all`),
+  `newsletter_consent`/`_at`/`_source` (`double_opt_in`/`preference_center`/
+  `staff`). Visas på kontaktkortet (panelen Utskick & samtycke) och som chip
+  i listan.
+- **`event_signups`** += steg `waitlist`, `plus_ones`, `diet`,
+  `custom_answer`, `checked_in_at`, `campaign`. **`incubator_events`** +=
+  `rsvp_settings` (json), `reminder_unanswered_sent_at`,
+  `reminder_confirmed_sent_at`.
+- Speglat i `setup-via-api.mjs`, asserterat i `verify-baseline.mjs`
+  (must-exist, `MUST_BE_STAFF_OR_OBSERVER`, `REQUIRED_APP_FIELDS`,
+  `REQUIRED_SELECT_VALUES`); `email_campaign_recipients`, `email_suppressions`,
+  `email_events` och `event_signups` är denylistade för AI (`redaction.ts`).
+
+### 55.3 Mottagare, mallar och innehåll
+
+- **Urval (`EmailAudience`)**: egna val ur samma listor som kontaktboken
+  (`c:`/`u:`/`s:`-nycklar — kontakter, användare, bolag) OCH/ELLER
+  **eventets deltagarlista som grupp** (`event_group`: `unsent` = inbjudna
+  som inte fått mejlet, `unanswered` = inbjudna, `confirmed` = tackat ja
+  eller längre, `attended` = närvarande eller längre; `eventGroupMatches`,
+  ren + enhetstestad). Gruppen löses vid utskick ur `event_signups` — rader
+  med kontakt/användare berikas ur sina poster (status, samtycke,
+  avregistrering gäller), en rad med bara e-post (manuellt tillagd gäst)
+  blir mottagare ändå (`e:<signup>`). Dubbletter (samma person via två
+  vägar, samma adress) skickas en gång.
+- **Rättslig grund per utskick**: `legitimate_interest` (kontaktnätet nås på
+  berättigat intresse med avregistrering i varje mejl; bolag och personal som
+  del av programmet) eller `consent_only` (bara kontakter med
+  `newsletter_consent` — användare/bolag utesluts). Nyhetsbrev får
+  `consent_only` som standard. En kontakt som stängt av kategorin
+  (`email_opt_out`) eller har `email_status` får aldrig mejlet; orsaken syns
+  i "Kontrollera mottagarna" och på mottagarraden.
+- **Mallstrukturer (`EMAIL_TEMPLATES`)**: Eventinbjudan (eventuppgifter +
+  svarsknappar), Påminnelse (inte svarat), Vi ses snart (anmälda: biljett
+  med QR + kalender), Save the date, Tack och utvärdering (`{{utvärdering.
+  länk}}`), Nyhetsbrev, Personligt mejl (ren text — det som oftast hamnar i
+  Primär). Egna kampanjer kan sparas som mallar (`is_template`).
+- **Block**: rubrik, text (fet/kursiv/länk), knapp, bild, linje, luft,
+  eventuppgifter (tid/plats/kalender), svarsknappar (personliga), biljett
+  (personlig), signatur. `rsvp`/`ticket` kräver en rad i deltagarlistan per
+  mottagare: svarsknappar SKAPAR inbjudna rader för nya mottagare (med
+  roterad svarstoken), biljetten länkar BARA befintliga rader.
+- **Platshållare**: `{{förnamn|du}}`, `{{namn}}`, `{{organisation}}`,
+  `{{event.namn}}`, `{{event.tid}}`, `{{event.plats}}`, `{{utvärdering.länk}}`,
+  `{{avsändare}}` — i ämnesrad och text; okända tas bort, en tom länk tar
+  bort knappen (aldrig en trasig knapp).
+- **Design**: accent ur brand-tokens (hex krävs i mejl), layout `card`
+  (kort med accentbalk och wordmark) eller `plain` (personligt mejl).
+  Systemtypsnitt som reserv — webbfonter laddas inte i mejl.
+
+### 55.4 Utskick, schemaläggning och systemkampanjer
+
+`dispatchCampaign` (under `withDistributedLock`, superuser): status
+`sending` → mottagare → spärrlista → mottagarrader (`pending`/`suppressed`
+med orsak) → ev. inbjudna rader + svarstoken → rendering per mottagare
+(avregistrering `/e/avregistrera?k=…&alla=1`, en-klick
+`/api/public/e/unsubscribe`, preferenscenter `/e/installningar`, svar
+`/e/svar?t=…&svar=yes|no`, biljett `/e/svar?t=…&klart=yes`, kalender
+`/api/public/e/kalender?e=…`, spårade länkar `/api/public/e/klick?c=…`) →
+Resend i batchar (`send-batch.ts`, fallback till enskilda vid 429) → rader +
+räknare + `link_clicks` → status `sent` (eller tillbaka till `draft` med
+`last_error` när inget gick fram) → `agent_actions`. Avsändare =
+`"<sender_name> <inviteAddress>"`, svarsadress = kollegans e-post annars
+`RESEND_REPLY_TO`. Schemalagda kampanjer tas av
+`hooks/campaign_dispatch_tick.pb.js` (varje minut, provisoriskt lås) →
+`/api/internal/send-campaign` (`MOVEXUM_SCHEDULE_SECRET`, § 12.3).
+
+**Systemkampanjer** (`createSystemCampaign`, `created_by` tomt): påminnelse-
+ticken (`event_reminder_tick`, timvis → `/api/internal/event-reminders` →
+`runEventReminders`) skapar och skickar Påminnelse/Vi ses snart när
+eventets fönster öppnar (`reminderDue`, en gång per sort, stämplas FÖRST och
+återställs vid fel); utvärderingsutskicket (`dispatchSurveyInvites`,
+"Skicka nu" eller enkätens schemaläggning) skapar Tack och utvärdering till
+närvarande. Båda syns i Kampanjer märkta "automatiskt". **Testmejl** går
+till den inloggades adress med exempeldata och `[TEST]` i ämnesraden.
+
+### 55.5 Leveransbarhet — Primär-inkorgen
+
+- **Domän**: avsändardomänen verifierad i Resend (SPF + DKIM) och en
+  DMARC-post; helst en underdomän (t.ex. `event.movexum.se`). Inställningar →
+  E-post & leverans läser Resends domänstatus/region (bör vara EU) och slår
+  upp DMARC.
+- **Rykte**: Gmails bulk-tröskel är klagomål < 0,3 % (målet < 0,1 %) och
+  studsar < 2 % — `deliverabilityHealth` färgar listan, statistiken och
+  inställningssidan (gul/orange, ingen röd § 2.3). Studsar och klagomål
+  spärras automatiskt (webhook) så listan självrensas; Mailchimps
+  unsubscribed/cleaned importeras FÖRE första utskicket.
+- **Innehåll**: `checkEmailDeliverability` körs live i editorn på exakt den
+  rendering som skickas — versaler/utropstecken/valuta i ämnesraden,
+  skräppostord, bild-tung text, länkförkortare, saknad svarsadress, saknad
+  avsändare, nyhetsbrev utan samtyckesläge. Ingen öppningspixel (mäts inte);
+  klick spåras på egen domän med signerad token och mål-URL ur kampanjens
+  egna länklista (aldrig ur URL-parametern). `List-Unsubscribe` +
+  en-klick (RFC 8058) för kontakter.
+- **Webhook**: `/api/public/e/webhook/resend` verifierar Svix-signaturen
+  (`RESEND_WEBHOOK_SECRET`, tidsfönster 5 min) och hanterar
+  `email.bounced` (hård studs ⇒ spärr), `email.complained` (⇒ spärr),
+  `email.delivered`, `email.delivery_delayed`; matchar mottagarraden på
+  `provider_message_id`, annars på adresshash (30 dagar).
+
+### 55.6 Preferenscenter, nyhetsbrev och samtycke
+
+- **Preferenscenter** `/e/installningar?k=<kontaktnyckel>` (samma signerade
+  HMAC-nyckel som avregistreringen, `lib/unsubscribe-key.ts`): kategorier
+  på/av, "alla av", nyhetsbrevssamtycke (källa `preference_center`).
+  Kampanjernas avregistreringslänk stänger av ALLT (`alla=1`) — den som
+  klickar avregistrera ska inte få nästa kategori.
+- **Nyhetsbrev med dubbel opt-in** `/e/prenumerera` → signerad token (48 h,
+  ingen rad skapas) → `/e/bekrafta` skapar/uppdaterar kontakten med
+  `gdpr_consent` + `newsletter_consent` (källa `double_opt_in`). Spärrad
+  adress får inget mejl men formuläret svarar likadant. Bekräftelsemejlet
+  renderas med samma renderare (enkel layout).
+- **Kontaktkortet**: e-poststatus, avstängda kategorier, avregistrering från
+  inbjudningar, nyhetsbrevssamtycke med källa; staff kan registrera samtycke
+  som personen gett på annat sätt (källa `staff`).
+
+### 55.7 Regelefterlevnad
+
+- **GDPR § 5**: adresser lagras aldrig på kampanj/mottagarrad/spärr (bara
+  SHA-256 + maskerad visning), loggar bär antal/status; fritext (ämne,
+  text, notering) personnummer-saneras; audit (`agent_actions`) är PII-fri
+  och mappad i `feed/agent-log.ts`. Kost/allergi i svaren (§ 55.11) kan vara
+  art. 9 — frivilligt, visas bara i eventets deltagarlista, aldrig AI.
+- **GDPR art. 6/7/21**: kontaktnätet på berättigat intresse med
+  avregistrering i varje mejl; nyhetsbrev på samtycke (dubbel opt-in eller
+  dokumenterad källa); bolag/personal som del av programmet. Rättslig grund
+  väljs per kampanj och syns i mejlets fottext (`emailReasonText`).
+- **GDPR art. 17**: cascade tenant → kampanj → mottagarrader; spärrar är
+  hashar (ingen identifierare att radera; tas bort av ledning i
+  inställningarna).
+- **§ 21 / ISO 27001**: staff/observer-RLS, server-only createRules för
+  rader/händelser, superuser bara i utskick/webhook (ingen session) med
+  tenant-verifiering på event, enkät och kontakter. Webhook-signatur
+  verifieras i konstant tid; interna endpoints med delat secret.
+- **EU AI Act**: n/a — deterministisk rendering och utskick, ingen
+  AI-inferens. **Leverantör**: Resend (US-ägt, EU-region) — samma
+  Schrems II-bedömning som Mailchimp hade; byte till Brevo/Scaleway kräver
+  bara `send-batch.ts` + webhook-parsern.
+- **Env (Coolify, web-appen)**: `RESEND_API_KEY`, `RESEND_FROM_EMAIL`,
+  `RESEND_INVITE_FROM_EMAIL`, `RESEND_REPLY_TO`, **`RESEND_WEBHOOK_SECRET`**
+  (webhook i Resend → `https://<app>/api/public/e/webhook/resend`),
+  `MOVEXUM_UNSUBSCRIBE_SECRET` (annars `MOVEXUM_INTEGRATION_KEY`), `APP_URL`,
+  `MOVEXUM_SCHEDULE_SECRET` (tickarna). `/api/health` → `email` visar
+  `webhook_secret_set`, `link_secret_set`, `app_url_set`.
+
+### 55.8 Hook-incident 2026-10-19 (pre-existing)
+
+`schedule_tick.pb.js` och `survey_dispatch_tick.pb.js` deklarerade båda
+`const TICK_INTERVAL` på toppnivå. PB:s JSVM evaluerar alla hook-filer i
+SAMMA scope ⇒ "Identifier 'TICK_INTERVAL' has already been declared" och
+den andra filen laddades aldrig — enkätens schemalagda utskick har inte
+gått. Konstanten är borttagen i båda (cron-strängen inline). **Deklarera
+aldrig något på toppnivå i en hook-fil** — allt inne i hanteraren (§ 21.8).
+
+### 55.11 Svarssidan — gästfrågor, maxantal, biljett, påminnelser, incheckning
+
+Det viktigaste från Confetti, på eventet (en plats):
+
+- **Inställningar per event** (`incubator_events.rsvp_settings`, redigeras i
+  eventformuläret): medföljande (max N), kost/allergi, egen fråga, maxantal
+  inkl. medföljande, väntelista, påminnelse N dagar före till dem som inte
+  svarat resp. till anmälda. Ren logik i `event-rsvp.ts`.
+- **Svarssidan `/e/svar?t=<token>`**: visar platsläge ("3 platser kvar"/
+  fullt/väntelista), gästfrågor i formuläret, och efter ja **biljetten** —
+  QR-kod (lokalt renderad, pekar på incheckningssidan), svaren, "Lägg i
+  kalendern" (`.ics` via `/api/public/e/kalender?t=…`), "Ändra mitt svar".
+  Fullt utan väntelista ⇒ `fel=fullt`; med väntelista ⇒ steget `waitlist`
+  (tar ingen plats, räknas inte som anmäld). En som redan har plats behåller
+  den när svaret uppdateras (`eventHasRoom` räknar bort det egna).
+- **Incheckning** `/inflode/events/<id>/incheckning?t=<token>` (inloggad
+  staff): skanna gästens QR → raden blir `attended` + `checked_in_at`
+  (idempotent, "redan incheckad"); gäst utan svar checkas in ändå; senare
+  steg nedgraderas aldrig. Eventsidan visar platser/väntelista/incheckade,
+  gästfrågor och påminnelsestatus.
+- **Påminnelser**: § 55.4 (systemkampanjer).

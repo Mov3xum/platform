@@ -9,8 +9,7 @@ import {
   CONTACT_CATEGORY_LABELS,
   contactDisplayName,
   contactSubtitle,
-  type ContactCategory
-} from '@platform/shared';
+  type ContactCategory, type ContactEmailStatus, CONTACT_EMAIL_STATUS_LABELS } from '@platform/shared';
 import { Icon } from '@/components/proto';
 import { changeContactGroupMembersAction } from '@/lib/actions/contact-groups';
 import { CategoryChip, Initials, Notice, OwnerChip, btnGhost, btnPrimary, inputClass } from './ui';
@@ -32,6 +31,8 @@ export interface BrowserContact {
   pendingRequests: number;
   hasEmail: boolean;
   hasPhone: boolean;
+  /** E-poststatus för utskick (§ 55): studsar/klagomål/avregistrerad. */
+  emailStatus: ContactEmailStatus | null;
 }
 
 export interface BrowserOwner {
@@ -296,6 +297,14 @@ export function ContactsBrowser({
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="font-medium text-foreground">{name}</span>
                             <CategoryChip category={c.category} />
+                            {c.emailStatus && (
+                              <span
+                                className="inline-flex rounded-full bg-movexum-pastell-orange px-2 py-0.5 text-[11px] font-semibold text-movexum-morkorange"
+                                title={CONTACT_EMAIL_STATUS_LABELS[c.emailStatus]}
+                              >
+                                {c.emailStatus === 'bounced' ? 'Studsar' : c.emailStatus === 'complained' ? 'Skräppost' : 'Avregistrerad'}
+                              </span>
+                            )}
                             {c.groups.slice(0, 2).map((id) =>
                               groupName.has(id) ? (
                                 <span

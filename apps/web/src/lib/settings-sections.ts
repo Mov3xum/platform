@@ -98,6 +98,17 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     roles: STAFF_ADMIN
   },
   {
+    id: 'e-post',
+    slug: 'e-post',
+    href: '/installningar/e-post',
+    title: 'E-post & leverans',
+    description:
+      'Leveransbarhet för utskick: avsändardomän (SPF/DKIM/DMARC), webhook, spärrlista (studsar, klagomål, avregistreringar) och Mailchimp-import.',
+    icon: 'send',
+    group: 'access',
+    roles: STAFF_ADMIN
+  },
+  {
     id: 'utseende',
     slug: 'utseende',
     href: '/installningar/utseende',

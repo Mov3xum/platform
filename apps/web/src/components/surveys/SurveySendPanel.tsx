@@ -61,8 +61,9 @@ export function SurveySendPanel({
       <div style={{ padding: 16, display: 'grid', gap: 12 }}>
         <div className="mx-t-13">
           <strong className="mx-ink-soft">{attendedCount}</strong> närvarande deltagare (av{' '}
-          {registeredCount} anmälda) har en e-postadress. Varje person får ett eget mejl med
-          länken till enkäten — adresserna lagras inte på enkäten.
+          {registeredCount} anmälda) har en e-postadress. Utskicket går som kampanjen &ldquo;Tack och utvärdering&rdquo;
+          (Marknadsverktyg → Kampanjer): ett eget mejl per person med länken till enkäten, spärrlista och
+          leveransstatistik — adresserna lagras inte på enkäten.
         </div>
         {attendedCount === 0 && registeredCount > 0 && (
           <div className="mx-t-12 mx-muted">

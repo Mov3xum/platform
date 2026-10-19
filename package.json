@@ -16,7 +16,7 @@
     "check:filters": "node backend/pocketbase-schema/scripts/check-pb-filters.mjs",
     "check:use-server": "node scripts/check-use-server-exports.mjs",
     "check:secrets": "node scripts/check-secrets.mjs",
-    "test": "node scripts/check-secrets.mjs && node backend/pocketbase-schema/scripts/check-pb-filters.mjs && node scripts/check-use-server-exports.mjs && node --import ./scripts/register-test-hooks.mjs --experimental-strip-types --test packages/shared/src/*.test.ts apps/web/src/lib/*.test.ts apps/web/src/lib/users/*.test.ts apps/web/src/lib/ai/*.test.ts apps/web/src/lib/import/*.test.ts apps/web/src/lib/compass/*.test.ts apps/web/src/lib/overview/*.test.ts apps/web/src/lib/integrations/*.test.ts apps/web/src/lib/integrations/company-registry/*.test.ts apps/web/src/lib/excellence/*.test.ts apps/web/src/lib/integrations/providers/*/*.test.ts .github/scripts/*.test.mjs backend/pocketbase-schema/scripts/*.test.mjs"
+    "test": "node scripts/check-secrets.mjs && node backend/pocketbase-schema/scripts/check-pb-filters.mjs && node scripts/check-use-server-exports.mjs && node --import ./scripts/register-test-hooks.mjs --experimental-strip-types --test packages/shared/src/*.test.ts apps/web/src/lib/*.test.ts apps/web/src/lib/users/*.test.ts apps/web/src/lib/ai/*.test.ts apps/web/src/lib/import/*.test.ts apps/web/src/lib/compass/*.test.ts apps/web/src/lib/overview/*.test.ts apps/web/src/lib/integrations/*.test.ts apps/web/src/lib/integrations/company-registry/*.test.ts apps/web/src/lib/excellence/*.test.ts apps/web/src/lib/email/*.test.ts apps/web/src/lib/integrations/providers/*/*.test.ts .github/scripts/*.test.mjs backend/pocketbase-schema/scripts/*.test.mjs"
   },
   "packageManager": "yarn@1.22.22",
   "resolutions": {

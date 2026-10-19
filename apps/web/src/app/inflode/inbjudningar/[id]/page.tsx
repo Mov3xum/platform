@@ -20,13 +20,14 @@ import {
   starterTemplateRef,
   type Role
 } from '@platform/shared';
-import { InvitePanel } from '@/components/invitations/InvitePanel';
+import { InviteLauncher } from '@/components/invitations/InviteLauncher';
+import { listCampaigns } from '@/lib/email/campaign-data';
+import { EMAIL_CAMPAIGN_STATUS_LABELS } from '@platform/shared';
 import { RemoveInviteButton } from '@/components/invitations/RemoveInviteButton';
 import { FollowUpSurveys } from '@/components/surveys/FollowUpSurveys';
 import { createEventEvaluationAction } from '@/lib/actions/events';
 import { listSurveyTemplates } from '@/lib/surveys/store';
 import { buildInflodeTabs } from '../../_tabs';
-import { SendButtons } from './InviteControls';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,11 +46,14 @@ type Invitee = {
 };
 
 /**
- * Inbjudningar för ett event (CLAUDE.md § 53.5): kryssa i kontakter per
- * kategori eller hela bolag, bjud in (mejlet går direkt) och följ svaren.
- * Inbjudna ligger i eventets deltagarlista — samma rader som närvaron och
- * utvärderingen bygger på. Här väljs också mallen för utvärderingen efter
- * eventet. Personuppgifter visas bara för staff (samma krets som
+ * Inbjudningar för ett event (CLAUDE.md § 53.5 / § 55): svarsöversikten
+ * (inbjudna, öppnat, kommer, avböjt, inte svarat), eventets utskick och
+ * startknapparna för nästa steg — inbjudan, påminnelse, "vi ses snart",
+ * tack och utvärdering. Varje knapp skapar en KAMPANJ med eventets
+ * deltagarlista som mottagargrupp; mottagare väljs och mejlet skickas i
+ * kampanjeditorn. Inbjudna ligger i eventets deltagarlista — samma rader
+ * som närvaron och utvärderingen bygger på. Här väljs också mallen för
+ * utvärderingen efter eventet. Personuppgifter visas bara för staff (samma krets som
  * kontaktboken); e-postadresser visas aldrig här.
  */
 export default async function EventInvitationsPage({
@@ -95,6 +99,10 @@ export default async function EventInvitationsPage({
     invitees = [];
   }
   const { unsent, unanswered, coming, declined, opened } = tallyInvites(invitees);
+  const attendedCount = invitees.filter((i) => ['attended', 'meeting', 'application', 'admitted'].includes(i.stage)).length;
+  // Utskicken för eventet (§ 55): inbjudningar, påminnelser, tack — alla är kampanjer.
+  const campaignsRes = await listCampaigns(pb, user.tenant);
+  const eventCampaigns = campaignsRes.campaigns.filter((c) => c.event === event.id);
 
   // Utvärderingen efter eventet (§ 53.3): egen mall för typen, annars
   // Movexums standardmall — samma val som när eventet skapas.
@@ -137,26 +145,45 @@ export default async function EventInvitationsPage({
             </Chip>
           </span>
         </div>
-        {open ? (
-          <div style={{ marginTop: 12 }}>
-            <SendButtons eventId={event.id} unsent={unsent} unanswered={unanswered} />
-          </div>
-        ) : (
-          <div className="mx-t-12 mx-muted" style={{ marginTop: 12 }}>
-            Eventet har ägt rum — inbjudningar kan inte längre skickas. Markera närvaron på eventet.
-          </div>
-        )}
+        <div style={{ marginTop: 12 }}>
+          <InviteLauncher eventId={event.id} open={open} counts={{ unsent, unanswered, confirmed: coming, attended: attendedCount }} />
+          {!open && attendedCount === 0 && (
+            <div className="mx-t-12 mx-muted" style={{ marginTop: 8 }}>
+              Eventet har ägt rum — markera närvaron på eventet så kan tack och utvärdering skickas till dem som deltog.
+            </div>
+          )}
+        </div>
       </Card>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 16 }}>
-        {open && (
-          <Card style={{ padding: 0, overflow: 'hidden' }}>
-            <CardHead label="Bjud in" />
-            <div style={{ padding: 16 }}>
-              <InvitePanel eventId={event.id} />
+        <Card style={{ padding: 0, overflow: 'hidden' }}>
+          <CardHead label={`Utskick · ${eventCampaigns.length}`} />
+          {eventCampaigns.length === 0 ? (
+            <div className="mx-muted mx-t-13" style={{ padding: 24, textAlign: 'center' }}>
+              Inga utskick för eventet än. &ldquo;Skapa inbjudan&rdquo; öppnar en kampanj med eventets mall.
             </div>
-          </Card>
-        )}
+          ) : (
+            eventCampaigns.map((c, idx) => (
+              <Link
+                key={c.id}
+                href={`/inflode/kampanjer/${c.id}`}
+                className="mx-flex mx-items-c mx-gap-3"
+                style={{ padding: '10px 16px', borderBottom: idx < eventCampaigns.length - 1 ? '1px solid var(--mx-line-soft)' : 'none', textDecoration: 'none', color: 'inherit' }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="mx-t-13 mx-fw-6 mx-truncate">{c.title}</div>
+                  <div className="mx-mono mx-t-xs mx-muted mx-truncate">
+                    {c.status === 'sent' && c.sent_at ? `Skickad ${formatStockholmDateTime(c.sent_at)} · ${c.sent_count} mejl` : c.status === 'scheduled' && c.send_at ? `Skickas ${formatStockholmDateTime(c.send_at)}` : 'Utkast'}
+                    {c.created_by ? '' : ' · automatiskt'}
+                  </div>
+                </div>
+                <Chip variant={c.status === 'sent' ? 'active' : 'draft'} mono>
+                  {EMAIL_CAMPAIGN_STATUS_LABELS[c.status]}
+                </Chip>
+              </Link>
+            ))
+          )}
+        </Card>
 
         <Card style={{ padding: 0, overflow: 'hidden' }}>
           <CardHead label={`Inbjudna · ${invitees.length}`} />

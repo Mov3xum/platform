@@ -60,7 +60,8 @@ export default async function KontakterPage({ searchParams }: { searchParams: Pr
     linkedStartups: linkCount.get(c.id) ?? 0,
     pendingRequests: pendingCount.get(c.id) ?? 0,
     hasEmail: Boolean(c.email),
-    hasPhone: Boolean(c.phone)
+    hasPhone: Boolean(c.phone),
+    emailStatus: c.email_status
   }));
 
   return (

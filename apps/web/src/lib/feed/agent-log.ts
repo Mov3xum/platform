@@ -772,6 +772,34 @@ function mapRow(
         icon: 'people'
       };
     }
+    case 'email_campaigns': {
+      const title = str(after.title) || 'en kampanj';
+      const href = `/inflode/kampanjer/${row.record_id ?? ''}`;
+      if (action === 'create') return { title: `Ny e-postkampanj: ${title}`, href, icon: 'send' };
+      if (after.deleted === true) return { title: `E-postkampanjen ${title} togs bort`, href: '/inflode/kampanjer', icon: 'send' };
+      switch (row.field) {
+        case 'scheduled':
+          return { title: `E-postkampanjen ${title} schemalades (${typeof after.recipients === 'number' ? after.recipients : 0} mottagare)`, href, icon: 'send' };
+        case 'schedule_cancelled':
+          return { title: `Schemaläggningen för ${title} avbröts`, href, icon: 'send' };
+        case 'sent': {
+          const sent = typeof after.sent === 'number' ? after.sent : 0;
+          return { title: `E-postkampanjen ${title} skickades · ${sent} mejl`, href, icon: 'send' };
+        }
+        case 'test_sent':
+          return { title: `Testmejl för ${title} skickades`, href, icon: 'send' };
+        default:
+          return { title: `E-postkampanjen ${title} ${changedVerb}`, href, icon: 'send' };
+      }
+    }
+    case 'email_suppressions': {
+      if (after.deleted === true) return { title: 'En spärr i e-postlistan togs bort', href: '/installningar/e-post', icon: 'shield' };
+      return { title: `En adress spärrades för utskick (${str(after.reason) || 'manuellt'})`, href: '/installningar/e-post', icon: 'shield' };
+    }
+    case 'email_suppression_import': {
+      const added = typeof after.added === 'number' ? after.added : 0;
+      return { title: `Spärrlista importerad: ${added} nya spärrar`, href: '/installningar/e-post', icon: 'shield' };
+    }
     case 'contact_import': {
       const created = typeof after.created === 'number' ? after.created : 0;
       const updated = typeof after.updated === 'number' ? after.updated : 0;

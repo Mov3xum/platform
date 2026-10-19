@@ -22,6 +22,9 @@ import { listActivityIndicatorOptions } from '@/lib/goals/activities';
 import { ActivityGoalPanel } from '@/components/activities/ActivityGoalPanel';
 import {
   rsvpOpen,
+  eventSeatsTaken,
+  normalizeEventRsvpSettings,
+  rsvpAsksAnything,
   EVENT_PHASE_LABEL,
   EVENT_SIGNUP_STAGE_LABEL,
   annualWheelRangeLabel,
@@ -120,10 +123,24 @@ export default async function EventDetailPage({
   }));
   const maxCount = Math.max(1, ...funnelData.map((f) => f.count));
 
+  // Svarssidans inställningar (§ 55.11): maxantal, väntelista, gästfrågor, påminnelser.
+  const rsvp = normalizeEventRsvpSettings(event.rsvp_settings);
+  const seatsTaken = eventSeatsTaken(signups);
+  const waitlisted = signups.filter((s) => s.stage === 'waitlist').length;
+  const checkedIn = signups.filter((s) => Boolean(s.checked_in_at)).length;
+
   const participantRows: ParticipantRow[] = signups.map((s) => ({
     id: s.id,
     name: s.name,
-    detail: s.organization || s.email || '',
+    detail: [
+      s.organization || s.email || '',
+      s.plus_ones ? `+${s.plus_ones}` : '',
+      rsvp.ask_diet && s.diet ? `kost: ${s.diet}` : '',
+      rsvp.custom_question && s.custom_answer ? s.custom_answer : '',
+      s.checked_in_at ? 'incheckad' : ''
+    ]
+      .filter(Boolean)
+      .join(' · '),
     stage: isEventSignupStage(s.stage) ? s.stage : 'signup',
     startup: s.expand?.startup ? { id: s.expand.startup.id, name: s.expand.startup.name } : undefined
   }));
@@ -245,6 +262,71 @@ export default async function EventDetailPage({
             label="Antagna"
             value={<span className="mx-disp mx-fw-6 mx-t-15">{event.admitted_count || 0}</span>}
           />
+          {rsvp.capacity > 0 && (
+            <Meta
+              label="Platser"
+              value={
+                <span className="mx-disp mx-fw-6 mx-t-15" title="Tagna platser inkl. medföljande av maxantalet">
+                  {seatsTaken}/{rsvp.capacity}
+                  {waitlisted > 0 && <span className="mx-t-13 mx-muted"> · {waitlisted} på väntelista</span>}
+                </span>
+              }
+            />
+          )}
+          {checkedIn > 0 && (
+            <Meta label="Incheckade" value={<span className="mx-disp mx-fw-6 mx-t-15">{checkedIn}</span>} />
+          )}
+        </div>
+      </Card>
+
+      {/* ── Svarssida, påminnelser & incheckning (§ 55.11) ── */}
+      <Card style={{ padding: 16, marginTop: 12 }}>
+        <div className="mx-flex mx-items-c" style={{ flexWrap: 'wrap', gap: 24 }}>
+          <Meta
+            label="Gästfrågor"
+            value={
+              <span className="mx-t-13">
+                {rsvpAsksAnything(rsvp)
+                  ? [
+                      rsvp.plus_ones_max > 0 ? `medföljande (max ${rsvp.plus_ones_max})` : '',
+                      rsvp.ask_diet ? 'kost/allergi' : '',
+                      rsvp.custom_question ? `”${rsvp.custom_question}”` : ''
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')
+                  : 'inga'}
+              </span>
+            }
+          />
+          <Meta
+            label="Maxantal"
+            value={<span className="mx-t-13">{rsvp.capacity > 0 ? `${rsvp.capacity}${rsvp.waitlist ? ' · väntelista' : ''}` : 'obegränsat'}</span>}
+          />
+          <Meta
+            label="Påminnelser"
+            value={
+              <span className="mx-t-13">
+                {rsvp.remind_unanswered_days > 0
+                  ? `ej svarat: ${rsvp.remind_unanswered_days} d före${event.reminder_unanswered_sent_at ? ` (skickad ${formatDateTime(event.reminder_unanswered_sent_at)})` : ''}`
+                  : ''}
+                {rsvp.remind_unanswered_days > 0 && rsvp.remind_confirmed_days > 0 ? ' · ' : ''}
+                {rsvp.remind_confirmed_days > 0
+                  ? `anmälda: ${rsvp.remind_confirmed_days} d före${event.reminder_confirmed_sent_at ? ` (skickad ${formatDateTime(event.reminder_confirmed_sent_at)})` : ''}`
+                  : ''}
+                {rsvp.remind_unanswered_days === 0 && rsvp.remind_confirmed_days === 0 ? 'av' : ''}
+              </span>
+            }
+          />
+          {canEdit && (
+            <Meta
+              label="Vid dörren"
+              value={
+                <Link href={`/inflode/events/${event.id}/incheckning`} className="mx-btn mx-sm">
+                  Öppna incheckningen
+                </Link>
+              }
+            />
+          )}
         </div>
       </Card>
 

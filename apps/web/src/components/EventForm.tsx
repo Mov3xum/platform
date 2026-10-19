@@ -2,6 +2,7 @@
 
 import { useActionState, useState } from 'react';
 import {
+  DEFAULT_EVENT_RSVP_SETTINGS,
   EVENT_TYPES,
   EVENT_TYPE_LABEL,
   SURVEY_STARTER_TEMPLATES,
@@ -9,6 +10,7 @@ import {
   getSurveyStarterTemplate,
   starterTemplateRef,
   toStockholmDateTimeInputValue,
+  type EventRsvpSettings,
   type EventStatus,
   type EventType
 } from '@platform/shared';
@@ -40,6 +42,8 @@ export interface EventFormInitial {
   location?: string;
   description?: string;
   accent?: string;
+  /** Svarssidans inställningar (§ 55.11). */
+  rsvp_settings?: EventRsvpSettings;
 }
 
 interface Props {
@@ -178,6 +182,47 @@ export function EventForm({ action, initial, submitLabel = 'Spara', wheelItem, e
           </p>
         </div>
       ) : null}
+
+      {(() => {
+        const r = initial?.rsvp_settings ?? DEFAULT_EVENT_RSVP_SETTINGS;
+        return (
+          <fieldset className="rounded-2xl border border-default p-4">
+            <legend className="px-1 text-sm font-semibold text-foreground">Svarssidan — gästfrågor, platser och påminnelser</legend>
+            <p className="mb-3 text-xs text-foreground-subtle">
+              Det gästen ser när hen tackar ja via inbjudan. Kost/allergi är frivilligt för gästen, visas bara för er
+              och raderas med eventet — fråga bara när ni behöver det för maten.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className="block text-sm font-medium text-foreground-muted">Medföljande gäster per svar (0 = fråga inte)</label>
+                <input name="rsvp_plus_ones_max" type="number" min={0} max={10} defaultValue={r.plus_ones_max} className={`mt-1 ${inputClass}`} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground-muted">Maxantal platser (0 = obegränsat)</label>
+                <input name="rsvp_capacity" type="number" min={0} max={100000} defaultValue={r.capacity} className={`mt-1 ${inputClass}`} />
+              </div>
+              <label className="flex items-center gap-2 text-sm text-foreground-muted">
+                <input type="checkbox" name="rsvp_ask_diet" defaultChecked={r.ask_diet} /> Fråga om kost/allergi
+              </label>
+              <label className="flex items-center gap-2 text-sm text-foreground-muted">
+                <input type="checkbox" name="rsvp_waitlist" defaultChecked={r.waitlist} /> Erbjud väntelista när det är fullt
+              </label>
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-medium text-foreground-muted">Egen fråga till gästen (frivillig)</label>
+                <input name="rsvp_custom_question" maxLength={200} defaultValue={r.custom_question} placeholder="T.ex. Vad hoppas du få ut av träffen?" className={`mt-1 ${inputClass}`} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground-muted">Påminn dem som inte svarat, dagar före (0 = av)</label>
+                <input name="rsvp_remind_unanswered_days" type="number" min={0} max={30} defaultValue={r.remind_unanswered_days} className={`mt-1 ${inputClass}`} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground-muted">Påminn dem som tackat ja, dagar före (0 = av)</label>
+                <input name="rsvp_remind_confirmed_days" type="number" min={0} max={30} defaultValue={r.remind_confirmed_days} className={`mt-1 ${inputClass}`} />
+              </div>
+            </div>
+          </fieldset>
+        );
+      })()}
 
       <div>
         <label className="block text-sm font-medium text-foreground-muted">Accent</label>

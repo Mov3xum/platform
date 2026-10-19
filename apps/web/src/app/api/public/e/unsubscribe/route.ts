@@ -55,10 +55,15 @@ export async function POST(req: Request) {
     console.error('[unsubscribe] superuser unavailable');
     return oneClick ? NextResponse.json({ error: 'Försök igen senare.' }, { status: 503 }) : back('fel=spara');
   }
+  // `alla=1` (kampanjmejl, § 55.9): en-klicksavregistrering stänger av ALLA
+  // utskick — mottagaren förväntar sig att sluta få mejl. Utan flaggan
+  // (inbjudningar, § 53.5) bara eventkategorin.
+  const all = new URL(req.url).searchParams.get('alla') === '1' || form?.get('alla') === '1';
   try {
     await su.pb.collection('contacts').update(contactId, {
       invite_opt_out: true,
-      invite_opt_out_at: new Date().toISOString()
+      invite_opt_out_at: new Date().toISOString(),
+      ...(all ? { email_opt_out: ['all'] } : {})
     });
   } catch (err) {
     const status = (err as { status?: number })?.status;
@@ -68,5 +73,5 @@ export async function POST(req: Request) {
       return oneClick ? NextResponse.json({ error: 'Försök igen senare.' }, { status: 503 }) : back('fel=spara');
     }
   }
-  return oneClick ? new NextResponse('Avregistrerad.', { status: 200 }) : back('klart=1');
+  return oneClick ? new NextResponse('Avregistrerad.', { status: 200 }) : back(all ? 'klart=1&alla=1' : 'klart=1');
 }

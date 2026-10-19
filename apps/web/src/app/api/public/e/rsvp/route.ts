@@ -1,10 +1,18 @@
 import { NextResponse } from 'next/server';
 import { clientIpFromRequest } from '@/lib/client-ip';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
-import { resolveRsvp } from '@/lib/events/rsvp';
+import { loadSeatsTaken, resolveRsvp } from '@/lib/events/rsvp';
 import { recomputeEventCounters } from '@/lib/events/counters';
 import { requestOrigin } from '@/lib/request-origin';
-import { isInviteStage, isRsvpAnswer, rsvpOpen, stageForRsvp } from '@platform/shared';
+import {
+  SEAT_STAGES,
+  eventHasRoom,
+  isInviteStage,
+  isRsvpAnswer,
+  parseRsvpAnswers,
+  rsvpOpen,
+  stageForRsvp
+} from '@platform/shared';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -13,13 +21,14 @@ const WINDOW_MS = 60 * 1000;
 const MAX_PER_WINDOW = 20;
 
 /**
- * Tar emot svaret på en inbjudan (CLAUDE.md § 53.5) från den publika
- * bekräftelsesidan `/e/svar`. POST (aldrig GET) så att mejlskannrar som
- * förhandsläser länkar inte svarar åt någon. Token → hash → deltagarrad;
+ * Tar emot svaret på en inbjudan (CLAUDE.md § 53.5, § 55.11) från den
+ * publika bekräftelsesidan `/e/svar`. POST (aldrig GET) så att mejlskannrar
+ * som förhandsläser länkar inte svarar åt någon. Token → hash → deltagarrad;
  * tenant härleds ur raden. Ja/nej ändrar bara en rad som fortfarande är
- * inbjuden/anmäld/avböjd — en närvarande eller antagen nedgraderas aldrig.
- * Avregistrering sätter `contacts.invite_opt_out`. IP används bara
- * transient för rate-limiten.
+ * inbjuden/anmäld/avböjd/på väntelista — en närvarande eller antagen
+ * nedgraderas aldrig. Gästfrågorna (medföljande, kost, egen fråga) sparas
+ * bara om eventet ställer dem; är det fullt hamnar svaret på väntelistan.
+ * Avregistrering sätter `contacts.invite_opt_out`. IP används bara transient.
  */
 export async function POST(req: Request) {
   const rlKey = `event-rsvp:${clientIpFromRequest(req)}`;
@@ -44,18 +53,39 @@ export async function POST(req: Request) {
 
   const resolved = await resolveRsvp(token);
   if (!resolved) return back('fel=lank');
-  const { pb, signup, event } = resolved;
+  const { pb, signup, event, settings } = resolved;
   if (!rsvpOpen(event, new Date(), answer)) return back('fel=stangd');
+  const tokenQs = `t=${encodeURIComponent(String(token))}`;
 
   const now = new Date().toISOString();
+  const answers = parseRsvpAnswers(settings, Object.fromEntries(form.entries()));
   try {
-    if (isInviteStage(signup.stage) || signup.stage === 'signup') {
+    const changeable = isInviteStage(signup.stage) || signup.stage === 'signup';
+    if (changeable) {
+      let stage = stageForRsvp(answer);
+      let waitlisted = false;
+      if (answer === 'yes' && settings.capacity > 0) {
+        const taken = await loadSeatsTaken(pb, signup.tenant, event.id);
+        const holding = SEAT_STAGES.includes(signup.stage) ? 1 + (signup.plus_ones ?? 0) : 0;
+        if (!eventHasRoom(settings, taken, 1 + answers.plus_ones, holding)) {
+          if (!settings.waitlist) return back(`${tokenQs}&fel=fullt`);
+          stage = 'waitlist' as typeof stage;
+          waitlisted = true;
+        }
+      }
       // Ett svar kräver att länken öppnats — även utan JS (§ 53.5).
       await pb.collection('event_signups').update(signup.id, {
-        stage: stageForRsvp(answer),
+        stage,
         responded_at: now,
+        plus_ones: answer === 'yes' ? answers.plus_ones : 0,
+        diet: answer === 'yes' ? answers.diet : '',
+        custom_answer: answer === 'yes' ? answers.custom_answer : '',
         ...(signup.invite_opened_at ? {} : { invite_opened_at: now })
       });
+      if (waitlisted) {
+        await recomputeEventCounters(pb, signup.tenant, event.id);
+        return back(`${tokenQs}&klart=waitlist`);
+      }
     }
     if (answer === 'unsubscribe' && signup.contact) {
       const contact = await pb.collection('contacts').getOne<{ id: string; tenant?: string }>(signup.contact, { fields: 'id,tenant' });
@@ -65,8 +95,9 @@ export async function POST(req: Request) {
     }
   } catch (err) {
     console.error('[rsvp] update failed', (err as { status?: number })?.status);
-    return back('fel=spara');
+    return back(`${tokenQs}&fel=spara`);
   }
   await recomputeEventCounters(pb, signup.tenant, event.id);
-  return back(`klart=${answer}`);
+  // Ja-svaret behåller token i adressen så sidan kan visa biljett + kalender.
+  return back(answer === 'yes' ? `${tokenQs}&klart=yes` : `klart=${answer}`);
 }
