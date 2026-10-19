@@ -251,7 +251,7 @@ export default async function HemPage({
       end: e.ends_at ? localDay(e.ends_at) : undefined,
       allDay: false,
       source: 'event',
-      href: `/events/${e.id}`,
+      href: `/inflode/events/${e.id}`,
       meta: [stockholmTime(e.starts_at), EVENT_TYPE_LABEL[e.type ?? ''] ?? 'Event', e.location]
         .filter(Boolean)
         .join(' · ')

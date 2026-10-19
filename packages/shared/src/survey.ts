@@ -495,7 +495,7 @@ export function surveyLinkHref(ref: SurveyLinkRef, slug?: string): string {
     case 'annual_wheel':
       return `/arshjul?item=${encodeURIComponent(ref.id)}`;
     case 'event':
-      return `/events/${encodeURIComponent(ref.id)}`;
+      return `/inflode/events/${encodeURIComponent(ref.id)}`;
     case 'workshop':
       return `/education/workshops/${encodeURIComponent(ref.id)}`;
     case 'mission':

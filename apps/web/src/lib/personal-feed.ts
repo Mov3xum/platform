@@ -268,7 +268,7 @@ export function buildPersonalFeedItems(src: PersonalFeedSources): PersonalFeedIt
             })
           : undefined,
       created: s.created,
-      href: eventId ? `/events/${eventId}` : '/events',
+      href: eventId ? `/inflode/events/${eventId}` : '/inflode/events',
       icon: 'calendar'
     });
   }

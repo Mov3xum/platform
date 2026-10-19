@@ -16,7 +16,7 @@ export default async function EditEventPage({ params }: { params: Promise<{ id: 
   const { id } = await params;
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) {
-    redirect(`/events/${id}`);
+    redirect(`/inflode/events/${id}`);
   }
 
   const pb = await getServerPb();
@@ -26,7 +26,7 @@ export default async function EditEventPage({ params }: { params: Promise<{ id: 
   } catch {
     notFound();
   }
-  if (event.tenant !== user.tenant) redirect('/events');
+  if (event.tenant !== user.tenant) redirect('/inflode/events');
 
   async function updateAndRedirect(
     _prev: EventActionState,
@@ -34,14 +34,14 @@ export default async function EditEventPage({ params }: { params: Promise<{ id: 
   ): Promise<EventActionState> {
     'use server';
     const result = await updateEventAction(id, {}, formData);
-    if (!result.error) redirect(`/events/${id}`);
+    if (!result.error) redirect(`/inflode/events/${id}`);
     return result;
   }
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-10 lg:px-8">
       <div className="mb-6">
-        <Link href={`/events/${id}`} className="text-sm text-foreground-muted hover:text-foreground">
+        <Link href={`/inflode/events/${id}`} className="text-sm text-foreground-muted hover:text-foreground">
           ← Tillbaka till {event.name}
         </Link>
       </div>

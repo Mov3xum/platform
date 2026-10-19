@@ -47,7 +47,7 @@ const ID = /^[a-zA-Z0-9_-]{1,64}$/;
 function revalidateEvent(eventId: string) {
   revalidatePath('/inflode/inbjudningar');
   revalidatePath(`/inflode/inbjudningar/${eventId}`);
-  revalidatePath(`/events/${eventId}`);
+  revalidatePath(`/inflode/events/${eventId}`);
 }
 
 async function requireManager() {

@@ -116,7 +116,7 @@ export async function createEvent(
     eventId: created.id,
     name: cleanName,
     startsAt: startsAt.value,
-    eventPath: `/events/${created.id}`
+    eventPath: `/inflode/events/${created.id}`
   });
 }
 

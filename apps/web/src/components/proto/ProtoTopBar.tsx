@@ -32,7 +32,7 @@ function buildCrumbs(pathname: string): { label: string; href: string; now: bool
   // riktiga titel, övriga visas som avhumaniserade segment.
   for (let i = 1; i < seg.length; i++) {
     const href = '/' + seg.slice(0, i + 1).join('/');
-    const known = SETTINGS_ROUTE_LABELS[href];
+    const known = SETTINGS_ROUTE_LABELS[href] ?? coreModules.find((m) => m.route === href)?.title;
     crumbs.push({
       label: known ?? decodeURIComponent(seg[i]).replace(/[-_]/g, ' '),
       href,

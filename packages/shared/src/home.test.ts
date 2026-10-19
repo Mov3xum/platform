@@ -44,7 +44,7 @@ test('buildHomeAgenda: pågående under Idag, passerat bort, bortom horisonten b
       item({ id: 'pågår', start: new Date(2026, 8, 1), end: new Date(2026, 8, 30) }),
       item({ id: 'idag-b', start: new Date(2026, 8, 9) }),
       item({ id: 'idag-a', start: new Date(2026, 8, 9) }),
-      item({ id: 'imorgon', start: new Date(2026, 8, 10), source: 'event', href: '/events/1' }),
+      item({ id: 'imorgon', start: new Date(2026, 8, 10), source: 'event', href: '/inflode/events/1' }),
       item({ id: 'långt-bort', start: new Date(2026, 9, 9) })
     ],
     today

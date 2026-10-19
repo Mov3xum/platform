@@ -14,20 +14,20 @@ async function createAndRedirect(
 ): Promise<CommunityActionState> {
   'use server';
   const result = await inviteAlumniFromFormAction({}, formData);
-  if (result.alumniId) redirect(`/community/${result.alumniId}`);
+  if (result.alumniId) redirect(`/inflode/community/${result.alumniId}`);
   return result;
 }
 
 export default async function NewAlumniPage() {
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
-    redirect('/community');
+    redirect('/inflode/community');
   }
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-10 lg:px-8">
       <div className="mb-6">
-        <Link href="/community" className="text-sm text-foreground-muted hover:text-foreground">
+        <Link href="/inflode/community" className="text-sm text-foreground-muted hover:text-foreground">
           ← Tillbaka
         </Link>
       </div>

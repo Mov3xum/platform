@@ -67,7 +67,7 @@ export function SurveySendPanel({
         {attendedCount === 0 && registeredCount > 0 && (
           <div className="mx-t-12 mx-muted">
             Närvaron är inte markerad än.{' '}
-            <Link href={`/events/${encodeURIComponent(eventId)}`}>Markera vilka som deltog</Link> — ett
+            <Link href={`/inflode/events/${encodeURIComponent(eventId)}`}>Markera vilka som deltog</Link> — ett
             schemalagt utskick väntar tills dess och försöker igen varje timme.
           </div>
         )}

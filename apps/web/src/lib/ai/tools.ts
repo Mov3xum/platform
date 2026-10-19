@@ -1338,7 +1338,7 @@ export function buildChatTools(
         name: 'create_event',
         description:
           'Skapar ett event/möte i kalendern (incubator_events) med status ' +
-          '"planned". Deltagare bjuds in av en människa i /events efteråt. ' +
+          '"planned". Deltagare bjuds in av en människa under Marknadsverktyg → Events/Inbjudningar efteråt. ' +
           'Ange tider i ISO-format; fråga om datum/tid är otydligt.',
         parameters: {
           type: 'object',
@@ -4784,7 +4784,7 @@ async function runCreateEvent(
       name: result.value.name,
       starts_at: result.value.startsAt,
       path: result.value.eventPath,
-      next_step: 'Deltagare bjuds in av personalen i /events.',
+      next_step: 'Deltagare bjuds in av personalen under Marknadsverktyg → Events/Inbjudningar.',
       logged_in: 'agent_actions'
     }
   };

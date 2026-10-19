@@ -55,7 +55,13 @@ const nextConfig = {
     return [
       // Inflöde (tidigare Kompassen). Backkompat för gamla länkar.
       { source: '/kompassen', destination: '/inflode', permanent: true },
-      { source: '/kompassen/:path*', destination: '/inflode/:path*', permanent: true }
+      { source: '/kompassen/:path*', destination: '/inflode/:path*', permanent: true },
+      // Events och Community bor som flikar under Marknadsverktyg (2026-10).
+      // Sparade notiser, aktivitetslogg och bokmärken pekar på de gamla adresserna.
+      { source: '/events', destination: '/inflode/events', permanent: true },
+      { source: '/events/:path*', destination: '/inflode/events/:path*', permanent: true },
+      { source: '/community', destination: '/inflode/community', permanent: true },
+      { source: '/community/:path*', destination: '/inflode/community/:path*', permanent: true }
     ];
   },
   // Produces a minimal runtime build at .next/standalone with only the

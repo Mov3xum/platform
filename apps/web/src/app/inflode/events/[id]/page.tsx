@@ -131,12 +131,12 @@ export default async function EventDetailPage({
   return (
     <div className="mx-view-pad mx-wide">
       <PageHead
-        crumb={`Dashboard / Events / ${event.name}`}
+        crumb={`Marknadsverktyg / Events / ${event.name}`}
         title={event.name}
         subtitle={event.description || `Event av typen ${event.type}`}
         actions={
           <>
-            <Link href="/events" className="mx-btn">
+            <Link href="/inflode/events" className="mx-btn">
               ← Tillbaka
             </Link>
             {phase === 'live' && (
@@ -146,7 +146,7 @@ export default async function EventDetailPage({
             )}
             {canEdit && (
               <>
-                <Link href={`/events/${event.id}/edit`} className="mx-btn">
+                <Link href={`/inflode/events/${event.id}/edit`} className="mx-btn">
                   Redigera
                 </Link>
                 <ConfirmDeleteButton

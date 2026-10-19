@@ -420,13 +420,13 @@ function mapRow(
     }
 
     case 'incubator_events': {
-      const goalEntry = activityGoalEntry(row, after, 'Event', row.record_id ? `/events/${row.record_id}` : '/events');
+      const goalEntry = activityGoalEntry(row, after, 'Event', row.record_id ? `/inflode/events/${row.record_id}` : '/inflode/events');
       if (goalEntry) return goalEntry;
       const starts = str(after.starts_at);
       return {
         title: `Nytt event: "${str(after.name) || 'utan namn'}"`,
         detail: starts ? new Date(starts).toLocaleString('sv-SE').slice(0, 16) : undefined,
-        href: row.record_id ? `/events/${row.record_id}` : '/events',
+        href: row.record_id ? `/inflode/events/${row.record_id}` : '/inflode/events',
         icon: 'calendar'
       };
     }

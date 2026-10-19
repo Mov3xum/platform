@@ -181,7 +181,7 @@ export function ActivityGoalPanel(p: ActivityGoalPanelProps) {
             {p.viaEvents.map((e, i) => (
               <span key={e.id}>
                 {i > 0 ? ', ' : ''}
-                <Link href={`/events/${e.id}`} className="text-link hover:underline">
+                <Link href={`/inflode/events/${e.id}`} className="text-link hover:underline">
                   {e.name}
                 </Link>
               </span>

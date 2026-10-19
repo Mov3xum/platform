@@ -108,7 +108,7 @@ test('inbjudningar, tilldelningar och medarbetarskap', () => {
   });
   const byId = new Map(items.map((i) => [i.id, i]));
   assert.equal(byId.get('signup-s1')!.title, 'Du bjöds in till "Demo Day"');
-  assert.equal(byId.get('signup-s1')!.href, '/events/ev1');
+  assert.equal(byId.get('signup-s1')!.href, '/inflode/events/ev1');
   assert.equal(byId.get('signup-s1')!.detail, '2 okt.');
   assert.equal(byId.get('wsassign-w1')!.title, 'Du tilldelade workshopen "Pitch"');
   assert.equal(byId.get('wsassign-w2')!.title, 'Du bjöds in som medarbetare på workshopen "Sälj"');

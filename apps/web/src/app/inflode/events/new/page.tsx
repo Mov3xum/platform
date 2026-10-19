@@ -21,7 +21,7 @@ async function createEventAndRedirect(
   const result = await createEventAction({}, formData);
   if (result.eventId) {
     const warnings = result.warnings?.length ? `?varning=${result.warnings.join(',')}` : '';
-    redirect(`/events/${result.eventId}${warnings}`);
+    redirect(`/inflode/events/${result.eventId}${warnings}`);
   }
   return result;
 }
@@ -45,7 +45,7 @@ export default async function NewEventPage({
 }) {
   const user = await requireUser();
   if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) {
-    redirect('/events');
+    redirect('/inflode/events');
   }
   const { fran } = (await searchParams) ?? {};
 
@@ -79,7 +79,7 @@ export default async function NewEventPage({
   return (
     <main className="mx-auto max-w-3xl px-6 py-10 lg:px-8">
       <div className="mb-6">
-        <Link href="/events" className="text-sm text-foreground-muted hover:text-foreground">
+        <Link href="/inflode/events" className="text-sm text-foreground-muted hover:text-foreground">
           ← Alla events
         </Link>
       </div>

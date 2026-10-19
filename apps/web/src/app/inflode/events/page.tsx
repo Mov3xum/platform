@@ -2,10 +2,11 @@ import Link from 'next/link';
 import { escFilter } from '@/lib/pb-filter';
 import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
-import { hasRole } from '@/lib/rbac';
+import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { Chip } from '@/components/proto';
 import { PageShell } from '@/components/PageShell';
+import { buildInflodeTabs } from '../_tabs';
 import { RailSection, RailStat, RailItem } from '@/components/PageRail';
 import {
   EVENT_SIGNUP_STAGE_LABEL,
@@ -123,7 +124,7 @@ export default async function EventsPage() {
             iconTone="success"
             title={liveEvent.name}
             meta={`${liveEvent.signups_count ?? 0} anmälda · ${liveEvent.attended_count ?? 0} incheckade`}
-            href={`/events/${liveEvent.id}`}
+            href={`/inflode/events/${liveEvent.id}`}
           />
         </RailSection>
       )}
@@ -141,7 +142,7 @@ export default async function EventsPage() {
               iconTone="brand"
               title={e.name}
               meta={`${shortDate(e.starts_at)} · ${e.signups_count ?? 0} anmälda`}
-              href={`/events/${e.id}`}
+              href={`/inflode/events/${e.id}`}
             />
           ))
         )}
@@ -153,12 +154,16 @@ export default async function EventsPage() {
 
   return (
     <PageShell
-      title="Events"
+      title="Marknadsverktyg"
+      tabs={buildInflodeTabs({
+        canAccess: (id) => canAccessModuleForUser(user.roles, id, user.enabledModules)
+      })}
+      meta={<span className="text-[12px] text-foreground-subtle">Events · eventflöde, deltagare och tratt</span>}
       rightPanel={rail}
       actions={
         canManage ? (
           <Link
-            href="/events/new"
+            href="/inflode/events/new"
             className="inline-flex items-center justify-center rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover"
           >
             + Nytt event
@@ -237,7 +242,7 @@ export default async function EventsPage() {
                     return (
                       <tr key={e.id} className="border-t border-default">
                         <td className="px-5 py-3 font-medium text-foreground">
-                          <Link href={`/events/${e.id}`} className="hover:underline">
+                          <Link href={`/inflode/events/${e.id}`} className="hover:underline">
                             {e.name}
                           </Link>
                         </td>

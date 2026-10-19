@@ -1917,7 +1917,7 @@ export function EditorModal({
             // Genomförandet (§ 53): ett event med deltagarlista som pekar
             // tillbaka på den här aktiviteten — namn och datum förifylls.
             <Link
-              href={`/events/new?fran=${encodeURIComponent(form.id)}`}
+              href={`/inflode/events/new?fran=${encodeURIComponent(form.id)}`}
               className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-[13px] text-foreground-muted hover:text-brand"
               title="Skapa ett event med deltagarlista för den här aktiviteten"
             >
