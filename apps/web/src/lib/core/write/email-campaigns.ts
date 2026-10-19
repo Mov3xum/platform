@@ -2,7 +2,9 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import {
   EMAIL_CAMPAIGN_STATUS_LABELS,
+  audienceHasRecipients,
   campaignEditable,
+  isEmailEventGroup,
   emailTemplateByKey,
   instantiateEmailTemplate,
   normalizeEmailCampaignContent,
@@ -10,6 +12,7 @@ import {
   validateEmailCampaignDraft,
   validateEmailCampaignForSend,
   type EmailCampaignInput,
+  type EmailEventGroup,
   type EmailSuppressionReason
 } from '@platform/shared';
 import { sanitizePersonnummer } from '@/lib/import/crm-excel';
@@ -68,16 +71,24 @@ function cleanInput(raw: EmailCampaignInput): EmailCampaignInput {
 async function verifyRefs(
   pb: PocketBase,
   actor: Actor,
-  refs: { eventId?: unknown; senderUserId?: unknown }
-): Promise<WriteResult<{ event: string | null; senderUser: string | null }>> {
+  refs: { eventId?: unknown; senderUserId?: unknown; surveyId?: unknown }
+): Promise<WriteResult<{ event: string | null; senderUser: string | null; survey: string | null }>> {
   let event: string | null = null;
   let senderUser: string | null = null;
+  let survey: string | null = null;
   const ID = /^[a-zA-Z0-9_-]{1,64}$/;
   if (typeof refs.eventId === 'string' && refs.eventId) {
     if (!ID.test(refs.eventId)) return fail('INVALID_VALUE', 'Ogiltigt event.');
     const ev = await getRecordInTenant<{ id: string; tenant?: string }>(pb, actor, 'incubator_events', refs.eventId, 'id,tenant');
     if (!ev) return fail('NOT_FOUND', 'Eventet hittades inte i din organisation.');
     event = ev.id;
+  }
+  if (typeof refs.surveyId === 'string' && refs.surveyId) {
+    if (!ID.test(refs.surveyId)) return fail('INVALID_VALUE', 'Ogiltig utvärdering.');
+    const sv = await getRecordInTenant<{ id: string; tenant?: string; is_template?: boolean }>(pb, actor, 'surveys', refs.surveyId, 'id,tenant,is_template');
+    if (!sv) return fail('NOT_FOUND', 'Utvärderingen hittades inte i din organisation.');
+    if (sv.is_template) return fail('INVALID_VALUE', 'En enkätmall kan inte skickas — skapa en utvärdering från den först.');
+    survey = sv.id;
   }
   if (typeof refs.senderUserId === 'string' && refs.senderUserId) {
     if (!ID.test(refs.senderUserId)) return fail('INVALID_VALUE', 'Ogiltig avsändare.');
@@ -96,7 +107,7 @@ async function verifyRefs(
       return fail('NOT_FOUND', 'Avsändaren hittades inte.');
     }
   }
-  return ok({ event, senderUser });
+  return ok({ event, senderUser, survey });
 }
 
 export interface CampaignWriteResult {
@@ -118,19 +129,33 @@ function schemaWarning(row: Record<string, unknown>): string | undefined {
  * Skapar ett utkast — tomt, från en inbyggd mallstruktur (`templateKey`),
  * från en egen sparad mall eller som kopia av en kampanj (`fromId`).
  */
-export async function createEmailCampaign(
-  pb: PocketBase,
-  actor: Actor,
-  input: { templateKey?: unknown; fromId?: unknown; eventId?: unknown; title?: unknown; isTemplate?: boolean }
-): Promise<WriteResult<CampaignWriteResult>> {
+export interface CreateCampaignInput {
+  templateKey?: unknown;
+  fromId?: unknown;
+  eventId?: unknown;
+  /** Kopplad utvärdering (§ 47) — fyller {{utvärdering.länk}}. */
+  surveyId?: unknown;
+  /** Eventets deltagarlista som mottagargrupp (§ 54.3); kräver `eventId`. */
+  eventGroup?: unknown;
+  title?: unknown;
+  isTemplate?: boolean;
+}
+
+export async function createEmailCampaign(pb: PocketBase, actor: Actor, input: CreateCampaignInput): Promise<WriteResult<CampaignWriteResult>> {
   const denied = guard(actor);
   if (denied) return denied;
-  const refs = await verifyRefs(pb, actor, { eventId: input.eventId });
+  const refs = await verifyRefs(pb, actor, { eventId: input.eventId, surveyId: input.surveyId });
   if (!refs.ok) return refs;
+  if (input.eventGroup !== undefined && input.eventGroup !== null && input.eventGroup !== '' && !isEmailEventGroup(input.eventGroup)) {
+    return fail('INVALID_VALUE', 'Okänd mottagargrupp.');
+  }
+  const eventGroup = isEmailEventGroup(input.eventGroup) ? input.eventGroup : null;
+  if (eventGroup && !refs.value.event) return fail('INVALID_VALUE', 'Mottagargruppen kräver ett kopplat event.');
 
   let base: EmailCampaignInput = {};
   let templateKey = '';
   let eventId = refs.value.event;
+  let surveyId = refs.value.survey;
   let senderUser: string | null = null;
   if (typeof input.fromId === 'string' && input.fromId) {
     const src = await getCampaign(pb, actor.tenant, input.fromId);
@@ -148,6 +173,7 @@ export async function createEmailCampaign(
     };
     templateKey = src.template_key;
     eventId = eventId ?? (src.is_template ? null : src.event);
+    surveyId = surveyId ?? (src.is_template ? null : src.survey);
     senderUser = src.sender_user;
   } else {
     const t = emailTemplateByKey(input.templateKey);
@@ -166,6 +192,7 @@ export async function createEmailCampaign(
   const content = normalizeEmailCampaignContent(
     cleanInput({ ...base, ...(typeof input.title === 'string' && input.title.trim() ? { title: input.title } : {}) })
   );
+  if (eventGroup) content.audience = { ...content.audience, event_group: eventGroup };
   if (!content.title) content.title = input.isTemplate ? 'Ny mall' : 'Nytt utskick';
   const v = validateEmailCampaignDraft(content);
   if (!v.ok) return fail('INVALID_VALUE', v.error);
@@ -188,6 +215,7 @@ export async function createEmailCampaign(
         sender_name: content.sender_name,
         ...(senderUser ? { sender_user: senderUser } : {}),
         ...(eventId ? { event: eventId } : {}),
+        ...(surveyId ? { survey: surveyId } : {}),
         is_template: Boolean(input.isTemplate),
         created_by: actor.id
       })
@@ -213,7 +241,7 @@ export async function updateEmailCampaign(
   pb: PocketBase,
   actor: Actor,
   id: string,
-  input: EmailCampaignInput & { eventId?: unknown; senderUserId?: unknown }
+  input: EmailCampaignInput & { eventId?: unknown; senderUserId?: unknown; surveyId?: unknown }
 ): Promise<WriteResult<CampaignWriteResult>> {
   const denied = guard(actor);
   if (denied) return denied;
@@ -222,9 +250,12 @@ export async function updateEmailCampaign(
   if (!campaignEditable(current.status)) {
     return fail('STATE_TRANSITION', `Utskicket är ${EMAIL_CAMPAIGN_STATUS_LABELS[current.status].toLowerCase()} och kan inte ändras. Duplicera det i stället.`);
   }
-  const refs = await verifyRefs(pb, actor, { eventId: input.eventId, senderUserId: input.senderUserId });
+  const refs = await verifyRefs(pb, actor, { eventId: input.eventId, senderUserId: input.senderUserId, surveyId: input.surveyId });
   if (!refs.ok) return refs;
   const content = normalizeEmailCampaignContent(cleanInput(input));
+  if (content.audience.event_group && !refs.value.event) {
+    return fail('INVALID_VALUE', 'Mottagargruppen "eventets deltagare" kräver ett kopplat event.');
+  }
   const v = validateEmailCampaignDraft(content);
   if (!v.ok) return fail('INVALID_VALUE', v.error);
 
@@ -244,7 +275,8 @@ export async function updateEmailCampaign(
           audience: content.audience,
           sender_name: content.sender_name,
           sender_user: refs.value.senderUser ?? '',
-          event: refs.value.event ?? ''
+          event: refs.value.event ?? '',
+          survey: refs.value.survey ?? ''
         }),
       { fallbackOn404: true }
     );
@@ -323,7 +355,57 @@ async function readyToSend(pb: PocketBase, actor: Actor, id: string): Promise<Wr
   if (campaign.status === 'sending') return fail('STATE_TRANSITION', 'Utskicket pågår.');
   const v = validateEmailCampaignForSend(campaign, { hasEvent: Boolean(campaign.event), recipients: campaign.audience.keys.length });
   if (!v.ok) return fail('INVALID_VALUE', v.error);
+  if (!audienceHasRecipients(campaign.audience)) return fail('INVALID_VALUE', 'Välj minst en mottagare.');
   return ok(campaign);
+}
+
+/**
+ * Systemkampanj (§ 54.4): skapas av servern — påminnelse-ticken och
+ * enkätutskicket — utan inloggad människa, med superuser. Ingen rollgrind
+ * (anroparen har redan verifierat event/enkät och tenant), men samma mall,
+ * normalisering och rendering som ett mänskligt utskick, så den syns i
+ * Kampanjer med statistik precis som allt annat. `created_by` lämnas tomt.
+ */
+export async function createSystemCampaign(
+  pb: PocketBase,
+  input: { tenant: string; templateKey: string; eventId: string; eventGroup: EmailEventGroup; surveyId?: string | null; title?: string }
+): Promise<WriteResult<CampaignWriteResult>> {
+  const t = emailTemplateByKey(input.templateKey);
+  if (!t) return fail('INVALID_VALUE', 'Okänd mallstruktur.');
+  const content = normalizeEmailCampaignContent({
+    title: input.title || t.name,
+    subject: t.subject,
+    preheader: t.preheader,
+    category: t.category,
+    blocks: instantiateEmailTemplate(t),
+    design: t.design,
+    audience: { list: 'everyone', keys: [], event_group: input.eventGroup }
+  });
+  let created: Record<string, unknown>;
+  try {
+    created = await pb.collection(CAMPAIGNS).create<Record<string, unknown>>({
+      tenant: input.tenant,
+      title: content.title,
+      subject: content.subject,
+      preheader: content.preheader,
+      category: content.category,
+      consent_mode: content.consent_mode,
+      status: 'draft',
+      template_key: t.key,
+      blocks: content.blocks,
+      design: content.design,
+      audience: content.audience,
+      sender_name: '',
+      event: input.eventId,
+      ...(input.surveyId ? { survey: input.surveyId } : {})
+    });
+  } catch (err) {
+    if (statusOf(err) === 404) return fail('DB_ERROR', CAMPAIGN_MIGRATION_HINT);
+    console.error('[campaigns] system create failed', { status: statusOf(err) });
+    return fail('DB_ERROR', 'Kunde inte skapa utskicket.');
+  }
+  const id = String(created.id);
+  return ok({ id, path: campaignPath(id), title: content.title, warning: schemaWarning(created) });
 }
 
 /** Schemalägger utskicket (cron-ticken gör själva utskicket). */

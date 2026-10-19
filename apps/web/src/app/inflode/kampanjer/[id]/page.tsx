@@ -69,12 +69,25 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
     }
   }
 
+  // Utvärderingar att koppla (§ 47): bara riktiga enkäter, inte mallar.
+  const surveys = await pb
+    .collection('surveys')
+    .getFullList<{ id: string; name: string; link_kind?: string; link_id?: string }>({
+      filter: pb.filter('tenant = {:t} && is_template != true', { t: user.tenant }),
+      fields: 'id,name,link_kind,link_id',
+      sort: '-created',
+      batch: 200
+    })
+    .then((rows) => rows.map((sv) => ({ id: sv.id, name: sv.name, event: sv.link_kind === 'event' ? sv.link_id ?? '' : '' })))
+    .catch(() => [] as Array<{ id: string; name: string; event: string }>);
+
   return (
     <PageShell title={campaign.is_template ? `Mall: ${campaign.title}` : campaign.title || 'Kampanj'} tabs={buildInflodeTabs()} activeTabId="kampanjer">
       <CampaignEditor
         campaign={campaign}
         staff={staff.map((s) => ({ id: s.id, name: s.name, hasEmail: Boolean(s.email) }))}
         events={events}
+        surveys={surveys}
         orgName={orgName}
         replyToConfigured={Boolean(resolveReplyTo(process.env))}
         meEmail={user.email}

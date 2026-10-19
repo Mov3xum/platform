@@ -53,6 +53,12 @@ migrate(
     const contactsCol = app.findCollectionByNameOrId('contacts');
     const startupsCol = app.findCollectionByNameOrId('startups');
     const signupsCol = app.findCollectionByNameOrId('event_signups');
+    let surveysCol = null;
+    try {
+      surveysCol = app.findCollectionByNameOrId('surveys');
+    } catch (e) {
+      surveysCol = null;
+    }
 
     const rel = (name, col, opts = {}) => ({
       name,
@@ -99,6 +105,9 @@ migrate(
           { name: 'sender_name', type: 'text', required: false, max: 80 },
           rel('sender_user', usersCol),
           rel('event', eventsCol),
+          // Kopplad utvärdering (§ 47) — "Tack och utvärdering"-mallen fyller
+          // {{utvärdering.länk}} ur den. Utelämnas på en instans utan `surveys`.
+          ...(surveysCol ? [rel('survey', surveysCol)] : []),
           { name: 'send_at', type: 'date', required: false },
           { name: 'sent_at', type: 'date', required: false },
           { name: 'send_base_url', type: 'text', required: false, max: 300 },

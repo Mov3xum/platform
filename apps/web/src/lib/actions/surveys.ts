@@ -367,7 +367,7 @@ export async function sendSurveyNowAction(formData: FormData): Promise<SendSurve
     message:
       res.recipients === 0
         ? 'Inga deltagare med e-postadress att skicka till.'
-        : `Skickat till ${res.sent} deltagare${res.failed ? ` (${res.failed} misslyckades${res.failReason ? `: ${res.failReason.replace(/\.$/, '')}` : ''})` : ''}.`
+        : `Skickat till ${res.sent} deltagare${res.failed ? ` (${res.failed} misslyckades${res.failReason ? `: ${res.failReason.replace(/\.$/, '')}` : ''})` : ''}. Utskicket finns under Kampanjer.`
   };
 }
 

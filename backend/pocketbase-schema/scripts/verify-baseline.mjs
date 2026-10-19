@@ -1131,6 +1131,8 @@ const REQUIRED_APP_FIELDS = [
   // försvinner och påminnelserna skickas aldrig.
   { collection: 'contacts', fields: ['email_status', 'email_status_at', 'email_opt_out', 'newsletter_consent', 'newsletter_consent_at', 'newsletter_consent_source'] },
   { collection: 'event_signups', fields: ['plus_ones', 'diet', 'custom_answer', 'checked_in_at', 'campaign'] },
+  // Kampanjens kopplade utvärdering (§ 54.3, migration 1700000201) — fyller {{utvärdering.länk}}.
+  { collection: 'email_campaigns', fields: ['survey', 'event', 'audience', 'blocks'] },
   { collection: 'incubator_events', fields: ['rsvp_settings', 'reminder_unanswered_sent_at', 'reminder_confirmed_sent_at'] },
   // AI-minne (§ 16.4): kategori per notering = migration 1700000155. Saknas
   // fältet "sparas" kategorin från UI/memory_write men försvinner tyst.

@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { inviteToEvent, removeEventInvitation, sendEventInvitations } from '@/lib/core/write/event-invitations';
+import { removeEventInvitation } from '@/lib/core/write/event-invitations';
 import {
   CONTACT_LIST_LIMIT,
   contactDisplayName,
@@ -17,7 +17,6 @@ import {
   type ContactRow
 } from '@/lib/events/invite-candidates';
 import { listContactGroups } from '@/lib/contacts/data';
-import { requestOrigin } from '@/lib/request-origin';
 import {
   CONTACT_CATEGORIES,
   CONTACT_CATEGORY_LABELS,
@@ -26,18 +25,17 @@ import {
   isContactCategory,
   matchesContactSearch,
   parseInviteList,
-  splitInviteSelection,
   type ContactCategory,
   type InviteSelectionKind,
   type Role
 } from '@platform/shared';
 
-// Inbjudningar till event (CLAUDE.md § 53.5). Tunna server actions:
-// inloggad användare → skrivlagret, som äger roll-, tenant- och
-// avregistreringskontrollerna. Listningen (kontaktboken, egna grupper,
-// personal, bolagsmedlemmar, bolag) returnerar
-// aldrig e-postadresser — bara om mottagaren går att nå. Alla utskick är
-// mänskliga klick.
+// Inbjudningar till event (CLAUDE.md § 53.5 / § 54). Själva utskicket är
+// sedan konsolideringen 2026-10 en KAMPANJ (mall "Eventinbjudan" med eventets
+// deltagarlista som mottagargrupp) — här finns listningen för
+// mottagarpanelen (kontaktboken, egna grupper, personal, bolagsmedlemmar,
+// bolag; aldrig e-postadresser, bara om mottagaren går att nå) och
+// borttagning av en inbjudan.
 
 export type InvitationState = { ok?: boolean; error?: string; notice?: string };
 
@@ -254,79 +252,6 @@ export async function listInviteOptionsAction(input: {
     const msg = err instanceof Error && err.message.includes('superuser') ? err.message : 'Kunde inte läsa listan.';
     return { error: msg, items: [], total: 0 };
   }
-}
-
-export async function inviteToEventAction(input: {
-  eventId: string;
-  /** Panelens val (`inviteSelectionKey`). */
-  selection: string[];
-}): Promise<InvitationState> {
-  const { contactIds, userIds, startupIds } = splitInviteSelection(Array.isArray(input.selection) ? input.selection : []);
-  const user = await requireUser();
-  let res: Awaited<ReturnType<typeof inviteToEvent>>;
-  try {
-    res = await inviteToEvent(
-      await getServerPb(),
-      { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Role[] },
-      {
-        eventId: String(input.eventId || ''),
-        contactIds,
-        userIds,
-        startupIds,
-        baseUrl: await requestOrigin()
-      }
-    );
-  } catch (err) {
-    // Ett kast blir annars en 500 som river hela sidan (CLAUDE.md § 53.5).
-    console.error('[invitations] invite failed', err instanceof Error ? err.message : 'unknown');
-    return { error: 'Inbjudan kunde inte genomföras. Ladda om sidan och försök igen.' };
-  }
-  if (!res.ok) return { error: res.error };
-  revalidateEvent(input.eventId);
-  const { invited, sent, failed, skipped, unreachableStartups, sendError, failReason } = res.value;
-  if (sendError) {
-    return { error: `${invited} lades till på listan men inget mejl skickades: ${sendError}` };
-  }
-  if (sent === 0 && failed > 0) {
-    return { error: `${invited} lades till på listan men inget mejl skickades. ${failReason ?? 'Resend avvisade utskicket.'}` };
-  }
-  const notes = [
-    skipped.already ? `${skipped.already} fanns redan på listan` : '',
-    skipped.optOut ? `${skipped.optOut} har avregistrerat sig` : '',
-    skipped.noEmail ? `${skipped.noEmail} saknar e-post` : '',
-    skipped.overCap ? `${skipped.overCap} över taket` : '',
-    unreachableStartups ? `${unreachableStartups} bolag saknar mottagare` : '',
-    failed ? `${failed} mejl misslyckades${failReason ? ` (${failReason.replace(/\.$/, '')})` : ''} — försök igen med "Skicka ej utskickade"` : ''
-  ].filter(Boolean);
-  return {
-    ok: true,
-    notice: `${invited} inbjudna, ${sent} mejl skickade.${notes.length ? ` ${notes.join(' · ')}.` : ''}`
-  };
-}
-
-export async function sendInvitationsAction(input: { eventId: string; mode: 'pending' | 'reminder' }): Promise<InvitationState> {
-  const user = await requireUser();
-  let res: Awaited<ReturnType<typeof sendEventInvitations>>;
-  try {
-    res = await sendEventInvitations(
-      await getServerPb(),
-      { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Role[] },
-      { eventId: String(input.eventId || ''), mode: input.mode === 'reminder' ? 'reminder' : 'pending', baseUrl: await requestOrigin() }
-    );
-  } catch (err) {
-    console.error('[invitations] send failed', err instanceof Error ? err.message : 'unknown');
-    return { error: 'Inbjudningarna kunde inte skickas. Ladda om sidan och försök igen.' };
-  }
-  if (!res.ok) return { error: res.error };
-  revalidateEvent(input.eventId);
-  const { sent, failed, optedOut, failReason } = res.value;
-  if (sent === 0 && failed > 0) {
-    return { error: `Inga mejl skickades. ${failReason ?? 'Resend avvisade utskicket.'}` };
-  }
-  return {
-    ok: true,
-    notice: `${sent} mejl skickade${failed ? `, ${failed} misslyckades${failReason ? ` (${failReason.replace(/\.$/, '')})` : ''}` : ''}${optedOut ? ` (${optedOut} avregistrerade hoppades över)` : ''}.`
-  };
 }
 
 export async function removeInvitationAction(signupId: string): Promise<InvitationState> {

@@ -34,6 +34,9 @@ import {
   EMAIL_CATEGORY_LABELS,
   EMAIL_CONSENT_MODES,
   EMAIL_CONSENT_MODE_LABELS,
+  EMAIL_EVENT_GROUPS,
+  EMAIL_EVENT_GROUP_LABELS,
+  isEmailEventGroup,
   EMAIL_LAYOUTS,
   EMAIL_LAYOUT_LABELS,
   EMAIL_MERGE_FIELDS,
@@ -53,6 +56,7 @@ import {
   type EmailCategory,
   type EmailConsentMode,
   type EmailDesign,
+  type EmailEventGroup,
   type EmailLayout
 } from '@platform/shared';
 
@@ -76,6 +80,12 @@ interface EventOption {
   name: string;
   starts_at?: string;
   location?: string;
+}
+interface SurveyOption {
+  id: string;
+  name: string;
+  /** Eventet enkäten följer upp (tomt = fristående). */
+  event: string;
 }
 
 const KIND_LABEL: Record<InviteOption['kind'], string> = { contact: 'Kontakt', user: 'Användare', startup: 'Bolag' };
@@ -132,6 +142,8 @@ function newBlock(type: EmailBlockType): EmailBlock {
     case 'event_details':
       return { id, type };
     case 'rsvp':
+      return { id, type };
+    case 'ticket':
       return { id, type };
     case 'signature':
       return { id, type, name: '{{avsändare}}', title: 'Movexum' };
@@ -266,6 +278,7 @@ export function CampaignEditor({
   campaign,
   staff,
   events,
+  surveys,
   orgName,
   replyToConfigured,
   meEmail
@@ -273,6 +286,7 @@ export function CampaignEditor({
   campaign: CampaignRow;
   staff: StaffOption[];
   events: EventOption[];
+  surveys: SurveyOption[];
   orgName: string;
   replyToConfigured: boolean;
   meEmail: string;
@@ -286,6 +300,8 @@ export function CampaignEditor({
   const [senderName, setSenderName] = useState(campaign.sender_name);
   const [senderUserId, setSenderUserId] = useState(campaign.sender_user ?? '');
   const [eventId, setEventId] = useState(campaign.event ?? '');
+  const [surveyId, setSurveyId] = useState(campaign.survey ?? '');
+  const [eventGroup, setEventGroup] = useState<EmailEventGroup | ''>(campaign.audience.event_group ?? '');
   const [blocks, setBlocks] = useState<EmailBlock[]>(campaign.blocks);
   const [design, setDesign] = useState<EmailDesign>(campaign.design);
   const [list, setList] = useState(campaign.audience.list || 'everyone');
@@ -398,7 +414,8 @@ export function CampaignEditor({
     sender_name: senderName,
     senderUserId,
     eventId,
-    audience: { list, keys: [...picked.keys()] }
+    surveyId,
+    audience: { list, keys: [...picked.keys()], event_group: eventId && eventGroup ? eventGroup : null }
   });
 
   const run = (fn: () => Promise<CampaignActionState>, after?: (s: CampaignActionState) => void) =>
@@ -424,7 +441,9 @@ export function CampaignEditor({
     }, () => router.refresh());
 
   const split = splitInviteSelection(picked.keys());
+  const hasGroup = Boolean(eventId && eventGroup);
   const summary = [
+    hasGroup ? EMAIL_EVENT_GROUP_LABELS[eventGroup as EmailEventGroup].toLowerCase() : '',
     split.contactIds.length ? `${split.contactIds.length} ${split.contactIds.length === 1 ? 'kontakt' : 'kontakter'}` : '',
     split.userIds.length ? `${split.userIds.length} användare` : '',
     split.startupIds.length ? `${split.startupIds.length} bolag` : ''
@@ -451,7 +470,7 @@ export function CampaignEditor({
   };
 
   const sendNow = () => {
-    if (picked.size === 0) return setState({ error: 'Välj mottagare först.' });
+    if (picked.size === 0 && !hasGroup) return setState({ error: 'Välj mottagare först.' });
     if (!window.confirm(`Skicka "${subject || title}" till ${summary.join(', ')} nu? Det går inte att ångra.`)) return;
     save(() => sendCampaignNowAction(campaign.id));
   };
@@ -542,17 +561,42 @@ export function CampaignEditor({
                   <input className="mx-input" value={senderName} maxLength={80} disabled={!editable} placeholder={sender ? `${sender.name} · ${orgName}` : orgName} onChange={(e) => mark(setSenderName)(e.target.value)} />
                 </Field>
               </div>
-              <Field label="Kopplat event" hint={needsEvent && !eventId ? 'Innehållet har eventblock — koppla ett event innan utskick.' : 'Ger tid, plats, kalenderfil och personliga svarsknappar.'}>
-                <select className="mx-input" value={eventId} disabled={!editable} onChange={(e) => mark(setEventId)(e.target.value)}>
-                  <option value="">Inget event</option>
-                  {events.map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {e.name}
-                      {e.starts_at ? ` · ${formatStockholmDateTime(e.starts_at)}` : ''}
-                    </option>
-                  ))}
-                </select>
-              </Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Kopplat event" hint={needsEvent && !eventId ? 'Innehållet har eventblock — koppla ett event innan utskick.' : 'Ger tid, plats, kalenderfil, svarsknappar och biljett.'}>
+                  <select
+                    className="mx-input"
+                    value={eventId}
+                    disabled={!editable}
+                    onChange={(e) => {
+                      mark(setEventId)(e.target.value);
+                      if (!e.target.value) setEventGroup('');
+                    }}
+                  >
+                    <option value="">Inget event</option>
+                    {events.map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.name}
+                        {e.starts_at ? ` · ${formatStockholmDateTime(e.starts_at)}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field
+                  label="Kopplad utvärdering"
+                  hint={surveyId ? 'Platshållaren {{utvärdering.länk}} blir enkätens publika länk.' : 'Välj enkäten för "Tack och utvärdering" — knappen visas bara när en är kopplad.'}
+                >
+                  <select className="mx-input" value={surveyId} disabled={!editable} onChange={(e) => mark(setSurveyId)(e.target.value)}>
+                    <option value="">Ingen utvärdering</option>
+                    {surveys
+                      .filter((sv) => !eventId || !sv.event || sv.event === eventId)
+                      .map((sv) => (
+                        <option key={sv.id} value={sv.id}>
+                          {sv.name}
+                        </option>
+                      ))}
+                  </select>
+                </Field>
+              </div>
             </div>
           </Card>
 
@@ -656,7 +700,31 @@ export function CampaignEditor({
                   </button>
                 )}
               </div>
-              <div className="grid gap-2 sm:grid-cols-2">
+              {eventId && (
+                <Field
+                  label="Eventets deltagarlista"
+                  hint="Samma rader som svaren och närvaron — inbjudna, anmälda eller närvarande. Kombineras med egna val nedan; spärrade och avregistrerade räknas bort vid utskick."
+                >
+                  <select
+                    className="mx-input"
+                    value={eventGroup}
+                    disabled={!editable}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setEventGroup(isEmailEventGroup(v) ? v : '');
+                      setDirty(true);
+                    }}
+                  >
+                    <option value="">Ingen grupp — bara mottagare jag väljer</option>
+                    {EMAIL_EVENT_GROUPS.map((g) => (
+                      <option key={g} value={g}>
+                        {EMAIL_EVENT_GROUP_LABELS[g]}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+              <div className="grid gap-2 sm:grid-cols-2" style={{ marginTop: eventId ? 10 : 0 }}>
                 <ListSelect value={list} onChange={(v) => mark(setList)(v)} meta={meta} />
                 <input className="mx-input" placeholder="Sök namn, organisation…" value={q} onChange={(e) => setQ(e.target.value)} />
               </div>
@@ -709,7 +777,7 @@ export function CampaignEditor({
                 <button
                   type="button"
                   className="mx-btn mx-sm"
-                  disabled={busy || picked.size === 0}
+                  disabled={busy || (picked.size === 0 && !hasGroup)}
                   onClick={() =>
                     run(async () => {
                       const saved = await saveCampaignAction(payload());
@@ -846,11 +914,11 @@ export function CampaignEditor({
                   <>
                     <div className="mx-flex mx-items-c mx-gap-2" style={{ flexWrap: 'wrap' }}>
                       <input type="datetime-local" className="mx-input" style={{ width: 'auto' }} value={sendAt} onChange={(e) => setSendAt(e.target.value)} />
-                      <button type="button" className="mx-btn mx-sm" disabled={busy || picked.size === 0} onClick={schedule}>
+                      <button type="button" className="mx-btn mx-sm" disabled={busy || (picked.size === 0 && !hasGroup)} onClick={schedule}>
                         <Icon name="clock" size={12} /> Schemalägg
                       </button>
                       <span style={{ flex: 1 }} />
-                      <button type="button" className="mx-btn mx-sm mx-primary" disabled={busy || picked.size === 0} onClick={sendNow}>
+                      <button type="button" className="mx-btn mx-sm mx-primary" disabled={busy || (picked.size === 0 && !hasGroup)} onClick={sendNow}>
                         <Icon name="send" size={12} /> Skicka nu
                       </button>
                     </div>

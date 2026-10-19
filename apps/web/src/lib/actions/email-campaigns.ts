@@ -54,7 +54,16 @@ function revalidate(id?: string) {
   revalidatePath('/installningar/e-post');
 }
 
-export async function createCampaignAction(input: { templateKey?: string; fromId?: string; eventId?: string; title?: string; isTemplate?: boolean }): Promise<CampaignActionState> {
+export async function createCampaignAction(input: {
+  templateKey?: string;
+  fromId?: string;
+  eventId?: string;
+  /** Eventets deltagarlista som mottagargrupp (§ 54.3). */
+  eventGroup?: string;
+  surveyId?: string;
+  title?: string;
+  isTemplate?: boolean;
+}): Promise<CampaignActionState> {
   const m = await manager();
   if ('error' in m) return { error: m.error };
   const res = await createEmailCampaign(await getServerPb(), m.actor, input);
@@ -69,6 +78,8 @@ export async function createCampaignAndRedirect(formData: FormData): Promise<voi
     templateKey: String(formData.get('template') || ''),
     fromId: String(formData.get('from') || ''),
     eventId: String(formData.get('event') || ''),
+    eventGroup: String(formData.get('event_group') || ''),
+    surveyId: String(formData.get('survey') || ''),
     title: String(formData.get('title') || ''),
     isTemplate: formData.get('is_template') === '1'
   });
@@ -88,6 +99,7 @@ export async function saveCampaignAction(input: {
   sender_name?: string;
   senderUserId?: string;
   eventId?: string;
+  surveyId?: string;
   audience?: unknown;
 }): Promise<CampaignActionState> {
   const m = await manager();

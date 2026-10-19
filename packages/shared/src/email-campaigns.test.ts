@@ -4,7 +4,10 @@ import assert from 'node:assert/strict';
 import {
   EMAIL_TEMPLATES,
   applyEmailPreference,
+  audienceHasRecipients,
   blocksNeedEvent,
+  blocksNeedSignup,
+  eventGroupMatches,
   checkEmailDeliverability,
   deliverabilityHealth,
   deliverabilityVerdict,
@@ -105,7 +108,64 @@ test('normalizeEmailDesign + audience tolererar skräp', () => {
     layout: 'plain',
     show_logo: false
   });
-  assert.deepEqual(normalizeEmailAudience('x'), { list: 'everyone', keys: [] });
+  assert.deepEqual(normalizeEmailAudience('x'), { list: 'everyone', keys: [], event_group: null });
+  assert.deepEqual(normalizeEmailAudience({ keys: ['c:a1', 'x:b', 'c:a1'], event_group: 'attended' }), {
+    list: 'everyone',
+    keys: ['c:a1'],
+    event_group: 'attended'
+  });
+  assert.equal(normalizeEmailAudience({ event_group: 'alla' }).event_group, null, 'okänd grupp ⇒ ingen');
+  assert.equal(audienceHasRecipients({ list: '', keys: [], event_group: 'unanswered' }), true);
+  assert.equal(audienceHasRecipients({ list: '', keys: [], event_group: null }), false);
+});
+
+test('eventGroupMatches: deltagarlistans steg per mottagargrupp (§ 54.3)', () => {
+  const invitedUnsent = { stage: 'invited', invite_sent_at: '' };
+  const invitedSent = { stage: 'invited', invite_sent_at: '2026-10-01 10:00:00.000Z' };
+  assert.equal(eventGroupMatches('unsent', invitedUnsent), true);
+  assert.equal(eventGroupMatches('unsent', invitedSent), false);
+  assert.equal(eventGroupMatches('unanswered', invitedSent), true);
+  assert.equal(eventGroupMatches('unanswered', { stage: 'signup' }), false);
+  assert.equal(eventGroupMatches('confirmed', { stage: 'signup' }), true);
+  assert.equal(eventGroupMatches('confirmed', { stage: 'waitlist' }), false, 'väntelistan tar ingen plats');
+  assert.equal(eventGroupMatches('confirmed', { stage: 'declined' }), false);
+  assert.equal(eventGroupMatches('attended', { stage: 'signup' }), false, 'anmäld men inte närvarande');
+  assert.equal(eventGroupMatches('attended', { stage: 'attended' }), true);
+  assert.equal(eventGroupMatches('attended', { stage: 'admitted' }), true);
+});
+
+test('ticket-block: personlig biljettlänk + kalender, utelämnas utan länk', () => {
+  const blocks = normalizeEmailBlocks([{ type: 'ticket' }, { type: 'paragraph', text: 'x' }]);
+  assert.equal(blocksNeedSignup(blocks), true);
+  assert.equal(blocksNeedEvent(blocks), true);
+  const base = {
+    subject: 'Vi ses',
+    preheader: '',
+    blocks,
+    design: normalizeEmailDesign(null),
+    merge: {},
+    reasonText: 'r',
+    orgName: 'Movexum'
+  };
+  const withTicket = renderCampaignEmail({ ...base, links: { ticket: 'https://app.test/e/svar?t=abc&klart=yes', calendar: 'https://app.test/api/public/e/kalender?e=k' } });
+  assert.match(withTicket.html, /Visa din biljett/);
+  assert.match(withTicket.html, /Lägg i kalendern/);
+  assert.match(withTicket.text, /Visa din biljett: https:\/\/app\.test\/e\/svar\?t=abc/);
+  assert.equal(withTicket.links.length, 0, 'personliga länkar spåras aldrig');
+  const without = renderCampaignEmail({ ...base, links: {} });
+  assert.doesNotMatch(without.html, /Visa din biljett/);
+});
+
+test('utvärderingslänken fylls i ur merge och knappen försvinner utan enkät', () => {
+  const t = EMAIL_TEMPLATES.find((x) => x.key === 'thank_you')!;
+  const blocks = instantiateEmailTemplate(t);
+  const base = { subject: t.subject, preheader: '', blocks, design: t.design, links: {}, reasonText: 'r', orgName: 'Movexum' };
+  const withSurvey = renderCampaignEmail({ ...base, merge: { event_name: 'Frukost', survey_url: 'https://app.test/u/abc?utm_source=event' } });
+  assert.match(withSurvey.html, /Svara på utvärderingen/);
+  assert.deepEqual(withSurvey.links, ['https://app.test/u/abc?utm_source=event']);
+  const noSurvey = renderCampaignEmail({ ...base, merge: { event_name: 'Frukost' } });
+  assert.doesNotMatch(noSurvey.html, /Svara på utvärderingen/, 'tom platshållare ger ingen trasig knapp');
+  assert.equal(renderMergeFields('{{utvärdering.länk}}|{{utvardering.lank}}', { survey_url: 'https://x' }), 'https://x|https://x');
 });
 
 test('mallstrukturer: varje mall ger giltiga block och eventmallar bär eventblock', () => {

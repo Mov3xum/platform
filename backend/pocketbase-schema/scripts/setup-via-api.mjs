@@ -5190,6 +5190,8 @@ await patchCollection('event_signups', [{ name: 'invite_opened_at', type: 'date'
 // tenant + skapare vid create (§ 21.8); mottagarrader och händelser skrivs
 // bara av servern (createRule null). Select-värdena MÅSTE spegla
 // packages/shared/src/email-campaigns.ts.
+// Kopplad utvärdering (§ 47): relationen pekar på `surveys` (skapad ovan i detta skript).
+const surveysColId = (await pb.collections.getOne('surveys')).id;
 await ensureCollection({
   id: 'email_campaigns_collection',
   name: 'email_campaigns',
@@ -5211,6 +5213,7 @@ await ensureCollection({
     { name: 'sender_name', type: 'text', required: false, max: 80 },
     { name: 'sender_user', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'event', type: 'relation', required: false, collectionId: 'incubator_events_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'survey', type: 'relation', required: false, collectionId: surveysColId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'send_at', type: 'date', required: false },
     { name: 'sent_at', type: 'date', required: false },
     { name: 'send_base_url', type: 'text', required: false, max: 300 },

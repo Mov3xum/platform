@@ -48,6 +48,8 @@ export interface CampaignRow {
   sender_name: string;
   sender_user: string | null;
   event: string | null;
+  /** Kopplad utvärdering (§ 47) — fyller {{utvärdering.länk}}. */
+  survey: string | null;
   send_at: string | null;
   sent_at: string | null;
   send_base_url: string;
@@ -93,6 +95,7 @@ export function normalizeCampaign(raw: Record<string, unknown>): CampaignRow {
     sender_name: str(raw.sender_name),
     sender_user: strOrNull(raw.sender_user),
     event: strOrNull(raw.event),
+    survey: strOrNull(raw.survey),
     send_at: strOrNull(raw.send_at),
     sent_at: strOrNull(raw.sent_at),
     send_base_url: str(raw.send_base_url),

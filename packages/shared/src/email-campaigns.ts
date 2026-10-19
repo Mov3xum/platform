@@ -246,6 +246,7 @@ export const EMAIL_BLOCK_TYPES = [
   'spacer',
   'event_details',
   'rsvp',
+  'ticket',
   'signature'
 ] as const;
 export type EmailBlockType = (typeof EMAIL_BLOCK_TYPES)[number];
@@ -259,6 +260,7 @@ export const EMAIL_BLOCK_LABELS: Record<EmailBlockType, string> = {
   spacer: 'Luft',
   event_details: 'Eventuppgifter',
   rsvp: 'Svarsknappar (Jag kommer / Jag kan inte)',
+  ticket: 'Biljett & kalender (Visa din biljett)',
   signature: 'Signatur'
 };
 
@@ -271,6 +273,8 @@ export type EmailBlock =
   | { id: string; type: 'spacer'; size: 's' | 'm' | 'l' }
   | { id: string; type: 'event_details' }
   | { id: string; type: 'rsvp' }
+  /** "Visa din biljett" + "Lägg i kalendern" — personlig länk till gästens anmälan (§ 54.11). */
+  | { id: string; type: 'ticket' }
   | { id: string; type: 'signature'; name: string; title: string };
 
 /** `Omit` som distribuerar över unionen (ett blockutkast utan id). */
@@ -370,6 +374,9 @@ export function normalizeEmailBlocks(raw: unknown): EmailBlock[] {
       case 'rsvp':
         out.push({ id, type: 'rsvp' });
         break;
+      case 'ticket':
+        out.push({ id, type: 'ticket' });
+        break;
       case 'signature':
         out.push({ id, type: 'signature', name: cleanLine(r.name, 120), title: cleanLine(r.title, 120) });
         break;
@@ -381,7 +388,12 @@ export function normalizeEmailBlocks(raw: unknown): EmailBlock[] {
 }
 
 export function blocksNeedEvent(blocks: readonly EmailBlock[]): boolean {
-  return blocks.some((b) => b.type === 'event_details' || b.type === 'rsvp');
+  return blocks.some((b) => b.type === 'event_details' || b.type === 'rsvp' || b.type === 'ticket');
+}
+
+/** Block med PERSONLIGA länkar till gästens anmälan — kräver en rad i eventets deltagarlista per mottagare. */
+export function blocksNeedSignup(blocks: readonly EmailBlock[]): boolean {
+  return blocks.some((b) => b.type === 'rsvp' || b.type === 'ticket');
 }
 
 // ── Utseende ─────────────────────────────────────────────────────────────────
@@ -449,11 +461,49 @@ export function normalizeEmailDesign(raw: unknown): EmailDesign {
 
 export const EMAIL_AUDIENCE_MAX_KEYS = 5000;
 
+/**
+ * Eventets deltagarlista som mottagargrupp (§ 54.3) — DEN röda tråden från
+ * inbjudan till uppföljning: samma `event_signups`-rader som svaren, närvaron
+ * och målen bygger på. `unsent` = inbjudna som aldrig fått mejlet,
+ * `unanswered` = alla som står som inbjudna, `confirmed` = tackat ja eller
+ * längre i tratten, `attended` = markerade närvarande (eller längre).
+ */
+export const EMAIL_EVENT_GROUPS = ['unsent', 'unanswered', 'confirmed', 'attended'] as const;
+export type EmailEventGroup = (typeof EMAIL_EVENT_GROUPS)[number];
+
+export const EMAIL_EVENT_GROUP_LABELS: Record<EmailEventGroup, string> = {
+  unsent: 'Inbjudna som inte fått mejlet',
+  unanswered: 'Inbjudna som inte svarat',
+  confirmed: 'Anmälda (tackat ja)',
+  attended: 'Närvarande (deltog)'
+};
+
+export function isEmailEventGroup(v: unknown): v is EmailEventGroup {
+  return typeof v === 'string' && (EMAIL_EVENT_GROUPS as readonly string[]).includes(v);
+}
+
+/** Steg i `event_signups` som ingår i respektive grupp (mottagaren måste också ha e-post). */
+export function eventGroupMatches(group: EmailEventGroup, row: { stage?: string | null; invite_sent_at?: string | null }): boolean {
+  const stage = row.stage ?? '';
+  switch (group) {
+    case 'unsent':
+      return stage === 'invited' && !row.invite_sent_at;
+    case 'unanswered':
+      return stage === 'invited';
+    case 'confirmed':
+      return ['signup', 'attended', 'meeting', 'application', 'admitted'].includes(stage);
+    case 'attended':
+      return ['attended', 'meeting', 'application', 'admitted'].includes(stage);
+  }
+}
+
 export interface EmailAudience {
   /** Senast visade lista i panelen (`inviteListValue`) — bara bekvämlighet. */
   list: string;
   /** Valda mottagare som `c:<id>` / `u:<id>` / `s:<id>` (`inviteSelectionKey`). */
   keys: string[];
+  /** Eventets deltagarlista som grupp (kräver kopplat event); kombineras med `keys`. */
+  event_group: EmailEventGroup | null;
 }
 
 export function normalizeEmailAudience(raw: unknown): EmailAudience {
@@ -464,7 +514,16 @@ export function normalizeEmailAudience(raw: unknown): EmailAudience {
         EMAIL_AUDIENCE_MAX_KEYS
       )
     : [];
-  return { list: typeof r.list === 'string' ? r.list.slice(0, 80) : 'everyone', keys };
+  return {
+    list: typeof r.list === 'string' ? r.list.slice(0, 80) : 'everyone',
+    keys,
+    event_group: isEmailEventGroup(r.event_group) ? r.event_group : null
+  };
+}
+
+/** Har urvalet någon mottagarkälla alls? */
+export function audienceHasRecipients(a: EmailAudience): boolean {
+  return a.keys.length > 0 || a.event_group !== null;
 }
 
 // ── Kampanjen ────────────────────────────────────────────────────────────────
@@ -524,6 +583,9 @@ export function validateEmailCampaignForSend(
   c: EmailCampaignContent,
   ctx: { hasEvent: boolean; recipients: number }
 ): { ok: true } | { ok: false; error: string } {
+  if (c.audience.event_group && !ctx.hasEvent) {
+    return { ok: false, error: 'Mottagargruppen "eventets deltagare" kräver att utskicket är kopplat till ett event.' };
+  }
   const draft = validateEmailCampaignDraft(c);
   if (!draft.ok) return draft;
   if (!c.subject) return { ok: false, error: 'Skriv en ämnesrad.' };
@@ -538,7 +600,7 @@ export function validateEmailCampaignForSend(
     if (b.type === 'button' && (!b.url || !b.label)) return { ok: false, error: 'En knapp saknar text eller länk.' };
     if (b.type === 'image' && !b.url) return { ok: false, error: 'En bild saknar adress.' };
   }
-  if (ctx.recipients <= 0) return { ok: false, error: 'Välj minst en mottagare.' };
+  if (ctx.recipients <= 0 && !c.audience.event_group) return { ok: false, error: 'Välj minst en mottagare.' };
   return { ok: true };
 }
 
@@ -552,6 +614,8 @@ export interface EmailMergeData {
   event_name?: string;
   event_when?: string;
   event_location?: string;
+  /** Publik länk till kopplad utvärdering (/u/<slug>), § 47. */
+  survey_url?: string;
 }
 
 const MERGE_KEYS: Record<string, keyof EmailMergeData> = {
@@ -564,7 +628,9 @@ const MERGE_KEYS: Record<string, keyof EmailMergeData> = {
   avsandare: 'sender_name',
   'event.namn': 'event_name',
   'event.tid': 'event_when',
-  'event.plats': 'event_location'
+  'event.plats': 'event_location',
+  'utvärdering.länk': 'survey_url',
+  'utvardering.lank': 'survey_url'
 };
 
 export const EMAIL_MERGE_FIELDS: Array<{ token: string; label: string }> = [
@@ -574,6 +640,7 @@ export const EMAIL_MERGE_FIELDS: Array<{ token: string; label: string }> = [
   { token: '{{event.namn}}', label: 'Eventets namn' },
   { token: '{{event.tid}}', label: 'Eventets tid' },
   { token: '{{event.plats}}', label: 'Eventets plats' },
+  { token: '{{utvärdering.länk}}', label: 'Länk till kopplad utvärdering (enkät)' },
   { token: '{{avsändare}}', label: 'Avsändarens namn' }
 ];
 
@@ -600,7 +667,8 @@ export const EMAIL_SAMPLE_MERGE: EmailMergeData = {
   sender_name: 'Movexum',
   event_name: 'Frukostträff: Finansiering 2027',
   event_when: '12 november 2026 08:00',
-  event_location: 'Movexum, Gävle'
+  event_location: 'Movexum, Gävle',
+  survey_url: 'https://app.movexum.se/u/exempel'
 };
 
 // ── Mallstrukturer ──────────────────────────────────────────────────────────
@@ -674,9 +742,27 @@ export const EMAIL_TEMPLATES: readonly EmailTemplateStructure[] = [
     ]
   },
   {
+    key: 'confirmed_reminder',
+    name: 'Vi ses snart (anmälda)',
+    summary: 'Påminnelse till dem som tackat ja: tid, plats, biljett med QR-kod och kalenderfil.',
+    category: 'events',
+    design: { accent: 'morkbla', layout: 'card', show_logo: true },
+    needsEvent: true,
+    subject: 'Vi ses snart: {{event.namn}}',
+    preheader: '{{event.tid}} · {{event.plats}} — här är din biljett.',
+    blocks: [
+      H('Vi ses snart, {{förnamn|du}}!'),
+      P('En påminnelse om att du är anmäld till {{event.namn}}. Här är allt du behöver.'),
+      { type: 'event_details' },
+      { type: 'ticket' },
+      P('Kan du inte komma ändå? Ändra ditt svar via biljettlänken så kan platsen gå till någon annan.'),
+      SIGN
+    ]
+  },
+  {
     key: 'thank_you',
-    name: 'Tack efter event',
-    summary: 'Tack för deltagandet med länk till utvärderingen och ett nästa steg.',
+    name: 'Tack och utvärdering',
+    summary: 'Tack för deltagandet med länk till den kopplade utvärderingen — steget efter eventet.',
     category: 'events',
     design: { accent: 'gron', layout: 'plain', show_logo: false },
     needsEvent: false,
@@ -685,7 +771,7 @@ export const EMAIL_TEMPLATES: readonly EmailTemplateStructure[] = [
     blocks: [
       P('Hej {{förnamn|du}},\n\ntack för att du var med på {{event.namn}}! Det var roligt att se så många av er.'),
       P('Vi vill gärna veta vad du tyckte — det tar två minuter och hjälper oss göra nästa träff bättre.'),
-      { type: 'button', label: 'Svara på utvärderingen', url: 'https://', style: 'primary' },
+      { type: 'button', label: 'Svara på utvärderingen', url: '{{utvärdering.länk}}', style: 'primary' },
       SIGN
     ]
   },

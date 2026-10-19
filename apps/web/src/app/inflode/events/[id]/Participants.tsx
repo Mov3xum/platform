@@ -17,7 +17,7 @@ import {
   isEventSignupStage,
   type EventSignupStage
 } from '@platform/shared';
-import { InvitePanel } from '@/components/invitations/InvitePanel';
+import { InviteLauncher } from '@/components/invitations/InviteLauncher';
 import { SignupDeleteButton } from './SignupDeleteButton';
 
 // Deltagarlistan på eventsidan (§ 53.1). Närvaro är det som styr vem som får
@@ -112,20 +112,18 @@ export function Participants({
                   <Icon name="check" size={12} /> Alla närvarande
                 </button>
               )}
-              {inviteOpen && (
-                <button
-                  type="button"
-                  className={`mx-btn mx-sm${inviting ? ' mx-primary' : ''}`}
-                  aria-expanded={inviting}
-                  onClick={() => {
-                    setInviting((v) => !v);
-                    setAdding(false);
-                  }}
-                  title="Bjud in bolag eller kontakter ur kontaktboken"
-                >
-                  <Icon name="send" size={12} /> Bjud in
-                </button>
-              )}
+              <button
+                type="button"
+                className={`mx-btn mx-sm${inviting ? ' mx-primary' : ''}`}
+                aria-expanded={inviting}
+                onClick={() => {
+                  setInviting((v) => !v);
+                  setAdding(false);
+                }}
+                title={inviteOpen ? 'Bjud in, påminn eller skicka biljetter via en kampanj' : 'Tack och utvärdering till de som deltog'}
+              >
+                <Icon name="send" size={12} /> {inviteOpen ? 'Bjud in' : 'Följ upp'}
+              </button>
               <button
                 type="button"
                 className={`mx-btn mx-sm${adding ? '' : ' mx-primary'}`}
@@ -141,11 +139,19 @@ export function Participants({
         }
       />
 
-      {inviting && canEdit && inviteOpen && (
+      {inviting && canEdit && (
         <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--mx-line-soft)', display: 'grid', gap: 8 }}>
-          <InvitePanel eventId={eventId} />
+          <InviteLauncher
+            eventId={eventId}
+            open={inviteOpen}
+            counts={{
+              unanswered: rows.filter((r) => r.stage === 'invited').length,
+              confirmed: rows.filter((r) => ['signup', 'attended', 'meeting', 'application', 'admitted'].includes(r.stage)).length,
+              attended: rows.filter((r) => ['attended', 'meeting', 'application', 'admitted'].includes(r.stage)).length
+            }}
+          />
           <Link href={`/inflode/inbjudningar/${eventId}`} className="mx-t-12 text-link hover:underline">
-            Följ svaren och skicka påminnelser under Marknadsverktyg → Inbjudningar
+            Följ svaren under Marknadsverktyg → Inbjudningar
           </Link>
         </div>
       )}

@@ -3,6 +3,8 @@ import { randomBytes } from 'node:crypto';
 import type PocketBase from 'pocketbase';
 import {
   EMAIL_SAMPLE_MERGE,
+  blocksNeedSignup,
+  eventGroupMatches,
   blocksNeedEvent,
   emailBlockedReason,
   emailReasonText,
@@ -52,7 +54,8 @@ export type DispatchResult =
 
 interface Candidate {
   key: string;
-  kind: 'contact' | 'user' | 'startup';
+  /** `signup` = en rad i eventets deltagarlista som bara har e-post (manuellt tillagd gäst). */
+  kind: 'contact' | 'user' | 'startup' | 'signup';
   email: string | null;
   name: string;
   firstName: string;
@@ -60,9 +63,23 @@ interface Candidate {
   contact?: string;
   user?: string;
   startup?: string;
+  /** Befintlig rad i eventets deltagarlista (när mottagaren kom ur eventgruppen). */
+  signupId?: string;
   reason: InviteReason;
   blocked?: EmailRecipientStatus;
   blockedWhy?: string;
+}
+
+interface SignupRowX {
+  id: string;
+  stage?: string;
+  invite_sent_at?: string;
+  contact?: string;
+  user?: string;
+  startup?: string;
+  email?: string;
+  name?: string;
+  organization?: string;
 }
 
 interface ContactRowX {
@@ -193,6 +210,54 @@ export async function resolveCampaignCandidates(pb: PocketBase, campaign: Campai
     }
   }
 
+  // Eventets deltagarlista som grupp (§ 54.3): samma rader som svaren, närvaron
+  // och målen bygger på. Kontakter/användare berikas ur sina poster (status,
+  // samtycke, avregistrering gäller); en rad med bara e-post blir mottagare
+  // ändå (`e:<signup>`), så en manuellt tillagd gäst aldrig faller bort.
+  if (campaign.audience.event_group && campaign.event) {
+    const rows = await pb.collection('event_signups').getFullList<SignupRowX>({
+      filter: pb.filter('tenant = {:t} && event = {:e}', { t: campaign.tenant, e: campaign.event }),
+      fields: 'id,stage,invite_sent_at,contact,user,startup,email,name,organization'
+    });
+    const group = campaign.audience.event_group;
+    const inGroup = rows.filter((r) => eventGroupMatches(group, r));
+    const byContact = new Map<string, SignupRowX>();
+    const byUser = new Map<string, SignupRowX>();
+    const emailOnly: SignupRowX[] = [];
+    for (const r of inGroup) {
+      if (r.contact) byContact.set(r.contact, r);
+      else if (r.user) byUser.set(r.user, r);
+      else if (r.email) emailOnly.push(r);
+    }
+    if (byContact.size > 0) {
+      for (const c of await loadContacts(pb, campaign.tenant, [...byContact.keys()])) {
+        const row = byContact.get(c.id)!;
+        out.push({ ...contactCandidate(c, row.startup, row.organization), signupId: row.id });
+      }
+    }
+    if (byUser.size > 0) {
+      for (const u of await loadInviteUsers(pb, campaign.tenant, { ids: [...byUser.keys()] })) {
+        const row = byUser.get(u.id)!;
+        out.push({ ...userCandidate(u, row.startup, row.organization), signupId: row.id });
+      }
+    }
+    for (const r of emailOnly) {
+      const name = (r.name || '').trim() || 'Gäst';
+      out.push({
+        key: `e:${r.id}`,
+        kind: 'signup',
+        email: normalizeEmailAddress(r.email),
+        name,
+        firstName: firstNameOf(name),
+        organization: r.organization || '',
+        ...(r.startup ? { startup: r.startup } : {}),
+        signupId: r.id,
+        reason: r.startup ? 'program' : 'contact',
+        ...(consentOnly ? { blocked: 'suppressed', blockedWhy: 'Utskicket kräver nyhetsbrevssamtycke — gäller bara kontakter' } : {})
+      });
+    }
+  }
+
   // Dubbletter på adress eller samma person via olika vägar: första vinner.
   const seenEmail = new Set<string>();
   const seenKey = new Set<string>();
@@ -230,6 +295,18 @@ async function loadEvent(pb: PocketBase, campaign: CampaignRow): Promise<EventIn
     return ev.tenant === campaign.tenant ? ev : null;
   } catch {
     return null;
+  }
+}
+
+/** Publik länk till kampanjens kopplade utvärdering (§ 47) — tenant-verifierad. */
+async function surveyUrlFor(pb: PocketBase, campaign: CampaignRow, baseUrl: string): Promise<string> {
+  if (!campaign.survey) return '';
+  try {
+    const sv = await pb.collection('surveys').getOne<{ tenant?: string; public_slug?: string }>(campaign.survey, { fields: 'id,tenant,public_slug' });
+    if (sv.tenant !== campaign.tenant || !sv.public_slug) return '';
+    return `${baseUrl}/u/${encodeURIComponent(sv.public_slug)}?utm_source=event`;
+  } catch {
+    return '';
   }
 }
 
@@ -278,13 +355,15 @@ const baseUrlOf = (campaign: CampaignRow, explicit?: string): string => {
 };
 
 /** Kampanjens upplösta länklista (för klickspårningen) — renderas med kampanjnivå-data. */
-function campaignLinks(campaign: CampaignRow, ev: EventInfo | null, senderName: string, orgName: string): string[] {
+function campaignLinks(campaign: CampaignRow, ev: EventInfo | null, senderName: string, orgName: string, surveyUrl: string): string[] {
+  // Samma event-/enkätdata som de riktiga mejlen, så länkindexen stämmer
+  // (en saknad utvärderingslänk tar bort knappen i båda).
   return renderCampaignEmail({
     subject: campaign.subject,
     preheader: campaign.preheader,
     blocks: campaign.blocks,
     design: campaign.design,
-    merge: { ...EMAIL_SAMPLE_MERGE, sender_name: senderName, ...eventMerge(ev) },
+    merge: { ...EMAIL_SAMPLE_MERGE, sender_name: senderName, ...eventMerge(ev), survey_url: surveyUrl },
     links: {},
     reasonText: '',
     orgName
@@ -323,10 +402,13 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
   if (!/^https?:\/\/[^\s/]+$/.test(baseUrl)) return { ok: false, error: 'Ingen giltig adress för länkarna i mejlet (APP_URL saknas).' };
 
   const ev = await loadEvent(pb, campaign);
-  const needsEvent = blocksNeedEvent(campaign.blocks);
+  const needsEvent = blocksNeedEvent(campaign.blocks) || Boolean(campaign.audience.event_group);
   if (needsEvent && !ev) return { ok: false, error: 'Eventet kampanjen gäller finns inte längre.' };
   const wantsRsvp = Boolean(ev) && campaign.blocks.some((b) => b.type === 'rsvp');
+  // Biljett/svarsknappar är personliga: varje mottagare behöver en rad i deltagarlistan.
+  const wantsSignup = Boolean(ev) && blocksNeedSignup(campaign.blocks);
   if (wantsRsvp && ev && !rsvpOpen(ev, new Date(), 'yes')) return { ok: false, error: 'Eventet har redan ägt rum — inbjudningar kan inte skickas.' };
+  const surveyUrl = await surveyUrlFor(pb, campaign, baseUrl);
 
   const orgName = await tenantName(pb, campaign.tenant);
   const sender = await senderFor(pb, campaign, orgName);
@@ -363,7 +445,7 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
       fields: 'id,status,contact,user,startup,signup'
     });
     for (const r of rows) {
-      const key = r.contact ? `c:${r.contact}` : r.user ? `u:${r.user}` : r.startup ? `s:${r.startup}` : '';
+      const key = r.contact ? `c:${r.contact}` : r.user ? `u:${r.user}` : r.startup ? `s:${r.startup}` : r.signup ? `e:${r.signup}` : '';
       if (key) existing.set(key, { id: r.id, status: r.status, signup: r.signup });
     }
   } catch (err) {
@@ -395,6 +477,7 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
           ...(c.contact ? { contact: c.contact } : {}),
           ...(c.user ? { user: c.user } : {}),
           ...(c.startup ? { startup: c.startup } : {}),
+          ...(c.signupId ? { signup: c.signupId } : {}),
           name: c.name.slice(0, 200),
           organization: c.organization.slice(0, 200),
           email_hash: hash,
@@ -409,12 +492,14 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
       console.error('[campaigns] recipient row failed', { status: (err as { status?: number })?.status });
       continue;
     }
-    if (status === 'pending' && c.email) pending.push({ candidate: c, rowId, hash, signupId: prior?.signup });
+    if (status === 'pending' && c.email) pending.push({ candidate: c, rowId, hash, signupId: c.signupId ?? prior?.signup });
     else suppressed++;
   }
 
-  // Inbjudningsrader i eventets deltagarlista (svarsknapparna).
-  if (wantsRsvp && ev) {
+  // Rader i eventets deltagarlista: svarsknappar skapar inbjudna rader för nya
+  // mottagare; biljettblocket länkar BARA till befintliga rader (en biljett
+  // till någon som inte är anmäld vore fel) — utan rad utelämnas knappen.
+  if (wantsSignup && ev) {
     let signups: Array<{ id: string; contact?: string; user?: string; email?: string }> = [];
     try {
       signups = await pb.collection('event_signups').getFullList({
@@ -435,6 +520,7 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
         if (match) signupId = match.id;
       }
       try {
+        if (!signupId && !wantsRsvp) continue;
         if (!signupId) {
           const row = await pb.collection('event_signups').create<{ id: string }>({
             tenant: campaign.tenant,
@@ -463,7 +549,7 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
   }
 
   // Rendering + utskick.
-  const links = campaignLinks(campaign, ev, sender.name, orgName);
+  const links = campaignLinks(campaign, ev, sender.name, orgName, surveyUrl);
   const calendarKey = ev && ev.starts_at ? signCalendarKey(ev.id, secret) : null;
   const messages: OutgoingEmail[] = [];
   const byKey = new Map<string, Pending>();
@@ -477,12 +563,13 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
       preheader: campaign.preheader,
       blocks: campaign.blocks,
       design: campaign.design,
-      merge: { first_name: c.firstName, name: c.name, organization: c.organization, sender_name: sender.name, ...eventMerge(ev) },
+      merge: { first_name: c.firstName, name: c.name, organization: c.organization, sender_name: sender.name, ...eventMerge(ev), survey_url: surveyUrl },
       links: {
         unsubscribe,
         preferences: key ? `${baseUrl}/e/installningar?k=${key}` : null,
         rsvpYes: p.token ? `${baseUrl}/e/svar?t=${p.token}&svar=yes` : null,
         rsvpNo: p.token ? `${baseUrl}/e/svar?t=${p.token}&svar=no` : null,
+        ticket: p.token ? `${baseUrl}/e/svar?t=${p.token}&klart=yes` : null,
         calendar: calendarKey ? `${baseUrl}/api/public/e/kalender?e=${calendarKey}` : null
       },
       reasonText: emailReasonText(c.reason, campaign.category, campaign.consent_mode),
@@ -529,7 +616,7 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
           .collection(CAMPAIGN_RECIPIENTS)
           .update(p.rowId, { status: 'sent', sent_at: sentAt, provider_message_id: (o.id ?? '').slice(0, 100), fail_reason: '' })
           .catch(() => undefined);
-        if (p.signupId) await pb.collection('event_signups').update(p.signupId, { invite_sent_at: sentAt }).catch(() => undefined);
+        if (p.signupId && wantsRsvp) await pb.collection('event_signups').update(p.signupId, { invite_sent_at: sentAt }).catch(() => undefined);
       }
     }
   }
@@ -588,7 +675,14 @@ export async function sendCampaignTest(pb: PocketBase, tenant: string, campaignI
   const orgName = await tenantName(client, tenant);
   const sender = await senderFor(client, campaign, orgName);
   const base = baseUrlOf(campaign, baseUrl);
-  const merge: EmailMergeData = { ...EMAIL_SAMPLE_MERGE, sender_name: sender.name, ...eventMerge(ev) };
+  const realSurvey = await surveyUrlFor(client, campaign, base);
+  const merge: EmailMergeData = {
+    ...EMAIL_SAMPLE_MERGE,
+    sender_name: sender.name,
+    ...eventMerge(ev),
+    // Riktig enkätlänk när kampanjen har en; annars exempel så knappen syns i testet.
+    survey_url: realSurvey || (campaign.survey ? '' : EMAIL_SAMPLE_MERGE.survey_url)
+  };
   const rendered = renderCampaignEmail({
     subject: campaign.subject || campaign.title,
     preheader: campaign.preheader,
@@ -600,6 +694,7 @@ export async function sendCampaignTest(pb: PocketBase, tenant: string, campaignI
       preferences: `${base}/e/installningar?test=1`,
       rsvpYes: ev ? `${base}/e/svar?test=1&svar=yes` : null,
       rsvpNo: ev ? `${base}/e/svar?test=1&svar=no` : null,
+      ticket: ev ? `${base}/e/svar?test=1&klart=yes` : null,
       calendar: ev?.starts_at ? `${base}/api/public/e/kalender?e=${signCalendarKey(ev.id, emailLinkSecret()) ?? ''}` : null
     },
     reasonText: emailReasonText('contact', campaign.category, campaign.consent_mode),

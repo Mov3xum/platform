@@ -4,7 +4,7 @@ import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { resolveLoginBrandingTenant } from '@/lib/login-branding.server';
 import { listUnsubscribeHeaders, resolveReplyTo, resolveSender } from '@/lib/mail-sender';
 import { isEmailConfigured } from '@/lib/email';
-import { escapeEmailHtml } from '@platform/shared';
+import { normalizeEmailBlocks, normalizeEmailDesign, renderCampaignEmail } from '@platform/shared';
 import { sendOne } from './send-batch';
 import { emailLinkSecret, signSubscribeToken, verifySubscribeToken, type SubscribePayload } from './signed-tokens';
 import { isSuppressed } from './suppression';
@@ -57,22 +57,27 @@ export async function startSubscription(input: {
   if (!token) return { ok: false, error: 'Tjänsten är inte konfigurerad (länkhemlighet saknas).' };
   const confirmUrl = `${input.baseUrl.replace(/\/+$/, '')}/e/bekrafta?k=${token}`;
   const from = resolveSender(process.env, 'invite');
-  const html = `<!DOCTYPE html><html lang="sv"><head><meta charset="UTF-8" /><title>Bekräfta din prenumeration</title></head>
-<body style="margin:0;padding:32px 16px;background:#ffffff;font-family:'Nunito Sans',Arial,Helvetica,sans-serif;color:#3f3f3f;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;"><tr><td>
-<h1 style="margin:0 0 12px;font-size:20px;color:#121212;">Bekräfta din prenumeration</h1>
-<p style="margin:0 0 16px;font-size:15px;line-height:1.6;">Hej${name ? ` ${escapeEmailHtml(splitFullName(name).first || name)}` : ''}! Du har bett om att få ${escapeEmailHtml(tenant.name)}s nyhetsbrev. Klicka på knappen för att bekräfta — annars händer ingenting och inga uppgifter sparas.</p>
-<p style="margin:0 0 20px;"><a href="${escapeEmailHtml(confirmUrl)}" style="display:inline-block;background:#002c40;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:12px 22px;border-radius:999px;">Ja, jag vill ha nyhetsbrevet</a></p>
-<p style="margin:0 0 8px;font-size:12px;color:#6b6b6b;">Länken gäller i 48 timmar. Fungerar inte knappen, kopiera adressen: <span style="word-break:break-all;">${escapeEmailHtml(confirmUrl)}</span></p>
-<p style="margin:16px 0 0;font-size:11px;color:#8a8a8a;">Om du inte bett om detta kan du ignorera mejlet. ${escapeEmailHtml(tenant.name)}</p>
-</td></tr></table></body></html>`;
-  const text = [
-    'Bekräfta din prenumeration',
-    `Du har bett om att få ${tenant.name}s nyhetsbrev. Öppna länken för att bekräfta — annars sparas inga uppgifter:`,
-    confirmUrl,
-    'Länken gäller i 48 timmar. Om du inte bett om detta kan du ignorera mejlet.',
-    tenant.name
-  ].join('\n\n');
+  // Samma renderare som alla andra utskick (§ 54): enkelt textmejl, ingen
+  // klickspårning, inga avregistreringslänkar (ingen prenumeration finns än).
+  const rendered = renderCampaignEmail({
+    subject: `Bekräfta din prenumeration på ${tenant.name}s nyhetsbrev`,
+    preheader: 'Ett klick så är du med — annars sparas inga uppgifter.',
+    blocks: normalizeEmailBlocks([
+      { type: 'heading', text: 'Bekräfta din prenumeration' },
+      {
+        type: 'paragraph',
+        text: `Hej {{förnamn|du}}! Du har bett om att få ${tenant.name}s nyhetsbrev. Klicka på knappen för att bekräfta — annars händer ingenting och inga uppgifter sparas.`
+      },
+      { type: 'button', label: 'Ja, jag vill ha nyhetsbrevet', url: confirmUrl, style: 'primary' },
+      { type: 'paragraph', text: `Länken gäller i 48 timmar. Fungerar inte knappen, kopiera adressen: ${confirmUrl}` }
+    ]),
+    design: normalizeEmailDesign({ accent: 'morkbla', layout: 'plain', show_logo: false }),
+    merge: { first_name: name ? splitFullName(name).first || name : '', name },
+    links: {},
+    reasonText: 'Du får det här mejlet eftersom någon bett om nyhetsbrevet med din adress. Om det inte var du kan du ignorera mejlet.',
+    orgName: tenant.name
+  });
+  const { html, text } = rendered;
   const res = await sendOne({
     key: 'subscribe',
     from,

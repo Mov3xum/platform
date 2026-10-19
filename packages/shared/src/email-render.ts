@@ -26,6 +26,8 @@ export interface EmailRenderLinks {
   /** Svarslänkar för `rsvp`-blocket. */
   rsvpYes?: string | null;
   rsvpNo?: string | null;
+  /** Gästens biljett (svarssidan efter ja) för `ticket`-blocket. */
+  ticket?: string | null;
   /** "Lägg i kalendern" (.ics). */
   calendar?: string | null;
 }
@@ -196,6 +198,16 @@ export function renderCampaignEmail(input: EmailRenderInput): EmailRenderOutput 
           `<p style="margin:0 0 18px;">${button('Jag kommer', input.links.rsvpYes, accent, 'primary')}${button('Jag kan inte', input.links.rsvpNo, accent, 'secondary')}</p>`
         );
         addText(`Jag kommer: ${input.links.rsvpYes}\nJag kan inte: ${input.links.rsvpNo}`);
+        break;
+      }
+      case 'ticket': {
+        if (!input.links.ticket) break;
+        htmlParts.push(
+          `<p style="margin:0 0 18px;">${button('Visa din biljett', input.links.ticket, accent, 'primary')}${
+            input.links.calendar ? button('Lägg i kalendern', input.links.calendar, accent, 'secondary') : ''
+          }</p>`
+        );
+        addText(`Visa din biljett: ${input.links.ticket}${input.links.calendar ? `\nLägg i kalendern: ${input.links.calendar}` : ''}`);
         break;
       }
       case 'signature': {

@@ -1,20 +1,23 @@
 import 'server-only';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
-import { EMAIL_NOT_CONFIGURED_MESSAGE, isEmailConfigured, sendSurveyInvites } from '@/lib/email';
-import { collectSurveyRecipients, isAttendedStage, isInviteStage } from '@platform/shared';
+import { EMAIL_NOT_CONFIGURED_MESSAGE, isEmailConfigured } from '@/lib/email';
+import { createSystemCampaign } from '@/lib/core/write/email-campaigns';
+import { dispatchCampaign } from '@/lib/email/campaign-dispatch';
+import { isAttendedStage, isInviteStage } from '@platform/shared';
 import { toSurvey, type Survey } from './store';
 
-// Utskick av enkät till eventets deltagare (CLAUDE.md § 47.5). Delad kärna
-// för BÅDE staffs "Skicka nu" och cron-vägen (/api/internal/send-survey).
-// Körs med superuser eftersom cron saknar användarsession; därför verifieras
-// tenant-likhet mellan enkät och event uttryckligen. Deltagarnas e-post läses
-// TRANSIENT (aldrig lagrad på enkäten, aldrig loggad) — bara antal skrivs.
-// Mottagare är de som DELTOG (närvarande eller längre i tratten, § 53.1) —
-// aldrig anmälda som inte kom.
-
+// Utskick av utvärderingen till eventets deltagare (CLAUDE.md § 47.5 / § 54).
+// Delad kärna för BÅDE staffs "Skicka nu" och cron-vägen
+// (/api/internal/send-survey). Sedan konsolideringen 2026-10 är utskicket en
+// KAMPANJ från mallen "Tack och utvärdering" med mottagargruppen "närvarande"
+// — samma renderare, spärrlista, leveranskontroll och statistik som alla
+// andra utskick; kampanjen syns under Marknadsverktyg → Kampanjer. Körs med
+// superuser eftersom cron saknar session; därför verifieras tenant-likhet
+// mellan enkät och event uttryckligen. Mottagare är de som DELTOG
+// (närvarande eller längre i tratten, § 53.1) — aldrig anmälda som inte kom.
 
 export type DispatchResult =
-  | { ok: true; sent: number; failed: number; recipients: number; failReason?: string }
+  | { ok: true; sent: number; failed: number; recipients: number; failReason?: string; campaignPath?: string }
   | { ok: false; error: string };
 
 export async function dispatchSurveyInvites(
@@ -81,8 +84,7 @@ export async function dispatchSurveyInvites(
     // att staff ser orsaken — utvärderingen går aldrig tyst förlorad.
     return { ok: false, error: 'Ingen närvaro är markerad på eventet — markera vilka som deltog först.' };
   }
-  const recipients = collectSurveyRecipients(attended);
-  if (recipients.length === 0) {
+  if (attended.filter((s) => s.email && s.email.includes('@')).length === 0) {
     // Inget att skicka — men markera så cron inte försöker varje timme.
     await pb.collection('surveys').update(survey.id, { send_at: '', sent_at: new Date().toISOString(), sent_count: 0 }).catch(() => undefined);
     return { ok: true, sent: 0, failed: 0, recipients: 0 };
@@ -90,35 +92,36 @@ export async function dispatchSurveyInvites(
 
   // Utan e-posttjänst: fel (cron försöker igen nästa timme), aldrig ett kast.
   if (!isEmailConfigured()) return { ok: false, error: EMAIL_NOT_CONFIGURED_MESSAGE };
-  const url = `${baseUrl}/u/${encodeURIComponent(survey.public_slug)}?utm_source=event`;
-  let sent: number;
-  let failed: number;
-  let failReason: string | undefined;
-  try {
-    ({ sent, failed, firstError: failReason } = await sendSurveyInvites(recipients, {
-      title: survey.welcome_title || survey.name,
-      url,
-      eventName,
-      intro: survey.welcome_body || undefined
-    }));
-  } catch (err) {
-    console.error('[surveys] send failed', err instanceof Error ? err.message : 'unknown');
-    return { ok: false, error: 'Enkäten kunde inte skickas. Försök igen.' };
-  }
+
+  const created = await createSystemCampaign(pb, {
+    tenant: survey.tenant,
+    templateKey: 'thank_you',
+    eventId: survey.link_id,
+    eventGroup: 'attended',
+    surveyId: survey.id,
+    title: `Tack och utvärdering: ${eventName || survey.name}`.slice(0, 120)
+  });
+  if (!created.ok) return { ok: false, error: created.error };
+  const res = await dispatchCampaign(created.value.id, { baseUrl });
   // Inget mejl gick fram: markera INTE som skickad (cron/knappen kan försöka
   // igen) och säg varför Resend avvisade dem.
-  if (sent === 0 && failed > 0) {
-    return { ok: false, error: `Inga mejl skickades. ${failReason ?? 'Resend avvisade utskicket.'}` };
-  }
+  if (!res.ok) return { ok: false, error: res.error };
 
   try {
     await pb.collection('surveys').update(survey.id, {
       send_at: '',
       sent_at: new Date().toISOString(),
-      sent_count: (survey.sent_count || 0) + sent
+      sent_count: (survey.sent_count || 0) + res.sent
     });
   } catch (err) {
     console.error('[surveys] could not record dispatch', (err as { status?: number })?.status);
   }
-  return { ok: true, sent, failed, recipients: recipients.length, ...(failed > 0 && failReason ? { failReason } : {}) };
+  return {
+    ok: true,
+    sent: res.sent,
+    failed: res.failed,
+    recipients: res.recipients,
+    campaignPath: created.value.path,
+    ...(res.failed > 0 && res.failReason ? { failReason: res.failReason } : {})
+  };
 }
