@@ -15,7 +15,7 @@ import { logAgentAction } from '@/lib/core/write/audit';
 import type { Actor } from '@/lib/core/write/types';
 import { pbStatus } from '@/lib/pb-error';
 import type { ExcellenceAssessment } from './types';
-import { parseAssessmentContext, serializeAssessmentContext, stripTransientNames, type AssessmentContext } from './context';
+import { parseAssessmentContext, serializeAssessmentContext, type AssessmentContext } from './context';
 
 // Historik för Bedömning excellens på bolagskortet (CLAUDE.md § 51.6).
 // Varje körning för ett PORTFÖLJBOLAG sparas som en rad i
@@ -139,11 +139,14 @@ export async function getScreeningRun(pb: PocketBase, tenantId: string, id: stri
   }
 }
 
-/** Serialiserat underlag utan verklig huvudmans namn; null om det inte kan tolkas. */
+/**
+ * Serialiserat, verifierat underlag (fält för fält) för lagring; null om det
+ * inte kan tolkas. Ägarbilden lagras med namn (§ 51.11) — aldrig personnummer.
+ */
 export function storableContext(json: string): string | null {
   const ctx = parseAssessmentContext(json);
   if (!ctx) return null;
-  const out = serializeAssessmentContext(stripTransientNames(ctx));
+  const out = serializeAssessmentContext(ctx);
   return out.length <= 1_900_000 ? out : null;
 }
 

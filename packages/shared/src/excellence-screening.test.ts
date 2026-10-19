@@ -1,7 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  classifyOwnerEngagements,
   classifyOwnershipEntry,
+  compareSni,
+  normalizeSniCode,
   deriveGroupCompanies,
   deriveRelatedCompanies,
   describeCompanyAge,
@@ -917,4 +920,108 @@ test('fristående: ett nyregistrerat bolag med tom koncernlista bevisas aldrig f
   );
   assert.equal(overruled.standalone.verdict, 'no');
   assert.match(overruled.standalone.detail, /Holding AB 30 %/);
+});
+
+// ─── Ägarnas andra bolag (§ 51.11) ──────────────────────────────────────────
+
+test('compareSni: samma kod, samma grupp, annan bransch, saknad kod', () => {
+  assert.deepEqual(compareSni([{ code: '62010' }], [{ code: '70220' }, { code: '62.010' }]), { match: 'same', code: '62010' });
+  assert.deepEqual(compareSni([{ code: '62010' }], [{ code: '62020' }]), { match: 'near', code: '620' });
+  assert.deepEqual(compareSni([{ code: '62010' }], [{ code: '47110' }]), { match: 'different' });
+  assert.deepEqual(compareSni([{ code: '62010' }], []), { match: 'unknown' });
+  // "00000" = uppgift saknas hos SCB — räknas inte som kod.
+  assert.deepEqual(compareSni([{ code: '00000' }], [{ code: '00000' }]), { match: 'unknown' });
+  assert.equal(normalizeSniCode('62.010'), '62010');
+  assert.equal(normalizeSniCode('0'), null);
+});
+
+const SNI_SUBJECT = company({
+  orgNr: '5595728790',
+  name: 'Combly AB',
+  basic: { registeredAt: '2026-02-17', bolagStatus: 'aktiv', bolagsform: 'AB', sni: [{ code: '62010', text: 'Dataprogrammering', primary: true }] },
+  ownership: [{ direction: 'owner', owner_kind: 'person', person_name: 'Anna Andersson', pct_min: 75, pct_max: 100, part: 'beneficial_owners' }],
+  groupMembers: [],
+  ownerEngagements: [
+    {
+      person_name: 'Anna Andersson',
+      subject_pct_min: 75,
+      subject_pct_max: 100,
+      status: 'ok',
+      companies: [
+        {
+          org_nr: '5567036271',
+          name: 'Ewell AB',
+          pct_min: 75,
+          pct_max: 100,
+          basic: { registeredAt: '2006-05-10', bolagStatus: 'aktiv', bolagsform: 'Aktiebolag', sni: [{ code: '62010', text: 'Dataprogrammering' }] }
+        },
+        { org_nr: '5560000001', name: 'Bageri AB', pct_min: 50, pct_max: 75, basic: { sni: [{ code: '10710' }] } },
+        { org_nr: '5590000006', name: 'Konsult AB', pct_min: 25, pct_max: 50, basic: { sni: [{ code: '62020' }] } }
+      ]
+    }
+  ]
+});
+
+test('ägarnas andra bolag: samma SNI-kod ⇒ anknutet och prövas — gammalt bolag fäller art. 22', () => {
+  const r = screenExcellence(input({ subject: SNI_SUBJECT }));
+  const ewell = r.companies.find((c) => c.orgNr === '5567036271');
+  assert.ok(ewell, 'Ewell ska räknas in');
+  assert.equal(ewell!.relation, 'linked');
+  assert.equal(ewell!.personLink?.sniMatch, 'same');
+  // Grunddata ur engagemangsuppslaget räcker för grundförutsättningarna.
+  assert.equal(ewell!.conditions.find((c) => c.id === 'age')?.verdict, 'no');
+  assert.equal(r.standalone.verdict, 'no');
+  assert.equal(r.stateAid.outcome, 'de_minimis');
+  // Annan bransch räknas inte; samma SNI-grupp blir oklart.
+  assert.equal(r.companies.some((c) => c.orgNr === '5560000001'), false);
+  assert.equal(r.companies.find((c) => c.orgNr === '5590000006')?.relation, 'uncertain');
+  // Vyn listar alla tre med klassning.
+  const view = r.ownerEngagements?.[0];
+  assert.equal(view?.person_name, 'Anna Andersson');
+  assert.deepEqual(
+    view?.companies.map((c) => [c.org_nr, c.sniMatch, c.relation]),
+    [
+      ['5567036271', 'same', 'linked'],
+      ['5560000001', 'different', 'none'],
+      ['5590000006', 'near', 'uncertain']
+    ]
+  );
+  // Tröskelvärdet räknar med det anknutna bolaget (bokslut saknas ⇒ okänt).
+  assert.ok(r.thresholds.rows.some((row) => row.orgNr === '5567036271' && row.role === 'linked'));
+});
+
+test('ägarnas andra bolag: controllerns bedömning vinner över SNI-koden', () => {
+  const manual = { companies: {}, de_minimis_related: {}, estimates: {}, group_companies: [], person_links: { '5567036271': { verdict: 'not_linked' as const, note: 'Annan marknad' }, '5590000006': { verdict: 'linked' as const } } };
+  const r = screenExcellence(input({ subject: SNI_SUBJECT, manual }));
+  assert.equal(r.companies.some((c) => c.orgNr === '5567036271'), false);
+  const konsult = r.companies.find((c) => c.orgNr === '5590000006');
+  assert.equal(konsult?.relation, 'linked');
+  assert.equal(konsult?.personLink?.manual, true);
+  assert.equal(r.ownerEngagements?.[0].companies.find((c) => c.org_nr === '5567036271')?.relation, 'none');
+});
+
+test('ägarnas andra bolag: inte hämtat ⇒ ingen vy och oförändrad bedömning', () => {
+  const r = screenExcellence(input({ subject: { ...SNI_SUBJECT, ownerEngagements: undefined } }));
+  assert.equal(r.ownerEngagements, undefined);
+  assert.equal(r.companies.length, 1);
+  const refs = deriveGroupCompanies({ ...SNI_SUBJECT, ownerEngagements: undefined }, []);
+  assert.equal(refs.length, 0);
+});
+
+test('classifyOwnerEngagements: startup-bolaget självt hoppas över, saknad SNI ⇒ oklart', () => {
+  const view = classifyOwnerEngagements({
+    orgNr: '5595728790',
+    name: 'Combly AB',
+    basic: { sni: [{ code: '62010' }] },
+    ownerEngagements: [
+      {
+        person_name: 'Bo',
+        status: 'ok',
+        companies: [{ org_nr: '5595728790', name: 'Combly AB' }, { org_nr: '5567036271', name: 'Ewell AB', capital_pct: 60 }]
+      }
+    ]
+  });
+  assert.equal(view?.[0].companies.length, 1);
+  assert.equal(view?.[0].companies[0].sniMatch, 'unknown');
+  assert.equal(view?.[0].companies[0].relation, 'uncertain');
 });

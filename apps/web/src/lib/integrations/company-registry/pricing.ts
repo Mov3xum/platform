@@ -102,13 +102,19 @@ export const REGISTRY_PROVIDER_PRICING: Readonly<Record<string, RegistryProvider
       basic: 10,
       financials: 35,
       group_structure: 150,
-      beneficial_owners: 50
+      beneficial_owners: 50,
+      // Verklig huvudman per PERSON (kalkylatorns rad "Verklig Huvudman 2.1 –
+      // Person") — ett anrop per huvudman; grunddata (10) per hittat bolag
+      // debiteras som `basic` och läggs på i efterhand (`addRegistryCalls`).
+      owner_engagements: 50
     },
     productNames: {
       basic: 'Företagsinformation (2.0) / Company Information — se-company-overview',
       financials: 'Finansiell Information (2.1) / Financial Information — se-company-economy-overview, /extended (flera år inkl. utdelning; kontrollera att /extended prissätts som raden)',
       group_structure: 'Ägarstruktur (1.0) / Group Structure — se-company-group-structure',
-      beneficial_owners: 'Verklig Huvudman (2.1) / Beneficial Owner — se-beneficialowner (kalkylatorns rad "– Person"; bolagsuppslaget antas ha samma pris)'
+      beneficial_owners: 'Verklig Huvudman (2.1) / Beneficial Owner — se-beneficialowner (kalkylatorns rad "– Person"; bolagsuppslaget antas ha samma pris)',
+      owner_engagements:
+        'Verklig Huvudman (2.1) – Person / Beneficial Owner per person — se-beneficialowner /person/{personnummer}, ett anrop per huvudman; plus Företagsinformation (2.0) per hittat bolag (SNI-kod)'
     },
     sourceLabel:
       'Roarings priskalkylator (credits per anrop; 245 credits = 49,00 kr exkl. moms för de fyra delarna) och helpcentret "How does your credits system work?"',
@@ -327,6 +333,44 @@ export function estimateRegistryCost(
     parts: [...parts],
     calls: parts.length * n,
     credits: creditsOut,
+    sek,
+    unpricedParts,
+    complete: unpricedParts.length === 0 && pricing.sekPerCredit !== null && parts.length > 0
+  };
+}
+
+/**
+ * Lägger FAKTISKA extra anrop på en uppskattning — delar vars antal anrop
+ * inte är "ett per bolag" (ägarnas andra bolag: ett anrop per huvudman +
+ * grunddata per hittat bolag, § 51.11). `counts` = antal anrop per del
+ * UTÖVER det som redan ingår i `est`. Delar utan pris gör summan till en
+ * nedre gräns, som i `estimateRegistryCost`.
+ */
+export function addRegistryCalls(
+  est: RegistryCostEstimate,
+  pricing: RegistryPricing,
+  counts: Partial<Record<RegistryPartId, number>>
+): RegistryCostEstimate {
+  const parts = [...est.parts];
+  const unpricedParts = [...est.unpricedParts];
+  let calls = est.calls;
+  let credits = est.credits;
+  for (const part of REGISTRY_PART_IDS) {
+    const n = Math.max(0, Math.floor(counts[part] ?? 0));
+    if (n === 0) continue;
+    if (!parts.includes(part)) parts.push(part);
+    calls += n;
+    const c = pricing.creditsPerPart[part];
+    if (c === undefined) {
+      if (!unpricedParts.includes(part)) unpricedParts.push(part);
+    } else credits = (credits ?? 0) + c * n;
+  }
+  const sek = credits !== null && pricing.sekPerCredit !== null ? credits * pricing.sekPerCredit : null;
+  return {
+    companies: est.companies,
+    parts,
+    calls,
+    credits,
     sek,
     unpricedParts,
     complete: unpricedParts.length === 0 && pricing.sekPerCredit !== null && parts.length > 0

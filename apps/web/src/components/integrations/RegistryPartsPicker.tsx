@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   REGISTRY_PART_META,
+  toggleRegistryPart,
   type RegistryPartId
 } from '@/lib/integrations/company-registry/parts';
 import {
@@ -62,10 +63,8 @@ export function useRegistryPartSelection(providerSlug: string, supported: Regist
   );
 
   const toggle = useCallback(
-    (id: RegistryPartId) => {
-      const has = selected.includes(id);
-      persist(supported.filter((p) => (p === id ? !has : selected.includes(p))));
-    },
+    // Beroenden följer med (ägarnas andra bolag kräver grunddata + verklig huvudman).
+    (id: RegistryPartId) => persist(toggleRegistryPart(selected, id, supported)),
     [persist, selected, supported]
   );
 
@@ -161,6 +160,7 @@ export function RegistryPartsPicker({
                       }`}
                     >
                       Kostnad per anrop: {registryPartCostLabel(pricing, id)}
+                      {meta.costUnit ? ` ${meta.costUnit}` : ''}
                     </span>
                   )}
                 </span>

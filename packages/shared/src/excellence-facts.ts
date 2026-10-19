@@ -118,6 +118,24 @@ export interface ScreeningManualFacts {
    * uppslagsloopen följer deras egen koncern vidare (§ 51.8).
    */
   group_companies: ManualGroupCompanyFact[];
+  /**
+   * Controllerns bedömning av bolag som en ÄGARE (fysisk person) också äger
+   * — "Ägarnas andra bolag" (§ 51.11). Motorn klassar dem på SNI-kod (samma
+   * kod ⇒ anknutet via fysisk person, bilaga I art. 3.3 st. 4); här kan
+   * controllern avgöra fallet själv (nyckel = det andra bolagets org-nr):
+   * `linked` = samma eller angränsande marknad och gemensam kontroll,
+   * `not_linked` = annan marknad eller ingen gemensam kontroll.
+   */
+  person_links?: Record<string, PersonLinkFact>;
+}
+
+export const PERSON_LINK_VERDICTS = ['linked', 'not_linked'] as const;
+export type PersonLinkVerdict = (typeof PERSON_LINK_VERDICTS)[number];
+
+export interface PersonLinkFact {
+  verdict: PersonLinkVerdict;
+  /** Motivering (t.ex. "konsultbolag i annan bransch") — personnummer-saneras. */
+  note?: string;
 }
 
 export const MANUAL_GROUP_RELATIONS = ['linked', 'partner'] as const;
@@ -139,6 +157,7 @@ export interface ManualGroupCompanyFact {
 }
 
 export const SCREENING_MAX_GROUP_COMPANIES = 20;
+export const SCREENING_MAX_PERSON_LINKS = 40;
 
 export const SCREENING_NOTE_MAX = 600;
 export const SCREENING_COMMENT_MAX = 2000;
@@ -228,7 +247,7 @@ function cleanCount(v: unknown): number | undefined {
 }
 
 export function normalizeScreeningFacts(raw: unknown): ScreeningManualFacts {
-  const out: ScreeningManualFacts = { companies: {}, de_minimis_related: {}, estimates: {}, group_companies: [] };
+  const out: ScreeningManualFacts = { companies: {}, de_minimis_related: {}, estimates: {}, group_companies: [], person_links: {} };
   if (!raw || typeof raw !== 'object') return out;
   const r = raw as Record<string, unknown>;
 
@@ -338,6 +357,19 @@ export function normalizeScreeningFacts(raw: unknown): ScreeningManualFacts {
     }
   }
 
+  if (r.person_links && typeof r.person_links === 'object') {
+    let n = 0;
+    for (const [key, val] of Object.entries(r.person_links as Record<string, unknown>)) {
+      const org = cleanOrgNr(key);
+      if (!org || isPersonalOrgNrDigits(org) || !val || typeof val !== 'object') continue;
+      const verdict = (val as Record<string, unknown>).verdict;
+      if (!(PERSON_LINK_VERDICTS as readonly unknown[]).includes(verdict)) continue;
+      const note = cleanText((val as Record<string, unknown>).note, SCREENING_NOTE_MAX);
+      out.person_links![org] = note ? { verdict: verdict as PersonLinkVerdict, note } : { verdict: verdict as PersonLinkVerdict };
+      if (++n >= SCREENING_MAX_PERSON_LINKS) break;
+    }
+  }
+
   if (r.irl && typeof r.irl === 'object') {
     const i = r.irl as Record<string, unknown>;
     const levels: Partial<Record<IrlAxis, number>> = {};
@@ -379,6 +411,7 @@ export function isEmptyScreeningFacts(f: ScreeningManualFacts): boolean {
     Object.keys(f.de_minimis_related).length === 0 &&
     Object.keys(f.estimates).length === 0 &&
     f.group_companies.length === 0 &&
+    Object.keys(f.person_links ?? {}).length === 0 &&
     !f.irl
   );
 }
@@ -397,6 +430,7 @@ export function summarizeScreeningFacts(f: ScreeningManualFacts): Record<string,
     estimates: Object.keys(f.estimates).length,
     irl_notes: Object.keys(f.irl?.notes ?? {}).length,
     group_companies: f.group_companies.length,
+    person_links: Object.keys(f.person_links ?? {}).length,
     has_comment: !!f.comment
   };
 }

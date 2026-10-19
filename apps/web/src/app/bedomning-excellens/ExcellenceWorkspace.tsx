@@ -10,8 +10,9 @@ import {
   type ExcellenceAssessmentState
 } from '@/lib/actions/excellence';
 import { RegistryPartsPicker, useRegistryPartSelection } from '@/components/integrations/RegistryPartsPicker';
-import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
+import { syncableParts, type RegistryPartId } from '@/lib/integrations/company-registry/parts';
 import type { RegistryPricing } from '@/lib/integrations/company-registry/pricing';
+import { logRegistryDiagnostics } from '@/lib/integrations/company-registry/console-diagnostics';
 import { AssessmentReport } from './AssessmentReport';
 import { ScreeningRequestComposer } from './ScreeningRequestComposer';
 
@@ -93,6 +94,10 @@ export function ExcellenceWorkspace({
   senderName
 }: Props) {
   const [state, formAction, pending] = useActionState(assessExcellenceAction, initialState);
+  // Ett uppslag som fallerade helt (t.ex. grunddata avvisades) syns även i DevTools-konsolen.
+  useEffect(() => {
+    if (state.error) logRegistryDiagnostics({ title: 'Bedömning excellens', error: state.error });
+  }, [state.error]);
   const canFetch = canLookup && registries.length > 0;
   const caseStartup = initialCase?.startupId && startups.some((s) => s.id === initialCase.startupId) ? initialCase.startupId : undefined;
   const [target, setTarget] = useState<'portfolio' | 'orgnr'>(
@@ -342,7 +347,14 @@ export function ExcellenceWorkspace({
             onUpdated={onUpdated}
             fetchMore={
               current.mode === 'register' && canFetch && provider && current.subject.orgNr
-                ? { providerSlug: provider.slug, providerName: provider.name, parts: provider.parts, endpoints: provider.partEndpoints, pricing: provider.pricing }
+                ? {
+                    providerSlug: provider.slug,
+                    providerName: provider.name,
+                    // Ägarnas andra bolag söks bara för startup-bolaget (§ 51.11).
+                    parts: syncableParts(provider.parts),
+                    endpoints: provider.partEndpoints,
+                    pricing: provider.pricing
+                  }
                 : undefined
             }
           />

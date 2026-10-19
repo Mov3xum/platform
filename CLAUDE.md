@@ -1365,7 +1365,7 @@ och kan renderas av samma UI oavsett leverantör.
 | Brevo     | FR (EU)   | Minimal       | Ingen AI. Endast aggregerade metrics synkas — inga e-postadresser. |
 | Howspace  | FI (EU)   | Begränsad     | AI-insights faller under art. 50 (transparenskrav). Vi synkar bara aggregerad statistik. |
 | Allabolag | SE        | Minimal       | Publik bolagsdata (org-nr, bolagsform, kommun, årsredovisningar). Ingen AI, inga personuppgifter för aktiebolag. För enskild firma exkluderas org-nr från AI-prompts (§ 9.3). **Status: implemented (stub)** — handler-skelettet skriver direkt till `startups`-registerfält och `startup_financials` (idempotent via unique-index `(startup, year)`). Produktion kräver leverantörsval via `MOVEXUM_ALLABOLAG_PROVIDER`-env (`mock`/`bolagsverket`/`roaring`/`creditsafe`); utan satt env returnerar handler ett tydligt fel. |
-| Roaring   | SE (EU)   | Begränsad     | **Implementerad (2026-09, § 11.8).** Grunddata, årsredovisningsposter (omsättning, anställda, **balansomslutning, eget kapital**), koncernstruktur och verklig huvudman. Ingen AI. Verklig huvudman är personuppgifter hos leverantören — vi läser dem transient och lagrar BARA andel/kontrollintervall + kontrollgrund (fast vokabulär) per person, aldrig namn/personnummer/födelsedatum. De anonyma raderna är **pseudonymiserade personuppgifter** (ett fåmansbolag med en ägare på 75–100 % är indirekt identifierbart mot det publika registret), inte "inga personuppgifter" — DPIA-bedömning + DPA med Roaring AB och kontroll att licensen täcker ändamålet (åtkomsten till registret över verkliga huvudmän är begränsad efter EU-domstolens dom C-37/20) krävs före produktion. |
+| Roaring   | SE (EU)   | Begränsad     | **Implementerad (2026-09, § 11.8).** Grunddata (inkl. SNI-koder), årsredovisningsposter (omsättning, anställda, **balansomslutning, eget kapital**), koncernstruktur, verklig huvudman och — bara vid uppslag — ägarnas andra bolag (verklig huvudman per person, § 51.11). Ingen AI. Verklig huvudman är personuppgifter hos leverantören — vi läser dem transient och lagrar BARA andel/kontrollintervall + kontrollgrund (fast vokabulär) per person, aldrig namn/personnummer/födelsedatum. De anonyma raderna är **pseudonymiserade personuppgifter** (ett fåmansbolag med en ägare på 75–100 % är indirekt identifierbart mot det publika registret), inte "inga personuppgifter" — DPIA-bedömning + DPA med Roaring AB och kontroll att licensen täcker ändamålet (åtkomsten till registret över verkliga huvudmän är begränsad efter EU-domstolens dom C-37/20) krävs före produktion. |
 | Bolagsverket | SE (myndighet) | Minimal | **Implementerad (2026-09, § 11.8).** API för värdefulla datamängder (kostnadsfritt, OAuth2): officiellt namn, bolagsform, registreringsdatum, SNI, status, säte. Ingen ägarbild, inga bokslutsposter. Primärkälla för grunddata. |
 | Breakit   | SE        | Minimal       | Provider-stub för framtida Premium-paywall. **Status: stub** — själva morgonagenten (`ai_breakit_morning`) använder den publika RSS-feeden via `web.ts`-whitelisten och behöver ingen credential. Premium-aktivering kräver kommersiellt avtal med Breakit + cookie-/session-stöd i `web.ts`. |
 
@@ -1601,7 +1601,8 @@ org-nr" och "Synka från <leverantör>" på bolagskortet (där knappen först
 öppnar valet; inget anropas förrän det bekräftats). Delarna är
 `basic` (grunddata), `financials` (bokslut inkl. beslutad utdelning, nedan),
 `group_structure` (koncernstruktur) och `beneficial_owners` (verklig
-huvudman); varje del är ett
+huvudman), plus den uppslagsbara `owner_engagements` (ägarnas andra bolag —
+bara Testa mot org-nr/Bedömning excellens, aldrig synk, § 51.11); varje del är ett
 eget API-anrop hos leverantören och endpointen visas vid kryssrutan
 (`partEndpoints`, env-medveten). Källa av sanning: den rena, enhetstestade
 `lib/integrations/company-registry/parts.ts`. Varje provider deklarerar
@@ -1724,14 +1725,15 @@ en synk anropade leverantören för. Speglat i `setup-via-api.mjs`
 (`REQUIRED_APP_FIELDS`); sparningen läser tillbaka raden och varnar vid
 schema-drift (§ 24.4). Ingen ny dataväg, ingen PII; riskklass oförändrad.
 
-**GDPR § 5 / § 9.3.** Fysiska personer i ägarbilden lagras UTAN namn,
-personnummer och födelsedatum — bara `owner_kind='person'` + andel/intervall
-+ kontrollgrund ur en **fast vokabulär**. **Namnet visas ändå på skärmen
-(2026-10-13, § 51.7):** `RegistryOwnershipEntry.person_name` bär huvudmannens
-för-/efternamn TRANSIENT från hämtningen till skärmen ("Testa mot org-nr" och
-Bedömning excellens) så personalen vet vem huvudmannen är; `writer.ts` bygger
-raden utan fältet, så det når aldrig `startup_ownership`, PDF:n, historiken
-eller AI. Personnummer, födelsedatum och adress läses aldrig (`controlBasisCategory`: shares/
+**GDPR § 5 / § 9.3.** Fysiska personer i `startup_ownership` lagras UTAN
+namn, personnummer och födelsedatum — bara `owner_kind='person'` +
+andel/intervall + kontrollgrund ur en **fast vokabulär**. **Namnet följer
+med i uppslag och bedömning (§ 51.7, utökat i § 51.11):**
+`RegistryOwnershipEntry.person_name` bär huvudmannens för-/efternamn till
+"Testa mot org-nr" och Bedömning excellens (skärm, PDF, ärende, körningens
+underlag); `writer.ts` bygger raden utan fältet, så det når aldrig
+`startup_ownership` eller AI. Personnummer används bara inne i Roaring-
+handlern för sökningen av ägarnas andra bolag (§ 51.11) och lagras aldrig. Personnummer, födelsedatum och adress läses aldrig (`controlBasisCategory`: shares/
 votes/board/agreement/other — leverantörens fritext kan bära namn och når
 aldrig databasen). En ägarrad utan giltigt org-nr för **juridisk** person
 (saknat, ogiltigt eller personnummer-derivat = enskild firma) behandlas
@@ -9094,6 +9096,8 @@ kollega) eller till **bolaget**, som båda svarar direkt i systemet:
   rader, fortsatt aldrig `name`/`org_nr`). Personnummer, födelsedatum och
   adress läses aldrig (`normalize.test.ts`). Rättslig grund oförändrad
   (berättigat intresse, § 11.3 — DPA/licens med Roaring krävs).
+  **Ersatt av § 51.11 (2026-10-19):** namnet är inte längre transient i
+  bedömningen — det följer med till PDF:n, ärendet och körningens underlag.
 - **Systerbolag** ingår i koncernkartan sedan § 51.5 (`deriveGroupCompanies`,
   rollen "Systerbolag / annat bolag i koncernen").
 - **Hämta mer per bolag.** Koncernkartan har kolumnen **Hämta mer** i
@@ -9250,8 +9254,110 @@ fanns ingen överblick över vilka bolag som var under bedömning.
   `/aktivitet` med länk till ärendet. Ett klarmarkerat ärende kan öppnas
   och läsas; arbete i det sparas utan att statusen ändras.
 - Riskklass n/a (ingen AI). GDPR § 5: samma uppgifter som körningen redan
-  visade, lagrade utan transienta personnamn; `cascadeDelete` på
-  tenant/startup.
+  visade (ägarbild med namn, § 51.11 — aldrig personnummer);
+  `cascadeDelete` på tenant/startup.
+
+### 51.11 Ägarnas andra bolag & SNI-koder (2026-10-19)
+
+**Behov.** Koncernstrukturen visar bara bolag som hänger ihop via bolag. En
+ägare (fysisk person) kan äga andra bolag utanför koncernen — och verkar de
+på samma marknad som startup-bolaget är de anknutna via personen (bilaga I
+art. 3.3 fjärde stycket: företag med en kontrollrelation genom en fysisk
+person eller personer som agerar gemensamt är anknutna om de verkar på samma
+relevanta marknad eller angränsande marknader). Då ska båda bolagen klara
+kriterierna. Plattformen mäter "samma marknad" med **SNI-koden**.
+
+- **Ny datadel `owner_engagements` — "Ägarnas andra bolag"** (`parts.ts`,
+  `writes: 'none'`, `lookupOnly`, `requires: ['basic','beneficial_owners']`
+  som `parseRegistryParts` och kryssrutorna, `toggleRegistryPart`, lägger
+  till automatiskt). Bara vid uppslag (Testa mot org-nr, Bedömning
+  excellens) — aldrig vid synk till bolagskortet (`syncableParts`; handlern
+  deklarerar den som `lookupOnlyParts`, `handler.parts` är oförändrat).
+  "Hämta mer"/"Lägg till koncernbolag" erbjuder den inte (bara
+  startup-bolagets ägare söks).
+- **Roaring-flödet** (`providers/roaring/handler.ts`,
+  `fetchOwnerEngagements`): ur bolagets verklig huvudman-svar läses varje
+  fysisk huvudmans namn, andel och **personnummer**
+  (`roaringBeneficialOwnerPersons`, kandidatlista `PNR_PATHS`, Luhn-
+  validerat i `normalizePersonalNumber`). Personnumret används ENBART som
+  parameter i anropet `GET /se/beneficialowner/2.1/person/{personnummer}`
+  (env `ROARING_PERSON_ENGAGEMENT_PATH`, kommaseparerad kandidatlista, reserv
+  `/1.0/person`) och lämnar aldrig handlern — inte i `RegistryCompany`, noter,
+  loggar, underlag eller databas (fixturtester). **Formen bekräftad mot
+  Roarings OpenAPI-spec 2026-10-19:** bolagssvarets `person` bär
+  `firstNames[]` (lista), `middleName`, `surName`, `personalNumber`,
+  `coordinationNumber`, `birthDate` (läses aldrig); personsvaret är
+  `records[]` med en post per bolag, `association{companyId, companyName,
+  type}` — **utan andel och kontrollgrund** (personen är verklig huvudman,
+  > 25 % eller kontroll; tabellen visar "verklig huvudman (> 25 %)").
+  Tolkningen är ändå tolerant mot äldre/andra former
+  (`normalizeRoaringPersonEngagements`); enskilda firmor hoppas över. Varje hittat bolag får **grunddata** (overview
+  — SNI, registreringsdatum, status, form). Tak: 8 personer
+  (`ROARING_MAX_ENGAGEMENT_PERSONS`), 25 bolag
+  (`ROARING_MAX_ENGAGEMENT_COMPANIES`). Saknas personnumret i svaret noteras
+  postens FORM (nycklar, aldrig värden) — status `no_id`.
+- **Felsökning mot live (2026-10-19):** varje personuppslag noteras per
+  huvudman med format och utfall ("12 siffror → HTTP 400: … ; 10 siffror →
+  HTTP 200") — formatet i sökvägen är ospecificerat, så ett 400 provas om med
+  det andra formatet (12 ⇄ 10 siffror, `personalNumberVariants`). Roarings
+  eget felbesked (`{ error, message, attributes[] }`) följer med i
+  noteringen via `describeRoaringError` (ren, enhetstestad): attributens
+  VÄRDEN visas aldrig, siffersekvenser och e-post maskeras. Noteringarna
+  syns på sidan ("Svar från … per bolag" / "Noteringar från tolkningen") och
+  loggas som hopfälld grupp i webbläsarens konsol
+  (`company-registry/console-diagnostics.ts`, `[bolagsregister] …`) — samma
+  innehåll som sidan, inget personnummer.
+- **Kostnad:** ett anrop per huvudman (Roaring "Verklig Huvudman 2.1 –
+  Person", 50 credits i listpriset) + grunddata (10) per hittat bolag. Det
+  är inte "ett anrop per bolag", så handlern rapporterar faktiska anrop i
+  `RegistryCompany.extraCalls` och `runRegistryLookup` räknar kostnaden med
+  `addRegistryCalls` (ren, enhetstestad). Kryssrutan visar priset "per
+  huvudman, plus grunddata per hittat bolag" (`REGISTRY_PART_META.costUnit`);
+  prisformuläret har en egen rad (`ROARING_CREDITS_OWNER_ENGAGEMENTS`), men
+  "full hämtning per bolag" räknar bara synkbara delar.
+- **SNI-koder hämtas och visas.** `normalizeRoaringSni` läser huvudsaklig kod
+  (`industryCode`/`industryText`) och ev. listor (`industries[]` m.fl.,
+  objekt eller strängar), släpper "00000". `RegistryCompany.sni` →
+  `ScreeningBasic.sni`; visas per bolag i rapporten (rad under rubriken +
+  kolumn i koncernkartan), i PDF:n och i "Testa mot org-nr". Bara när
+  grunddata hämtades (`restrictToParts`).
+- **Regelmotorn** (`excellence-screening.ts`, rena + enhetstestade
+  `compareSni`/`classifyOwnerEngagements`, lager 4 i `deriveGroupCompanies`):
+  samma SNI-kod (fem siffror) ⇒ **anknutet** — bolaget prövas mot
+  grundförutsättningarna (grunddata ur engagemangsuppslaget räcker; bokslut
+  hämtas automatiskt för anknutna, `partsForRelated`), räknas in i
+  tröskelvärdet och de minimis för "ett enda företag", och gör startup-
+  bolaget icke-fristående. Samma SNI-grupp (tre första siffrorna) eller
+  saknad kod ⇒ **oklart** (fristående blir okänt med "avgör marknaden"),
+  annan bransch ⇒ räknas inte men listas. Andelen i det andra bolaget
+  styr inte klassningen (personer som agerar gemensamt kan ha
+  kontrollrelation även under 50 %); controllern avgör undantagen.
+- **Controllerns bedömning** per bolag: `screening_facts.person_links`
+  (`{ [orgNr]: { verdict: 'linked' | 'not_linked', note } }`,
+  normaliseras i `excellence-facts.ts`, personnummer saneras) vinner alltid
+  över SNI-jämförelsen. Sätts i rapportens sektion **Ägarnas andra bolag**
+  (en tabell per huvudman: bolag, andel, SNI, bransch-jämförelse, bedömning
+  med väljare + motivering) och sparas med "Spara och räkna om".
+- **Namnrestriktionerna borttagna i bedömningen (beslut 2026-10-19,
+  maintainer):** ägarbilden ska gå att läsa. Huvudmännens och koncernlistans
+  fysiska personers namn (`person_name`) följer nu med till rapporten,
+  PDF:n, ärendet (`screening_cases.context`) och körningen på bolagskortet
+  (`startup_screenings.context`) — `stripTransientNames` är borttagen. En
+  nod i koncernlistan som är en fysisk person/enskild firma behåller namnet
+  (aldrig org-nr). **Oförändrat:** personnummer, födelsedatum och adress
+  lagras/visas aldrig; `startup_ownership` (bolagskortets ägarbild) får inga
+  namn (`writer.ts`); AI-kontexten (`buildOwnershipContext`) anonymiserar
+  fortfarande personer; `screening_cases`/`startup_screenings` är
+  denylistade för AI.
+- **GDPR:** ändamål = statsstödskontroll (bilaga I-bedömningen kräver att
+  ägarens övriga bolag prövas); rättslig grund berättigat intresse.
+  Personuppgifterna (namn, vilka bolag en person äger) hämtas på
+  personalens uttryckliga val per bedömning, visas bara för
+  admin/incubator_lead/coach (modulen) och lagras i staff-scopade,
+  AI-denylistade kollektioner. **Före produktion:** DPIA-tillägg för
+  sökning på person (ny behandling — inte i `docs/privacy/` än) och kontroll
+  att Roaring-licensen täcker uppslag av verklig huvudman per person
+  (C-37/20, § 11.3). Riskklass (EU AI Act) n/a — ingen AI.
 
 ### 51.11 En sanning per uppgift — IRL, svar, ärenden och kompletteringar (2026-10-19)
 

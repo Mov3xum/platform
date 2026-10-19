@@ -4,6 +4,7 @@ import { useActionState } from 'react';
 import { saveRegistryPricingAction, type RegistryPricingState } from '@/lib/actions/integrations';
 import {
   REGISTRY_PART_META,
+  syncableParts,
   type RegistryPartId
 } from '@/lib/integrations/company-registry/parts';
 import {
@@ -48,8 +49,11 @@ export function RegistryPricingForm({ tenantIntegrationId, providerSlug, provide
   const [state, formAction, pending] = useActionState(saveRegistryPricingAction, initialState);
   const current = state.pricing ?? pricing;
   const envKeys = registryPricingEnvKeys(providerSlug);
-  const perCompany = estimateRegistryCost(current, parts, 1);
-  const portfolio = portfolioCompanies ? estimateRegistryCost(current, parts, portfolioCompanies) : null;
+  // "Full hämtning" = det som kan synkas till bolagskortet; delar som bara
+  // gäller uppslag (ägarnas andra bolag) prissätts här men ingår inte.
+  const fullParts = syncableParts(parts);
+  const perCompany = estimateRegistryCost(current, fullParts, 1);
+  const portfolio = portfolioCompanies ? estimateRegistryCost(current, fullParts, portfolioCompanies) : null;
   const provider = current.provider;
   const layerOf = (part: RegistryPartId) => current.fieldSources?.credits?.[part];
   const sekLayer = current.fieldSources?.sekPerCredit;
@@ -98,6 +102,7 @@ export function RegistryPricingForm({ tenantIntegrationId, providerSlug, provide
             <label key={part} className="block">
               <span className="text-xs font-semibold uppercase tracking-wider text-foreground-muted">
                 {REGISTRY_PART_META[part].label} — credits per anrop
+                {REGISTRY_PART_META[part].costUnit ? ` (${REGISTRY_PART_META[part].costUnit})` : ''}
               </span>
               <input
                 name={`credits_${part}`}

@@ -9,7 +9,7 @@ import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import { describeRegistryParts, parseRegistryParts, type RegistryPartId } from './parts';
 import { isPersonalOrgNr, isValidOrgNr, normalizeOrgNr } from './orgnr';
 import type { RegistryCompany } from './types';
-import { estimateRegistryCost, formatRegistryCost, type RegistryCostEstimate, type RegistryPricing } from './pricing';
+import { addRegistryCalls, estimateRegistryCost, formatRegistryCost, type RegistryCostEstimate, type RegistryPricing } from './pricing';
 import { resolveRegistryPricing } from './pricing.server';
 
 // Uppslag på ett valfritt bolag hos en ansluten bolagsregister-leverantör
@@ -27,7 +27,7 @@ export type RegistryLookupResult =
       orgNr: string;
       /** Tenantens prislista för leverantören (§ 11.8). */
       pricing: RegistryPricing;
-      /** Uppskattad kostnad för DETTA uppslag: valda delar × 1 bolag. */
+      /** Uppskattad kostnad för DETTA uppslag: valda delar × 1 bolag (+ faktiska anrop för ägarnas andra bolag). */
       cost: RegistryCostEstimate;
     }
   | { ok: false; error: string };
@@ -93,9 +93,11 @@ export async function runRegistryLookup(
   if (!handler || handler.kind !== 'company_registry' || !handler.lookup) {
     return { ok: false, error: 'Leverantören stödjer inte uppslag.' };
   }
+  // Uppslag får även delar som bara gäller uppslag (ägarnas andra bolag, § 51.11).
+  const lookupParts = [...handler.parts, ...(handler.lookupOnlyParts ?? [])];
   const requested = opts.parts
-    ? parseRegistryParts(opts.parts, handler.parts)
-    : readRequestedParts(opts.formData, handler.parts);
+    ? parseRegistryParts(opts.parts, lookupParts)
+    : readRequestedParts(opts.formData, lookupParts);
   if (!requested.ok) return { ok: false, error: requested.error };
 
   const adminResult = await getSuperuserPb();
@@ -130,13 +132,22 @@ export async function runRegistryLookup(
   // debiteras oavsett om svaret blir tomt) — tenantens prislista + env.
   const requestedParts = requested.parts ?? handler.parts;
   const pricing = resolveRegistryPricing(providerSlug, tenantIntegration.pricing);
-  const cost = estimateRegistryCost(pricing, requestedParts, 1);
+  let cost = estimateRegistryCost(pricing, requestedParts, 1);
 
   let company: RegistryCompany;
   try {
     company = await handler.lookup(orgNr, loaded.value, requested.parts);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message.slice(0, 300) : 'Uppslaget misslyckades.' };
+  }
+  // Ägarnas andra bolag är inte "ett anrop per bolag": ett per huvudman +
+  // grunddata per hittat bolag — kostnaden räknas på de FAKTISKA anropen.
+  if (company.extraCalls) {
+    cost = addRegistryCalls(
+      estimateRegistryCost(pricing, requestedParts.filter((p) => p !== 'owner_engagements'), 1),
+      pricing,
+      company.extraCalls
+    );
   }
   // Audit (ISO 27001 A.8.15): PII-fri rad — leverantör, antal och uppskattad
   // kostnad (credits/kr enligt angivna priser), aldrig org-nr.
