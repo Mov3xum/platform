@@ -233,6 +233,10 @@ function irl(v: unknown): ScreeningIrl | null {
     return n === undefined ? null : n;
   };
   const out: ScreeningIrl = { level: lvl(o.level), crl: lvl(o.crl), brl: lvl(o.brl), tmrl: lvl(o.tmrl), srl: lvl(o.srl) };
+  for (const ax of ['trl', 'iprl', 'frl'] as const) {
+    const v = lvl(o[ax]);
+    if (v !== null) out[ax] = v;
+  }
   const at = isoDay(o.assessedAt);
   if (at) out.assessedAt = at;
   return out;

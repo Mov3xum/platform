@@ -1,4 +1,5 @@
 import 'server-only';
+import { createHash } from 'node:crypto';
 import type PocketBase from 'pocketbase';
 import {
   type Role,
@@ -16,6 +17,7 @@ import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { pbStatus } from '@/lib/pb-error';
 import { isRuleDenialStatus } from '@/lib/read-scaling';
 import { hasRole } from '@/lib/rbac';
+import { LockTimeoutError, withDistributedLock } from '@/lib/distributed-lock';
 import { parseAssessmentContext, type AssessmentContext } from './context';
 import { storableContext } from './history.server';
 import type { ExcellenceAssessment } from './types';
@@ -285,10 +287,34 @@ export async function saveAssessmentToCase(
   pb: PocketBase,
   actor: Actor,
   assessment: ExcellenceAssessment,
-  opts: { caseId?: string; create: boolean }
+  opts: {
+    caseId?: string;
+    create: boolean;
+    /** `false`: ärendet räknas om (t.ex. efter en komplettering) — "senast sparad av/när" lämnas orört. */
+    touch?: boolean;
+  }
 ): Promise<SaveCaseResult> {
   const orgNr = assessment.subject.orgNr;
   if (!orgNr) return { ok: 'skip' };
+  // Ett ärende per bolag: välj-eller-skapa sker under ett lås per org-nr, så
+  // två samtidiga körningar (dubbelklick, två flikar, två kollegor) aldrig
+  // skapar två pågående ärenden. Nyckeln bär en hash, aldrig org-numret.
+  const key = `screening_case:${actor.tenant}:${createHash('sha256').update(orgNr).digest('hex').slice(0, 24)}`;
+  try {
+    return await withDistributedLock(key, () => saveAssessmentToCaseLocked(pb, actor, assessment, orgNr, opts), { ttlMs: 15_000, waitMs: 10_000 });
+  } catch (err) {
+    if (err instanceof LockTimeoutError) return { ok: false, error: 'Ärendet sparas av någon annan just nu — försök igen om en stund.' };
+    throw err;
+  }
+}
+
+async function saveAssessmentToCaseLocked(
+  pb: PocketBase,
+  actor: Actor,
+  assessment: ExcellenceAssessment,
+  orgNr: string,
+  opts: { caseId?: string; create: boolean; touch?: boolean }
+): Promise<SaveCaseResult> {
   const viewer = { tenant: actor.tenant, roles: actor.roles };
   const toCandidate = (r: { id: string; org_nr?: string; status?: string } | null): CaseCandidate | null =>
     r && r.org_nr ? { id: r.id, org_nr: r.org_nr, status: normalizeScreeningCaseStatus(r.status) } : null;
@@ -306,14 +332,19 @@ export async function saveAssessmentToCase(
     startup: assessment.subject.startupId ?? '',
     mode: assessment.mode,
     provider: (parsed?.providerSlug || '').slice(0, 60),
-    facts: assessment.facts,
+    // Ett portföljbolags svar bor på bolagskortet (`startups.screening_facts`,
+    // dit även kompletteringarna går) — ärendet bär ingen egen kopia som kan
+    // glida isär. Bara bolag utanför plattformen har svaren i ärendet.
+    facts: assessment.subject.startupId ? null : assessment.facts,
     state_aid_outcome: assessment.result.stateAid.outcome,
     vinnova_outcome: assessment.result.vinnova.outcome,
     excellence_verdict: assessment.result.excellence.verdict,
-    unknown_count: summary.counts.unknown,
-    last_assessed_at: assessment.assessedAt,
-    last_assessed_by: actor.id
+    unknown_count: summary.counts.unknown
   };
+  if (opts.touch !== false || target.kind === 'create') {
+    payload.last_assessed_at = assessment.assessedAt;
+    payload.last_assessed_by = actor.id;
+  }
   // Ett underlag som inte går att lagra ersätter aldrig det förra med tomt.
   if (context) payload.context = context;
   // `file_id`/`file_name` = slutbedömningens PDF och sätts BARA vid

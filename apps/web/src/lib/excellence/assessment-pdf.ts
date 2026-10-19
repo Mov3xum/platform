@@ -511,12 +511,25 @@ export async function buildExcellenceAssessmentPdf(a: ExcellenceAssessment): Pro
         ['TMRL', irl?.tmrl],
         ['SRL', irl?.srl]
       ] as const
-    ).map(([k, v]) => [
-      k,
-      typeof v === 'number' ? String(v) : '–',
-      irl?.notes?.[k.toLowerCase() as 'crl' | 'brl' | 'tmrl' | 'srl'] ??
-        (hasIrlDims ? 'Motiveras av coachen' : 'Ingen readiness-bedömning i plattformen — fylls i av coachen')
-    ]),
+    )
+      .map(([k, v]) => [
+        k,
+        typeof v === 'number' ? String(v) : '–',
+        irl?.notes?.[k.toLowerCase() as 'crl' | 'brl' | 'tmrl' | 'srl'] ??
+          (hasIrlDims ? 'Motiveras av coachen' : 'Ingen readiness-bedömning i plattformen — fylls i av coachen')
+      ])
+      // Övriga KTH-axlar ur bolagskortets bedömning (§ 52.2) när de finns.
+      .concat(
+        (
+          [
+            ['TRL', irl?.trl, 'Teknik'],
+            ['IPRL', irl?.iprl, 'IPR'],
+            ['FRL', irl?.frl, 'Finansiering']
+          ] as const
+        )
+          .filter(([, v]) => typeof v === 'number')
+          .map(([k, v, label]) => [k, String(v), `${label} — från bolagskortets KTH-bedömning`])
+      ),
     [1, 0.8, 4]
   );
   eyebrow(ctx, `Ingår ${subjectName} i målgruppen`);

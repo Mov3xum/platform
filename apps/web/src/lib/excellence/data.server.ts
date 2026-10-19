@@ -3,6 +3,7 @@ import type PocketBase from 'pocketbase';
 import {
   DEFAULT_VAXELKURS_SEK_PER_EUR,
   SAMLAT_TAK_EUR,
+  dropShadowedIrlLevels,
   normalizeScreeningFacts,
   samladSumma,
   type ExcellenceScreeningInput,
@@ -22,6 +23,7 @@ import type { RegistryPartId } from '@/lib/integrations/company-registry/parts';
 import { resolveRegistryPricing } from '@/lib/integrations/company-registry/pricing.server';
 import type { RegistryPricing } from '@/lib/integrations/company-registry/pricing';
 import type { RegistryCompany } from '@/lib/integrations/company-registry/types';
+import { loadLatestIrlReading } from '@/lib/irl/data.server';
 
 // Läsvägar för "Bedömning excellens" (CLAUDE.md § 51). Allt läses med
 // användarens token (RLS § 21) — sidan är en ny lins på data personalen redan
@@ -164,6 +166,16 @@ function mapOwnershipRow(r: Record<string, unknown>): ScreeningOwnershipEntry {
   return entry;
 }
 
+/** IRL som bolagskortet redan har är inaktuella kopior i svaren (§ 52.2) — de används och sparas aldrig. */
+function withoutShadowedIrl(facts: ScreeningManualFacts, irl: ScreeningIrl | null): ScreeningManualFacts {
+  if (!facts.irl) return facts;
+  const cleaned = dropShadowedIrlLevels(facts.irl, irl);
+  const next: ScreeningManualFacts = { ...facts };
+  if (cleaned) next.irl = cleaned;
+  else delete next.irl;
+  return next;
+}
+
 /**
  * Bolagets fakta ur plattformen. `null` när bolaget inte finns i tenanten
  * (eller inte får läsas av användaren).
@@ -203,11 +215,8 @@ export async function loadPlatformStartupFacts(
       filter: `startup = "${escFilter(startupId)}"`,
       fields: 'forordning,belopp_eur,beslutsdatum'
     }),
-    pb.collection('startup_readiness_assessments').getList(1, 1, {
-      filter: byStartup,
-      sort: '-assessed_at',
-      fields: 'assessed_at,crl,brl,tmrl,srl'
-    })
+    // IRL ur bolagskortets KTH-bedömning — samma rad som radarn visar (§ 52.2).
+    loadLatestIrlReading(pb, tenantId, startupId)
   ]);
 
   const financials: ScreeningFinancialsYear[] =
@@ -255,16 +264,25 @@ export async function loadPlatformStartupFacts(
   }
 
   let irl: ScreeningIrl | null = { level: num(s.irl_level) ?? null };
-  if (irlRes.status === 'fulfilled' && irlRes.value.items[0]) {
-    const r = irlRes.value.items[0] as Record<string, unknown>;
+  if (irlRes.status === 'fulfilled' && irlRes.value) {
+    const r = irlRes.value;
+    // PB lagrar 0 för "ej bedömd" — normaliserat till null i `latestIrlReading`.
+    const notes: NonNullable<ScreeningIrl['notes']> = {};
+    for (const ax of ['crl', 'brl', 'tmrl'] as const) if (r.axisNotes[ax]) notes[ax] = r.axisNotes[ax];
     irl = {
       level: irl.level,
-      crl: num(r.crl) ?? null,
-      brl: num(r.brl) ?? null,
-      tmrl: num(r.tmrl) ?? null,
-      srl: num(r.srl) ?? null,
-      assessedAt: str(r.assessed_at)?.slice(0, 10)
+      crl: r.profile.crl ?? null,
+      brl: r.profile.brl ?? null,
+      tmrl: r.profile.tmrl ?? null,
+      srl: r.srl,
+      trl: r.profile.trl ?? null,
+      iprl: r.profile.iprl ?? null,
+      frl: r.profile.frl ?? null,
+      assessedAt: r.assessedAt
     };
+    if (Object.keys(notes).length > 0) irl.notes = notes;
+  } else if (irlRes.status === 'rejected') {
+    console.error('[excellence] irl read failed', { status: (irlRes.reason as { status?: number } | null)?.status });
   }
 
   return {
@@ -284,7 +302,7 @@ export async function loadPlatformStartupFacts(
     ownership,
     groupStructureSaved,
     beneficialOwnersSaved,
-    facts: normalizeScreeningFacts(s.screening_facts)
+    facts: withoutShadowedIrl(normalizeScreeningFacts(s.screening_facts), irl)
   };
 }
 

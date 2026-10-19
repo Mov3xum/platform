@@ -165,8 +165,12 @@ export interface ScreeningIrl {
   brl?: number | null;
   tmrl?: number | null;
   srl?: number | null;
+  /** Övriga KTH-axlar ur bolagskortets bedömning (§ 52.2) — visas, prövas inte. */
+  trl?: number | null;
+  iprl?: number | null;
+  frl?: number | null;
   assessedAt?: string;
-  /** Motivering (metrics) per axel — manuellt svar. */
+  /** Motivering (metrics) per axel — bolagskortets KTH-bedömning, överstyrd av manuella svar. */
   notes?: Partial<Record<'crl' | 'brl' | 'tmrl' | 'srl', string>>;
   /** Sant när nivåerna sattes manuellt i bedömningen (ingen readiness-rad i plattformen). */
   manualLevels?: boolean;
@@ -1535,24 +1539,29 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
                   text: 'Kräver grundarägande, statsstödsgrund och bedömning av engagemang, innovationshöjd och mognadsnivå.'
                 };
 
-  // IRL — plattformens readiness-rad, annars manuellt satta nivåer; motivering per axel ur manuella svar.
+  // IRL — bolagskortets KTH-bedömning (§ 52.2) per axel; en axel bolagskortet
+  // saknar fylls av manuellt angiven nivå (bolag utanför plattformen, eller
+  // SRL som KTH-bedömningen inte bär). Motivering per axel ur manuella svar.
   let irl: ScreeningIrl | null = input.irl ? { ...input.irl } : null;
   const irlFacts = manual?.irl;
   if (irlFacts?.levels) {
-    const hasPlatformDims = !!irl && [irl.crl, irl.brl, irl.tmrl, irl.srl].some((x) => typeof x === 'number');
-    if (!hasPlatformDims) {
-      irl = {
-        level: irl?.level ?? null,
-        crl: irlFacts.levels.crl ?? null,
-        brl: irlFacts.levels.brl ?? null,
-        tmrl: irlFacts.levels.tmrl ?? null,
-        srl: irlFacts.levels.srl ?? null,
-        manualLevels: true
-      };
-    }
+    const base: ScreeningIrl = irl ?? { level: null };
+    let fromManual = false;
+    const pick = (ax: 'crl' | 'brl' | 'tmrl' | 'srl'): number | null => {
+      if (typeof base[ax] === 'number') return base[ax] as number;
+      const m = irlFacts.levels?.[ax];
+      if (typeof m === 'number') {
+        fromManual = true;
+        return m;
+      }
+      return null;
+    };
+    const next: ScreeningIrl = { ...base, crl: pick('crl'), brl: pick('brl'), tmrl: pick('tmrl'), srl: pick('srl') };
+    if (fromManual) next.manualLevels = true;
+    irl = next;
   }
   if (irlFacts?.notes && Object.keys(irlFacts.notes).length > 0) {
-    irl = { ...(irl ?? { level: null }), notes: irlFacts.notes };
+    irl = { ...(irl ?? { level: null }), notes: { ...(irl?.notes ?? {}), ...irlFacts.notes } };
   }
 
   const excellenceBase: ScreeningCheck = {

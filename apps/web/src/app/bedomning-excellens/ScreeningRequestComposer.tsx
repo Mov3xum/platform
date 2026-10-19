@@ -216,7 +216,8 @@ export function ScreeningRequestComposer({ assessment, coaches, senderName }: Pr
 
       {state.created && (
         <p className={`mt-3 rounded-xl px-3 py-2 text-[12.5px] ${OK_TONE}`}>
-          Förfrågan skickad till {SCREENING_REQUEST_RECIPIENT_LABEL[state.created.recipient].toLowerCase()} ({state.created.items} punkter).{' '}
+          {state.created.existing ? 'Förfrågan finns redan hos ' : 'Förfrågan skickad till '}
+          {SCREENING_REQUEST_RECIPIENT_LABEL[state.created.recipient].toLowerCase()} ({state.created.items} punkter).{' '}
           <Link href={state.created.href} className="font-semibold underline">
             Öppna förfrågan
           </Link>
