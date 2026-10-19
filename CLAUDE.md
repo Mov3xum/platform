@@ -9836,3 +9836,151 @@ på eventsidan ("Bjud in" i deltagarpanelen) väljer staff mottagare i
 - **GDPR § 5:** inga nya personuppgiftsfält; deltagarnas e-post läses fortsatt
   transient vid utskick. `event_signups` når aldrig AI-kontexten. Riskklass
   (EU AI Act): n/a — ingen AI-inferens.
+
+---
+
+## 54. Studenter & talang — matchning mellan studenter och bolag (2026-10)
+
+### 54.1 Översikt
+
+`/talang` (modul `talang`, titel **Studenter & talang**, "Portfölj"-railen;
+staff/observer) kopplar ihop inkubatorbolagens kompetensbehov med studenter.
+Tre parter, tre ytor:
+
+| Part | Yta | Gör |
+| --- | --- | --- |
+| **Bolaget** (länkad `startup_member`, eller staff via Mitt bolag) | Mitt bolag → **Studenter & talang** (`/min-oversikt/talang`, kort på `/min-oversikt`) | Lägger upp **behov** (exjobb, praktik, deltid, anställning, projekt), skickar till granskning, pausar/avslutar, ser intressen, markerar dialog/match/avböjt + utfall, bläddrar bland sökbara studenter **anonymt** och föreslår ett behov |
+| **Movexum** | `/talang` (Behov · Studenter · Matchningar · Studentsidan) + bolagskortet → Team & nätverk → *Studenter & talang* | **Granskar och publicerar** (bolaget kan aldrig publicera själv), skapar behov åt bolag, föreslår studenter ur den deterministiska rankningen, hanterar studentprofiler, delar den publika länken/QR |
+| **Studenten** (privatperson, inget konto) | Publik sida `/s/<tenant-slug>` (tavla · `behov/<id>` · `registrera` · `logga-in` · `jag`) | Registrerar profil med hashtags, bekräftar e-post via magisk länk, söker publicerade behov, svarar på förslag, redigerar/pausar/förlänger/raderar sin profil |
+
+**Grundregler (bindande):**
+- **Ingen AI rankar, filtrerar eller bedömer studenter.** Rekrytering är
+  högrisk enligt EU AI Act bilaga III p. 4; matchningen är därför
+  **deterministisk** (`rankStudentsForNeed`/`rankNeedsForStudent`/
+  `scoreTalentPair` i `packages/shared/src/talent.ts`, enhetstestad):
+  hashtag-träff viktad med nivå (× `COMPETENCE_LEVEL_WEIGHT`), typ av
+  uppdrag, period, plats/distans — med läsbara skäl per rad. Människor
+  beslutar: Movexum/bolaget föreslår, studenten avgör. `student_profiles`
+  och `talent_interests` är **denylistade** för chattens `query_collection`
+  (`lib/ai/redaction.ts`); `talent_needs` (bolagens annonser) är läsbara.
+- **Bolaget ser studenten anonymt tills studenten själv tar kontakt.**
+  `anonymizeStudent` (lärosäte/program/nivå/hashtags/söker/tillgänglig/
+  ort/om mig — aldrig namn, e-post, LinkedIn). Namn + kontakt visas för
+  ETT bolag först när intresset är `new`/`dialogue`/`matched`
+  (`interestRevealsContact`), dvs. när studenten sökt eller tackat ja.
+- **Movexum granskar före publicering.** `canTransitionNeed`: bolaget går
+  `draft → pending_review → (paused|closed)`; bara staff sätter `published`
+  (RLS låser dessutom `status = "published"`, `published_at`, `reviewed_by`,
+  `review_note` för medlemmar). En textändring på ett publicerat behov går
+  tillbaka till granskning.
+- **Samma hashtag-vokabulär som personalens kompetensprofil** (§ 29.7,
+  `competence_tags` + seed, `TagPicker` i `components/talent/`). Studentens
+  fritext normaliseras till slug; personnummer-mönster avvisas.
+
+### 54.2 Datamodell (migration 1700000201)
+
+- **`talent_needs`**: `tenant`, `startup` (cascade), `title`, `kind`
+  (`exjobb|praktik|deltid|anstallning|projekt` — MÅSTE spegla
+  `TALENT_NEED_KINDS`), `description` (≤ 5000), `tags` (json, slugs ≤ 12),
+  `scope`, `starts_at`/`ends_at`, `compensation`, `compensation_note`,
+  `location`, `work_mode`, `supervisor`, `deadline`, `status`
+  (`draft|pending_review|published|paused|closed`), `anonymous` (dölj
+  bolagsnamnet publikt), `contact_user`, `review_note`, `published_at`,
+  `reviewed_by`, `created_by`. RLS: list/view medlem-scopad på `startup`
+  (§ 21.3); create pinnad (tenant + `created_by`, status bara
+  draft/pending_review, publiceringsfälten `:isset = false`); update staff
+  eller länkad medlem med publiceringsfälten + `startup`/`tenant` låsta;
+  delete staff eller medlem för `draft`.
+- **`student_profiles`**: `tenant`, `first_name`, `last_name`, `email`
+  (unikt per tenant), `university`, `program`, `level`, `graduation_year`,
+  `tags` (json `{tag, level}` ≤ 20), `seeking` (json, kinds),
+  `available_from`, `location`, `remote_ok`, `summary` (≤ 1500),
+  `linkedin_url`, `searchable`, `status` (`pending|active|paused|withdrawn`),
+  `consent_at`, `verified_at`, `last_active_at`, `expires_at`,
+  `access_token_hash` (SHA-256 av engångstoken), `token_expires_at`.
+  RLS: list/view staff/observer-only (bolaget ser BARA kurerade vyer i kod),
+  **create null** (bara servern — studenten har ingen session), update
+  staff, delete ledning. Inga betyg, inga art. 9-fält, inget CV (YAGNI +
+  dataminimering).
+- **`talent_interests`**: `tenant`, `need` (cascade), `student` (cascade),
+  `startup` (denormaliserat för RLS, alltid = need.startup), `status`
+  (`proposed|new|dialogue|matched|declined|withdrawn`), `initiated_by`
+  (`student|company|staff`), `message` (studentens hälsning ≤ 1000),
+  `company_note` (intern), `outcome` (`thesis_completed|
+  internship_completed|hired|not_completed`), `outcome_note`, `outcome_at`,
+  `responded_at`, `status_changed_at`, `changed_by`, `created_by`. Unikt
+  index `(need, student)`. RLS: list/view medlem-scopad; **create null**
+  (servern — publika routen eller skrivlagret efter verifiering); update
+  staff eller länkad medlem med identitetsfält + `message` låsta; delete
+  ledning.
+- Migration **1700000202** backfillar `talang` i `users.enabled_modules`
+  (§ 36.3-läxan). Allt speglas i `setup-via-api.mjs` (defs +
+  `FORCE_CREATE_RULES` för `talent_needs`) och asserteras i
+  `verify-baseline.mjs` (must-exist, `MUST_SCOPE_TO_MEMBER`,
+  `MUST_BE_STAFF_OR_OBSERVER`, `MUST_BE_SERVER_CREATE_ONLY`, AI-denylist).
+
+### 54.3 Flöden och kritiska filer
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/talent.ts` (+ `.test.ts`) | Vokabulär, validering (`validateTalentNeedInput`, `validateStudentProfileInput`), statusmaskiner (`canTransitionNeed`, `canTransitionInterest`), rankning, anonymisering, gallring |
+| `apps/web/src/lib/talent/data.ts` | Enda läsvägen (RLS) + kurerade superuser-vyer för bolaget (`listSearchableStudentsForStartup`, `listInterestsForStartup`) |
+| `apps/web/src/lib/core/write/talent.ts` | Skrivlager för bolag/Movexum: behov (skapa/redigera/status/radera), förslag till student, intressestatus + utfall, studentstatus/radering — RBAC, tenant, audit, notiser |
+| `apps/web/src/lib/talent/students.server.ts` | Studentens egna skrivningar (registrera, logga in, växla token, uppdatera, pausa/förläng/radera, söka, svara) — superuser EFTER tenant + sessionsprofil |
+| `apps/web/src/lib/talent/public.ts` | Tenant ur slug (superuser), publik projektion av behov (`toPublicNeed` — aldrig interna fält), vokabulär, sessionsprofil |
+| `apps/web/src/lib/talent/student-session.ts` (+ `.test.ts`) | Ren HMAC-modul: engångstoken + hash, signerad sessionscookie `mx_student` |
+| `apps/web/src/lib/talent/maintenance.ts` | Gallring (utgånget samtycke, obekräftade > 7 d) — lazy när Movexum öppnar studentlistan |
+| `apps/web/src/lib/actions/talent.ts` | Tunna server actions (grind: staff via modulen eller länkad medlem) |
+| `apps/web/src/app/api/public/s/[tenant]/{register,login,session,interest,profile}` | Studentens publika routes (rate-limit per IP, tenant ur slug, session ur cookie) |
+| `apps/web/src/app/s/[tenant]/**`, `components/talent/*` | Publik studentsida (mx-compass-språket), bolagets och Movexums UI |
+
+**Studentens session.** Registrering skapar profilen som `pending` och
+mejlar en magisk länk (`/s/<slug>/jag?t=<token>`); sidan visar BARA en knapp
+som POST:ar tokenen till `/api/public/s/<slug>/session` (en mejlskanner
+loggar aldrig in åt studenten, § 53.5-mönstret). Tokenen är 32 slumpbytes,
+bara hashen lagras, 30 min giltighet, förbrukas vid användning; cookien är
+HMAC-signerad (`MOVEXUM_STUDENT_SESSION_SECRET`, annars
+`MOVEXUM_INTEGRATION_KEY`), httpOnly/SameSite=Lax/Secure över https, 30
+dagar — inget lagras server-side. Registrering/inloggning svarar alltid
+"om adressen finns har vi skickat en länk" (ingen uppräkning). `/s/`,
+`/api/public/s/` är publika i middleware och renderas utan AppShell.
+
+**Notiser (§ 50):** `talent_need_review` (ledning + bolagets coacher när ett
+behov skickas in), `talent_need_published` (bolagets medlemmar när Movexum
+publicerar/pausar/skickar tillbaka), `talent_interest` (bolaget när en
+student söker), `talent_student_response` (bolaget + den som föreslog när
+studenten tackar ja/nej eller drar tillbaka). Studenten får mejl (Resend,
+`sendStudentEmail`) vid förslag och vid match/avböjt — aldrig vid interna
+statusbyten.
+
+**Spår i plattformen:** varje mutation av bolag/Movexum auditeras PII-fritt
+i `agent_actions` (behovets rubrik/typ/status, antal — aldrig studentens
+namn/e-post/meddelande) och mappas i `feed/agent-log.ts`; en match skriver
+en `activities`-rad på bolagskortet ("Matchad med student: <behov>") utan
+studentens namn. Metrikregistret (§ 41) får `talent_matches` (periodiskt)
+och `talent_needs_published` — kan kopplas som indikator i Mål & VP (§ 42).
+
+### 54.4 Regelefterlevnad
+
+- **GDPR:** studenten är en privatperson — rättslig grund **samtycke**
+  (kryssruta, `consent_at`, återkalleligt på egen sida); samtycket gäller
+  ett år (`STUDENT_PROFILE_RETENTION_DAYS`), profilen gallras automatiskt
+  därefter om studenten inte förlänger; obekräftade registreringar gallras
+  efter 7 dagar; "Ta bort min profil" raderar hårt (intressen kaskadraderas,
+  art. 17). Fritext personnummer-saneras och cappas (`cleanTalentText`).
+  DPIA: `docs/privacy/dpia-talent-matching.md` — **godkännande av
+  maintainer krävs före produktion**.
+- **EU AI Act:** riskklass n/a för matchningsmotorn (deterministisk, ingen
+  inferens). Bygg ALDRIG "AI föreslår topp 5 studenter" eller AI-
+  sammanfattning av studentprofiler utan ny DPIA + juridisk bedömning mot
+  bilaga III (högrisk).
+- **§ 21/ISO 27001:** RLS enligt ovan; skrivlagret verifierar bolags-
+  tillhörighet (`access.linkedStartups`) och roll innan `writeWithFallback`;
+  intressen skapas bara av servern. Känd begränsning: `talent_needs.createRule`
+  kan inte joina bolagstillhörighet (§ 21.3) — en medlem kan via direkt-API
+  skapa ett utkast för ett annat bolag i samma tenant; det syns bara för det
+  bolaget + Movexum och publiceras aldrig utan granskning.
+- **Inte byggt (medvetet):** CV-uppladdning, betyg, lärosätesportal,
+  påminnelsemejl inför gallring (studenten förlänger själv på sin sida),
+  chatt-verktyg för agenten, uppföljningsregler (§ 40-adapter) och
+  utvärderingsenkät efter avslutat uppdrag — nästa steg om behovet visar sig.

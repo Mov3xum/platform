@@ -43,6 +43,8 @@ test('denylist håller ute auth-, credential- och privat-innehåll-kollektioner'
     'startup_screenings', // statsstödsbedömningar på bolagskortet (§51.6)
     'screening_requests', // begäran om komplettering med grundaruppgifter (§51.6)
     'screening_cases', // ärenden i Bedömning excellens — underlag + manuella svar (§51.10)
+    'student_profiles', // studenter = privatpersoner: namn, e-post, fritext (§54)
+    'talent_interests', // intresseanmälningar med meddelanden (§54)
     'agent_memory' // tvärsessions-minne (§16.4)
   ]) {
     assert.equal(isDeniedCollection(name), true, `${name} ska vara denylistad`);

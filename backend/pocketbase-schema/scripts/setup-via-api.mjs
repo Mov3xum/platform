@@ -4548,6 +4548,143 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_LEAD_EACH} || @request.auth.id = created_by)`
 });
 
+// Migration 1700000201 (§ 54): Studenter & talang — behov (talent_needs),
+// studentprofiler (student_profiles) och intressen (talent_interests).
+// Behov + intressen medlem-scopade på startup; studentprofiler staff/observer-
+// only (bolaget ser dem bara anonymiserat via kod). student_profiles och
+// talent_interests skapas BARA av servern (createRule null). Båda denylistade
+// för AI. Fältlistorna MÅSTE spegla packages/shared/src/talent.ts.
+{
+  const MEMBER_SCOPED = `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || @request.auth.linked_startups:each ?= startup)`;
+  const LINKED_MEMBER = '(@request.auth.roles:each ?= "startup_member" && @request.auth.linked_startups:each ?= startup)';
+  const unset = (fields) => fields.map((f) => `@request.body.${f}:isset = false`).join(' && ');
+  const user = (name) => ({ name, type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 });
+  await ensureCollection({
+    id: 'talent_needs_collection',
+    name: 'talent_needs',
+    type: 'base',
+    fields: [
+      { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+      { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+      { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+      { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+      { name: 'title', type: 'text', required: true, min: 3, max: 120 },
+      { name: 'kind', type: 'select', required: true, maxSelect: 1, values: ['exjobb', 'praktik', 'deltid', 'anstallning', 'projekt'] },
+      { name: 'description', type: 'text', required: false, max: 5000 },
+      { name: 'tags', type: 'json', required: false, maxSize: 4000 },
+      { name: 'scope', type: 'text', required: false, max: 160 },
+      { name: 'starts_at', type: 'date', required: false },
+      { name: 'ends_at', type: 'date', required: false },
+      { name: 'compensation', type: 'select', required: false, maxSelect: 1, values: ['unpaid', 'paid', 'negotiable'] },
+      { name: 'compensation_note', type: 'text', required: false, max: 200 },
+      { name: 'location', type: 'text', required: false, max: 120 },
+      { name: 'work_mode', type: 'select', required: false, maxSelect: 1, values: ['onsite', 'hybrid', 'remote'] },
+      { name: 'supervisor', type: 'bool', required: false },
+      { name: 'deadline', type: 'date', required: false },
+      { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['draft', 'pending_review', 'published', 'paused', 'closed'] },
+      { name: 'anonymous', type: 'bool', required: false },
+      user('contact_user'),
+      { name: 'review_note', type: 'text', required: false, max: 1000 },
+      { name: 'published_at', type: 'date', required: false },
+      user('reviewed_by'),
+      user('created_by')
+    ],
+    indexes: [
+      'CREATE INDEX idx_talent_needs_tenant_status ON talent_needs (tenant, status)',
+      'CREATE INDEX idx_talent_needs_startup ON talent_needs (startup)'
+    ],
+    listRule: MEMBER_SCOPED,
+    viewRule: MEMBER_SCOPED,
+    createRule:
+      `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id` +
+      ` && (@request.body.status:isset = false || @request.body.status = "draft" || @request.body.status = "pending_review")` +
+      ` && ${unset(['published_at', 'reviewed_by', 'review_note'])}`,
+    updateRule:
+      `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_EACH} || (${LINKED_MEMBER} && @request.body.status != "published"` +
+      ` && ${unset(['published_at', 'reviewed_by', 'review_note', 'startup', 'tenant'])}))`,
+    deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_EACH} || (${LINKED_MEMBER} && status = "draft"))`
+  });
+  await ensureCollection({
+    id: 'student_profiles_collection',
+    name: 'student_profiles',
+    type: 'base',
+    fields: [
+      { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+      { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+      { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+      { name: 'first_name', type: 'text', required: true, min: 1, max: 80 },
+      { name: 'last_name', type: 'text', required: false, max: 80 },
+      { name: 'email', type: 'email', required: true },
+      { name: 'university', type: 'text', required: false, max: 120 },
+      { name: 'program', type: 'text', required: false, max: 160 },
+      { name: 'level', type: 'select', required: false, maxSelect: 1, values: ['kandidat', 'master', 'yrkeshogskola', 'doktorand', 'annan'] },
+      { name: 'graduation_year', type: 'number', required: false, min: 2000, max: 2100, onlyInt: true },
+      { name: 'tags', type: 'json', required: false, maxSize: 6000 },
+      { name: 'seeking', type: 'json', required: false, maxSize: 500 },
+      { name: 'available_from', type: 'date', required: false },
+      { name: 'location', type: 'text', required: false, max: 120 },
+      { name: 'remote_ok', type: 'bool', required: false },
+      { name: 'summary', type: 'text', required: false, max: 1500 },
+      { name: 'linkedin_url', type: 'url', required: false },
+      { name: 'searchable', type: 'bool', required: false },
+      { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['pending', 'active', 'paused', 'withdrawn'] },
+      { name: 'consent_at', type: 'date', required: true },
+      { name: 'verified_at', type: 'date', required: false },
+      { name: 'last_active_at', type: 'date', required: false },
+      { name: 'expires_at', type: 'date', required: true },
+      { name: 'access_token_hash', type: 'text', required: false, max: 64 },
+      { name: 'token_expires_at', type: 'date', required: false }
+    ],
+    indexes: [
+      'CREATE UNIQUE INDEX idx_student_profiles_tenant_email ON student_profiles (tenant, email)',
+      'CREATE INDEX idx_student_profiles_tenant_status ON student_profiles (tenant, status)',
+      'CREATE INDEX idx_student_profiles_token ON student_profiles (access_token_hash)'
+    ],
+    listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+    viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+    createRule: null,
+    updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
+    deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+  });
+  const needsCol = await pb.collections.getOne('talent_needs');
+  const studentsCol = await pb.collections.getOne('student_profiles');
+  await ensureCollection({
+    id: 'talent_interests_collection',
+    name: 'talent_interests',
+    type: 'base',
+    fields: [
+      { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+      { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+      { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+      { name: 'need', type: 'relation', required: true, collectionId: needsCol.id, cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+      { name: 'student', type: 'relation', required: true, collectionId: studentsCol.id, cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+      { name: 'startup', type: 'relation', required: true, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+      { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['proposed', 'new', 'dialogue', 'matched', 'declined', 'withdrawn'] },
+      { name: 'initiated_by', type: 'select', required: true, maxSelect: 1, values: ['student', 'company', 'staff'] },
+      { name: 'message', type: 'text', required: false, max: 1000 },
+      { name: 'company_note', type: 'text', required: false, max: 1000 },
+      { name: 'outcome', type: 'select', required: false, maxSelect: 1, values: ['thesis_completed', 'internship_completed', 'hired', 'not_completed'] },
+      { name: 'outcome_note', type: 'text', required: false, max: 500 },
+      { name: 'outcome_at', type: 'date', required: false },
+      { name: 'responded_at', type: 'date', required: false },
+      { name: 'status_changed_at', type: 'date', required: false },
+      user('changed_by'),
+      user('created_by')
+    ],
+    indexes: [
+      'CREATE UNIQUE INDEX idx_talent_interests_need_student ON talent_interests (need, student)',
+      'CREATE INDEX idx_talent_interests_tenant_status ON talent_interests (tenant, status)',
+      'CREATE INDEX idx_talent_interests_startup ON talent_interests (startup)',
+      'CREATE INDEX idx_talent_interests_student ON talent_interests (student)'
+    ],
+    listRule: MEMBER_SCOPED,
+    viewRule: MEMBER_SCOPED,
+    createRule: null,
+    updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_EACH} || (${LINKED_MEMBER} && ${unset(['need', 'student', 'startup', 'tenant', 'initiated_by', 'message'])}))`,
+    deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+  });
+}
+
 // Migration 1700000186 (§ 50): notifications.kind blir TEXT — ersätter de
 // tidigare select-unionerna (1700000158/1700000169). Kan REST inte byta typ
 // (validation_field_type_change) unionas select-värdena i stället, så nya
@@ -4564,7 +4701,8 @@ await convertSelectFieldToText('notifications', 'kind', {
     'task_assigned', 'due_soon', 'workshop_assigned', 'document_assigned', 'event_invited',
     'agreement_to_sign', 'agreement_signed', 'contact_request', 'contact_decision',
     'support_check_submitted', 'support_check_changes', 'support_check_decision', 'support_check_comment',
-    'feedback_answered', 'feedback_done'
+    'feedback_answered', 'feedback_done', 'screening_request', 'screening_answered',
+    'talent_interest', 'talent_need_review', 'talent_need_published', 'talent_student_response'
   ];
   const col = await pb.collections.getOne('notifications');
   const kindField = (col.fields || []).find((f) => f.name === 'kind');
@@ -5476,6 +5614,13 @@ const FORCE_CREATE_RULES = {
   // Bedömning excellens (§ 51.6, migration 1700000191) — pinnade skapare.
   startup_screenings: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.assessed_by = @request.auth.id`,
   screening_requests: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.requested_by = @request.auth.id`,
+  // Studenter & talang (§ 54, migration 1700000201) — bolagets behov: pinnad
+  // skapare + låsta publiceringsfält. student_profiles/talent_interests: null
+  // (bara servern) — sätts i inline-defs, aldrig här.
+  talent_needs:
+    `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id` +
+    ' && (@request.body.status:isset = false || @request.body.status = "draft" || @request.body.status = "pending_review")' +
+    ' && @request.body.published_at:isset = false && @request.body.reviewed_by:isset = false && @request.body.review_note:isset = false',
   // Ärenden i Bedömning excellens (§ 51.10, migration 1700000200).
   screening_cases: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
   // Stödcheckar & finansieringsprojekt (§ 46, migrationer 1700000161–167) —

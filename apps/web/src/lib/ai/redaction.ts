@@ -101,6 +101,11 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   'screening_requests',
   // Ärenden i Bedömning excellens (§ 51.10): underlag + manuella svar per bolag.
   'screening_cases',
+  // Studenter & talang (§ 54): studentprofiler (namn, e-post, fritext om en
+  // privatperson) och intresseanmälningar (meddelanden). Behoven
+  // (`talent_needs`) är bolagens egna annonser och förblir läsbara.
+  'student_profiles',
+  'talent_interests',
   'agent_memory' // agentens tvärsessions-scratchpad (1700000079)
 ]);
 

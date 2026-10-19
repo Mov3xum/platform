@@ -78,7 +78,10 @@ export default async function RootLayout({
     pathname === '/u' ||
     pathname.startsWith('/u/') ||
     // Svar på inbjudningar (§ 53.5) — likaså fristående.
-    pathname.startsWith('/e/');
+    pathname.startsWith('/e/') ||
+    // Studentsidan (§ 54) — publik, oinloggad yta för studenter.
+    pathname === '/s' ||
+    pathname.startsWith('/s/');
 
   // Inloggningssidan är en fristående, helsides split-screen-yta (bild +
   // formulär) som bär sin egen branding — den ska aldrig visa den utloggade

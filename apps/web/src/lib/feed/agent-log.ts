@@ -1,5 +1,14 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
+import {
+  STUDENT_PROFILE_STATUS_LABELS,
+  TALENT_NEED_STATUS_LABELS,
+  TALENT_OUTCOME_LABELS,
+  isStudentProfileStatus,
+  isTalentNeedStatus,
+  isTalentOutcome
+} from '@platform/shared';
+
 import { escFilter } from '@/lib/pb-filter';
 import { ACTIVITY_OUTCOME_LABELS, isActivityOutcome, isOrgPostKind, orgPostHomePath } from '@platform/shared';
 
@@ -876,6 +885,35 @@ function mapRow(
       };
     }
     // Ärenden i Bedömning excellens (§ 51.10).
+    // Studenter & talang (§ 54) — PII-fritt: rubrik/typ/status, aldrig studentens namn.
+    case 'talent_needs': {
+      const title = str(after.title) || 'utan rubrik';
+      const company = str(after.startup_name);
+      const href = row.record_id ? `/talang/behov/${row.record_id}` : '/talang';
+      if (after.deleted === true) return { title: `Behov mot studenter borttaget: "${title}"`, href: '/talang', icon: 'trash' };
+      if (action === 'create') {
+        return { title: `${company ? `${company}: ` : ''}nytt behov mot studenter "${title}"`, detail: isTalentNeedStatus(after.status) ? TALENT_NEED_STATUS_LABELS[after.status] : undefined, href, icon: 'cap' };
+      }
+      if (row.field === 'status') {
+        return { title: `${company ? `${company}: ` : ''}behovet "${title}" — ${(isTalentNeedStatus(after.status) ? TALENT_NEED_STATUS_LABELS[after.status] : 'status').toLowerCase()}`, href, icon: str(after.status) === 'published' ? 'check' : 'cap' };
+      }
+      return { title: `${company ? `${company}: ` : ''}behovet "${title}" ${changedVerb}`, href, icon: 'cap' };
+    }
+    case 'talent_interests': {
+      const title = str(after.need_title) || 'ett behov';
+      const company = str(after.startup_name);
+      const href = row.record_id ? '/talang/matchningar' : '/talang';
+      if (action === 'create') {
+        return { title: `${company ? `${company}: ` : ''}en student föreslogs för "${title}"`, href, icon: 'send' };
+      }
+      const status = str(after.status);
+      const label = status === 'matched' ? 'matchad med en student' : status === 'dialogue' ? 'dialog med en student' : status === 'declined' ? 'en student avböjdes' : `intresse ${changedVerb}`;
+      return { title: `${company ? `${company}: ` : ''}"${title}" — ${label}`, detail: isTalentOutcome(after.outcome) ? TALENT_OUTCOME_LABELS[after.outcome] : undefined, href, icon: status === 'matched' ? 'check' : 'cap' };
+    }
+    case 'student_profiles': {
+      if (after.deleted === true) return { title: 'En studentprofil togs bort', href: '/talang/studenter', icon: 'trash' };
+      return { title: `En studentprofil — ${(isStudentProfileStatus(after.status) ? STUDENT_PROFILE_STATUS_LABELS[after.status] : 'status').toLowerCase()}`, href: row.record_id ? `/talang/studenter/${row.record_id}` : '/talang/studenter', icon: 'cap' };
+    }
     case 'screening_cases': {
       const name = str(after.subject_name);
       const href = row.record_id ? `/bedomning-excellens?arende=${row.record_id}` : '/bedomning-excellens';

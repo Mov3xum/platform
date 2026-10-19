@@ -15,7 +15,8 @@ function isShellLess(pathname: string): boolean {
     SHELL_LESS_PATHS.includes(pathname) ||
     pathname.startsWith('/m/') ||
     pathname.startsWith('/u/') ||
-    pathname.startsWith('/e/')
+    pathname.startsWith('/e/') ||
+    pathname.startsWith('/s/')
   );
 }
 

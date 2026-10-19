@@ -601,3 +601,72 @@ export async function sendChatSummaryEmail(to: string, fields: ChatSummaryEmailF
     throw new Error(`Kunde inte skicka sammanfattningen (fel ${res.status}).`);
   }
 }
+
+// ── Studenter & talang (§ 54) ───────────────────────────────────────────────
+
+export interface StudentEmailFields {
+  subject: string;
+  eyebrow?: string;
+  heading: string;
+  /** Ren text; radbrytningar bevaras. */
+  intro: string;
+  /** Extra stycken (ren text). */
+  lines?: string[];
+  cta?: { label: string; url: string };
+  footer?: string;
+}
+
+/**
+ * Ett brandat engångsmejl till en student (magisk länk, förslag från ett
+ * bolag, besked om en matchning). Innehållet HTML-escapas; adressen loggas
+ * aldrig. Studenten är en privatperson som själv registrerat sig — mejlet
+ * säger alltid varför hen får det och hur profilen tas bort.
+ */
+export async function sendStudentEmail(to: string, f: StudentEmailFields): Promise<void> {
+  const apiKey = getResendApiKey();
+  const esc = (v: string) =>
+    v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const footer =
+    f.footer ??
+    'Du får det här mejlet eftersom du registrerat en studentprofil hos Movexum. Du kan när som helst pausa eller ta bort profilen på din sida.';
+  const paragraphs = [f.intro, ...(f.lines ?? [])].filter(Boolean);
+  const html = `<!DOCTYPE html>
+<html lang="sv">
+<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>${esc(f.subject)}</title></head>
+<body style="margin:0;padding:0;background:#f2f2f2;font-family:'Nunito Sans','Nunito Sans Variable',system-ui,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f2f2f2;padding:40px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;padding:40px;max-width:560px;">
+        <tr><td style="padding-bottom:24px;"><span style="font-size:22px;font-weight:700;color:#121212;letter-spacing:-0.5px;">movexum</span></td></tr>
+        <tr><td>
+          ${f.eyebrow ? `<p style="margin:0 0 6px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:#6b6b6b;">${esc(f.eyebrow)}</p>` : ''}
+          <h1 style="margin:0 0 12px;font-size:20px;font-weight:700;color:#121212;">${esc(f.heading)}</h1>
+          ${paragraphs.map((p) => `<p style="margin:0 0 12px;font-size:14px;line-height:1.5;color:#3f3f3f;white-space:pre-wrap;">${esc(p)}</p>`).join('')}
+          ${f.cta ? `<a href="${esc(f.cta.url)}" style="display:inline-block;background:#002c40;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:12px 20px;border-radius:999px;margin:8px 0 0;">${esc(f.cta.label)}</a>` : ''}
+          <p style="margin:24px 0 0;font-size:11px;color:#8a8a8a;">${esc(footer)}</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+  const text = [f.heading, ...paragraphs, f.cta ? `${f.cta.label}: ${f.cta.url}` : '', footer, 'Movexum'].filter(Boolean).join('\n\n');
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      from: FROM_EMAIL,
+      to: [to],
+      subject: f.subject,
+      html,
+      text,
+      ...(REPLY_TO ? { reply_to: REPLY_TO } : {}),
+      tags: [{ name: 'category', value: 'talent' }]
+    })
+  });
+  if (!res.ok) {
+    const reason = describeResendError(res.status, await res.text().catch(() => ''), FROM_EMAIL);
+    console.error(`[email] Resend student email error ${res.status}: ${reason}`);
+    throw new Error(reason);
+  }
+}

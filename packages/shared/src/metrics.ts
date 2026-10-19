@@ -29,7 +29,9 @@ export const METRIC_KEYS = [
   'partners_count',
   'workshops_in_progress',
   'my_open_tasks',
-  'women_led_share'
+  'women_led_share',
+  'talent_matches',
+  'talent_needs_published'
 ] as const;
 export type MetricKey = (typeof METRIC_KEYS)[number];
 
@@ -156,6 +158,26 @@ export const METRIC_DEFINITIONS: Record<MetricKey, MetricDefinition> = {
     higherIsBetter: false,
     sensitivity: 'none',
     scope: 'user',
+    periodic: false
+  },
+  talent_matches: {
+    key: 'talent_matches',
+    label: 'Studentmatchningar',
+    description: 'Intressen mellan student och bolag som markerats matchade under perioden (Studenter & talang, § 54).',
+    unit: 'count',
+    higherIsBetter: true,
+    sensitivity: 'none',
+    scope: 'tenant',
+    periodic: true
+  },
+  talent_needs_published: {
+    key: 'talent_needs_published',
+    label: 'Publicerade studentbehov',
+    description: 'Bolagens behov mot studenter (exjobb, praktik, anställning …) som just nu är publicerade.',
+    unit: 'count',
+    higherIsBetter: true,
+    sensitivity: 'none',
+    scope: 'tenant',
     periodic: false
   },
   women_led_share: {

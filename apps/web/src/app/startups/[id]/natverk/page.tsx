@@ -13,6 +13,7 @@ import {
 import { LogMeetingButton } from '../LogMeetingButton';
 import { StartupContactsSection } from '../StartupContactsSection';
 import { StartupMissionsSection } from '../StartupMissionsSection';
+import { StartupTalentSection } from '../StartupTalentSection';
 import { loadStartupPage } from '../_shared/context';
 import { Empty, PillLink, Section, SectionNav, StatusPill, TabPage, formatDate, formatDateTime } from '../_shared/ui';
 
@@ -143,6 +144,7 @@ export default async function StartupNetworkPage({ params }: { params: Promise<{
           ...(flags.isStaffOrObserver ? [{ href: '#kontakter', label: 'Kontakter' }] : []),
           { href: '#moten', label: 'Möten & uppgifter', count: openTasks.length },
           { href: '#team-uppdrag', label: 'Tvärfunktionella team' },
+          { href: '#studenter', label: 'Studenter & talang' },
           { href: '#uppfoljning', label: 'Uppföljning' }
         ]}
       />
@@ -266,6 +268,8 @@ export default async function StartupNetworkPage({ params }: { params: Promise<{
       </Section>
 
       <StartupMissionsSection pb={pb} tenantId={user.tenant} startupId={id} />
+
+      <StartupTalentSection pb={pb} tenantId={user.tenant} startupId={id} isStaff={flags.isStaff} />
 
       <Section id="uppfoljning" title="Uppföljning">
         <FollowUpSurveys
