@@ -124,7 +124,9 @@ export async function computeAssessment(
 export async function loadCaseAssessment(
   pb: PocketBase,
   user: AssessmentViewer,
-  caseId: string
+  caseId: string,
+  /** `final`: slutbedömningen vid klarmarkering — daterad nu och av den som klarmarkerar. */
+  opts: { final?: boolean } = {}
 ): Promise<{ row: ScreeningCaseRow; assessment?: ExcellenceAssessment } | null> {
   const loaded = await loadScreeningCase(pb, { tenant: user.tenant, roles: user.roles }, caseId);
   if (!loaded) return null;
@@ -140,15 +142,19 @@ export async function loadCaseAssessment(
     // Bolaget finns inte längre (eller inte i tenanten) — ingen bolagsmapp, inga sparade svar på bolagskortet.
     ctx = { ...ctx, subject: { ...ctx.subject, startupId: undefined } };
   }
-  const assessment = await computeAssessment(pb, user, ctx, facts, {
+  const assessment = await computeAssessment(
+    pb,
+    user,
+    ctx,
+    facts,
     // Visa när ärendet senast sparades, inte när sidan öppnades.
-    assessedAt: row.last_assessed_at,
-    assessedBy: row.last_assessed_by_name
-  });
+    opts.final ? {} : { assessedAt: row.last_assessed_at, assessedBy: row.last_assessed_by_name }
+  );
   assessment.caseId = row.id;
   assessment.caseStatus = row.status;
-  // Senaste PDF:en ligger i den som körde bedömningens egna Filer (ägaren-bara, § 51.3).
-  if (row.file_id && row.file_name && row.last_assessed_by === user.id) {
+  // Slutbedömningens PDF (skapas vid klarmarkering) ligger i den som
+  // klarmarkerade ärendets egna Filer (ägaren-bara, § 51.3).
+  if (!opts.final && row.status === 'done' && row.file_id && row.file_name && row.completed_by === user.id) {
     assessment.file = { id: row.file_id, filename: row.file_name, href: `/api/files/${row.file_id}`, startupId: ctx.subject.startupId };
   }
   return { row, assessment };

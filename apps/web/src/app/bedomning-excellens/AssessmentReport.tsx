@@ -895,6 +895,16 @@ export function AssessmentReport({ assessment, fetchMore, onUpdated }: Props) {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            {!assessment.file && assessment.caseId && (
+              <a
+                href={`/api/bedomning-excellens/${assessment.caseId}/pdf`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center rounded-full border border-strong px-3.5 py-1.5 text-[12.5px] font-semibold text-foreground hover:bg-canvas-subtle"
+              >
+                Förhandsgranska PDF
+              </a>
+            )}
             {assessment.file && (
               <a
                 href={assessment.file.href}

@@ -24,10 +24,12 @@ export const dynamic = 'force-dynamic';
 // dess underlag utan nya registeranrop.
 
 const FLASH: Record<string, { tone: 'ok' | 'warn'; text: string }> = {
-  klarmarkerat: { tone: 'ok', text: 'Ärendet är klarmarkerat och har flyttats till Avslutade.' },
+  klarmarkerat: { tone: 'ok', text: 'Ärendet är klarmarkerat — slutbedömningen är sparad som PDF och ärendet har flyttats till Avslutade.' },
   arende: { tone: 'warn', text: 'Ärendet hittades inte.' },
   behorighet: { tone: 'warn', text: 'Du har inte behörighet att ändra ärendet.' },
-  status: { tone: 'warn', text: 'Ärendet kunde inte uppdateras just nu — försök igen.' }
+  status: { tone: 'warn', text: 'Ärendet kunde inte uppdateras just nu — försök igen.' },
+  pdf: { tone: 'warn', text: 'Slutbedömningens PDF kunde inte sparas i Filer — ärendet är inte klarmarkerat. Försök igen.' },
+  underlag: { tone: 'warn', text: 'Ärendet saknar underlag — kör bedömningen innan det klarmarkeras.' }
 };
 
 function Flash({ code }: { code?: string }) {

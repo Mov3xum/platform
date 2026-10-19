@@ -60,6 +60,7 @@ export interface ScreeningCaseRow {
   created: string;
   created_by_name?: string;
   completed_at?: string;
+  completed_by?: string;
   completed_by_name?: string;
   file_id?: string;
   file_name?: string;
@@ -82,6 +83,7 @@ interface RawRow {
   last_assessed_by?: string;
   created?: string;
   completed_at?: string;
+  completed_by?: string;
   file_id?: string;
   file_name?: string;
   context?: unknown;
@@ -99,7 +101,7 @@ const VERDICTS: readonly ScreeningVerdict[] = ['yes', 'no', 'unknown'];
 
 const LIST_FIELDS = [
   'id,tenant,startup,org_nr,subject_name,status,mode,provider,state_aid_outcome,vinnova_outcome,excellence_verdict',
-  'unknown_count,last_assessed_at,last_assessed_by,created,completed_at,file_id,file_name',
+  'unknown_count,last_assessed_at,last_assessed_by,created,completed_at,completed_by,file_id,file_name',
   'expand.last_assessed_by.display_name,expand.created_by.display_name,expand.completed_by.display_name'
 ].join(',');
 const EXPAND = 'last_assessed_by,created_by,completed_by';
@@ -131,6 +133,7 @@ function mapRow(r: RawRow): ScreeningCaseRow | null {
     created: r.created || '',
     created_by_name: nameOf(r.expand?.created_by),
     completed_at: r.completed_at || undefined,
+    completed_by: r.completed_by || undefined,
     completed_by_name: nameOf(r.expand?.completed_by),
     file_id: r.file_id || undefined,
     file_name: r.file_name || undefined
@@ -274,7 +277,7 @@ export type SaveCaseResult =
 
 /**
  * Sparar en bedömning i ett ärende (§ 51.10): underlaget (utan transienta
- * personnamn), de manuella svaren, utfallen och senaste PDF:en. Målet väljs
+ * personnamn), de manuella svaren och utfallen. Målet väljs
  * av `resolveCaseTarget` (uttryckligt ärende → pågående ärende för samma
  * org-nr → nytt). Fail-soft: anroparen visar felet, bedömningen visas ändå.
  */
@@ -313,10 +316,8 @@ export async function saveAssessmentToCase(
   };
   // Ett underlag som inte går att lagra ersätter aldrig det förra med tomt.
   if (context) payload.context = context;
-  if (assessment.file) {
-    payload.file_id = assessment.file.id;
-    payload.file_name = assessment.file.filename.slice(0, 200);
-  }
+  // `file_id`/`file_name` = slutbedömningens PDF och sätts BARA vid
+  // klarmarkering (`setScreeningCaseStatus`) — aldrig av arbetet i ärendet.
 
   try {
     if (target.kind === 'update') {
@@ -359,16 +360,18 @@ export async function setScreeningCaseStatus(
   pb: PocketBase,
   actor: Actor,
   id: string,
-  status: ScreeningCaseStatus
+  status: ScreeningCaseStatus,
+  /** Slutbedömningens PDF (sätts vid klarmarkering). */
+  file?: { file_id: string; file_name: string }
 ): Promise<{ ok: true; name?: string } | { ok: false; error: string }> {
   const viewer = { tenant: actor.tenant, roles: actor.roles };
   const raw = await readCase(pb, viewer, id, 'id,tenant,org_nr,status,subject_name,startup');
   if (!raw) return { ok: false, error: 'Ärendet hittades inte.' };
   const before = normalizeScreeningCaseStatus(raw.status);
-  if (before === status) return { ok: true, name: raw.subject_name };
+  if (before === status && !file) return { ok: true, name: raw.subject_name };
   const patch =
     status === 'done'
-      ? { status, completed_at: new Date().toISOString(), completed_by: actor.id }
+      ? { status, completed_at: new Date().toISOString(), completed_by: actor.id, ...(file ?? {}) }
       : { status, completed_at: '', completed_by: '' };
   try {
     await writeWithFallback(pb, (c) => c.collection(SCREENING_CASES).update(id, patch));

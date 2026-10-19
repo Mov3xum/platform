@@ -8933,7 +8933,8 @@ in. Nu är det **EN rapport** (`AssessmentReport.tsx`, ersätter
 
 **Incident:** en bedömning (som kostar credits hos Roaring) fanns bara på
 skärmen — stängde controllern fliken var den borta, och det fanns inget att
-dela eller bifoga. Nu arkiveras **varje körning** automatiskt:
+dela eller bifoga. Nu arkiveras **slutbedömningen när ärendet klarmarkeras**
+(§ 51.10; före 2026-10-19 arkiverades varje körning):
 - `assessExcellenceAction` renderar bedömningen som PDF
   (`buildExcellenceAssessmentPdf`: pdf-lib + Sora/Nunito, Combly-ordningen:
   review-rad → steg 1 med grundförutsättningar per bolag, ägarbild med
@@ -9190,7 +9191,7 @@ fanns ingen överblick över vilka bolag som var under bedömning.
   **denylistat för AI** (`redaction.ts` + test). Verifierat mot PB 0.23.4.
 - **Allt sparas i ärendet.** `finishAssessment` (alla actions: körning,
   "Spara och räkna om", "Hämta mer", "Lägg till koncernbolag") anropar
-  `saveAssessmentToCase` efter PDF/historik. Rapportens formulär bär
+  `saveAssessmentToCase`. Rapportens formulär bär
   `case_id`; målet väljs av den rena `resolveCaseTarget`: uttryckligt ärende
   **för samma org-nr** (ett id för ett annat bolag skrivs aldrig över) →
   pågående ärende för org-numret (ingen dubblett när "Skapa ärende" körs för
@@ -9206,10 +9207,28 @@ fanns ingen överblick över vilka bolag som var under bedömning.
   `facts` (där bor svaren bara). En ny hämtning i ett pågående ärende
   ("Hämta på nytt" i ärendehuvudet, bolaget låst) läser ärendets svar så
   inget tappas. Saknar ärendet tolkbart underlag visas bolagsvalet.
+- **PDF bara vid klarmarkering (beslut 2026-10-19).** Arbetet i ett ärende
+  skapar varken PDF i Filer eller körning på bolagskortet (tidigare en per
+  omräkning). `completeScreeningCaseAction` räknar slutbedömningen på
+  ärendets underlag + senaste svar (`loadCaseAssessment(..., { final: true })`
+  — daterad nu, av den som klarmarkerar, inga registeranrop), arkiverar den
+  (`archiveAssessment`: PDF i den inloggades Filer + `startup_screenings`-rad
+  för portföljbolag, § 51.3/§ 51.6) och klarmarkerar FÖRST när PDF:en är
+  sparad (`file_id`/`file_name` på ärendet; annars `?fel=pdf`, ärendet
+  förblir pågående). Länken "Ladda ned PDF" visas för den som klarmarkerade
+  (Filer är ägaren-bara). Under arbetet: **Förhandsgranska PDF**
+  (`/api/bedomning-excellens/<id>/pdf`) renderar på ärendets sparade läge
+  utan att spara. Undantag som fortfarande arkiverar direkt: bolagskortets
+  uttryckliga "Räkna om med svaren och spara ny PDF" (§ 51.8,
+  `archive: 'always'`) och en körning vars ärende inte kunde sparas
+  (`'if_no_case'` — t.ex. utan migrationen; en betald körning försvinner
+  aldrig). Begäran om komplettering under arbetet länkas därför inte till en
+  körning (`screening` tomt).
 - **Klarmarkera / öppna igen** (`completeScreeningCaseAction` /
   `reopenScreeningCaseAction`, admin/incubator_lead/coach,
   tenant-verifierat): klarmarkerat ärende lämnar listan över aktuella;
-  öppna igen nollställer `completed_*`. Status auditeras i `agent_actions`
+  öppna igen nollställer `completed_*` (nästa klarmarkering sparar en ny
+  PDF). Status auditeras i `agent_actions`
   (PII-fritt: bolagsnamn + status, aldrig org-nr/svar) → Bolagsnytt/
   `/aktivitet` med länk till ärendet. Ett klarmarkerat ärende kan öppnas
   och läsas; arbete i det sparas utan att statusen ändras.

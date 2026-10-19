@@ -29,7 +29,7 @@ import type { ExcellenceAssessment } from '@/lib/excellence/types';
 import { upsertGroupCompany } from '@/lib/excellence/merge';
 import { renderExcellenceAssessmentPdf, storeExcellenceAssessmentPdf } from '@/lib/excellence/assessment-store.server';
 import { loadLatestScreeningContext, storeScreeningRun } from '@/lib/excellence/history.server';
-import { computeAssessment, refreshPlatformInContext } from '@/lib/excellence/compute.server';
+import { computeAssessment, loadCaseAssessment, refreshPlatformInContext } from '@/lib/excellence/compute.server';
 import { findOpenScreeningCase, loadScreeningCase, saveAssessmentToCase, setScreeningCaseStatus } from '@/lib/excellence/cases.server';
 import { isScreeningCaseId } from '@/lib/excellence/cases';
 import { pbStatus } from '@/lib/pb-error';
@@ -74,17 +74,41 @@ function actorOf(user: SessionUser): Actor {
 }
 
 /**
+ * Arkiverar en bedömning: PDF:en renderas EN gång och sparas i den
+ * inloggades Filer (§ 51.3) och — för ett portföljbolag — som körning på
+ * bolagskortet (§ 51.6). Båda fail-soft (felet följer med i resultatet).
+ */
+async function archiveAssessment(pb: PocketBase, user: SessionUser, assessment: ExcellenceAssessment): Promise<ExcellenceAssessment> {
+  const pdf = await renderExcellenceAssessmentPdf(assessment);
+  let out = await storeExcellenceAssessmentPdf(pb, user, assessment, pdf);
+  if (assessment.subject.startupId) {
+    const stored = await storeScreeningRun(pb, actorOf(user), out, pdf);
+    out = {
+      ...out,
+      history: stored.ok ? { runId: stored.value.id, previous: stored.value.previous, diff: stored.value.diff } : { error: stored.error }
+    };
+  }
+  return out;
+}
+
+/**
  * Räknar bedömningen på ett underlag + manuella svar, sparar svaren på
- * bolagskortet (portföljbolag), arkiverar PDF:en och sparar underlaget i
- * ärendet (§ 51.10). Delas av första körningen och alla omräkningar så
- * samma underlag alltid ger samma resultat.
+ * bolagskortet (portföljbolag) och underlaget i ärendet (§ 51.10). Delas av
+ * första körningen och alla omräkningar så samma underlag alltid ger samma
+ * resultat.
+ *
+ * PDF + körning på bolagskortet skapas BARA när ärendet klarmarkeras
+ * (`completeScreeningCaseAction`) — arbetet däremellan fyller inte Filer med
+ * utkast. Undantag: `archive: 'always'` (bolagskortets uttryckliga "Räkna om
+ * och spara ny PDF", § 51.8) och när ärendet inte kunde sparas
+ * (`'if_no_case'`) — då vore en betald körning annars helt borta.
  */
 async function finishAssessment(
   pb: PocketBase,
   user: SessionUser,
   ctx: AssessmentContext,
   facts: ScreeningManualFacts,
-  opts: { saveFacts: boolean; recomputed?: boolean; caseId?: string; createCase: boolean }
+  opts: { saveFacts: boolean; recomputed?: boolean; caseId?: string; createCase: boolean; archive?: 'always' | 'if_no_case' }
 ): Promise<ExcellenceAssessment> {
   let factsSaved: boolean | undefined;
   let factsSchemaMissing: boolean | undefined;
@@ -109,24 +133,14 @@ async function finishAssessment(
     factsSchemaMissing,
     recomputed: opts.recomputed
   });
-  // PDF:en renderas EN gång och arkiveras på två ställen: i den inloggades
-  // Filer (§ 51.3) och — för ett portföljbolag — som körning på bolagskortet
-  // (§ 51.6) så kollegor och revisorer ser samma bild. Båda fail-soft.
-  const pdf = await renderExcellenceAssessmentPdf(assessment);
-  let out = await storeExcellenceAssessmentPdf(pb, user, assessment, pdf);
-  if (startupId) {
-    const stored = await storeScreeningRun(pb, actorOf(user), out, pdf);
-    out = {
-      ...out,
-      history: stored.ok ? { runId: stored.value.id, previous: stored.value.previous, diff: stored.value.diff } : { error: stored.error }
-    };
-  }
+  const out = opts.archive === 'always' ? await archiveAssessment(pb, user, assessment) : assessment;
   // Ärendet (§ 51.10): underlaget sparas så ärendet kan fortsättas utan nya
   // registeranrop. Fail-soft — bedömningen visas även om ärendet inte sparas.
   const saved = await saveAssessmentToCase(pb, actorOf(user), out, { caseId: opts.caseId, create: opts.createCase });
   if (saved.ok === true) return { ...out, caseId: saved.id, caseStatus: saved.status, caseCreated: saved.created || undefined };
-  if (saved.ok === false) return { ...out, caseError: saved.error };
-  return out;
+  const kept = opts.archive === 'if_no_case' ? await archiveAssessment(pb, user, out) : out;
+  if (saved.ok === false) return { ...kept, caseError: saved.error };
+  return kept;
 }
 
 /**
@@ -209,7 +223,7 @@ export async function assessExcellenceAction(
       lookupWarnings: [],
       assessedAt: now.toISOString()
     };
-    return { assessment: await finishAssessment(pb, user, ctx, facts, { saveFacts: false, caseId: caseIdFrom(formData), createCase: true }) };
+    return { assessment: await finishAssessment(pb, user, ctx, facts, { saveFacts: false, caseId: caseIdFrom(formData), createCase: true, archive: 'if_no_case' }) };
   }
 
   // Färska uppslag: leverantörerna debiterar per anrop — samma krets som
@@ -286,7 +300,7 @@ export async function assessExcellenceAction(
     cost: sumRegistryCosts(costs),
     assessedAt: now.toISOString()
   };
-  return { assessment: await finishAssessment(pb, user, ctx, facts, { saveFacts: false, caseId: caseIdFrom(formData), createCase: true }) };
+  return { assessment: await finishAssessment(pb, user, ctx, facts, { saveFacts: false, caseId: caseIdFrom(formData), createCase: true, archive: 'if_no_case' }) };
 }
 
 /**
@@ -320,7 +334,7 @@ export async function applyExcellenceFactsAction(
   }
   return {
     // Tomma svar sparas också (nollställer tidigare svar på bolagskortet).
-    assessment: await finishAssessment(pb, user, ctx, facts, { saveFacts: !!ctx.subject.startupId, caseId: caseIdFrom(formData), createCase: true })
+    assessment: await finishAssessment(pb, user, ctx, facts, { saveFacts: !!ctx.subject.startupId, caseId: caseIdFrom(formData), createCase: true, archive: 'if_no_case' })
   };
 }
 
@@ -371,7 +385,7 @@ export async function fetchGroupCompanyAction(
   if (ctx.subject.startupId && !(await loadPlatformStartupFacts(pb, user.tenant, ctx.subject.startupId))) {
     next.subject = { ...next.subject, startupId: undefined };
   }
-  return { assessment: await finishAssessment(pb, user, next, facts, { saveFacts: false, caseId: caseIdFrom(formData), createCase: true }) };
+  return { assessment: await finishAssessment(pb, user, next, facts, { saveFacts: false, caseId: caseIdFrom(formData), createCase: true, archive: 'if_no_case' }) };
 }
 
 
@@ -537,7 +551,7 @@ export async function addGroupCompanyAction(
   }
   if (remove) {
     facts.group_companies = facts.group_companies.filter((g) => g.org_nr !== orgNr);
-    return { assessment: await finishAssessment(pb, user, ctx, facts, { saveFacts: !!ctx.subject.startupId, caseId: caseIdFrom(formData), createCase: true }) };
+    return { assessment: await finishAssessment(pb, user, ctx, facts, { saveFacts: !!ctx.subject.startupId, caseId: caseIdFrom(formData), createCase: true, archive: 'if_no_case' }) };
   }
 
   // Normaliseringen (ren, enhetstestad) avgör relation/riktning/andel/not.
@@ -594,7 +608,7 @@ export async function addGroupCompanyAction(
     }
   }
   return {
-    assessment: await finishAssessment(pb, user, next, facts, { saveFacts: !!next.subject.startupId, caseId: caseIdFrom(formData), createCase: true })
+    assessment: await finishAssessment(pb, user, next, facts, { saveFacts: !!next.subject.startupId, caseId: caseIdFrom(formData), createCase: true, archive: 'if_no_case' })
   };
 }
 
@@ -649,7 +663,7 @@ export async function recomputeLatestScreeningAction(formData: FormData): Promis
   // från bolagskortet skapas inget nytt ärende.
   const openCase = await findOpenScreeningCase(pb, { tenant: user.tenant, roles: user.roles }, { startupId });
   try {
-    await finishAssessment(pb, user, ctx, platform!.facts, { saveFacts: false, recomputed: true, caseId: openCase?.id, createCase: false });
+    await finishAssessment(pb, user, ctx, platform!.facts, { saveFacts: false, recomputed: true, caseId: openCase?.id, createCase: false, archive: 'always' });
   } catch (err) {
     console.error('[excellence] recompute failed', { status: pbStatus(err), userId: user.id });
     done('fel');
@@ -659,30 +673,60 @@ export async function recomputeLatestScreeningAction(formData: FormData): Promis
 }
 
 /**
- * Klarmarkerar ett ärende (§ 51.10) — det lämnar listan över aktuella
- * ärenden men finns kvar under "Avslutade" och kan öppnas igen. Formuläraction.
+ * Klarmarkerar ett ärende (§ 51.10) — slutbedömningen räknas på ärendets
+ * sparade underlag och senaste svar (inga registeranrop) och arkiveras som
+ * PDF i Filer och som körning på bolagskortet. Först när PDF:en är sparad
+ * klarmarkeras ärendet; det lämnar då listan över aktuella ärenden men finns
+ * kvar under "Avslutade" och kan öppnas igen. Formuläraction.
  */
 export async function completeScreeningCaseAction(formData: FormData): Promise<void> {
-  await changeCaseStatus(formData, 'done');
+  const user = await requireUser();
+  const caseId = guardCaseAction(user, formData);
+  const pb = await getServerPb();
+  const loaded = await loadCaseAssessment(
+    pb,
+    { id: user.id, tenant: user.tenant, roles: user.roles, linkedStartups: user.linkedStartups, name: user.name },
+    caseId,
+    { final: true }
+  );
+  if (!loaded) redirect('/bedomning-excellens?fel=arende');
+  if (!loaded!.assessment) redirect(`/bedomning-excellens?arende=${caseId}&fel=underlag`);
+  let archived: ExcellenceAssessment;
+  try {
+    archived = await archiveAssessment(pb, user, loaded!.assessment!);
+  } catch (err) {
+    console.error('[excellence] final pdf failed', { status: pbStatus(err), userId: user.id });
+    redirect(`/bedomning-excellens?arende=${caseId}&fel=pdf`);
+  }
+  // Utan sparad PDF klarmarkeras inget — ett avslutat ärende ska alltid ha sin slutbedömning.
+  if (!archived!.file) redirect(`/bedomning-excellens?arende=${caseId}&fel=pdf`);
+  const res = await setScreeningCaseStatus(pb, actorOf(user), caseId, 'done', {
+    file_id: archived!.file!.id,
+    file_name: archived!.file!.filename.slice(0, 200)
+  });
+  if (!res.ok) redirect(`/bedomning-excellens?arende=${caseId}&fel=status`);
+  revalidatePath('/bedomning-excellens');
+  if (archived!.subject.startupId) revalidatePath(`/startups/${archived!.subject.startupId}`);
+  redirect('/bedomning-excellens?klarmarkerat=1');
 }
 
 /** Öppnar ett klarmarkerat ärende igen (§ 51.10). Formuläraction. */
 export async function reopenScreeningCaseAction(formData: FormData): Promise<void> {
-  await changeCaseStatus(formData, 'open');
+  const user = await requireUser();
+  const caseId = guardCaseAction(user, formData);
+  const pb = await getServerPb();
+  const res = await setScreeningCaseStatus(pb, actorOf(user), caseId, 'open');
+  if (!res.ok) redirect(`/bedomning-excellens?arende=${caseId}&fel=status`);
+  revalidatePath('/bedomning-excellens');
+  redirect(`/bedomning-excellens?arende=${caseId}`);
 }
 
-async function changeCaseStatus(formData: FormData, status: 'open' | 'done'): Promise<void> {
-  const user = await requireUser();
+/** Ärendets id + behörighet (modulens roller) — redirectar annars. */
+function guardCaseAction(user: SessionUser, formData: FormData): string {
   const caseId = caseIdFrom(formData);
   if (!caseId) redirect('/bedomning-excellens?fel=arende');
   if (!canAccessModuleForUser(user.roles, 'bedomning_excellens', user.enabledModules) || !hasRole(user.roles, [...CASE_ROLES])) {
     redirect(`/bedomning-excellens?arende=${caseId}&fel=behorighet`);
   }
-  const pb = await getServerPb();
-  const res = await setScreeningCaseStatus(pb, actorOf(user), caseId!, status);
-  if (!res.ok) redirect(`/bedomning-excellens?arende=${caseId}&fel=status`);
-  revalidatePath('/bedomning-excellens');
-  // Klarmarkerat → tillbaka till listan (ärendet syns inte längre där);
-  // öppnat igen → fortsätt direkt i ärendet.
-  redirect(status === 'done' ? '/bedomning-excellens?klarmarkerat=1' : `/bedomning-excellens?arende=${caseId}`);
+  return caseId!;
 }

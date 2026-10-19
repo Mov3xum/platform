@@ -11,7 +11,8 @@ const STEPS: { title: string; items: string[] }[] = [
       'Varje bolag du bedömer blir ett ärende. Skapa ärende uppe till höger, välj bolag och kör bedömningen — ärendet skapas när första bedömningen sparas.',
       'Ärendet sparas varje gång du hämtar, räknar om eller hämtar mer. Öppna det från listan och fortsätt där du slutade — ingen ny hämtning från Roaring.',
       'Skapar du ett ärende för ett bolag som redan har ett pågående ärende fylls det befintliga på i stället (med den nya hämtningen).',
-      'Klarmarkera när bedömningen är färdig: ärendet försvinner ur listan över aktuella ärenden men finns kvar under Avslutade och kan öppnas igen.'
+      'Under arbetet sparas ingen PDF — Förhandsgranska PDF visar hur den blir utan att spara den.',
+      'Klarmarkera när bedömningen är färdig: slutbedömningen sparas som PDF i dina Filer (och för portföljbolag på bolagskortet), och ärendet flyttas till Avslutade. Där kan det öppnas igen; nästa klarmarkering sparar en ny PDF.'
     ]
   },
   {
@@ -54,7 +55,7 @@ const STEPS: { title: string; items: string[] }[] = [
   {
     title: 'Var bedömningen sparas',
     items: [
-      'Varje körning sparas som PDF i dina Filer (i bolagets mapp) och, för portföljbolag, på bolagskortet under Ekonomi & statsstöd → Statsstöd & Vinnova med historik och vad som ändrats sedan förra bedömningen.',
+      'Slutbedömningen (när ärendet klarmarkeras) sparas som PDF i dina Filer (i bolagets mapp) och, för portföljbolag, på bolagskortet under Ekonomi & statsstöd → Statsstöd & Vinnova med historik och vad som ändrats sedan förra slutbedömningen.',
       'Skriv aldrig personuppgifter i motiveringar och kommentarer. Namn på verkliga huvudmän visas bara på skärmen och lagras inte.'
     ]
   }
