@@ -1,6 +1,14 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
-import { cleanIrlText, normalizeIrlAxisNotes, normalizeIrlLevel, normalizeIrlProfile, IRL_NOTE_MAX } from '@platform/shared';
+import {
+  cleanIrlText,
+  latestIrlReading,
+  normalizeIrlAxisNotes,
+  normalizeIrlLevel,
+  normalizeIrlProfile,
+  IRL_NOTE_MAX,
+  type IrlReading
+} from '@platform/shared';
 import type { IrlAssessmentView } from '@/components/irl/IrlWorkspace';
 
 /**
@@ -43,4 +51,19 @@ export async function loadIrlAssessments(
     console.error('[irl] load failed', { status });
     return { assessments: [], error: 'IRL-bedömningarna kunde inte läsas just nu.' };
   }
+}
+
+/**
+ * Bolagets gällande IRL (CLAUDE.md § 52.2) — samma bedömning som
+ * bolagskortets radar visar som senaste (`latestIrlReading`). Delas av
+ * Bedömning excellens (§ 51) och flytten av IRL-svar till bolagskortet, så
+ * IRL har EN källa. `null` = ingen bedömning; ett läsfel kastas vidare.
+ */
+export async function loadLatestIrlReading(pb: PocketBase, tenant: string, startupId: string): Promise<IrlReading | null> {
+  const res = await pb.collection('startup_readiness_assessments').getList<Record<string, unknown>>(1, 20, {
+    filter: pb.filter('tenant = {:tenant} && startup = {:startup}', { tenant, startup: startupId }),
+    sort: '-assessed_at',
+    fields: 'assessed_at,crl,tmrl,brl,srl,trl,iprl,frl,axis_notes'
+  });
+  return latestIrlReading(res.items);
 }

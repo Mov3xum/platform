@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { screenExcellence, type ExcellenceScreeningInput, type GroupCompanyFacts } from './excellence-screening';
 import { normalizeScreeningFacts } from './excellence-facts';
 import {
+  findDuplicateScreeningRequest,
   applyScreeningRequestAnswers,
   canViewScreeningRequest,
   deriveScreeningRequestItems,
@@ -284,4 +285,20 @@ test('deriveScreeningRequestItems: okänt "fristående" ger en group-punkt som b
   assert.ok(!items.some((i) => i.key === 'document:aktiebok'));
   assert.ok(screeningRequestItemsFor(items, 'startup').some((i) => i.kind === 'group'));
   assert.ok(screeningRequestItemsFor(items, 'coach').some((i) => i.kind === 'group'));
+});
+
+test('findDuplicateScreeningRequest: samma obesvarade punkter till samma mottagare är en dubblett', () => {
+  const existing = [
+    { id: 'r1', recipient_kind: 'coach' as const, recipient: 'u1', status: 'open' as const, items: [{ key: 'irl', status: 'open' as const }, { key: 'founders', status: 'open' as const }] },
+    { id: 'r2', recipient_kind: 'startup' as const, status: 'partially_answered' as const, items: [{ key: 'group', status: 'answered' as const }, { key: 'estimate:5590000000', status: 'open' as const }] },
+    { id: 'r3', recipient_kind: 'coach' as const, recipient: 'u1', status: 'closed' as const, items: [{ key: 'excellence', status: 'open' as const }] }
+  ];
+  assert.equal(findDuplicateScreeningRequest(existing, { recipient_kind: 'coach', recipient: 'u1', keys: ['irl'] }), 'r1');
+  // Annan kollega eller en punkt som inte finns i den pågående ⇒ ny förfrågan.
+  assert.equal(findDuplicateScreeningRequest(existing, { recipient_kind: 'coach', recipient: 'u2', keys: ['irl'] }), null);
+  assert.equal(findDuplicateScreeningRequest(existing, { recipient_kind: 'coach', recipient: 'u1', keys: ['irl', 'excellence'] }), null);
+  // Redan besvarad punkt får begäras igen; avslutade förfrågningar räknas inte.
+  assert.equal(findDuplicateScreeningRequest(existing, { recipient_kind: 'startup', keys: ['group'] }), null);
+  assert.equal(findDuplicateScreeningRequest(existing, { recipient_kind: 'startup', keys: ['estimate:5590000000'] }), 'r2');
+  assert.equal(findDuplicateScreeningRequest(existing, { recipient_kind: 'coach', recipient: 'u1', keys: ['excellence'] }), null);
 });

@@ -871,3 +871,31 @@ export function validateScreeningRequestInput(input: {
   }
   return { ok: true, value: { recipient, items, message, dueDate } };
 }
+
+/**
+ * En ny förfrågan som bara upprepar en redan PÅGÅENDE (samma mottagare,
+ * varje punkt finns redan där och är obesvarad) är dubbeljobb för
+ * mottagaren — skrivlagret returnerar den befintliga i stället
+ * (dubbelklick, två kollegor, "Skicka allt" två gånger). Punkter som redan
+ * besvarats får begäras igen. Ger id:t för den befintliga, annars null.
+ */
+export function findDuplicateScreeningRequest(
+  existing: readonly {
+    id: string;
+    recipient_kind: ScreeningRequestRecipient;
+    recipient?: string;
+    status: ScreeningRequestStatus;
+    items: readonly { key: string; status: ScreeningRequestItem['status'] }[];
+  }[],
+  candidate: { recipient_kind: ScreeningRequestRecipient; recipient?: string; keys: readonly string[] }
+): string | null {
+  if (candidate.keys.length === 0) return null;
+  for (const r of existing) {
+    if (r.status !== 'open' && r.status !== 'partially_answered') continue;
+    if (r.recipient_kind !== candidate.recipient_kind) continue;
+    if (candidate.recipient_kind === 'coach' && (r.recipient ?? '') !== (candidate.recipient ?? '')) continue;
+    const open = new Set(r.items.filter((i) => i.status !== 'answered').map((i) => i.key));
+    if (candidate.keys.every((k) => open.has(k))) return r.id;
+  }
+  return null;
+}

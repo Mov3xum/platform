@@ -553,6 +553,22 @@ test('IRL: manuella nivåer används bara utan readiness-rad; motivering följer
   assert.equal(platformIrl.irl?.notes?.srl, 'Agenda 2030 mål 3');
 });
 
+test('IRL: bolagskortets nivå vinner per axel; en axel bolagskortet saknar fylls av manuellt svar', () => {
+  const base = { subject: company({ orgNr: '5595728790', name: 'Combly AB' }) };
+  const res = screenExcellence(
+    input({
+      ...base,
+      irl: { level: null, crl: 1, brl: 3, tmrl: 2, srl: null, trl: 4, notes: { crl: 'Inga kunder' } },
+      manual: { companies: {}, de_minimis_related: {}, group_companies: [], estimates: {}, irl: { levels: { crl: 6, srl: 7 }, notes: { srl: 'Hållbarhetsplan' } } }
+    })
+  );
+  assert.equal(res.irl?.crl, 1);
+  assert.equal(res.irl?.srl, 7);
+  assert.equal(res.irl?.trl, 4);
+  assert.equal(res.irl?.manualLevels, true);
+  assert.deepEqual(res.irl?.notes, { crl: 'Inga kunder', srl: 'Hållbarhetsplan' });
+});
+
 test('Vinnova-utfallet blir "ingår sannolikt" utan förbehåll när alla punkter är JA', () => {
   const res = screenExcellence(
     input({

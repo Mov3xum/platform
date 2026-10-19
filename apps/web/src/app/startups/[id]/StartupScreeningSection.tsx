@@ -7,6 +7,7 @@ import {
   VINNOVA_OUTCOME_LABEL,
   diffScreeningRuns,
   formatStockholmDateTime,
+  type Role,
   type ScreeningRunChange,
   type ScreeningVerdict,
   type StateAidOutcome,
@@ -16,6 +17,7 @@ import { Icon } from '@/components/proto';
 import { listScreeningRuns, type ScreeningRunRow } from '@/lib/excellence/history.server';
 import { listScreeningRequestsForStartup } from '@/lib/excellence/requests.server';
 import { recomputeLatestScreeningAction } from '@/lib/actions/excellence';
+import { findOpenScreeningCase } from '@/lib/excellence/cases.server';
 
 // Bolagskortets sektion "Statsstöd & Vinnova" (CLAUDE.md § 51.6): alla
 // körningar av Bedömning excellens för bolaget (utfall, vem, när, kostnad,
@@ -79,11 +81,12 @@ export async function StartupScreeningSection({
   /** `?bedomning=` efter "Räkna om med svaren" (§ 51.8). */
   feedback?: string;
 }) {
-  const [{ runs, error }, { requests, error: reqError }] = await Promise.all([
+  const [{ runs, error }, { requests, error: reqError }, openCase] = await Promise.all([
     listScreeningRuns(pb, tenantId, startupId, 20),
-    listScreeningRequestsForStartup(pb, { tenant: tenantId, roles: viewerRoles }, startupId, { limit: 20 })
+    listScreeningRequestsForStartup(pb, { tenant: tenantId, roles: viewerRoles }, startupId, { limit: 20 }),
+    findOpenScreeningCase(pb, { tenant: tenantId, roles: viewerRoles as Role[] }, { startupId })
   ]);
-  if (runs.length === 0 && requests.length === 0 && !error && !reqError && !canAssess) return null;
+  if (runs.length === 0 && requests.length === 0 && !openCase && !error && !reqError && !canAssess) return null;
 
   return (
     <section id="statsstod" className="scroll-mt-24 rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
@@ -96,34 +99,66 @@ export async function StartupScreeningSection({
         </div>
         {canAssess && (
           <div className="flex flex-wrap items-center gap-2">
-            {runs.length > 0 && (
+            {(openCase || runs.length > 0) && (
               <form action={recomputeLatestScreeningAction}>
                 <input type="hidden" name="startup_id" value={startupId} />
                 <button
                   type="submit"
                   className="inline-flex items-center gap-1.5 rounded-full border border-strong px-3 py-1 text-sm font-semibold text-foreground transition hover:bg-canvas-subtle"
-                  title="Räknar om den senaste bedömningen på sparat underlag med bolagets manuella svar och kompletteringar — inga nya anrop hos leverantören. Ny PDF sparas här och i dina Filer."
+                  title={
+                    openCase
+                      ? 'Räknar om det pågående ärendet med bolagets svar och kompletteringar — inga nya anrop hos leverantören. Slutbedömningen sparas här när ärendet klarmarkeras.'
+                      : 'Räknar om den senaste bedömningen på sparat underlag med bolagets manuella svar och kompletteringar — inga nya anrop hos leverantören. Ny PDF sparas här och i dina Filer.'
+                  }
                 >
-                  <Icon name="rotate-ccw" size={13} /> Räkna om med svaren
+                  <Icon name="rotate-ccw" size={13} /> {openCase ? 'Uppdatera ärendet' : 'Räkna om med svaren'}
                 </button>
               </form>
             )}
             <Link
-              href={`/bedomning-excellens?startup=${startupId}`}
+              href={openCase ? `/bedomning-excellens?arende=${openCase.id}` : `/bedomning-excellens?startup=${startupId}`}
               className="inline-flex items-center gap-1.5 rounded-full bg-brand px-3 py-1 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover"
             >
-              <Icon name="shield" size={13} /> {runs.length > 0 ? 'Ny bedömning' : 'Gör en bedömning'}
+              <Icon name="shield" size={13} /> {openCase ? 'Fortsätt ärendet' : runs.length > 0 ? 'Ny bedömning' : 'Gör en bedömning'}
             </Link>
           </div>
         )}
       </div>
 
+      {openCase && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-default bg-canvas-subtle px-4 py-2.5 text-[12.5px]">
+          <span className="font-semibold text-foreground">Pågående ärende</span>
+          {openCase.state_aid_outcome && <Chip className={STATE_AID_TONE[openCase.state_aid_outcome]}>{STATE_AID_OUTCOME_LABEL[openCase.state_aid_outcome]}</Chip>}
+          {openCase.vinnova_outcome && (
+            <Chip className={VINNOVA_TONE[openCase.vinnova_outcome]}>Vinnova: {VINNOVA_OUTCOME_LABEL[openCase.vinnova_outcome]}</Chip>
+          )}
+          {typeof openCase.unknown_count === 'number' && (
+            <span className="text-foreground-subtle mx-tnum">{openCase.unknown_count} okända punkter</span>
+          )}
+          <span className="flex-1" />
+          <span className="text-[11.5px] text-foreground-subtle mx-tnum">
+            {openCase.last_assessed_by_name ? `${openCase.last_assessed_by_name} · ` : ''}
+            {openCase.last_assessed_at ? formatStockholmDateTime(openCase.last_assessed_at) : ''}
+          </span>
+          {canAssess && (
+            <Link href={`/bedomning-excellens?arende=${openCase.id}`} className="text-[12px] font-semibold text-link hover:underline">
+              Öppna
+            </Link>
+          )}
+        </div>
+      )}
+
+      {feedback === 'arende' && (
+        <p className="mb-3 rounded-xl bg-movexum-pastell-gron px-3 py-2 text-[12.5px] text-movexum-morkgron dark:bg-movexum-morkgron/30 dark:text-movexum-pastell-gron">
+          Det pågående ärendet räknades om med svaren. Slutbedömningen sparas här när ärendet klarmarkeras.
+        </p>
+      )}
       {feedback === 'ok' && (
         <p className="mb-3 rounded-xl bg-movexum-pastell-gron px-3 py-2 text-[12.5px] text-movexum-morkgron dark:bg-movexum-morkgron/30 dark:text-movexum-pastell-gron">
           Bedömningen räknades om med svaren — ny körning och PDF sparad nedan (och i dina Filer).
         </p>
       )}
-      {feedback && feedback !== 'ok' && (
+      {feedback && feedback !== 'ok' && feedback !== 'arende' && (
         <p className="mb-3 rounded-xl bg-movexum-pastell-orange px-3 py-2 text-[12.5px] text-movexum-morkorange dark:bg-movexum-morkorange/30 dark:text-movexum-pastell-orange">
           {feedback === 'underlag'
             ? 'Inget sparat underlag att räkna om på — den senaste körningen gjordes innan underlaget började sparas (eller fältet saknas: migration 1700000192). Kör en ny bedömning.'

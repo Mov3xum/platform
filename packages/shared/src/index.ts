@@ -1906,3 +1906,4 @@ export interface OrgKnowledgeChunk {
   updated: string;
 }
 export * from './kth-irl';
+export * from './excellence-irl';

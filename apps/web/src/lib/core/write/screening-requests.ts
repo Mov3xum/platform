@@ -2,6 +2,8 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import {
   applyScreeningRequestAnswers,
+  dropShadowedIrlLevels,
+  findDuplicateScreeningRequest,
   mergeScreeningRequestAnswersIntoFacts,
   normalizeScreeningFacts,
   normalizeScreeningRequestItems,
@@ -13,10 +15,13 @@ import {
   type ScreeningRequestStatus
 } from '@platform/shared';
 import { notify, notifyStartupMembers } from '@/lib/notifications-server';
-import { SCREENING_REQUESTS, mapScreeningRequestRow, type ScreeningRequestRow } from '@/lib/excellence/requests.server';
+import { SCREENING_REQUESTS, listScreeningRequestsForStartup, mapScreeningRequestRow, type ScreeningRequestRow } from '@/lib/excellence/requests.server';
+import { LockTimeoutError, withDistributedLock } from '@/lib/distributed-lock';
 import { canCreateRecord } from './writable-fields';
 import { logAgentAction } from './audit';
 import { getRecordInTenant, writeWithFallback } from './helpers';
+import { promoteScreeningIrl } from './readiness';
+import { loadLatestIrlReading } from '@/lib/irl/data.server';
 import type { Actor, WriteResult } from './types';
 import { fail, ok } from './types';
 
@@ -84,6 +89,8 @@ export interface CreatedScreeningRequest {
   id: string;
   recipient: ScreeningRequestRecipient;
   items: number;
+  /** En pågående förfrågan med samma punkter fanns redan — ingen ny skapades. */
+  existing?: boolean;
   /** Icke-blockerande varningar (t.ex. notis som inte gick fram). */
   warnings: string[];
 }
@@ -120,6 +127,51 @@ export async function createScreeningRequest(
     if (run && run.startup === startup.id) screeningId = run.id;
   }
 
+  // Samma obesvarade punkter till samma mottagare finns redan i en pågående
+  // förfrågan ⇒ ingen ny (dubbelklick, två kollegor, "Skicka allt" igen) —
+  // mottagaren ska inte få samma fråga två gånger. Kontroll + skapande sker
+  // under ett lås per bolag så två samtidiga klick inte båda hinner skapa.
+  const keys = v.value.items.map((i) => i.key);
+  try {
+    return await withDistributedLock(
+      `screening_request:${startup.id}`,
+      async () => {
+        const { requests } = await listScreeningRequestsForStartup(pb, { tenant: actor.tenant, roles: actor.roles }, startup.id, {
+          openOnly: true,
+          limit: 50
+        });
+        const duplicate = findDuplicateScreeningRequest(requests, { recipient_kind: v.value.recipient, recipient: recipientUserId, keys });
+        if (duplicate) {
+          return ok({
+            id: duplicate,
+            recipient: v.value.recipient,
+            items: keys.length,
+            warnings: ['Samma punkter väntar redan på svar i en pågående förfrågan — ingen ny skickades.'],
+            existing: true
+          });
+        }
+        return createRequestRecord(pb, actor, { startup, v: v.value, recipientUserId, screeningId });
+      },
+      { ttlMs: 15_000, waitMs: 10_000 }
+    );
+  } catch (err) {
+    if (err instanceof LockTimeoutError) return fail('DB_ERROR', 'En förfrågan för bolaget skickas just nu — försök igen om en stund.');
+    throw err;
+  }
+}
+
+async function createRequestRecord(
+  pb: PocketBase,
+  actor: Actor,
+  args: {
+    startup: { id: string; name?: string };
+    v: Extract<ReturnType<typeof validateScreeningRequestInput>, { ok: true }>['value'];
+    recipientUserId?: string;
+    screeningId?: string;
+  }
+): Promise<WriteResult<CreatedScreeningRequest>> {
+  const { startup, recipientUserId, screeningId } = args;
+  const v = { value: args.v };
   const payload: Record<string, unknown> = {
     tenant: actor.tenant,
     startup: startup.id,
@@ -196,6 +248,10 @@ export interface AnswerScreeningRequestInput {
 
 export interface AnsweredScreeningRequest {
   id: string;
+  /** Bolaget förfrågan gäller — för omräkning av ett pågående ärende. */
+  startupId: string;
+  /** En ny KTH-bedömning skrevs på bolagskortet av IRL-svaret. */
+  irlPromoted: boolean;
   status: ScreeningRequestStatus;
   answered: number;
   total: number;
@@ -231,11 +287,35 @@ export async function answerScreeningRequest(
   //    fick svar nu, så ett äldre svar aldrig skriver över ett nyare.
   let factsSaved = false;
   let factsSchemaMissing = false;
+  let irlPromoted = false;
+  let irlWarning: string | undefined;
   if (applied.answeredKeys.length > 0) {
     const current = await getRecordInTenant<{ id: string; tenant?: string; screening_facts?: unknown }>(pb, actor, 'startups', row.startup, 'id,tenant,screening_facts');
     if (!current) return fail('NOT_FOUND', 'Bolaget hittades inte.');
     const before = normalizeScreeningFacts(current.screening_facts);
-    const merged = mergeScreeningRequestAnswersIntoFacts(before, applied.items, applied.answeredKeys);
+    // Gamla IRL-nivåer i svaren som bolagskortet redan har ersatt rensas FÖRE
+    // sammanslagningen — annars kunde de flyttas till bolagskortet och skriva
+    // över den nyare bedömningen (§ 52.2). Bara de nya svaren får ändra IRL.
+    if (before.irl) {
+      try {
+        const latest = await loadLatestIrlReading(pb, actor.tenant, row.startup);
+        const cleaned = dropShadowedIrlLevels(before.irl, latest ? { ...latest.profile, srl: latest.srl, notes: latest.axisNotes } : null);
+        if (cleaned) before.irl = cleaned;
+        else delete before.irl;
+      } catch {
+        // Läsfel: promoteScreeningIrl nedan läser själv och avstår från att skriva.
+      }
+    }
+    let merged = mergeScreeningRequestAnswersIntoFacts(before, applied.items, applied.answeredKeys);
+    // IRL bor på bolagskortet (§ 52.2): coachens IRL-svar blir en KTH-
+    // bedömning där, inte en kopia i svaren. Bara Movexum-personal bedömer;
+    // vid fel ligger svaret kvar i svaren och en varning följer med.
+    if (applied.items.some((i) => i.kind === 'irl' && applied.answeredKeys.includes(i.key))) {
+      const promo = await promoteScreeningIrl(pb, actor, row.startup, merged);
+      merged = promo.facts;
+      irlPromoted = promo.promoted;
+      if (promo.error) irlWarning = promo.error;
+    }
     try {
       const after = await writeWithFallback(pb, (c) =>
         c.collection('startups').update<{ screening_facts?: unknown }>(row.startup, { screening_facts: merged }, { fields: 'id,screening_facts' })
@@ -276,7 +356,7 @@ export async function answerScreeningRequest(
     after_value: { startup: row.startup, startup_name: row.startup_name, status: nextStatus, answered, items: applied.items.length, recipient_kind: row.recipient_kind }
   });
 
-  const warnings: string[] = [];
+  const warnings: string[] = irlWarning ? [irlWarning] : [];
   if (applied.answeredKeys.length > 0 && row.requested_by && row.requested_by !== actor.id) {
     try {
       await notify(pb, {
@@ -296,7 +376,18 @@ export async function answerScreeningRequest(
     }
   }
 
-  return ok({ id: row.id, status: nextStatus, answered, total: applied.items.length, rejected: applied.rejectedKeys, factsSaved, factsSchemaMissing, warnings });
+  return ok({
+    id: row.id,
+    startupId: row.startup,
+    irlPromoted,
+    status: nextStatus,
+    answered,
+    total: applied.items.length,
+    rejected: applied.rejectedKeys,
+    factsSaved,
+    factsSchemaMissing,
+    warnings
+  });
 }
 
 // ── Avsluta ─────────────────────────────────────────────────────────────────

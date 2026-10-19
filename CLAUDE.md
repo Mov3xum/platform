@@ -9250,6 +9250,60 @@ fanns ingen överblick över vilka bolag som var under bedömning.
   visade, lagrade utan transienta personnamn; `cascadeDelete` på
   tenant/startup.
 
+### 51.11 En sanning per uppgift — IRL, svar, ärenden och kompletteringar (2026-10-19)
+
+**Incident.** DevUp hade IRL 1, 3 … på bolagskortet men 6, 6, 7, 7 i
+Bedömning excellens. Två orsaker: (1) "Spara och räkna om", "Hämta mer" och
+"Lägg till koncernbolag" räknade om på underlaget från klienten (rundturen
+§ 51.4) utan att läsa plattformens fakta på nytt, så en IRL-bedömning gjord
+efter att rapporten öppnades kom aldrig med; (2) IRL-nivåer som tidigare
+angetts i rapporten låg kvar som en egen kopia i `screening_facts` och tog
+över när läsningen av bolagskortet inte gav värden (PB lagrar 0 för "ej
+bedömd", och bara den allra senaste raden lästes). Bindande sedan dess:
+
+- **Plattformens fakta läses alltid färskt.** Alla actions som tar ett
+  underlag från klienten går genom `withFreshPlatform`
+  (`lib/actions/excellence.ts` → `refreshPlatformInContext`): IRL, de
+  minimis, grundare och excellensflagga kommer från bolagskortet vid varje
+  omräkning.
+- **IRL har EN plats: bolagskortets KTH-bedömning (§ 52.2).** Läsningen
+  (`loadLatestIrlReading` i `lib/irl/data.server.ts`, delad med
+  `loadPlatformStartupFacts`) väljer samma rad som radarn visar som senaste
+  (`latestIrlReading`, ren + enhetstestad i
+  `packages/shared/src/excellence-irl.ts`; 0 ⇒ ej bedömd) och bär även
+  TRL/IPRL/FRL och KTH-motiveringarna (visas i rapporten och PDF:n). Regeln i
+  `screenExcellence` är per axel: bolagskortets nivå vinner, en manuell nivå
+  fyller bara en axel bolagskortet saknar. IRL-nivåer/motiveringar som anges
+  i rapporten ELLER i ett kompletteringssvar flyttas till bolagskortet som en
+  ny KTH-bedömning (`promoteScreeningIrl` i `lib/core/write/readiness.ts` →
+  `planIrlPromotion`: ovanpå senaste bedömningen, bara när något ändrats —
+  aldrig en dubblett vid omräkning) och tas bort ur `screening_facts`.
+  Gamla manuella nivåer för axlar bolagskortet redan har rensas innan något
+  sparas eller flyttas (`dropShadowedIrlLevels`) så en inaktuell siffra
+  aldrig skriver över en nyare bedömning. Bara Movexum-personal bedömer;
+  annars, och vid läsfel, ligger svaret kvar och en varning visas.
+- **Svaren bor på bolagskortet.** Ett ärende för ett portföljbolag lagrar
+  inte längre någon egen kopia av de manuella svaren (`screening_cases.facts`
+  = null); bara bolag utanför plattformen har svaren i ärendet.
+- **Kompletteringssvar slår igenom direkt.** När en komplettering besvaras
+  (`answerScreeningRequestAction`) räknas bolagets pågående ärende om
+  (`refreshOpenScreeningCase` i `lib/excellence/compute.server.ts`: ärendets
+  underlag + bolagskortets svar, inga registeranrop, ingen PDF, "senast
+  sparad av" orört). Svarar en bolagsmedlem görs omräkningen med superusern
+  efter skrivlagrets behörighetskontroll. Bolagskortets "Uppdatera ärendet"
+  gör samma sak när ett ärende pågår (ingen extra PDF/körning — slutbedömningen
+  sparas vid klarmarkering); sektionen Statsstöd & Vinnova visar det pågående
+  ärendet med utfall och länk.
+- **Inga dubbletter.** Välj-eller-skapa ärende sker under ett lås per org-nr
+  (`withDistributedLock`, nyckeln bär en hash). Klarmarkering sker under ett
+  lås per ärende, ett redan klarmarkerat ärende arkiveras inte igen, och ett
+  portföljbolags ärende klarmarkeras bara när slutbedömningen faktiskt
+  sparats på bolagskortet (`?fel=kort` annars). En begäran om komplettering
+  med samma obesvarade punkter till samma mottagare som en pågående
+  förfrågan skapas inte — den befintliga returneras
+  (`findDuplicateScreeningRequest`, ren + enhetstestad; lås per bolag).
+- Inga nya fält, kollektioner eller migrationer; riskklass n/a (ingen AI).
+
 ## 52. Bolagskortet — flikar & KTH Innovation Readiness Level (2026-10)
 
 ### 52.1 Struktur

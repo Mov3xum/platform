@@ -10,9 +10,9 @@ const STEPS: { title: string; items: string[] }[] = [
     items: [
       'Varje bolag du bedömer blir ett ärende. Skapa ärende uppe till höger, välj bolag och kör bedömningen — ärendet skapas när första bedömningen sparas.',
       'Ärendet sparas varje gång du hämtar, räknar om eller hämtar mer. Öppna det från listan och fortsätt där du slutade — ingen ny hämtning från Roaring.',
-      'Skapar du ett ärende för ett bolag som redan har ett pågående ärende fylls det befintliga på i stället (med den nya hämtningen).',
+      'Ett bolag har högst ett pågående ärende: skapar du ett nytt för samma bolag fylls det befintliga på i stället (med den nya hämtningen).',
       'Under arbetet sparas ingen PDF — Förhandsgranska PDF visar hur den blir utan att spara den.',
-      'Klarmarkera när bedömningen är färdig: slutbedömningen sparas som PDF i dina Filer (och för portföljbolag på bolagskortet), och ärendet flyttas till Avslutade. Där kan det öppnas igen; nästa klarmarkering sparar en ny PDF.'
+      'Klarmarkera när bedömningen är färdig: slutbedömningen sparas på bolagskortet (portföljbolag) och som PDF i dina Filer, och ärendet flyttas till Avslutade. Ett klick räcker — ett dubbelklick sparar inte två gånger. Ärendet kan öppnas igen; nästa klarmarkering sparar en ny slutbedömning.'
     ]
   },
   {
@@ -22,7 +22,7 @@ const STEPS: { title: string; items: string[] }[] = [
       'Hämta från bolagsregistret: bocka i de datadelar som ska begäras ut — ingen är förvald, varje anrop debiteras. För en komplett bedömning: Koncernstruktur (hela koncernen: moder-, syster- och dotterbolag), Grunddata (ålder, status, bolagsform — avgör även börsnotering), Bokslut (tröskelvärden och utdelning) och Verklig huvudman (fristående, indirekt grundarägande).',
       `Varje bolag i koncernen slås därefter upp med grunddata + bokslut av ditt val (verklig huvudman bara för moderbolag), högst ${MAX_RELATED_COMPANIES} bolag. Kostnaden för hela bedömningen visas i resultatet — leverantörens faktura är facit.`,
       'Bedöm sparade data: använder det som redan finns på bolagskortet, utan nya anrop. Systerbolag syns bara vid en färsk hämtning med Koncernstruktur.',
-      'Grundarägande, registrerat de minimis-stöd, IRL och excellensflaggan tas från plattformen när bolaget finns här.'
+      'Grundarägande, registrerat de minimis-stöd, IRL och excellensflaggan tas från plattformen när bolaget finns här — alltid de senaste värdena, även i ett ärende som påbörjades tidigare.'
     ]
   },
   {
@@ -40,6 +40,7 @@ const STEPS: { title: string; items: string[] }[] = [
       'Välj svar i väljaren till höger på punkten och skriv en kort motivering/källa (t.ex. bolagsordning, intyg).',
       'Ett eget Nej väger alltid tyngst; ett eget Ja fyller bara en okänd punkt. "Registret gäller" betyder att registret redan avgjort punkten.',
       'Tabellerna (grundarteam med engagemang och mognadsfas, IRL, kommentaren) ändras med Ändra. Engagemanget prövas mot fasens trösklar.',
+      'IRL har en plats: bolagskortets KTH-bedömning (fliken Utveckling & IRL). Bedömningen visar den senaste; nivåer och motiveringar du ändrar här sparas som en ny bedömning på bolagskortet när du sparar. Ett tomt fält behåller bolagskortets värde.',
       'Bolag utan bokslut: skriv bolagets egen uppskattning i god tro direkt i tröskelvärdestabellen (bilaga I art. 4.3) — ett bokslut vinner alltid.',
       'Fristående kan sällan avgöras ur registret för nyregistrerade bolag — aktieboken avgör. Lägg till ägarbolag med "Lägg till koncernbolag" under koncernkartan, eller hämta mer om ett bolag direkt i kartan (kostnaden visas innan).',
       'Spara och räkna om längst ned: samma underlag, inga nya anrop. Svaren sparas på bolagskortet och återanvänds vid nästa körning.'
@@ -49,7 +50,7 @@ const STEPS: { title: string; items: string[] }[] = [
     title: '4. Be om det som saknas',
     items: [
       'Begär komplettering skickar punkterna till coachen eller direkt till bolaget (svarar under Mitt bolag). Punkter som kräver coachens bedömning (Vinnova, IRL, excellens) går inte till bolaget.',
-      'Svaren hamnar i bolagets manuella svar — räkna om bedömningen när de kommit in.'
+      'Svaren sparas direkt på bolagskortet (IRL som ny KTH-bedömning) och det pågående ärendet räknas om med dem — ingen omräkning behövs. Samma obesvarade punkter skickas inte två gånger till samma mottagare.'
     ]
   },
   {

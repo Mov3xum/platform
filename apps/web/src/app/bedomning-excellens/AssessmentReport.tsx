@@ -92,6 +92,12 @@ const OWNER_KIND_LABEL: Record<string, string> = {
   other: 'Okänd'
 };
 const IRL_LABEL: Record<IrlAxis, string> = { crl: 'CRL', brl: 'BRL', tmrl: 'TMRL', srl: 'SRL' };
+/** Övriga KTH-axlar ur bolagskortets bedömning (§ 52.2) — visas, ändras på bolagskortet. */
+const KTH_EXTRA_AXES = [
+  { key: 'trl', label: 'TRL', hint: 'Teknik — från bolagskortets KTH-bedömning' },
+  { key: 'iprl', label: 'IPRL', hint: 'IPR — från bolagskortets KTH-bedömning' },
+  { key: 'frl', label: 'FRL', hint: 'Finansiering — från bolagskortets KTH-bedömning' }
+] as const;
 
 /**
  * Frågorna ställs som NATURLIGA frågor med svarsalternativ som säger vad de
@@ -1359,9 +1365,16 @@ export function AssessmentReport({ assessment, fetchMore, onUpdated }: Props) {
                 <span>
                   Bedömning IRL{irl?.assessedAt ? ` (senast ${irl.assessedAt})` : ''}
                   {typeof irl?.level === 'number' ? ` · sammanvägd nivå ${irl.level}` : ''}
-                  {irl?.manualLevels ? ' · nivåer manuellt angivna' : ''}
+                  {irl?.manualLevels ? ' · nivåer manuellt angivna' : platformIrl ? ' · från bolagskortet' : ''}
                 </span>
-                <EditToggle editing={editingIrl} onToggle={() => toggle('irl')} label="Ändra" />
+                <span className="flex items-center gap-3">
+                  {subject.startupId && (
+                    <Link href={`/startups/${subject.startupId}/utveckling#irl`} className="text-[12px] font-semibold text-link hover:underline">
+                      IRL på bolagskortet
+                    </Link>
+                  )}
+                  <EditToggle editing={editingIrl} onToggle={() => toggle('irl')} label="Ändra" />
+                </span>
               </span>
             </caption>
             <thead className="text-left text-[11px] uppercase tracking-wider text-foreground-subtle">
@@ -1373,17 +1386,18 @@ export function AssessmentReport({ assessment, fetchMore, onUpdated }: Props) {
             </thead>
             <tbody>
               {IRL_AXES.map((ax) => {
-                const level = platformIrl ? irl?.[ax] : (facts.irl?.levels?.[ax] ?? irl?.[ax]);
+                // Resultatet är facit: bolagskortets nivå per axel, annars manuellt angiven.
+                const level = irl?.[ax];
                 const note = facts.irl?.notes?.[ax] ?? irl?.notes?.[ax];
                 return (
                   <tr key={ax} className="border-t border-default">
                     <td className="px-3 py-1.5 font-medium text-foreground">{IRL_LABEL[ax]}</td>
                     <td className="px-3 py-1.5 text-foreground-muted mx-tnum">
-                      {editingIrl && !platformIrl ? (
+                      {editingIrl ? (
                         <input
                           aria-label={`${IRL_LABEL[ax]} nivå`}
                           inputMode="numeric"
-                          placeholder="1–9"
+                          placeholder={typeof level === 'number' ? String(level) : '1–9'}
                           value={facts.irl?.levels?.[ax] ?? ''}
                           onChange={(e) => {
                             const n = Number(e.target.value);
@@ -1404,7 +1418,7 @@ export function AssessmentReport({ assessment, fetchMore, onUpdated }: Props) {
                       {editingIrl ? (
                         <input
                           aria-label={`${IRL_LABEL[ax]} motivering`}
-                          placeholder="Motivering (metrics)"
+                          placeholder={irl?.notes?.[ax] ?? 'Motivering (metrics)'}
                           maxLength={SCREENING_NOTE_MAX}
                           value={facts.irl?.notes?.[ax] ?? ''}
                           onChange={(e) => {
@@ -1422,6 +1436,13 @@ export function AssessmentReport({ assessment, fetchMore, onUpdated }: Props) {
                   </tr>
                 );
               })}
+              {KTH_EXTRA_AXES.filter((k) => typeof irl?.[k.key] === 'number').map((k) => (
+                <tr key={k.key} className="border-t border-default">
+                  <td className="px-3 py-1.5 font-medium text-foreground">{k.label}</td>
+                  <td className="px-3 py-1.5 text-foreground-muted mx-tnum">{irl?.[k.key]}</td>
+                  <td className="px-3 py-1.5 text-foreground-subtle">{k.hint}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

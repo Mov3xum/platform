@@ -4,7 +4,7 @@ import { deriveScreeningRequestItems, screenExcellence, type Role, type Screenin
 import { platformPart, loadPlatformStartupFacts, type PlatformStartupFacts } from './data.server';
 import { serializeAssessmentContext, type AssessmentContext } from './context';
 import { listScreeningRequestsForStartup } from './requests.server';
-import { loadScreeningCase, type ScreeningCaseRow } from './cases.server';
+import { findOpenScreeningCase, loadScreeningCase, saveAssessmentToCase, type ScreeningCaseRow } from './cases.server';
 import type { AssessmentRequestSummary, ExcellenceAssessment } from './types';
 
 // Räknar Bedömning excellens på ett underlag + manuella svar (CLAUDE.md § 51)
@@ -158,4 +158,32 @@ export async function loadCaseAssessment(
     assessment.file = { id: row.file_id, filename: row.file_name, href: `/api/files/${row.file_id}`, startupId: ctx.subject.startupId };
   }
   return { row, assessment };
+}
+
+/**
+ * Räknar om bolagets PÅGÅENDE ärende (§ 51.10) på dess sparade underlag med
+ * bolagskortets aktuella svar och plattformsfakta — anropas när en
+ * komplettering besvaras eller bolagskortet räknas om, så ärendelistans
+ * utfall och "okänt"-antal aldrig visar ett gammalt läge. Inga
+ * registeranrop, ingen PDF, "senast sparad av" lämnas orört. Fail-soft:
+ * `error` beskriver varför ärendet inte kunde uppdateras.
+ */
+export async function refreshOpenScreeningCase(
+  pb: PocketBase,
+  user: AssessmentViewer,
+  startupId: string
+): Promise<{ caseId?: string; error?: string }> {
+  const viewer = { tenant: user.tenant, roles: user.roles };
+  const open = await findOpenScreeningCase(pb, viewer, { startupId });
+  if (!open) return {};
+  const loaded = await loadCaseAssessment(pb, user, open.id);
+  if (!loaded?.assessment) return { caseId: open.id, error: 'Ärendet saknar sparat underlag.' };
+  const saved = await saveAssessmentToCase(
+    pb,
+    { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles },
+    loaded.assessment,
+    { caseId: open.id, create: false, touch: false }
+  );
+  if (saved.ok === false) return { caseId: open.id, error: saved.error };
+  return { caseId: open.id };
 }
