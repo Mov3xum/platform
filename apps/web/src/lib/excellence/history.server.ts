@@ -140,7 +140,7 @@ export async function getScreeningRun(pb: PocketBase, tenantId: string, id: stri
 }
 
 /** Serialiserat underlag utan verklig huvudmans namn; null om det inte kan tolkas. */
-function storableContext(json: string): string | null {
+export function storableContext(json: string): string | null {
   const ctx = parseAssessmentContext(json);
   if (!ctx) return null;
   const out = serializeAssessmentContext(stripTransientNames(ctx));

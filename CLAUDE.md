@@ -8663,6 +8663,9 @@ Bolagskortets Ägarbild-sektion länkar hit (`?startup=<id>`).
 | `apps/web/src/lib/excellence/assessment-file.ts` (+ `.test.ts`) | REN: filnamn (`Bedömning excellens – <bolag> – <svensk tid>.pdf`), ämne i Filer |
 | `apps/web/src/lib/excellence/assessment-store.server.ts` | `storeExcellenceAssessmentPdf` — sparar PDF:en i `user_files` (bolagets mapp) via `createUserFileRecord`, fail-soft |
 | `backend/pocketbase-schema/migrations/1700000187_backfill_enabled_modules_bedomning_excellens.js` | Backfill av `users.enabled_modules` (§ 36.3-läxan) |
+| `apps/web/src/lib/excellence/cases.ts` (+ `.test.ts`) / `cases.server.ts` | Ärenden (§ 51.10): vilket ärende en körning sparas i (ren, enhetstestad) + läs/spara/klarmarkera |
+| `apps/web/src/lib/excellence/compute.server.ts` | Bedömningen utan sidoeffekter — delas av actions och ärendevyn (öppnar ett ärende utan registeranrop) |
+| `backend/pocketbase-schema/migrations/1700000200_create_screening_cases.js` | Collection `screening_cases` |
 
 ### 51.2 Regler (bindande)
 
@@ -8944,7 +8947,8 @@ in. Nu är det **EN rapport** (`AssessmentReport.tsx`, ersätter
 
 **Incident:** en bedömning (som kostar credits hos Roaring) fanns bara på
 skärmen — stängde controllern fliken var den borta, och det fanns inget att
-dela eller bifoga. Nu arkiveras **varje körning** automatiskt:
+dela eller bifoga. Nu arkiveras **slutbedömningen när ärendet klarmarkeras**
+(§ 51.10; före 2026-10-19 arkiverades varje körning):
 - `assessExcellenceAction` renderar bedömningen som PDF
   (`buildExcellenceAssessmentPdf`: pdf-lib + Sora/Nunito, Combly-ordningen:
   review-rad → steg 1 med grundförutsättningar per bolag, ägarbild med
@@ -9171,6 +9175,80 @@ helst** — inga bolagsspecifika regler.
   `context` ligger i den staff/observer-scopade, AI-denylistade
   `startup_screenings` (grundarnamn ur teamet — samma krets som bolagskortet);
   `screening_facts` är fortsatt fältmaskat för AI. Riskklass n/a (ingen AI).
+
+### 51.10 Ärenden — skapa, fortsätt utan ny hämtning, klarmarkera (2026-10-19)
+
+**Behov.** Varje bedömning var en engångsvy: stängdes fliken fick
+controllern köra om (och betala) Roaring-uppslagen för att fortsätta, och det
+fanns ingen överblick över vilka bolag som var under bedömning.
+
+- **Sidan är en ärendelista.** `/bedomning-excellens` listar **aktuella**
+  ärenden (bolag, org-nr, statsstöd/Vinnova-utfall, antal okända punkter,
+  senast sparad av vem) med **Fortsätt** och **Klarmarkera**; fliken
+  **Avslutade** (`?visa=avslutade`) visar klarmarkerade med **Öppna igen**.
+  **Skapa ärende** uppe till höger (`?ny=1`) öppnar bolagsvalet; ärendet
+  skapas när första bedömningen sparas. Bolagskortets länk (`?startup=<id>`)
+  går direkt in i ett pågående ärende för bolaget när ett finns.
+- **Datamodell — `screening_cases` (migration 1700000200).** `tenant`,
+  `startup` (bara portföljbolag), `org_nr`, `subject_name`, `status`
+  (`open | done`, MÅSTE spegla `SCREENING_CASE_STATUSES`), `mode`,
+  `provider` (slug — för "hämta mer"), **`context`** (senaste underlaget,
+  `stripTransientNames` — verklig huvudmans namn lagras aldrig), **`facts`**
+  (manuella svar), utfallen + `unknown_count` (för listan),
+  `last_assessed_at/_by`, `file_id/file_name` (senaste PDF:en i
+  `last_assessed_by`:s Filer — nedladdningslänken visas bara för den
+  personen, `user_files` är ägaren-bara), `created_by`, `completed_at/_by`.
+  RLS: list/view staff/observer; create pinnar tenant + `created_by`
+  (§ 21.8); update Movexum-personal; delete ledningen eller skaparen.
+  Speglat i `setup-via-api.mjs` (+ `FORCE_CREATE_RULES`), asserterat i
+  `verify-baseline.mjs` (must-exist, `MUST_BE_STAFF_OR_OBSERVER`),
+  **denylistat för AI** (`redaction.ts` + test). Verifierat mot PB 0.23.4.
+- **Allt sparas i ärendet.** `finishAssessment` (alla actions: körning,
+  "Spara och räkna om", "Hämta mer", "Lägg till koncernbolag") anropar
+  `saveAssessmentToCase`. Rapportens formulär bär
+  `case_id`; målet väljs av den rena `resolveCaseTarget`: uttryckligt ärende
+  **för samma org-nr** (ett id för ett annat bolag skrivs aldrig över) →
+  pågående ärende för org-numret (ingen dubblett när "Skapa ärende" körs för
+  ett bolag som redan har ett) → nytt. Omräkningen från bolagskortet (§ 51.8)
+  fyller på ett pågående ärende men skapar inget. Fail-soft: kan ärendet
+  inte sparas visas bedömningen ändå med `caseError`.
+- **Fortsätt utan Roaring.** `?arende=<id>` → `loadCaseAssessment`
+  (`compute.server.ts`) räknar om på ärendets underlag — ingen leverantör,
+  ingen PDF, ingen historikrad. Svaren: för ett portföljbolag bolagskortets
+  `screening_facts` (EN sanning, dit även kompletteringarna slagits ihop
+  § 51.6) och plattformens fakta läses färskt (`refreshPlatformInContext`,
+  delad med § 51.8-omräkningen); för ett bolag utanför plattformen ärendets
+  `facts` (där bor svaren bara). En ny hämtning i ett pågående ärende
+  ("Hämta på nytt" i ärendehuvudet, bolaget låst) läser ärendets svar så
+  inget tappas. Saknar ärendet tolkbart underlag visas bolagsvalet.
+- **PDF bara vid klarmarkering (beslut 2026-10-19).** Arbetet i ett ärende
+  skapar varken PDF i Filer eller körning på bolagskortet (tidigare en per
+  omräkning). `completeScreeningCaseAction` räknar slutbedömningen på
+  ärendets underlag + senaste svar (`loadCaseAssessment(..., { final: true })`
+  — daterad nu, av den som klarmarkerar, inga registeranrop), arkiverar den
+  (`archiveAssessment`: PDF i den inloggades Filer + `startup_screenings`-rad
+  för portföljbolag, § 51.3/§ 51.6) och klarmarkerar FÖRST när PDF:en är
+  sparad (`file_id`/`file_name` på ärendet; annars `?fel=pdf`, ärendet
+  förblir pågående). Länken "Ladda ned PDF" visas för den som klarmarkerade
+  (Filer är ägaren-bara). Under arbetet: **Förhandsgranska PDF**
+  (`/api/bedomning-excellens/<id>/pdf`) renderar på ärendets sparade läge
+  utan att spara. Undantag som fortfarande arkiverar direkt: bolagskortets
+  uttryckliga "Räkna om med svaren och spara ny PDF" (§ 51.8,
+  `archive: 'always'`) och en körning vars ärende inte kunde sparas
+  (`'if_no_case'` — t.ex. utan migrationen; en betald körning försvinner
+  aldrig). Begäran om komplettering under arbetet länkas därför inte till en
+  körning (`screening` tomt).
+- **Klarmarkera / öppna igen** (`completeScreeningCaseAction` /
+  `reopenScreeningCaseAction`, admin/incubator_lead/coach,
+  tenant-verifierat): klarmarkerat ärende lämnar listan över aktuella;
+  öppna igen nollställer `completed_*` (nästa klarmarkering sparar en ny
+  PDF). Status auditeras i `agent_actions`
+  (PII-fritt: bolagsnamn + status, aldrig org-nr/svar) → Bolagsnytt/
+  `/aktivitet` med länk till ärendet. Ett klarmarkerat ärende kan öppnas
+  och läsas; arbete i det sparas utan att statusen ändras.
+- Riskklass n/a (ingen AI). GDPR § 5: samma uppgifter som körningen redan
+  visade, lagrade utan transienta personnamn; `cascadeDelete` på
+  tenant/startup.
 
 ## 52. Bolagskortet — flikar & KTH Innovation Readiness Level (2026-10)
 

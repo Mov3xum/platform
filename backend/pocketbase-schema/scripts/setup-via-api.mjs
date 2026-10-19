@@ -4503,6 +4503,51 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_LEAD_EACH} || @request.auth.id = requested_by)`
 });
 
+// Migration 1700000200 (§ 51.10): ärenden i Bedömning excellens — senaste
+// underlaget + manuella svar per bolag så ett påbörjat ärende fortsätts utan
+// nya registeranrop; klarmarkerade ärenden lämnar listan över aktuella.
+// list/view staff/observer; create pinnad (tenant + created_by); update
+// Movexum-personal; delete ledning eller skaparen. Denylistad för AI.
+await ensureCollection({
+  id: 'screening_cases_collection',
+  name: 'screening_cases',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'startup', type: 'relation', required: false, collectionId: 'startups_collection', cascadeDelete: true, minSelect: 0, maxSelect: 1 },
+    { name: 'org_nr', type: 'text', required: true, min: 10, max: 20 },
+    { name: 'subject_name', type: 'text', required: false, max: 200 },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['open', 'done'] },
+    { name: 'mode', type: 'select', required: false, maxSelect: 1, values: ['register', 'saved'] },
+    { name: 'provider', type: 'text', required: false, max: 60 },
+    { name: 'context', type: 'json', required: false, maxSize: 2000000 },
+    { name: 'facts', type: 'json', required: false, maxSize: 200000 },
+    { name: 'state_aid_outcome', type: 'select', required: false, maxSelect: 1, values: ['art22_possible', 'de_minimis', 'not_eligible', 'undetermined'] },
+    { name: 'vinnova_outcome', type: 'select', required: false, maxSelect: 1, values: ['in_target_possible', 'not_in_target', 'undetermined'] },
+    { name: 'excellence_verdict', type: 'select', required: false, maxSelect: 1, values: ['yes', 'no', 'unknown'] },
+    { name: 'unknown_count', type: 'number', required: false, min: 0, onlyInt: true },
+    { name: 'last_assessed_at', type: 'date', required: false },
+    { name: 'last_assessed_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'file_id', type: 'text', required: false, max: 30 },
+    { name: 'file_name', type: 'text', required: false, max: 200 },
+    { name: 'created_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'completed_at', type: 'date', required: false },
+    { name: 'completed_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_screening_cases_tenant_status ON screening_cases (tenant, status)',
+    'CREATE INDEX idx_screening_cases_tenant_org ON screening_cases (tenant, org_nr)',
+    'CREATE INDEX idx_screening_cases_startup ON screening_cases (startup)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  createRule: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_LEAD_EACH} || @request.auth.id = created_by)`
+});
+
 // Migration 1700000186 (§ 50): notifications.kind blir TEXT — ersätter de
 // tidigare select-unionerna (1700000158/1700000169). Kan REST inte byta typ
 // (validation_field_type_change) unionas select-värdena i stället, så nya
@@ -5431,6 +5476,8 @@ const FORCE_CREATE_RULES = {
   // Bedömning excellens (§ 51.6, migration 1700000191) — pinnade skapare.
   startup_screenings: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.assessed_by = @request.auth.id`,
   screening_requests: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.requested_by = @request.auth.id`,
+  // Ärenden i Bedömning excellens (§ 51.10, migration 1700000200).
+  screening_cases: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
   // Stödcheckar & finansieringsprojekt (§ 46, migrationer 1700000161–167) —
   // roll-/medlemskontroll i skrivlagret och route-handlers.
   funding_projects: `${ANY_AUTH} && @request.auth.tenant != ""`,

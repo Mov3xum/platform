@@ -875,6 +875,14 @@ function mapRow(
         icon: 'shield'
       };
     }
+    // Ärenden i Bedömning excellens (§ 51.10).
+    case 'screening_cases': {
+      const name = str(after.subject_name);
+      const href = row.record_id ? `/bedomning-excellens?arende=${row.record_id}` : '/bedomning-excellens';
+      if (action === 'create') return { title: `${name ? `${name}: ` : ''}ärende i Bedömning excellens skapat`, href, icon: 'shield' };
+      const done = str(after.status) === 'done';
+      return { title: `${name ? `${name}: ` : ''}ärende i Bedömning excellens ${done ? 'klarmarkerat' : 'öppnat igen'}`, href, icon: done ? 'check' : 'shield' };
+    }
     case 'screening_requests': {
       const name = str(after.startup_name);
       const to = str(after.recipient_kind) === 'coach' ? 'coachen' : 'bolaget';
