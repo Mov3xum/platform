@@ -24,7 +24,7 @@ import { loadInviteUsers, loadStartupReach, type InviteUser, type StartupReach }
 import { recomputeEventCounters } from '@/lib/events/counters';
 import { hashRsvpToken } from '@/lib/core/write/event-invitations';
 import { logAgentAction } from '@/lib/core/write/audit';
-import { signUnsubscribeKey, unsubscribeSecret } from '@/lib/unsubscribe-key';
+import { signUnsubscribeSubject, unsubscribeSecret, type UnsubscribeSubject } from '@/lib/unsubscribe-key';
 import { LockTimeoutError, withDistributedLock } from '@/lib/distributed-lock';
 import { CAMPAIGNS, CAMPAIGN_RECIPIENTS, getCampaign, normalizeCampaign, type CampaignRow } from './campaign-data';
 import { sendEmailBatch, sendOne, type OutgoingEmail } from './send-batch';
@@ -117,6 +117,18 @@ async function loadContacts(pb: PocketBase, tenant: string, ids: readonly string
     );
   }
   return out;
+}
+
+export const UNSUBSCRIBE_SECRET_MISSING =
+  'Avregistreringslänkar kan inte skapas: sätt MOVEXUM_UNSUBSCRIBE_SECRET (eller MOVEXUM_INTEGRATION_KEY) på web-appen i Coolify. Inget skickades.';
+
+/** Posten avregistreringslänken ska peka på — den adressen hämtades ur. */
+function unsubscribeSubjectFor(c: Candidate): UnsubscribeSubject | null {
+  if (c.contact) return { kind: 'contact', id: c.contact };
+  if (c.user) return { kind: 'user', id: c.user };
+  if (c.kind === 'startup' && c.startup) return { kind: 'startup', id: c.startup };
+  if (c.kind === 'signup' && c.signupId) return { kind: 'signup', id: c.signupId };
+  return null;
 }
 
 function firstNameOf(name: string): string {
@@ -415,6 +427,10 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
   const sender = await senderFor(pb, campaign, orgName);
   const secret = emailLinkSecret();
   const unsubSecret = unsubscribeSecret();
+  // Inget kampanjmejl utan fungerande avregistrering (GDPR art. 21, § 55.6):
+  // saknas hemligheten kan ingen länk signeras — säg det i stället för att
+  // skicka mejl vars "Avregistrera dig" saknas.
+  if (!unsubSecret) return { ok: false, error: UNSUBSCRIBE_SECRET_MISSING };
 
   // Markera som pågående innan något skickas (cron kör inte om den).
   await pb.collection(CAMPAIGNS).update(campaign.id, { status: 'sending', send_at: '', last_error: '' }).catch(() => undefined);
@@ -593,7 +609,11 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
   const byKey = new Map<string, Pending>();
   for (const p of pending) {
     const c = p.candidate;
-    const key = c.contact && unsubSecret ? signUnsubscribeKey(c.contact, unsubSecret) : null;
+    // Avregistreringen följer med i VARJE mejl — kontakt, användare, bolag
+    // eller gäst i deltagarlistan (§ 55.6); nyckeln pekar på posten adressen
+    // hämtades ur, så den fungerar från alla mallar och utan ny token.
+    const subject = unsubscribeSubjectFor(c);
+    const key = subject ? signUnsubscribeSubject(subject, unsubSecret) : null;
     const unsubscribe = key ? `${baseUrl}/e/avregistrera?k=${key}&alla=1` : null;
     const oneClick = key ? `${baseUrl}/api/public/e/unsubscribe?k=${key}&alla=1` : null;
     const rendered = renderCampaignEmail({
@@ -627,7 +647,7 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
       html: rendered.html,
       text: rendered.text,
       reply_to: sender.replyTo,
-      headers: c.reason === 'contact' ? listUnsubscribeHeaders(oneClick) : {},
+      headers: listUnsubscribeHeaders(oneClick),
       tags: [
         { name: 'category', value: `campaign_${campaign.category}` },
         { name: 'campaign', value: campaign.id },

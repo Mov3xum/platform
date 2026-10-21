@@ -10242,6 +10242,23 @@ till den inloggades adress med exempeldata och `[TEST]` i ämnesraden.
   på/av, "alla av", nyhetsbrevssamtycke (källa `preference_center`).
   Kampanjernas avregistreringslänk stänger av ALLT (`alla=1`) — den som
   klickar avregistrera ska inte få nästa kategori.
+- **Avregistreringen följer med i VARJE kampanjmejl (incident 2026-10-21).**
+  Länken och `List-Unsubscribe` fanns bara för kontakter i kontaktboken —
+  användare (personal, bolagsmedlemmar), bolagets egen adress och gäster i
+  deltagarlistan fick mejl utan "Avregistrera dig", och testmejlets länk
+  ledde till en tom "Testlänk"-sida. Nu signerar `lib/unsubscribe-key.ts`
+  nyckeln över den POST adressen hämtades ur (`signUnsubscribeSubject`:
+  kontakt = `<id>` som förut, användare `u-<id>`, bolag `s-<id>`, gäst
+  `e-<deltagarrad>`; redan skickade kontaktlänkar fortsätter att fungera),
+  dispatchen sätter länk + en-klicks-headers för alla mottagartyper och
+  **vägrar skicka när hemligheten saknas** (`UNSUBSCRIBE_SECRET_MISSING` —
+  inget kampanjmejl utan fungerande avregistrering, art. 21). Routen
+  `/api/public/e/unsubscribe` sätter kontaktens opt-out som förut; för
+  övriga typer läses adressen ur posten (superuser) och **spärras i
+  `email_suppressions`** (reason `unsubscribe`, source `unsubscribe_link`),
+  som varje utskick kontrollerar oavsett mall. Bara kontakter har
+  preferenscentret; övriga avregistreras helt. Enhetstestat i
+  `unsubscribe-key.test.ts`.
 - **Nyhetsbrev med dubbel opt-in** `/e/prenumerera` → signerad token (48 h,
   ingen rad skapas) → `/e/bekrafta` skapar/uppdaterar kontakten med
   `gdpr_consent` + `newsletter_consent` (källa `double_opt_in`). Spärrad
