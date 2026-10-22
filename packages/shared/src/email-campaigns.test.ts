@@ -432,3 +432,44 @@ test('reminderDue: fönstret öppnar N dygn före och stänger vid start', () =>
   assert.ok(!due('2026-11-11T07:00:00Z', '2026-11-10T07:00:00Z'));
   assert.ok(!reminderDue({ settings, kind: 'confirmed', starts_at, sentAt: null, now: new Date('2026-11-11T07:00:00Z') }), 'av = aldrig');
 });
+
+// ── Leveransstatus från Resend (§ 55.4) ─────────────────────────────────────
+
+test('deliveryStatusFromProviderEvent: tolkar Resends last_event, okänt ⇒ null', async () => {
+  const { deliveryStatusFromProviderEvent, isFinalDeliveryStatus } = await import('./email-campaigns.ts');
+  assert.equal(deliveryStatusFromProviderEvent('delivered'), 'delivered');
+  assert.equal(deliveryStatusFromProviderEvent('email.delivered'), 'delivered');
+  assert.equal(deliveryStatusFromProviderEvent('opened'), 'delivered');
+  assert.equal(deliveryStatusFromProviderEvent('clicked'), 'delivered');
+  assert.equal(deliveryStatusFromProviderEvent('bounced'), 'bounced');
+  assert.equal(deliveryStatusFromProviderEvent('bounce'), 'bounced');
+  assert.equal(deliveryStatusFromProviderEvent('complaint'), 'complained');
+  assert.equal(deliveryStatusFromProviderEvent('delivery_delayed'), 'delivery_delayed');
+  assert.equal(deliveryStatusFromProviderEvent('queued'), 'queued');
+  assert.equal(deliveryStatusFromProviderEvent('sent'), 'sent');
+  assert.equal(deliveryStatusFromProviderEvent('cancelled'), 'canceled');
+  assert.equal(deliveryStatusFromProviderEvent('something_else'), null);
+  assert.equal(deliveryStatusFromProviderEvent(undefined), null);
+  assert.equal(deliveryStatusFromProviderEvent(42), null);
+  assert.equal(isFinalDeliveryStatus('delivered'), true);
+  assert.equal(isFinalDeliveryStatus('bounced'), true);
+  assert.equal(isFinalDeliveryStatus('sent'), false);
+  assert.equal(isFinalDeliveryStatus('queued'), false);
+  assert.equal(isFinalDeliveryStatus(null), false);
+});
+
+test('summarizeDeliveryStatuses: räknar bara skickade rader, okontrollerade för sig', async () => {
+  const { summarizeDeliveryStatuses } = await import('./email-campaigns.ts');
+  const s = summarizeDeliveryStatuses([
+    { status: 'sent', delivery_status: 'delivered' },
+    { status: 'sent', delivery_status: 'opened' },
+    { status: 'sent', delivery_status: 'sent' },
+    { status: 'sent', delivery_status: '' },
+    { status: 'sent' },
+    { status: 'bounced', delivery_status: 'bounced' },
+    { status: 'sent', delivery_status: 'failed' },
+    { status: 'suppressed', delivery_status: '' },
+    { status: 'failed' }
+  ]);
+  assert.deepEqual(s, { checked: 5, delivered: 2, pending: 1, bounced: 1, complained: 0, failed: 1, unchecked: 2 });
+});

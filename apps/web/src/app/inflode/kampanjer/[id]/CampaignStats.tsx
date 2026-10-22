@@ -2,15 +2,19 @@ import Link from 'next/link';
 import { Card, Chip, Icon } from '@/components/proto';
 import type { CampaignRow, RecipientRow } from '@/lib/email/campaign-data';
 import { DuplicateButton } from './DuplicateButton';
+import { DeliverySyncButton } from './DeliverySyncButton';
 import {
   EMAIL_CAMPAIGN_STATUS_LABELS,
   EMAIL_CATEGORY_LABELS,
   EMAIL_RECIPIENT_STATUSES,
   EMAIL_RECIPIENT_STATUS_LABELS,
+  EMAIL_DELIVERY_STATUS_LABELS,
   deliverabilityHealth,
+  deliveryStatusFromProviderEvent,
   emailCampaignRates,
   formatRate,
   formatStockholmDateTime,
+  summarizeDeliveryStatuses,
   type EmailRecipientStatus
 } from '@platform/shared';
 
@@ -49,6 +53,12 @@ export function CampaignStats({ campaign, recipients }: { campaign: CampaignRow;
   for (const r of recipients) byStatus.set(r.status, [...(byStatus.get(r.status) ?? []), r]);
   const links = campaign.link_clicks.urls.map((url, i) => ({ url, count: campaign.link_clicks.counts[i] ?? 0 })).sort((a, b) => b.count - a.count);
   const clickers = recipients.filter((r) => r.click_count > 0).length;
+  // Vad Resend säger hände EFTER att vi skickade (§ 55.4) — "Skickat" är bara mottaget hos Resend.
+  const delivery = summarizeDeliveryStatuses(recipients);
+  const deliveryLabel = (r: RecipientRow): string | null => {
+    const d = deliveryStatusFromProviderEvent(r.delivery_status);
+    return d ? EMAIL_DELIVERY_STATUS_LABELS[d] : null;
+  };
 
   return (
     <div className="space-y-4 py-4">
@@ -86,6 +96,19 @@ export function CampaignStats({ campaign, recipients }: { campaign: CampaignRow;
         <p className="mx-t-13" style={{ margin: '12px 0 0', color: HEALTH_TONE[health] }}>
           {HEALTH_TEXT[health]} Öppningar mäts inte — vi använder ingen spårningspixel (§ 55.6).
         </p>
+        {rates.sent > 0 && (
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--mx-line-soft)' }}>
+            <div className="mx-t-13 mx-fw-6" style={{ marginBottom: 6 }}>
+              Leveransstatus hos Resend
+            </div>
+            <p className="mx-t-xs mx-muted" style={{ margin: '0 0 8px' }}>
+              {delivery.checked === 0
+                ? '"Skickade" betyder att Resend tog emot mejlen. Hämta statusen för att se om de levererades till mottagarnas servrar.'
+                : `${delivery.delivered} levererade · ${delivery.pending} väntar/köade hos Resend · ${delivery.bounced} studsade · ${delivery.complained} skräppost · ${delivery.failed} misslyckade${delivery.unchecked ? ` · ${delivery.unchecked} ej kontrollerade` : ''}.`}
+            </p>
+            <DeliverySyncButton id={campaign.id} unchecked={delivery.unchecked} />
+          </div>
+        )}
       </Card>
 
       <div className="grid gap-4" style={{ gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)' }}>
@@ -134,6 +157,7 @@ export function CampaignStats({ campaign, recipients }: { campaign: CampaignRow;
                         {r.organization ? ` · ${r.organization}` : ''}
                         {r.click_count > 0 ? ` · ${r.click_count} klick` : ''}
                         {r.fail_reason ? ` · ${r.fail_reason}` : ''}
+                        {deliveryLabel(r) ? ` · Resend: ${deliveryLabel(r)}` : ''}
                       </li>
                     ))}
                     {rows.length > 300 && <li className="mx-muted">+{rows.length - 300} till</li>}

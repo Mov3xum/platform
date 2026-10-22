@@ -5405,7 +5405,10 @@ await ensureCollection({
       { name: 'provider_message_id', type: 'text', required: false, max: 100 },
       { name: 'click_count', type: 'number', required: false, min: 0, onlyInt: true },
       { name: 'first_clicked_at', type: 'date', required: false },
-      { name: 'fail_reason', type: 'text', required: false, max: 300 }
+      { name: 'fail_reason', type: 'text', required: false, max: 300 },
+      // Leveransstatus från Resend (§ 55.4, migration 1700000205).
+      { name: 'delivery_status', type: 'text', required: false, max: 40 },
+      { name: 'delivery_checked_at', type: 'date', required: false }
     ],
     indexes: [
       'CREATE INDEX idx_email_recipients_campaign ON email_campaign_recipients (campaign)',
@@ -5444,6 +5447,11 @@ await ensureCollection({
     deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
   });
   const recipientsCol = await pb.collections.getOne('email_campaign_recipients');
+  // Befintlig installation (migration 1700000205): leveransstatus per mottagare.
+  await patchCollection('email_campaign_recipients', [
+    { name: 'delivery_status', type: 'text', required: false, max: 40 },
+    { name: 'delivery_checked_at', type: 'date', required: false }
+  ]);
   await ensureCollection({
     id: 'email_events_collection',
     name: 'email_events',

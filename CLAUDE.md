@@ -10202,6 +10202,33 @@ räknare + `link_clicks` → status `sent` (eller tillbaka till `draft` med
 `hooks/campaign_dispatch_tick.pb.js` (varje minut, provisoriskt lås) →
 `/api/internal/send-campaign` (`MOVEXUM_SCHEDULE_SECRET`, § 12.3).
 
+**Leveransstatus från Resend (2026-10-22).** "Skickat" i statistiken
+betyder bara att Resend tog emot mejlet (API-svaret). Statistikvyn har
+knappen **"Uppdatera leveransstatus från Resend"** (`DeliverySyncButton` →
+`syncDeliveryAction` → `lib/email/delivery-sync.ts`): för varje skickad
+mottagarrad utan slutlig status hämtas `GET /emails/{id}` (`retrieveEmail` i
+`send-batch.ts`) och Resends `last_event` skrivs som
+`email_campaign_recipients.delivery_status` + `delivery_checked_at`
+(migration **1700000205**, speglad i `setup-via-api.mjs`, asserterad i
+`verify-baseline.mjs`). Tolkningen är ren och enhetstestad
+(`deliveryStatusFromProviderEvent`, `summarizeDeliveryStatuses` i
+`@platform/shared`): `opened`/`clicked` ⇒ levererat; `bounced`/`complained`
+hanteras som webhooken (radens status, spärrlista med adressen läst
+transient, kampanjens räknare, `email_events`); okänd händelse ⇒ `sent`.
+Högst 60 rader per klick (Resends gräns 2 anrop/s), resten vid nästa
+klick; per mottagare visas "Resend: Levererat till mottagarens server" /
+"Köat" / "Studsade" i listan. Webhooken (§ 55.5) är fortsatt den löpande
+vägen — synken är svaret på "kom nyhetsbrevet fram?" när ingen webhook är
+konfigurerad. **Omsändning prövar varje mottagare på nytt (incident
+2026-10-22):** bara `sent`/`bounced`/`complained` från ett tidigare försök
+är slutgiltiga; `failed`, `suppressed` och `unsubscribed` prövas mot dagens
+läge — tidigare låstes en rad som hoppats över (t.ex. "saknar samtycke till
+nyhetsbrev") för alltid, så ett nyhetsbrev som skickades om efter att
+samtycket registrerats nådde fortfarande ingen. Editorns "Kontrollera
+mottagarna" förklarar dessutom, när mottagare blockeras av "Bara samtycke",
+var samtycket registreras (kontaktkortet → Utskick & samtycke) eller att
+rättslig grund kan bytas till berättigat intresse för B2B-listor.
+
 **Systemkampanjer** (`createSystemCampaign`, `created_by` tomt): påminnelse-
 ticken (`event_reminder_tick`, timvis → `/api/internal/event-reminders` →
 `runEventReminders`) skapar och skickar Påminnelse/Vi ses snart när
@@ -10242,6 +10269,23 @@ till den inloggades adress med exempeldata och `[TEST]` i ämnesraden.
   på/av, "alla av", nyhetsbrevssamtycke (källa `preference_center`).
   Kampanjernas avregistreringslänk stänger av ALLT (`alla=1`) — den som
   klickar avregistrera ska inte få nästa kategori.
+- **Avregistreringen följer med i VARJE kampanjmejl (incident 2026-10-21).**
+  Länken och `List-Unsubscribe` fanns bara för kontakter i kontaktboken —
+  användare (personal, bolagsmedlemmar), bolagets egen adress och gäster i
+  deltagarlistan fick mejl utan "Avregistrera dig", och testmejlets länk
+  ledde till en tom "Testlänk"-sida. Nu signerar `lib/unsubscribe-key.ts`
+  nyckeln över den POST adressen hämtades ur (`signUnsubscribeSubject`:
+  kontakt = `<id>` som förut, användare `u-<id>`, bolag `s-<id>`, gäst
+  `e-<deltagarrad>`; redan skickade kontaktlänkar fortsätter att fungera),
+  dispatchen sätter länk + en-klicks-headers för alla mottagartyper och
+  **vägrar skicka när hemligheten saknas** (`UNSUBSCRIBE_SECRET_MISSING` —
+  inget kampanjmejl utan fungerande avregistrering, art. 21). Routen
+  `/api/public/e/unsubscribe` sätter kontaktens opt-out som förut; för
+  övriga typer läses adressen ur posten (superuser) och **spärras i
+  `email_suppressions`** (reason `unsubscribe`, source `unsubscribe_link`),
+  som varje utskick kontrollerar oavsett mall. Bara kontakter har
+  preferenscentret; övriga avregistreras helt. Enhetstestat i
+  `unsubscribe-key.test.ts`.
 - **Nyhetsbrev med dubbel opt-in** `/e/prenumerera` → signerad token (48 h,
   ingen rad skapas) → `/e/bekrafta` skapar/uppdaterar kontakten med
   `gdpr_consent` + `newsletter_consent` (källa `double_opt_in`). Spärrad

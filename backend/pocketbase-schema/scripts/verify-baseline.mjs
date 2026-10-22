@@ -1150,6 +1150,9 @@ const REQUIRED_APP_FIELDS = [
   { collection: 'event_signups', fields: ['plus_ones', 'diet', 'custom_answer', 'checked_in_at', 'campaign'] },
   // Kampanjens kopplade utvärdering (§ 55.3, migration 1700000203) — fyller {{utvärdering.länk}}.
   { collection: 'email_campaigns', fields: ['survey', 'event', 'audience', 'blocks'] },
+  // Leveransstatus från Resend per mottagare (§ 55.4, migration 1700000205):
+  // utan fälten "sparas" statusen tyst bort och "kom det fram?" förblir obesvarat.
+  { collection: 'email_campaign_recipients', fields: ['delivery_status', 'delivery_checked_at'] },
   { collection: 'incubator_events', fields: ['rsvp_settings', 'reminder_unanswered_sent_at', 'reminder_confirmed_sent_at'] },
   // AI-minne (§ 16.4): kategori per notering = migration 1700000155. Saknas
   // fältet "sparas" kategorin från UI/memory_write men försvinner tyst.

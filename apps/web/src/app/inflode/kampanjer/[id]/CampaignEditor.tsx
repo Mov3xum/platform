@@ -156,6 +156,7 @@ function BlockEditor({
   onChange,
   onRemove,
   onMove,
+  onInsertAfter,
   first,
   last
 }: {
@@ -163,6 +164,8 @@ function BlockEditor({
   onChange: (b: EmailBlock) => void;
   onRemove: () => void;
   onMove: (dir: -1 | 1) => void;
+  /** Lägger ett block av vald typ direkt under det här blocket. */
+  onInsertAfter?: () => void;
   first: boolean;
   last: boolean;
 }) {
@@ -180,6 +183,11 @@ function BlockEditor({
         <button type="button" className="mx-btn mx-sm" onClick={() => onMove(1)} disabled={last} aria-label="Flytta ned">
           ↓
         </button>
+        {onInsertAfter && (
+          <button type="button" className="mx-btn mx-sm" onClick={onInsertAfter} aria-label="Lägg till block under" title="Lägg till valt block under det här">
+            <Icon name="plus" size={12} />
+          </button>
+        )}
         <button type="button" className="mx-btn mx-sm" onClick={onRemove} aria-label="Ta bort block">
           <Icon name="trash" size={12} />
         </button>
@@ -224,6 +232,9 @@ function BlockEditor({
         <span className="mx-t-xs mx-muted">
           Personliga svarsknappar. Varje mottagare blir en inbjuden rad i eventets deltagarlista och svaret landar där (§ 53.5).
         </span>
+      )}
+      {block.type === 'ticket' && (
+        <span className="mx-t-xs mx-muted">Personlig biljett med QR-kod och kalenderfil — bara till mottagare som redan står i eventets deltagarlista.</span>
       )}
       {block.type === 'divider' && <span className="mx-t-xs mx-muted">En tunn linje.</span>}
     </div>
@@ -305,6 +316,20 @@ export function CampaignEditor({
   const [sendAt, setSendAt] = useState(toStockholmDateTimeInputValue(campaign.send_at) || '');
   const [recipientPreview, setRecipientPreview] = useState<Awaited<ReturnType<typeof previewRecipientsAction>> | null>(null);
   const [addType, setAddType] = useState<EmailBlockType>('paragraph');
+  // Nytt block: läggs sist i listan — som ofta ligger under skärmkanten i en
+  // mall med bild, rubrik och flera stycken — så vi rullar fram det, markerar
+  // det en stund och sätter fokus i dess första fält. Annars ser ett klick på
+  // "Lägg till" ut som att ingenting hände.
+  const [justAdded, setJustAdded] = useState<string | null>(null);
+  const blockRefs = useRef(new Map<string, HTMLDivElement>());
+  useEffect(() => {
+    if (!justAdded) return;
+    const el = blockRefs.current.get(justAdded);
+    el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el?.querySelector<HTMLElement>('input, textarea, select')?.focus({ preventScroll: true });
+    const t = setTimeout(() => setJustAdded(null), 1600);
+    return () => clearTimeout(t);
+  }, [justAdded]);
 
   // Mottagarlistan (samma listning som inbjudningspanelen, utan event).
   const [q, setQ] = useState('');
@@ -452,6 +477,34 @@ export function CampaignEditor({
     setDirty(true);
   };
 
+  const canAddBlock = editable && blocks.length < 40;
+  const addBlock = (type: EmailBlockType, afterIdx?: number) => {
+    if (!canAddBlock) return;
+    const block = newBlock(type);
+    const at = afterIdx === undefined ? blocks.length : afterIdx + 1;
+    mark(setBlocks)([...blocks.slice(0, at), block, ...blocks.slice(at)]);
+    setJustAdded(block.id);
+  };
+  const addControls = (
+    <>
+      <select className="mx-input" style={{ width: 'auto' }} value={addType} onChange={(e) => setAddType(e.target.value as EmailBlockType)} disabled={!editable} aria-label="Blocktyp att lägga till">
+        {EMAIL_BLOCK_TYPES.map((t) => (
+          <option key={t} value={t}>
+            {EMAIL_BLOCK_LABELS[t]}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className="mx-btn mx-sm"
+        disabled={!canAddBlock}
+        title={!editable ? 'Utskicket kan inte ändras' : blocks.length >= 40 ? 'Högst 40 block per mejl' : 'Lägger blocket sist i innehållet'}
+        onClick={() => addBlock(addType)}
+      >
+        <Icon name="plus" size={12} /> Lägg till
+      </button>
+    </>
+  );
   const updateBlock = (idx: number, b: EmailBlock) => mark(setBlocks)(blocks.map((x, i) => (i === idx ? b : x)));
   const moveBlock = (idx: number, dir: -1 | 1) => {
     const j = idx + dir;
@@ -596,31 +649,42 @@ export function CampaignEditor({
             <div className="mx-flex mx-items-c mx-gap-2" style={{ marginBottom: 10 }}>
               <span className="mx-fw-6 mx-t-13">Innehåll</span>
               <span style={{ flex: 1 }} />
-              <select className="mx-input" style={{ width: 'auto' }} value={addType} onChange={(e) => setAddType(e.target.value as EmailBlockType)} disabled={!editable}>
-                {EMAIL_BLOCK_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {EMAIL_BLOCK_LABELS[t]}
-                  </option>
-                ))}
-              </select>
-              <button type="button" className="mx-btn mx-sm" disabled={!editable || blocks.length >= 40} onClick={() => mark(setBlocks)([...blocks, newBlock(addType)])}>
-                <Icon name="plus" size={12} /> Lägg till
-              </button>
+              {addControls}
             </div>
             <div className="grid gap-2">
               {blocks.length === 0 && <p className="mx-t-13 mx-muted">Inget innehåll än — lägg till en rubrik och en text.</p>}
               {blocks.map((b, i) => (
-                <BlockEditor
+                <div
                   key={b.id}
-                  block={b}
-                  first={i === 0}
-                  last={i === blocks.length - 1}
-                  onChange={(nb) => updateBlock(i, nb)}
-                  onRemove={() => mark(setBlocks)(blocks.filter((_, j) => j !== i))}
-                  onMove={(dir) => moveBlock(i, dir)}
-                />
+                  ref={(el) => {
+                    if (el) blockRefs.current.set(b.id, el);
+                    else blockRefs.current.delete(b.id);
+                  }}
+                  style={
+                    justAdded === b.id
+                      ? { borderRadius: 12, boxShadow: '0 0 0 3px var(--movexum-pastell-lila)', transition: 'box-shadow .3s' }
+                      : { borderRadius: 12, transition: 'box-shadow .6s' }
+                  }
+                >
+                  <BlockEditor
+                    block={b}
+                    first={i === 0}
+                    last={i === blocks.length - 1}
+                    onChange={(nb) => updateBlock(i, nb)}
+                    onRemove={() => mark(setBlocks)(blocks.filter((_, j) => j !== i))}
+                    onMove={(dir) => moveBlock(i, dir)}
+                    onInsertAfter={canAddBlock ? () => addBlock(addType, i) : undefined}
+                  />
+                </div>
               ))}
             </div>
+            {blocks.length >= 3 && (
+              <div className="mx-flex mx-items-c mx-gap-2" style={{ marginTop: 10 }}>
+                <span className="mx-t-xs mx-muted">Lägg till sist i innehållet</span>
+                <span style={{ flex: 1 }} />
+                {addControls}
+              </div>
+            )}
             <details style={{ marginTop: 10 }}>
               <summary className="mx-t-xs mx-muted" style={{ cursor: 'pointer' }}>
                 Platshållare du kan använda i texten
@@ -798,7 +862,19 @@ export function CampaignEditor({
                       </li>
                     ))}
                   </ul>
+                  {consentMode === 'consent_only' && recipientPreview.blocked.some((b) => /samtycke/i.test(b.why)) && (
+                    <p className="mx-t-xs" style={{ margin: '8px 0 0', color: 'var(--movexum-morkgul)' }}>
+                      Rättslig grund är &quot;Bara samtycke&quot;: bara kontakter med registrerat nyhetsbrevssamtycke får mejlet. Registrera samtycket på kontaktkortet under
+                      &quot;Utskick &amp; samtycke&quot; (eller låt personen bekräfta via nyhetsbrevsformuläret), eller byt till &quot;Berättigat intresse&quot; ovan om listan är ren B2B.
+                      Användare och bolag kan bara nås på berättigat intresse.
+                    </p>
+                  )}
                 </details>
+              )}
+              {recipientPreview?.ok && recipientPreview.sendable === 0 && (recipientPreview.total ?? 0) > 0 && (
+                <p className="mx-t-xs" style={{ margin: '8px 0 0', color: 'var(--movexum-morkorange)' }}>
+                  Ingen av mottagarna kan nås — utskicket skulle stanna utan att något mejl går iväg.
+                </p>
               )}
             </Card>
           )}
