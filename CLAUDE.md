@@ -10289,6 +10289,20 @@ till den inloggades adress med exempeldata och `[TEST]` i ämnesraden.
   för Movexums egna M365-konton kan admin lägga en e-postflödesregel med
   `X-MS-Exchange-Organization-BypassFocusedInbox: true` för avsändardomänen
   (dokumenterat på Inställningar → E-post & leverans).
+- **Klickspårning — vad som räknas (incident 2026-10-22):** ett "Save the
+  date" skickades, mottagaren klickade "Lägg i kalendern" och statistiken
+  visade 0 klick. Två orsaker: (1) kalenderlänken gick förbi `trackLink` i
+  `event_details`/`ticket`-blocken (bara text-, knapp- och bildlänkar
+  spårades) — den är inte personlig (signerad eventnyckel, samma för alla)
+  och spåras nu som innehållslänk; svar-/biljett-/avregistreringslänkar är
+  fortsatt ospårade. (2) Mallen har **Personlig leverans** på, vilket per
+  design stänger av spårningen — statistikvyn säger nu det (Klick "–",
+  gul förklaring under Klick per länk) i stället för "0,0 %". Klick-token
+  bär indexet i KAMPANJENS sparade länklista (`campaignLinks`, med
+  kalenderlänk + platshållare för de personliga länkarna) och `trackLink`
+  slår upp indexet på URL — aldrig på blockposition — så en mottagare vars
+  mejl saknar ett block (biljett utan rad i deltagarlistan) aldrig skickas
+  till fel mål; en länk utanför listan lämnas ospårad.
 - **Webhook**: `/api/public/e/webhook/resend` verifierar Svix-signaturen
   (`RESEND_WEBHOOK_SECRET`, tidsfönster 5 min) och hanterar
   `email.bounced` (hård studs ⇒ spärr), `email.complained` (⇒ spärr),
