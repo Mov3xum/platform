@@ -10229,6 +10229,23 @@ mottagarna" förklarar dessutom, när mottagare blockeras av "Bara samtycke",
 var samtycket registreras (kontaktkortet → Utskick & samtycke) eller att
 rättslig grund kan bytas till berättigat intresse för B2B-listor.
 
+**Utfallet syns där man klickar (incident 2026-10-22).** Testmejlet
+(`sendCampaignTest` → `sendOne`) går förbi allt som kan stoppa ett skarpt
+utskick: mottagarurval, rättslig grund (`consent_only` är standard för
+nyhetsbrev ⇒ kontakter utan `newsletter_consent`, användare och bolag
+hoppas över), spärrlistan, `APP_URL`-kravet för länkarna och
+avregistreringshemligheten (`UNSUBSCRIBE_SECRET_MISSING`). Varje sådant stopp
+returnerar ett tydligt fel, sätter kampanjen tillbaka till `draft` med
+orsaken i `last_error` och loggas nu PII-fritt (`[campaigns] dispatch
+aborted` / `dispatch sent nothing`) — men editorn visade felet bara som en
+banner högst upp på en lång sida medan "Skicka nu" ligger längst ned, och
+`last_error` visades bara i statistikvyn (som ett utkast aldrig når). Nu
+visas utfallet av Skicka/Schemalägg vid knapparna (`noticeAt`, scroll till
+bannern) och ett sparat `last_error` står som "Senaste utskicket gick inte:
+…" i samma sektion tills nästa försök. Webbläsarens "[Violation] 'click'
+handler took …ms" kommer av bekräftelsedialogen (`window.confirm` blockerar
+hanteraren tills man svarat) och är inget fel.
+
 **Systemkampanjer** (`createSystemCampaign`, `created_by` tomt): påminnelse-
 ticken (`event_reminder_tick`, timvis → `/api/internal/event-reminders` →
 `runEventReminders`) skapar och skickar Påminnelse/Vi ses snart när

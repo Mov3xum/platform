@@ -435,6 +435,9 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
   // Markera som pågående innan något skickas (cron kör inte om den).
   await pb.collection(CAMPAIGNS).update(campaign.id, { status: 'sending', send_at: '', last_error: '' }).catch(() => undefined);
   const fail = async (error: string): Promise<DispatchResult> => {
+    // Orsaken i serverloggen också (PII-fri: räknare och konfigurationsfel,
+    // aldrig adresser) — så den syns i Coolify även om ingen tittar i UI:t.
+    console.error('[campaigns] dispatch aborted', { campaign: campaign.id, reason: error.slice(0, 300) });
     await pb.collection(CAMPAIGNS).update(campaign.id, { status: 'draft', last_error: error.slice(0, 300) }).catch(() => undefined);
     return { ok: false, error };
   };
@@ -682,6 +685,7 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
   }
 
   const everythingFailed = messages.length > 0 && sent === 0;
+  if (everythingFailed) console.error('[campaigns] dispatch sent nothing', { campaign: campaign.id, attempted: messages.length, reason: (failReason ?? '').slice(0, 300) });
   await pb
     .collection(CAMPAIGNS)
     .update(campaign.id, {
