@@ -518,16 +518,25 @@ export interface EmailDesign {
   layout: EmailLayout;
   /** Visa wordmarken överst (bara `card`). */
   show_logo: boolean;
+  /**
+   * Personlig leverans (§ 55.5): skicka som ett mejl från en person — utan
+   * listhuvuden (`List-Unsubscribe`) och utan spårade klicklänkar, som annars
+   * är de tydligaste "nyhetsbrev"-signalerna för Outlooks Prioriterad/Övrigt
+   * och Gmails Primär/Kampanjer. Avregistreringslänken i fottexten finns
+   * alltid kvar (art. 21); klick räknas inte. Testmejlet skickas redan så.
+   */
+  personal_delivery: boolean;
 }
 
-export const DEFAULT_EMAIL_DESIGN: EmailDesign = { accent: 'morkbla', layout: 'card', show_logo: true };
+export const DEFAULT_EMAIL_DESIGN: EmailDesign = { accent: 'morkbla', layout: 'card', show_logo: true, personal_delivery: false };
 
 export function normalizeEmailDesign(raw: unknown): EmailDesign {
   const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   return {
     accent: isEmailAccent(r.accent) ? r.accent : DEFAULT_EMAIL_DESIGN.accent,
     layout: r.layout === 'plain' ? 'plain' : 'card',
-    show_logo: r.show_logo !== false
+    show_logo: r.show_logo !== false,
+    personal_delivery: r.personal_delivery === true
   };
 }
 
@@ -771,7 +780,7 @@ export const EMAIL_TEMPLATES: readonly EmailTemplateStructure[] = [
     name: 'Eventinbjudan',
     summary: 'Rubrik, eventuppgifter, kort text och svarsknappar. Svaren hamnar direkt i eventets deltagarlista.',
     category: 'events',
-    design: { accent: 'morkbla', layout: 'card', show_logo: true },
+    design: { accent: 'morkbla', layout: 'card', show_logo: true, personal_delivery: true },
     needsEvent: true,
     subject: 'Inbjudan: {{event.namn}}',
     preheader: '{{event.tid}} · {{event.plats}} — svara med ett klick.',
@@ -790,7 +799,7 @@ export const EMAIL_TEMPLATES: readonly EmailTemplateStructure[] = [
     name: 'Påminnelse',
     summary: 'Kort påminnelse till dem som inte svarat, med eventuppgifter och svarsknappar.',
     category: 'events',
-    design: { accent: 'morkbla', layout: 'plain', show_logo: false },
+    design: { accent: 'morkbla', layout: 'plain', show_logo: false, personal_delivery: true },
     needsEvent: true,
     subject: 'Påminnelse: {{event.namn}}',
     preheader: 'Platserna är begränsade — svara idag.',
@@ -806,7 +815,7 @@ export const EMAIL_TEMPLATES: readonly EmailTemplateStructure[] = [
     name: 'Save the date',
     summary: 'Tidig förvarning om ett kommande event, utan svarsknappar.',
     category: 'events',
-    design: { accent: 'lila', layout: 'card', show_logo: true },
+    design: { accent: 'lila', layout: 'card', show_logo: true, personal_delivery: true },
     needsEvent: true,
     subject: 'Save the date: {{event.namn}}',
     preheader: 'Boka {{event.tid}} i kalendern.',
@@ -823,7 +832,7 @@ export const EMAIL_TEMPLATES: readonly EmailTemplateStructure[] = [
     name: 'Vi ses snart (anmälda)',
     summary: 'Påminnelse till dem som tackat ja: tid, plats, biljett med QR-kod och kalenderfil.',
     category: 'events',
-    design: { accent: 'morkbla', layout: 'card', show_logo: true },
+    design: { accent: 'morkbla', layout: 'card', show_logo: true, personal_delivery: true },
     needsEvent: true,
     subject: 'Vi ses snart: {{event.namn}}',
     preheader: '{{event.tid}} · {{event.plats}} — här är din biljett.',
@@ -841,7 +850,7 @@ export const EMAIL_TEMPLATES: readonly EmailTemplateStructure[] = [
     name: 'Tack och utvärdering',
     summary: 'Tack för deltagandet med länk till den kopplade utvärderingen — steget efter eventet.',
     category: 'events',
-    design: { accent: 'gron', layout: 'plain', show_logo: false },
+    design: { accent: 'gron', layout: 'plain', show_logo: false, personal_delivery: true },
     needsEvent: false,
     subject: 'Tack för att du var med på {{event.namn}}',
     preheader: 'Två minuter för din feedback.',
@@ -857,7 +866,7 @@ export const EMAIL_TEMPLATES: readonly EmailTemplateStructure[] = [
     name: 'Nyhetsbrev',
     summary: 'Flera korta notiser med rubrik, text och länk. Kräver samtycke för privatpersoner.',
     category: 'newsletter',
-    design: { accent: 'morkbla', layout: 'card', show_logo: true },
+    design: { accent: 'morkbla', layout: 'card', show_logo: true, personal_delivery: false },
     needsEvent: false,
     subject: 'Nytt från Movexum',
     preheader: 'Det viktigaste från inkubatorn den här månaden.',
@@ -881,7 +890,7 @@ export const EMAIL_TEMPLATES: readonly EmailTemplateStructure[] = [
     name: 'Personligt mejl',
     summary: 'Ren text från en person på Movexum, utan kort och bilder — det som oftast hamnar i Primär.',
     category: 'other',
-    design: { accent: 'morkbla', layout: 'plain', show_logo: false },
+    design: { accent: 'morkbla', layout: 'plain', show_logo: false, personal_delivery: true },
     needsEvent: false,
     subject: '',
     preheader: '',
@@ -940,6 +949,8 @@ export function checkEmailDeliverability(input: {
   layout: EmailLayout;
   category: EmailCategory;
   consentMode: EmailConsentMode;
+  /** `EmailDesign.personal_delivery` — inga listhuvuden, inga spårade länkar. */
+  personalDelivery?: boolean;
 }): DeliverabilityFinding[] {
   const out: DeliverabilityFinding[] = [];
   const subject = input.subject.trim();
@@ -985,6 +996,15 @@ export function checkEmailDeliverability(input: {
   }
   if (input.category === 'newsletter' && input.consentMode !== 'consent_only') {
     out.push({ level: 'warn', text: 'Nyhetsbrev till privatpersoner kräver samtycke enligt marknadsföringslagen — välj "Bara samtycke" om listan inte är ren B2B.' });
+  }
+  if (input.category !== 'newsletter' && !input.personalDelivery) {
+    out.push({
+      level: 'info',
+      text: 'Mejlet skickas med listhuvuden (List-Unsubscribe) och spårade länkar — det Outlook sorterar till Övrigt och Gmail till Kampanjer. Slå på "Personlig leverans" för inbjudningar och personliga mejl.'
+    });
+  }
+  if (input.category === 'newsletter' && input.personalDelivery) {
+    out.push({ level: 'info', text: 'Personlig leverans på ett nyhetsbrev: utan List-Unsubscribe-huvud och klickspårning räknas inga klick, och Gmail/Yahoo kräver huvudet av avsändare över 5 000 mejl per dag.' });
   }
   return out;
 }

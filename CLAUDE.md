@@ -10273,6 +10273,22 @@ till den inloggades adress med exempeldata och `[TEST]` i ämnesraden.
   klick spåras på egen domän med signerad token och mål-URL ur kampanjens
   egna länklista (aldrig ur URL-parametern). `List-Unsubscribe` +
   en-klick (RFC 8058) för kontakter.
+- **Prioriterad/Primär — personlig leverans (incident 2026-10-22):** ett
+  testmejl hamnade i Outlooks Prioriterad, det skarpa utskicket i Övrigt.
+  Skillnaden var inte innehållet utan formen: det skarpa mejlet bar
+  `List-Unsubscribe`/`List-Unsubscribe-Post` och spårade klicklänkar — de
+  tydligaste "nyhetsbrev"-signalerna för Outlooks och Gmails sortering.
+  `EmailDesign.personal_delivery` (kryssrutan **Personlig leverans** i
+  kampanjens design; på i alla mallar utom Nyhetsbrev, av för befintliga
+  utkast) skickar utan listhuvuden och utan `trackLink` — exakt som
+  testmejlet. Avregistreringslänken i fottexten finns alltid kvar (art. 21,
+  § 55.6); klick räknas inte för sådana utskick. Leveranskontrollen tipsar om
+  valet för inbjudningar/personliga mejl och varnar åt andra hållet för
+  nyhetsbrev (Gmail/Yahoo kräver huvudet av avsändare > 5 000 mejl/dag —
+  behåll det där). Ingen garanti: Outlook lär sig av mottagarens beteende;
+  för Movexums egna M365-konton kan admin lägga en e-postflödesregel med
+  `X-MS-Exchange-Organization-BypassFocusedInbox: true` för avsändardomänen
+  (dokumenterat på Inställningar → E-post & leverans).
 - **Webhook**: `/api/public/e/webhook/resend` verifierar Svix-signaturen
   (`RESEND_WEBHOOK_SECRET`, tidsfönster 5 min) och hanterar
   `email.bounced` (hård studs ⇒ spärr), `email.complained` (⇒ spärr),

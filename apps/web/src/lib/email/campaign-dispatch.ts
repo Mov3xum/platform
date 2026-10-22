@@ -610,6 +610,9 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
   const calendarKey = ev && ev.starts_at ? signCalendarKey(ev.id, secret) : null;
   const messages: OutgoingEmail[] = [];
   const byKey = new Map<string, Pending>();
+  // Personlig leverans (§ 55.5): inga listhuvuden, inga spårade länkar —
+  // samma form som testmejlet, som hamnar i Prioriterad/Primär.
+  const personal = campaign.design.personal_delivery;
   for (const p of pending) {
     const c = p.candidate;
     // Avregistreringen följer med i VARJE mejl — kontakt, användare, bolag
@@ -637,10 +640,14 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
       orgName,
       // Uppladdade bilder (app-relativa sökvägar) blir absoluta mot utskickets bas (§ 55.9).
       assetBase: baseUrl,
-      trackLink: (url, index) => {
-        const t = secret ? signClickToken({ recipientId: p.rowId, campaignId: campaign.id, index }, secret) : null;
-        return t ? `${baseUrl}/api/public/e/klick?c=${t}` : url;
-      }
+      ...(personal
+        ? {}
+        : {
+            trackLink: (url: string, index: number) => {
+              const t = secret ? signClickToken({ recipientId: p.rowId, campaignId: campaign.id, index }, secret) : null;
+              return t ? `${baseUrl}/api/public/e/klick?c=${t}` : url;
+            }
+          })
     });
     messages.push({
       key: p.rowId,
@@ -650,7 +657,7 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
       html: rendered.html,
       text: rendered.text,
       reply_to: sender.replyTo,
-      headers: listUnsubscribeHeaders(oneClick),
+      headers: personal ? {} : listUnsubscribeHeaders(oneClick),
       tags: [
         { name: 'category', value: `campaign_${campaign.category}` },
         { name: 'campaign', value: campaign.id },

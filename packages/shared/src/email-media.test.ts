@@ -95,7 +95,7 @@ test('renderaren absolutiserar uppladdade bilder med assetBase', () => {
     subject: 'Hej',
     preheader: '',
     blocks: normalizeEmailBlocks([{ type: 'image', url: path, alt: 'Hero' }, { type: 'paragraph', text: 'Text' }]),
-    design: { accent: 'morkbla', layout: 'card', show_logo: true } as const,
+    design: { accent: 'morkbla', layout: 'card', show_logo: true, personal_delivery: false } as const,
     merge: {},
     links: {},
     reasonText: 'x',

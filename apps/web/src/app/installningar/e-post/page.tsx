@@ -121,6 +121,9 @@ export default async function EpostPage() {
         <p className="mt-3 text-xs text-foreground-subtle">
           Tips för Primär-inkorgen: skicka från en underdomän (t.ex. event.movexum.se), håll klagomålen under {formatRate(COMPLAINT_RATE_WARN, 1)} (Gmail varnar vid {formatRate(COMPLAINT_RATE_ALERT, 1)}), registrera domänen i Google Postmaster Tools (postmaster.google.com) och Microsoft SNDS, och skicka bara till dem som väntar sig mejlet.
         </p>
+        <p className="mt-2 text-xs text-foreground-subtle">
+          Outlook (Prioriterad/Övrigt) sorterar mejl med listhuvuden och spårade länkar till Övrigt — slå på <strong>Personlig leverans</strong> i kampanjens design för inbjudningar och personliga mejl (testmejlet skickas redan så). För Movexums egna Microsoft 365-konton kan administratören lägga en e-postflödesregel som sätter huvudet <code>X-MS-Exchange-Organization-BypassFocusedInbox: true</code> för avsändardomänen; en mottagare kan själv välja &quot;Flytta alltid till Prioriterad&quot; på mejlet.
+        </p>
       </section>
 
       <section className="rounded-3xl border border-default bg-surface p-5" style={{ borderLeft: `4px solid ${healthTone}` }}>

@@ -422,9 +422,10 @@ export function CampaignEditor({
         senderName,
         layout: design.layout,
         category,
-        consentMode
+        consentMode,
+        personalDelivery: design.personal_delivery
       }),
-    [subject, preheader, rendered, sender, replyToConfigured, senderName, design.layout, category, consentMode]
+    [subject, preheader, rendered, sender, replyToConfigured, senderName, design.layout, design.personal_delivery, category, consentMode]
   );
   const verdict = deliverabilityVerdict(findings);
   const verdictTone = verdict === 'ok' ? 'gron' : verdict === 'warn' ? 'gul' : 'orange';
@@ -761,6 +762,21 @@ export function CampaignEditor({
                 <input type="checkbox" checked={design.show_logo} disabled={!editable} onChange={(e) => mark(setDesign)({ ...design, show_logo: e.target.checked })} /> Visa logotyp
               </label>
             )}
+            <label className="mx-t-13 mx-flex mx-gap-2" style={{ marginTop: 8, alignItems: 'flex-start' }}>
+              <input
+                type="checkbox"
+                style={{ marginTop: 3 }}
+                checked={design.personal_delivery}
+                disabled={!editable}
+                onChange={(e) => mark(setDesign)({ ...design, personal_delivery: e.target.checked })}
+              />
+              <span>
+                Personlig leverans (Prioriterad/Primär)
+                <span className="mx-t-xs mx-muted" style={{ display: 'block', marginTop: 2 }}>
+                  Skickas som ett mejl från en person: inga listhuvuden och inga spårade länkar — samma form som testmejlet. Avregistreringslänken finns kvar; klick räknas inte.
+                </span>
+              </span>
+            </label>
           </Card>
 
           {!isTemplate && (
