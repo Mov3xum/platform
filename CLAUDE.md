@@ -10229,6 +10229,23 @@ mottagarna" förklarar dessutom, när mottagare blockeras av "Bara samtycke",
 var samtycket registreras (kontaktkortet → Utskick & samtycke) eller att
 rättslig grund kan bytas till berättigat intresse för B2B-listor.
 
+**Utfallet syns där man klickar (incident 2026-10-22).** Testmejlet
+(`sendCampaignTest` → `sendOne`) går förbi allt som kan stoppa ett skarpt
+utskick: mottagarurval, rättslig grund (`consent_only` är standard för
+nyhetsbrev ⇒ kontakter utan `newsletter_consent`, användare och bolag
+hoppas över), spärrlistan, `APP_URL`-kravet för länkarna och
+avregistreringshemligheten (`UNSUBSCRIBE_SECRET_MISSING`). Varje sådant stopp
+returnerar ett tydligt fel, sätter kampanjen tillbaka till `draft` med
+orsaken i `last_error` och loggas nu PII-fritt (`[campaigns] dispatch
+aborted` / `dispatch sent nothing`) — men editorn visade felet bara som en
+banner högst upp på en lång sida medan "Skicka nu" ligger längst ned, och
+`last_error` visades bara i statistikvyn (som ett utkast aldrig når). Nu
+visas utfallet av Skicka/Schemalägg vid knapparna (`noticeAt`, scroll till
+bannern) och ett sparat `last_error` står som "Senaste utskicket gick inte:
+…" i samma sektion tills nästa försök. Webbläsarens "[Violation] 'click'
+handler took …ms" kommer av bekräftelsedialogen (`window.confirm` blockerar
+hanteraren tills man svarat) och är inget fel.
+
 **Systemkampanjer** (`createSystemCampaign`, `created_by` tomt): påminnelse-
 ticken (`event_reminder_tick`, timvis → `/api/internal/event-reminders` →
 `runEventReminders`) skapar och skickar Påminnelse/Vi ses snart när
@@ -10256,6 +10273,22 @@ till den inloggades adress med exempeldata och `[TEST]` i ämnesraden.
   klick spåras på egen domän med signerad token och mål-URL ur kampanjens
   egna länklista (aldrig ur URL-parametern). `List-Unsubscribe` +
   en-klick (RFC 8058) för kontakter.
+- **Prioriterad/Primär — personlig leverans (incident 2026-10-22):** ett
+  testmejl hamnade i Outlooks Prioriterad, det skarpa utskicket i Övrigt.
+  Skillnaden var inte innehållet utan formen: det skarpa mejlet bar
+  `List-Unsubscribe`/`List-Unsubscribe-Post` och spårade klicklänkar — de
+  tydligaste "nyhetsbrev"-signalerna för Outlooks och Gmails sortering.
+  `EmailDesign.personal_delivery` (kryssrutan **Personlig leverans** i
+  kampanjens design; på i alla mallar utom Nyhetsbrev, av för befintliga
+  utkast) skickar utan listhuvuden och utan `trackLink` — exakt som
+  testmejlet. Avregistreringslänken i fottexten finns alltid kvar (art. 21,
+  § 55.6); klick räknas inte för sådana utskick. Leveranskontrollen tipsar om
+  valet för inbjudningar/personliga mejl och varnar åt andra hållet för
+  nyhetsbrev (Gmail/Yahoo kräver huvudet av avsändare > 5 000 mejl/dag —
+  behåll det där). Ingen garanti: Outlook lär sig av mottagarens beteende;
+  för Movexums egna M365-konton kan admin lägga en e-postflödesregel med
+  `X-MS-Exchange-Organization-BypassFocusedInbox: true` för avsändardomänen
+  (dokumenterat på Inställningar → E-post & leverans).
 - **Webhook**: `/api/public/e/webhook/resend` verifierar Svix-signaturen
   (`RESEND_WEBHOOK_SECRET`, tidsfönster 5 min) och hanterar
   `email.bounced` (hård studs ⇒ spärr), `email.complained` (⇒ spärr),

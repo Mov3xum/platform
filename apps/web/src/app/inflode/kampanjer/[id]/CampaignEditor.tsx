@@ -92,10 +92,18 @@ interface SurveyOption {
 const KIND_LABEL: Record<InviteOption['kind'], string> = { contact: 'Kontakt', user: 'Användare', startup: 'Bolag' };
 
 function Notice({ state }: { state: CampaignActionState | null }) {
-  if (!state || (!state.error && !state.notice && !state.warning)) return null;
+  const ref = useRef<HTMLDivElement>(null);
+  const visible = Boolean(state && (state.error || state.notice || state.warning));
+  // Utfallet ska synas där man klickade — "Skicka nu" ligger längst ned på en
+  // lång sida, så ett fel högst upp lästes som "inget hände" (incident 2026-10-22).
+  useEffect(() => {
+    if (visible) ref.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [visible, state]);
+  if (!state || !visible) return null;
   const tone = state.error ? 'orange' : state.warning ? 'gul' : 'gron';
   return (
     <div
+      ref={ref}
       role="status"
       className="mx-t-13"
       style={{
@@ -311,6 +319,8 @@ export function CampaignEditor({
   const [picked, setPicked] = useState<Map<string, string>>(() => new Map(campaign.audience.keys.map((k) => [k, ''])));
   const [dirty, setDirty] = useState(false);
   const [state, setState] = useState<CampaignActionState | null>(null);
+  /** Var utfallet visas: vid sidhuvudet (Spara m.m.) eller vid Skicka/Schemalägg. */
+  const [noticeAt, setNoticeAt] = useState<'top' | 'send'>('top');
   const [busy, startBusy] = useTransition();
   const [preview, setPreview] = useState<'desktop' | 'mobile' | 'text'>('desktop');
   const [sendAt, setSendAt] = useState(toStockholmDateTimeInputValue(campaign.send_at) || '');
@@ -412,9 +422,10 @@ export function CampaignEditor({
         senderName,
         layout: design.layout,
         category,
-        consentMode
+        consentMode,
+        personalDelivery: design.personal_delivery
       }),
-    [subject, preheader, rendered, sender, replyToConfigured, senderName, design.layout, category, consentMode]
+    [subject, preheader, rendered, sender, replyToConfigured, senderName, design.layout, design.personal_delivery, category, consentMode]
   );
   const verdict = deliverabilityVerdict(findings);
   const verdictTone = verdict === 'ok' ? 'gron' : verdict === 'warn' ? 'gul' : 'orange';
@@ -435,8 +446,9 @@ export function CampaignEditor({
     audience: { list, keys: [...picked.keys()], event_group: eventId && eventGroup ? eventGroup : null }
   });
 
-  const run = (fn: () => Promise<CampaignActionState>, after?: (s: CampaignActionState) => void) =>
+  const run = (fn: () => Promise<CampaignActionState>, after?: (s: CampaignActionState) => void, at: 'top' | 'send' = 'top') =>
     startBusy(async () => {
+      setNoticeAt(at);
       let res: CampaignActionState;
       try {
         res = await fn();
@@ -447,15 +459,19 @@ export function CampaignEditor({
       if (res.ok) after?.(res);
     });
 
-  const save = (then?: () => Promise<CampaignActionState>) =>
-    run(async () => {
-      const saved = await saveCampaignAction(payload());
-      if (!saved.ok) return saved;
-      setDirty(false);
-      if (!then) return saved;
-      const next = await then();
-      return next.ok && saved.warning ? { ...next, warning: saved.warning } : next;
-    }, () => router.refresh());
+  const save = (then?: () => Promise<CampaignActionState>, at: 'top' | 'send' = 'top') =>
+    run(
+      async () => {
+        const saved = await saveCampaignAction(payload());
+        if (!saved.ok) return saved;
+        setDirty(false);
+        if (!then) return saved;
+        const next = await then();
+        return next.ok && saved.warning ? { ...next, warning: saved.warning } : next;
+      },
+      () => router.refresh(),
+      at
+    );
 
   const split = splitInviteSelection(picked.keys());
   const hasGroup = Boolean(eventId && eventGroup);
@@ -515,13 +531,17 @@ export function CampaignEditor({
   };
 
   const sendNow = () => {
+    setNoticeAt('send');
     if (picked.size === 0 && !hasGroup) return setState({ error: 'Välj mottagare först.' });
+    // Bekräftelsedialogen blockerar klickhanteraren tills man svarat — därav
+    // webbläsarens "[Violation] 'click' handler took …ms"; det är inget fel.
     if (!window.confirm(`Skicka "${subject || title}" till ${summary.join(', ')} nu? Det går inte att ångra.`)) return;
-    save(() => sendCampaignNowAction(campaign.id));
+    save(() => sendCampaignNowAction(campaign.id), 'send');
   };
   const schedule = () => {
+    setNoticeAt('send');
     if (!sendAt) return setState({ error: 'Välj en tidpunkt.' });
-    save(() => scheduleCampaignAction({ id: campaign.id, sendAt }));
+    save(() => scheduleCampaignAction({ id: campaign.id, sendAt }), 'send');
   };
 
   const frameWidth = preview === 'mobile' ? 390 : '100%';
@@ -543,7 +563,7 @@ export function CampaignEditor({
           Spara
         </button>
       </div>
-      <Notice state={state} />
+      {noticeAt === 'top' && <Notice state={state} />}
       {!editable && (
         <div className="mx-t-13" style={{ padding: '8px 12px', borderRadius: 10, background: 'var(--movexum-pastell-gul)', color: 'var(--movexum-morkgul)' }}>
           Utskicket är {EMAIL_CAMPAIGN_STATUS_LABELS[campaign.status].toLowerCase()} och kan inte ändras. Duplicera det för att skicka igen.
@@ -742,6 +762,21 @@ export function CampaignEditor({
                 <input type="checkbox" checked={design.show_logo} disabled={!editable} onChange={(e) => mark(setDesign)({ ...design, show_logo: e.target.checked })} /> Visa logotyp
               </label>
             )}
+            <label className="mx-t-13 mx-flex mx-gap-2" style={{ marginTop: 8, alignItems: 'flex-start' }}>
+              <input
+                type="checkbox"
+                style={{ marginTop: 3 }}
+                checked={design.personal_delivery}
+                disabled={!editable}
+                onChange={(e) => mark(setDesign)({ ...design, personal_delivery: e.target.checked })}
+              />
+              <span>
+                Personlig leverans (Prioriterad/Primär)
+                <span className="mx-t-xs mx-muted" style={{ display: 'block', marginTop: 2 }}>
+                  Skickas som ett mejl från en person: inga listhuvuden och inga spårade länkar — samma form som testmejlet. Avregistreringslänken finns kvar; klick räknas inte.
+                </span>
+              </span>
+            </label>
           </Card>
 
           {!isTemplate && (
@@ -969,6 +1004,15 @@ export function CampaignEditor({
             </div>
             {!isTemplate && editable && (
               <div style={{ marginTop: 12, borderTop: '1px solid var(--mx-line-soft)', paddingTop: 12 }} className="grid gap-2">
+                {noticeAt === 'send' && <Notice state={state} />}
+                {campaign.last_error && !(noticeAt === 'send' && state?.error) && (
+                  // Orsaken från det senaste misslyckade utskicket (sparad på
+                  // kampanjen) — visas tills ett nytt försök gjorts, så den
+                  // aldrig bara ligger i databasen.
+                  <div className="mx-t-13" role="status" style={{ padding: '8px 12px', borderRadius: 10, background: 'var(--movexum-pastell-orange)', color: 'var(--movexum-morkorange)' }}>
+                    <strong>Senaste utskicket gick inte:</strong> {campaign.last_error}
+                  </div>
+                )}
                 {campaign.status === 'scheduled' ? (
                   <div className="mx-flex mx-items-c mx-gap-2" style={{ flexWrap: 'wrap' }}>
                     <span className="mx-t-13">

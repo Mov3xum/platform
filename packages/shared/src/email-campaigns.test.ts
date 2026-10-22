@@ -102,12 +102,14 @@ test('normalizeEmailCampaignContent + validering för utskick', () => {
 });
 
 test('normalizeEmailDesign + audience tolererar skräp', () => {
-  assert.deepEqual(normalizeEmailDesign(null), { accent: 'morkbla', layout: 'card', show_logo: true });
-  assert.deepEqual(normalizeEmailDesign({ accent: 'gron', layout: 'plain', show_logo: false }), {
+  assert.deepEqual(normalizeEmailDesign(null), { accent: 'morkbla', layout: 'card', show_logo: true, personal_delivery: false });
+  assert.deepEqual(normalizeEmailDesign({ accent: 'gron', layout: 'plain', show_logo: false, personal_delivery: true }), {
     accent: 'gron',
     layout: 'plain',
-    show_logo: false
+    show_logo: false,
+    personal_delivery: true
   });
+  assert.equal(normalizeEmailDesign({ personal_delivery: 'ja' }).personal_delivery, false, 'bara ett äkta true slår på personlig leverans');
   assert.deepEqual(normalizeEmailAudience('x'), { list: 'everyone', keys: [], event_group: null });
   assert.deepEqual(normalizeEmailAudience({ keys: ['c:a1', 'x:b', 'c:a1'], event_group: 'attended' }), {
     list: 'everyone',
@@ -271,9 +273,14 @@ test('checkEmailDeliverability flaggar de kända signalerna', () => {
     senderName: 'Hampus',
     layout: 'plain' as const,
     category: 'events' as const,
-    consentMode: 'legitimate_interest' as const
+    consentMode: 'legitimate_interest' as const,
+    personalDelivery: true
   };
   assert.equal(deliverabilityVerdict(checkEmailDeliverability(base)), 'ok');
+  // Inbjudan utan personlig leverans: listhuvuden + spårade länkar ⇒ Övrigt/Kampanjer-signal (info, inte fel).
+  const bulkInvite = checkEmailDeliverability({ ...base, personalDelivery: false });
+  assert.ok(bulkInvite.some((f) => f.level === 'info' && f.text.includes('Personlig leverans')), 'tipsar om personlig leverans');
+  assert.ok(!checkEmailDeliverability({ ...base, category: 'newsletter', consentMode: 'consent_only', personalDelivery: false }).some((f) => f.text.includes('Slå på "Personlig leverans"')), 'nyhetsbrev får inte tipset');
   const bad = checkEmailDeliverability({
     ...base,
     subject: 'GRATIS!!! KLICKA HÄR',

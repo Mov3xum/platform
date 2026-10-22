@@ -435,6 +435,9 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
   // Markera som pågående innan något skickas (cron kör inte om den).
   await pb.collection(CAMPAIGNS).update(campaign.id, { status: 'sending', send_at: '', last_error: '' }).catch(() => undefined);
   const fail = async (error: string): Promise<DispatchResult> => {
+    // Orsaken i serverloggen också (PII-fri: räknare och konfigurationsfel,
+    // aldrig adresser) — så den syns i Coolify även om ingen tittar i UI:t.
+    console.error('[campaigns] dispatch aborted', { campaign: campaign.id, reason: error.slice(0, 300) });
     await pb.collection(CAMPAIGNS).update(campaign.id, { status: 'draft', last_error: error.slice(0, 300) }).catch(() => undefined);
     return { ok: false, error };
   };
@@ -607,6 +610,9 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
   const calendarKey = ev && ev.starts_at ? signCalendarKey(ev.id, secret) : null;
   const messages: OutgoingEmail[] = [];
   const byKey = new Map<string, Pending>();
+  // Personlig leverans (§ 55.5): inga listhuvuden, inga spårade länkar —
+  // samma form som testmejlet, som hamnar i Prioriterad/Primär.
+  const personal = campaign.design.personal_delivery;
   for (const p of pending) {
     const c = p.candidate;
     // Avregistreringen följer med i VARJE mejl — kontakt, användare, bolag
@@ -634,10 +640,14 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
       orgName,
       // Uppladdade bilder (app-relativa sökvägar) blir absoluta mot utskickets bas (§ 55.9).
       assetBase: baseUrl,
-      trackLink: (url, index) => {
-        const t = secret ? signClickToken({ recipientId: p.rowId, campaignId: campaign.id, index }, secret) : null;
-        return t ? `${baseUrl}/api/public/e/klick?c=${t}` : url;
-      }
+      ...(personal
+        ? {}
+        : {
+            trackLink: (url: string, index: number) => {
+              const t = secret ? signClickToken({ recipientId: p.rowId, campaignId: campaign.id, index }, secret) : null;
+              return t ? `${baseUrl}/api/public/e/klick?c=${t}` : url;
+            }
+          })
     });
     messages.push({
       key: p.rowId,
@@ -647,7 +657,7 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
       html: rendered.html,
       text: rendered.text,
       reply_to: sender.replyTo,
-      headers: listUnsubscribeHeaders(oneClick),
+      headers: personal ? {} : listUnsubscribeHeaders(oneClick),
       tags: [
         { name: 'category', value: `campaign_${campaign.category}` },
         { name: 'campaign', value: campaign.id },
@@ -682,6 +692,7 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
   }
 
   const everythingFailed = messages.length > 0 && sent === 0;
+  if (everythingFailed) console.error('[campaigns] dispatch sent nothing', { campaign: campaign.id, attempted: messages.length, reason: (failReason ?? '').slice(0, 300) });
   await pb
     .collection(CAMPAIGNS)
     .update(campaign.id, {
