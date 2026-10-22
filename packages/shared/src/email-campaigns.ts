@@ -116,6 +116,77 @@ export const EMAIL_RECIPIENT_STATUS_LABELS: Record<EmailRecipientStatus, string>
   suppressed: 'Spärrad — skickades inte'
 };
 
+// ── Leveransstatus från leverantören (§ 55.4) ───────────────────────────────
+
+/**
+ * Vad Resend själva säger om ett mejl EFTER att vi lämnat det ifrån oss
+ * (`GET /emails/{id}` → `last_event`). "Skickat" i vår statistik betyder bara
+ * att Resend tog emot mejlet; först `delivered` betyder att mottagarens
+ * server tagit emot det. Hämtas på begäran ("Uppdatera leveransstatus") så
+ * personalen får svar på "kom det fram?" även utan webhook.
+ */
+export const EMAIL_DELIVERY_STATUSES = ['queued', 'scheduled', 'sent', 'delivered', 'delivery_delayed', 'bounced', 'complained', 'failed', 'canceled'] as const;
+export type EmailDeliveryStatus = (typeof EMAIL_DELIVERY_STATUSES)[number];
+
+export const EMAIL_DELIVERY_STATUS_LABELS: Record<EmailDeliveryStatus, string> = {
+  queued: 'Köat hos Resend',
+  scheduled: 'Schemalagt hos Resend',
+  sent: 'Skickat från Resend — inte bekräftat levererat än',
+  delivered: 'Levererat till mottagarens server',
+  delivery_delayed: 'Fördröjt — mottagarens server svarar inte än',
+  bounced: 'Studsade',
+  complained: 'Markerat som skräppost',
+  failed: 'Misslyckades hos Resend',
+  canceled: 'Avbrutet hos Resend'
+};
+
+/** Resends `last_event` (`delivered`, `bounced`, `opened` …) → vår status. Okänt ⇒ null. */
+export function deliveryStatusFromProviderEvent(lastEvent: unknown): EmailDeliveryStatus | null {
+  if (typeof lastEvent !== 'string') return null;
+  const e = lastEvent.trim().toLowerCase().replace(/^email\./, '');
+  // Öppnat/klickat förutsätter leverans — vi mäter inte öppningar själva.
+  if (e === 'opened' || e === 'clicked') return 'delivered';
+  if (e === 'bounce') return 'bounced';
+  if (e === 'complaint') return 'complained';
+  if (e === 'cancelled') return 'canceled';
+  return (EMAIL_DELIVERY_STATUSES as readonly string[]).includes(e) ? (e as EmailDeliveryStatus) : null;
+}
+
+/** Status som inte ändras längre — behöver inte hämtas igen. */
+export function isFinalDeliveryStatus(s: EmailDeliveryStatus | null | undefined): boolean {
+  return s === 'delivered' || s === 'bounced' || s === 'complained' || s === 'failed' || s === 'canceled';
+}
+
+export interface EmailDeliverySummary {
+  checked: number;
+  delivered: number;
+  pending: number;
+  bounced: number;
+  complained: number;
+  failed: number;
+  unchecked: number;
+}
+
+/** Sammanfattning av leveransstatusen över skickade mottagarrader. */
+export function summarizeDeliveryStatuses(rows: readonly { status: string; delivery_status?: string | null }[]): EmailDeliverySummary {
+  const out: EmailDeliverySummary = { checked: 0, delivered: 0, pending: 0, bounced: 0, complained: 0, failed: 0, unchecked: 0 };
+  for (const r of rows) {
+    if (r.status !== 'sent' && r.status !== 'bounced' && r.status !== 'complained') continue;
+    const d = deliveryStatusFromProviderEvent(r.delivery_status);
+    if (!d) {
+      out.unchecked++;
+      continue;
+    }
+    out.checked++;
+    if (d === 'delivered') out.delivered++;
+    else if (d === 'bounced') out.bounced++;
+    else if (d === 'complained') out.complained++;
+    else if (d === 'failed' || d === 'canceled') out.failed++;
+    else out.pending++;
+  }
+  return out;
+}
+
 // ── Spärrlista ──────────────────────────────────────────────────────────────
 
 /**

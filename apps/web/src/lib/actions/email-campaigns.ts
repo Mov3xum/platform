@@ -6,6 +6,7 @@ import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { requestOrigin } from '@/lib/request-origin';
 import { readTableFile } from '@/lib/import/table-file';
+import { syncCampaignDelivery, type DeliverySyncResult } from '@/lib/email/delivery-sync';
 import {
   addManualSuppression,
   cancelEmailCampaignSchedule,
@@ -183,6 +184,39 @@ export async function sendCampaignNowAction(id: string): Promise<CampaignActionS
   const notice = `${parts.join(' · ')}.`;
   // Inte alla nådde fram — gul banner så det inte läses som ett helt lyckat utskick.
   return v.failed > 0 || v.suppressed > 0 ? { ok: true, warning: notice } : { ok: true, notice };
+}
+
+/**
+ * Hämtar leveransstatus från Resend för ett skickat utskick (§ 55.4):
+ * "Skickat" betyder bara att Resend tog emot mejlet — här får varje
+ * mottagarrad vad som hände sedan (levererat, studsade, köat …).
+ */
+export async function syncDeliveryAction(id: string): Promise<CampaignActionState & { summary?: DeliverySyncResult }> {
+  const m = await manager();
+  if ('error' in m) return { error: m.error };
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(String(id || ''))) return { error: 'Ogiltigt id.' };
+  let res: Awaited<ReturnType<typeof syncCampaignDelivery>>;
+  try {
+    res = await syncCampaignDelivery(await getServerPb(), m.actor.tenant, id);
+  } catch (err) {
+    console.error('[campaigns] delivery sync failed', err instanceof Error ? err.message : 'unknown');
+    return { error: 'Kunde inte hämta leveransstatus. Försök igen.' };
+  }
+  if ('error' in res && !('checked' in res)) return { error: res.error };
+  revalidate(id);
+  const parts = [
+    `${res.checked} kontrollerade`,
+    res.delivered ? `${res.delivered} levererade` : '',
+    res.pending ? `${res.pending} väntar hos Resend` : '',
+    res.bounced ? `${res.bounced} studsade` : '',
+    res.complained ? `${res.complained} markerade som skräppost` : '',
+    res.failed ? `${res.failed} misslyckades hos Resend` : '',
+    res.remaining ? `${res.remaining} kvar — klicka igen` : ''
+  ].filter(Boolean);
+  const notice = `${parts.join(' · ')}.`;
+  if (res.schemaMissing) return { error: `Statusen kunde inte sparas — kör migration 1700000205 (eller workflowen "Sync PocketBase"). ${notice}`, summary: res };
+  if (res.error) return { ok: true, warning: `${notice} ${res.error}`, summary: res };
+  return res.bounced || res.complained || res.failed ? { ok: true, warning: notice, summary: res } : { ok: true, notice, summary: res };
 }
 
 export async function sendTestAction(id: string): Promise<CampaignActionState> {

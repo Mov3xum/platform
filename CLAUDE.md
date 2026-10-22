@@ -10202,6 +10202,33 @@ räknare + `link_clicks` → status `sent` (eller tillbaka till `draft` med
 `hooks/campaign_dispatch_tick.pb.js` (varje minut, provisoriskt lås) →
 `/api/internal/send-campaign` (`MOVEXUM_SCHEDULE_SECRET`, § 12.3).
 
+**Leveransstatus från Resend (2026-10-22).** "Skickat" i statistiken
+betyder bara att Resend tog emot mejlet (API-svaret). Statistikvyn har
+knappen **"Uppdatera leveransstatus från Resend"** (`DeliverySyncButton` →
+`syncDeliveryAction` → `lib/email/delivery-sync.ts`): för varje skickad
+mottagarrad utan slutlig status hämtas `GET /emails/{id}` (`retrieveEmail` i
+`send-batch.ts`) och Resends `last_event` skrivs som
+`email_campaign_recipients.delivery_status` + `delivery_checked_at`
+(migration **1700000205**, speglad i `setup-via-api.mjs`, asserterad i
+`verify-baseline.mjs`). Tolkningen är ren och enhetstestad
+(`deliveryStatusFromProviderEvent`, `summarizeDeliveryStatuses` i
+`@platform/shared`): `opened`/`clicked` ⇒ levererat; `bounced`/`complained`
+hanteras som webhooken (radens status, spärrlista med adressen läst
+transient, kampanjens räknare, `email_events`); okänd händelse ⇒ `sent`.
+Högst 60 rader per klick (Resends gräns 2 anrop/s), resten vid nästa
+klick; per mottagare visas "Resend: Levererat till mottagarens server" /
+"Köat" / "Studsade" i listan. Webhooken (§ 55.5) är fortsatt den löpande
+vägen — synken är svaret på "kom nyhetsbrevet fram?" när ingen webhook är
+konfigurerad. **Omsändning prövar varje mottagare på nytt (incident
+2026-10-22):** bara `sent`/`bounced`/`complained` från ett tidigare försök
+är slutgiltiga; `failed`, `suppressed` och `unsubscribed` prövas mot dagens
+läge — tidigare låstes en rad som hoppats över (t.ex. "saknar samtycke till
+nyhetsbrev") för alltid, så ett nyhetsbrev som skickades om efter att
+samtycket registrerats nådde fortfarande ingen. Editorns "Kontrollera
+mottagarna" förklarar dessutom, när mottagare blockeras av "Bara samtycke",
+var samtycket registreras (kontaktkortet → Utskick & samtycke) eller att
+rättslig grund kan bytas till berättigat intresse för B2B-listor.
+
 **Systemkampanjer** (`createSystemCampaign`, `created_by` tomt): påminnelse-
 ticken (`event_reminder_tick`, timvis → `/api/internal/event-reminders` →
 `runEventReminders`) skapar och skickar Påminnelse/Vi ses snart när

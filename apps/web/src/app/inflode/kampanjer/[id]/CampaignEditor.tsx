@@ -862,7 +862,19 @@ export function CampaignEditor({
                       </li>
                     ))}
                   </ul>
+                  {consentMode === 'consent_only' && recipientPreview.blocked.some((b) => /samtycke/i.test(b.why)) && (
+                    <p className="mx-t-xs" style={{ margin: '8px 0 0', color: 'var(--movexum-morkgul)' }}>
+                      Rättslig grund är &quot;Bara samtycke&quot;: bara kontakter med registrerat nyhetsbrevssamtycke får mejlet. Registrera samtycket på kontaktkortet under
+                      &quot;Utskick &amp; samtycke&quot; (eller låt personen bekräfta via nyhetsbrevsformuläret), eller byt till &quot;Berättigat intresse&quot; ovan om listan är ren B2B.
+                      Användare och bolag kan bara nås på berättigat intresse.
+                    </p>
+                  )}
                 </details>
+              )}
+              {recipientPreview?.ok && recipientPreview.sendable === 0 && (recipientPreview.total ?? 0) > 0 && (
+                <p className="mx-t-xs" style={{ margin: '8px 0 0', color: 'var(--movexum-morkorange)' }}>
+                  Ingen av mottagarna kan nås — utskicket skulle stanna utan att något mejl går iväg.
+                </p>
               )}
             </Card>
           )}

@@ -133,3 +133,35 @@ export async function sendEmailBatch(
   }
   return out;
 }
+
+export interface RetrievedEmail {
+  /** Resends `last_event`: queued, sent, delivered, delivery_delayed, bounced, complained, opened, clicked … */
+  lastEvent: string;
+  /** Mottagaradressen — läses transient (för spärrlistan vid studs), lagras aldrig. */
+  to: string | null;
+}
+
+/**
+ * Hämtar ett skickat mejls status hos Resend (`GET /emails/{id}`, § 55.4).
+ * 404 = id:t finns inte (annat konto/region) → tydligt fel, aldrig en
+ * gissad status. Adressen loggas aldrig.
+ */
+export async function retrieveEmail(messageId: string): Promise<RetrievedEmail | { error: string }> {
+  const key = apiKey();
+  if (!key) return { error: 'E-posttjänsten är inte konfigurerad (RESEND_API_KEY saknas).' };
+  if (!/^[a-zA-Z0-9-]{8,100}$/.test(messageId)) return { error: 'Ogiltigt meddelande-id.' };
+  try {
+    const res = await fetch(`${API}/emails/${messageId}`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(20_000)
+    });
+    if (res.status === 404) return { error: 'Resend känner inte till mejlet (fel konto eller nyckel?).' };
+    if (!res.ok) return { error: describeResendError(res.status, await res.text().catch(() => ''), '') };
+    const data = (await res.json().catch(() => ({}))) as { last_event?: unknown; to?: unknown };
+    const to = Array.isArray(data.to) ? data.to[0] : data.to;
+    return { lastEvent: typeof data.last_event === 'string' ? data.last_event : '', to: typeof to === 'string' ? to : null };
+  } catch (err) {
+    return { error: `Kunde inte nå Resend (${err instanceof Error ? err.message : 'nätverksfel'}).` };
+  }
+}

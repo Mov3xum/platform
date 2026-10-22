@@ -184,6 +184,9 @@ export interface RecipientRow {
   click_count: number;
   first_clicked_at: string | null;
   fail_reason: string;
+  /** Resends `last_event` (§ 55.4) — tomt tills leveransstatusen hämtats. */
+  delivery_status: string;
+  delivery_checked_at: string | null;
 }
 
 export function normalizeRecipient(raw: Record<string, unknown>): RecipientRow {
@@ -203,7 +206,9 @@ export function normalizeRecipient(raw: Record<string, unknown>): RecipientRow {
     provider_message_id: str(raw.provider_message_id),
     click_count: num(raw.click_count),
     first_clicked_at: strOrNull(raw.first_clicked_at),
-    fail_reason: str(raw.fail_reason)
+    fail_reason: str(raw.fail_reason),
+    delivery_status: str(raw.delivery_status),
+    delivery_checked_at: strOrNull(raw.delivery_checked_at)
   };
 }
 

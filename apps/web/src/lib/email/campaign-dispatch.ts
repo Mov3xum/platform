@@ -491,16 +491,16 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
       why = 'Adressen är spärrad (studs, klagomål eller avregistrering)';
     }
     const prior = existing.get(c.key);
-    // Redan hanterad i ett tidigare försök — men en rad som FÖLL ("failed",
-    // t.ex. Resend avvisade förra gången) ska skickas igen: det är hela
-    // poängen med att kampanjen går tillbaka till utkast. Utan det blev
-    // andra försöket ett tyst "0 mejl skickade" med status Skickat.
-    if (prior && prior.status !== 'pending' && prior.status !== 'failed') {
-      if (prior.status === 'sent') alreadySent++;
-      else {
-        suppressed++;
-        noteSkip('Hoppades över redan i ett tidigare försök');
-      }
+    // Bara ett mejl som faktiskt lämnade oss är slutgiltigt ("sent", eller
+    // studsat/klagat EFTER ett utskick). Allt annat från ett tidigare försök
+    // prövas om mot DAGENS läge: en rad som föll ("failed", Resend avvisade)
+    // skickas igen, och en som hoppades över (saknat samtycke, spärrad,
+    // avregistrerad) får mejlet när orsaken är åtgärdad — tidigare låstes
+    // den som "hoppades över redan i ett tidigare försök" för alltid, så ett
+    // nyhetsbrev som skickades om efter att samtycket registrerats nådde
+    // fortfarande ingen (incident 2026-10-22).
+    if (prior && (prior.status === 'sent' || prior.status === 'bounced' || prior.status === 'complained')) {
+      alreadySent++;
       continue;
     }
     let rowId = prior?.id;
@@ -521,8 +521,8 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
         });
         rowId = row.id;
       } else if (status !== 'pending') {
-        await pb.collection(CAMPAIGN_RECIPIENTS).update(rowId, { status, fail_reason: why });
-      } else if (prior?.status === 'failed') {
+        if (prior?.status !== status || why) await pb.collection(CAMPAIGN_RECIPIENTS).update(rowId, { status, fail_reason: why }).catch(() => undefined);
+      } else if (prior?.status !== 'pending') {
         await pb.collection(CAMPAIGN_RECIPIENTS).update(rowId, { status: 'pending', fail_reason: '' }).catch(() => undefined);
       }
     } catch (err) {

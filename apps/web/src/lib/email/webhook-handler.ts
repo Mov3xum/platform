@@ -99,7 +99,8 @@ async function findRecipient(pb: PocketBase, messageId: string, hash: string | n
   return null;
 }
 
-async function bump(pb: PocketBase, campaignId: string, field: 'bounced_count' | 'complained_count'): Promise<void> {
+/** Räknarna på kampanjen är en cache av mottagarraderna — delas med leveranssynken (§ 55.4). */
+export async function bumpCampaignCounter(pb: PocketBase, campaignId: string, field: 'bounced_count' | 'complained_count'): Promise<void> {
   try {
     const c = await pb.collection(CAMPAIGNS).getOne<Record<string, unknown>>(campaignId, { fields: `id,${field}` });
     const cur = typeof c[field] === 'number' ? (c[field] as number) : 0;
@@ -161,7 +162,7 @@ export async function handleProviderEvent(event: ProviderEvent): Promise<Webhook
     const newStatus = type === 'bounced' && reason ? 'bounced' : type === 'complained' ? 'complained' : null;
     if (newStatus && hit.status !== newStatus) {
       await pb.collection(CAMPAIGN_RECIPIENTS).update(hit.id, { status: newStatus, fail_reason: detail.slice(0, 300) }).catch(() => undefined);
-      await bump(pb, hit.campaign, newStatus === 'bounced' ? 'bounced_count' : 'complained_count');
+      await bumpCampaignCounter(pb, hit.campaign, newStatus === 'bounced' ? 'bounced_count' : 'complained_count');
     }
   }
 
