@@ -153,7 +153,7 @@ test('ticket-block: personlig biljettlänk + kalender, utelämnas utan länk', (
   assert.match(withTicket.html, /Visa din biljett/);
   assert.match(withTicket.html, /Lägg i kalendern/);
   assert.match(withTicket.text, /Visa din biljett: https:\/\/app\.test\/e\/svar\?t=abc/);
-  assert.equal(withTicket.links.length, 0, 'personliga länkar spåras aldrig');
+  assert.deepEqual(withTicket.links, ['https://app.test/api/public/e/kalender?e=k'], 'biljettlänken är personlig och spåras aldrig; kalenderlänken spåras');
   const without = renderCampaignEmail({ ...base, links: {} });
   assert.doesNotMatch(without.html, /Visa din biljett/);
 });
@@ -224,9 +224,16 @@ test('renderCampaignEmail: escapar, spårar innehållslänkar men aldrig avregis
   assert.ok(out.html.includes('&lt;script&gt;'), 'HTML i text escapas');
   assert.ok(out.html.includes('<strong>detta</strong>'));
   assert.ok(out.html.includes('Hej Anna &lt;b&gt;'), 'ämnet fylls i och escapas i <title>');
-  assert.deepEqual(tracked, ['https://movexum.se/sida', 'https://movexum.se/go'], 'bara innehållslänkar spåras');
+  assert.deepEqual(
+    tracked,
+    ['https://movexum.se/sida', 'https://movexum.se/go', 'https://app/api/public/e/kalender?t=abc'],
+    'innehållslänkar och kalenderlänken spåras — inte svar/avregistrering'
+  );
   assert.deepEqual(out.links, tracked);
+  assert.ok(out.html.includes('href="https://app/api/public/e/klick?l=2"'), 'kalenderlänken går via klickspårningen');
+  assert.ok(!out.html.includes('href="https://app/api/public/e/kalender?t=abc"'), 'den ospårade kalenderadressen står inte kvar i HTML');
   assert.ok(out.html.includes('href="https://app/e/avregistrera?k=1"'), 'avregistrering spåras aldrig');
+  assert.ok(out.html.includes('href="https://app/e/svar?t=abc&amp;svar=yes"'), 'svarsknapparna är personliga och spåras aldrig');
   assert.ok(out.html.includes('svar=yes') && out.html.includes('Jag kan inte'));
   assert.ok(out.html.includes('Lägg i kalendern'));
   assert.ok(out.html.includes('>movexum<'), 'wordmark på kort-layout');

@@ -367,17 +367,24 @@ const baseUrlOf = (campaign: CampaignRow, explicit?: string): string => {
   return (configured || explicit || campaign.send_base_url || '').replace(/\/+$/, '');
 };
 
-/** Kampanjens upplösta länklista (för klickspårningen) — renderas med kampanjnivå-data. */
-function campaignLinks(campaign: CampaignRow, ev: EventInfo | null, senderName: string, orgName: string, surveyUrl: string): string[] {
-  // Samma event-/enkätdata som de riktiga mejlen, så länkindexen stämmer
-  // (en saknad utvärderingslänk tar bort knappen i båda).
+/**
+ * Kampanjens upplösta länklista (för klickspårningen) — renderas med
+ * kampanjnivå-data. Det är den listan som sparas i `link_clicks.urls` och som
+ * klickroutern slår upp målet i; klick-token bär indexet i DEN listan
+ * (`trackLink` nedan letar upp varje mottagarlänk på URL, aldrig på position).
+ */
+function campaignLinks(campaign: CampaignRow, ev: EventInfo | null, senderName: string, orgName: string, surveyUrl: string, calendarUrl: string | null): string[] {
+  // Samma event-/enkätdata som de riktiga mejlen (en saknad utvärderingslänk
+  // tar bort knappen i båda). De personliga länkarna (svar/biljett) spåras
+  // aldrig, men platshållare för dem gör att blocken renderas — annars saknas
+  // kalenderlänken i biljettblocket i listan och kan inte spåras.
   return renderCampaignEmail({
     subject: campaign.subject,
     preheader: campaign.preheader,
     blocks: campaign.blocks,
     design: campaign.design,
     merge: { ...EMAIL_SAMPLE_MERGE, sender_name: senderName, ...eventMerge(ev), survey_url: surveyUrl },
-    links: {},
+    links: { calendar: calendarUrl, ticket: '#', rsvpYes: '#', rsvpNo: '#' },
     reasonText: '',
     orgName
   }).links;
@@ -606,8 +613,9 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
   }
 
   // Rendering + utskick.
-  const links = campaignLinks(campaign, ev, sender.name, orgName, surveyUrl);
   const calendarKey = ev && ev.starts_at ? signCalendarKey(ev.id, secret) : null;
+  const calendarUrl = calendarKey ? `${baseUrl}/api/public/e/kalender?e=${calendarKey}` : null;
+  const links = campaignLinks(campaign, ev, sender.name, orgName, surveyUrl, calendarUrl);
   const messages: OutgoingEmail[] = [];
   const byKey = new Map<string, Pending>();
   // Personlig leverans (§ 55.5): inga listhuvuden, inga spårade länkar —
@@ -634,7 +642,7 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
         rsvpYes: p.token ? `${baseUrl}/e/svar?t=${p.token}&svar=yes` : null,
         rsvpNo: p.token ? `${baseUrl}/e/svar?t=${p.token}&svar=no` : null,
         ticket: p.token ? `${baseUrl}/e/svar?t=${p.token}&klart=yes` : null,
-        calendar: calendarKey ? `${baseUrl}/api/public/e/kalender?e=${calendarKey}` : null
+        calendar: calendarUrl
       },
       reasonText: emailReasonText(c.reason, campaign.category, campaign.consent_mode),
       orgName,
@@ -643,8 +651,14 @@ async function dispatchLocked(campaignId: string, opts: { baseUrl?: string; acto
       ...(personal
         ? {}
         : {
-            trackLink: (url: string, index: number) => {
-              const t = secret ? signClickToken({ recipientId: p.rowId, campaignId: campaign.id, index }, secret) : null;
+            // Indexet i token är platsen i KAMPANJENS länklista (det klickroutern
+            // slår upp målet i) — slås upp på URL, inte på blockposition, så en
+            // mottagare vars mejl saknar ett block (t.ex. biljett utan rad i
+            // deltagarlistan) aldrig skickas till fel mål. En länk som inte
+            // finns i listan (platshållare i URL:en) lämnas ospårad.
+            trackLink: (url: string) => {
+              const index = links.indexOf(url);
+              const t = index >= 0 && secret ? signClickToken({ recipientId: p.rowId, campaignId: campaign.id, index }, secret) : null;
               return t ? `${baseUrl}/api/public/e/klick?c=${t}` : url;
             }
           })

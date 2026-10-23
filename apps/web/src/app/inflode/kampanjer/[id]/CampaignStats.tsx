@@ -53,6 +53,9 @@ export function CampaignStats({ campaign, recipients }: { campaign: CampaignRow;
   for (const r of recipients) byStatus.set(r.status, [...(byStatus.get(r.status) ?? []), r]);
   const links = campaign.link_clicks.urls.map((url, i) => ({ url, count: campaign.link_clicks.counts[i] ?? 0 })).sort((a, b) => b.count - a.count);
   const clickers = recipients.filter((r) => r.click_count > 0).length;
+  // Personlig leverans (§ 55.5): mejlet gick utan spårade länkar — 0 klick är
+  // då ingen mätning, och det ska stå så i stället för "0,0 %".
+  const untracked = campaign.design.personal_delivery;
   // Vad Resend säger hände EFTER att vi skickade (§ 55.4) — "Skickat" är bara mottaget hos Resend.
   const delivery = summarizeDeliveryStatuses(recipients);
   const deliveryLabel = (r: RecipientRow): string | null => {
@@ -90,7 +93,7 @@ export function CampaignStats({ campaign, recipients }: { campaign: CampaignRow;
           <Stat label="Levererade" value={rates.delivered} hint="skickade minus studsar" />
           <Stat label="Studsar" value={formatRate(rates.bounceRate)} hint={`${campaign.bounced_count} st · gräns 2 %`} />
           <Stat label="Klagomål" value={formatRate(rates.complaintRate, 2)} hint={`${campaign.complained_count} st · gräns 0,1 %`} />
-          <Stat label="Klick" value={formatRate(rates.clickRate)} hint={`${clickers} personer klickade`} />
+          <Stat label="Klick" value={untracked ? '–' : formatRate(rates.clickRate)} hint={untracked ? 'spårades inte (personlig leverans)' : `${clickers} personer klickade`} />
           <Stat label="Avregistreringar" value={formatRate(rates.unsubscribeRate)} hint={`${campaign.unsubscribed_count} st`} />
         </div>
         <p className="mx-t-13" style={{ margin: '12px 0 0', color: HEALTH_TONE[health] }}>
@@ -116,9 +119,15 @@ export function CampaignStats({ campaign, recipients }: { campaign: CampaignRow;
           <div className="mx-fw-6 mx-t-13" style={{ padding: '12px 16px', borderBottom: '1px solid var(--mx-line-soft)' }}>
             Klick per länk
           </div>
+          {untracked && (
+            <p className="mx-t-13" style={{ padding: '10px 16px', margin: 0, borderBottom: '1px solid var(--mx-line-soft)', background: 'var(--movexum-pastell-gul)', color: 'var(--movexum-morkgul)' }}>
+              Utskicket gick med <strong>Personlig leverans</strong> — länkarna skickades ospårade så mejlet hamnar i Prioriterad/Primär, och klick kan därför inte
+              räknas. Vill du mäta klick nästa gång: duplicera kampanjen och slå av &quot;Personlig leverans&quot; under Design innan du skickar.
+            </p>
+          )}
           {links.length === 0 ? (
             <p className="mx-t-13 mx-muted" style={{ padding: 16, margin: 0 }}>
-              Mejlet hade inga spårade länkar.
+              {untracked ? 'Mejlet hade inga länkar att spåra.' : 'Mejlet hade inga spårade länkar.'}
             </p>
           ) : (
             links.map((l, i) => (
@@ -126,7 +135,7 @@ export function CampaignStats({ campaign, recipients }: { campaign: CampaignRow;
                 <span className="mx-t-13 mx-truncate" style={{ flex: 1, minWidth: 0 }} title={l.url}>
                   {l.url}
                 </span>
-                <span className="mx-mono mx-fw-6 mx-t-13">{l.count}</span>
+                <span className="mx-mono mx-fw-6 mx-t-13">{untracked ? '–' : l.count}</span>
               </div>
             ))
           )}

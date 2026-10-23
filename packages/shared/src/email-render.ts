@@ -4,8 +4,11 @@
 // Outlook och Apple Mail, plus en ren textversion. Modellen är enkel med
 // avsikt: inga webbtypsnitt (Gmail/Outlook laddar dem inte), inga externa
 // stilmallar, inga skript, inga spårningspixlar. Varje länk kan slussas genom
-// `trackLink` (klickspårning på egen domän, § 55.6) — avregistrering och
-// preferenscentret spåras aldrig.
+// `trackLink` (klickspårning på egen domän, § 55.6) — avregistrering,
+// preferenscentret och de personliga svars-/biljettlänkarna spåras aldrig.
+// Kalenderlänken ("Lägg i kalendern") är INTE personlig (signerad eventnyckel,
+// samma för alla) och spåras som en innehållslänk — ett "Save the date" har
+// ofta inget annat att klicka på (incident 2026-10-22).
 //
 // All text escapas FÖRE insättning (§ 10.3). Platshållare fylls i med
 // `renderMergeFields` på ren text och escapas därefter.
@@ -191,7 +194,7 @@ export function renderCampaignEmail(input: EmailRenderInput): EmailRenderOutput 
             ? `<tr><td style="padding:4px 12px 4px 0;${FONT}font-size:13px;color:${SUBTLE};white-space:nowrap;vertical-align:top;">${label}</td><td style="padding:4px 0;${FONT}font-size:14px;color:${INK};font-weight:600;">${escapeEmailHtml(value)}</td></tr>`
             : '';
         const cal = input.links.calendar
-          ? `<tr><td></td><td style="padding:6px 0 0;"><a href="${escapeEmailHtml(input.links.calendar)}" style="${FONT}font-size:13px;color:${accent};text-decoration:underline;">Lägg i kalendern</a></td></tr>`
+          ? `<tr><td></td><td style="padding:6px 0 0;"><a href="${escapeEmailHtml(track(input.links.calendar))}" style="${FONT}font-size:13px;color:${accent};text-decoration:underline;">Lägg i kalendern</a></td></tr>`
           : '';
         htmlParts.push(
           `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 18px;border-left:3px solid ${accent};padding-left:14px;"><tr><td style="padding-left:14px;"><table role="presentation" cellpadding="0" cellspacing="0">${row('Vad', name)}${row('När', when)}${row('Var', where)}${cal}</table></td></tr></table>`
@@ -211,7 +214,7 @@ export function renderCampaignEmail(input: EmailRenderInput): EmailRenderOutput 
         if (!input.links.ticket) break;
         htmlParts.push(
           `<p style="margin:0 0 18px;">${button('Visa din biljett', input.links.ticket, accent, 'primary')}${
-            input.links.calendar ? button('Lägg i kalendern', input.links.calendar, accent, 'secondary') : ''
+            input.links.calendar ? button('Lägg i kalendern', track(input.links.calendar), accent, 'secondary') : ''
           }</p>`
         );
         addText(`Visa din biljett: ${input.links.ticket}${input.links.calendar ? `\nLägg i kalendern: ${input.links.calendar}` : ''}`);
