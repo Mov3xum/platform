@@ -1,16 +1,28 @@
 'use client';
 
 import { useActionState, useEffect, useMemo, useState } from 'react';
-import { GROUP_ROLE_LABEL, MAX_RELATED_COMPANIES, SNI_MATCH_LABEL, describeCompanyAge, formatSni, type CompanyAssessment, type ScreeningManualFacts } from '@platform/shared';
+import { GROUP_ROLE_LABEL, MAX_RELATED_COMPANIES, SCREENING_DATA_PART_LABEL, SNI_MATCH_LABEL, describeCompanyAge, formatSni, type CompanyAssessment, type ScreeningManualFacts } from '@platform/shared';
 import { addGroupCompanyAction, fetchGroupCompanyAction, type ExcellenceAssessment } from '@/lib/actions/excellence';
 import { REGISTRY_PART_META, type RegistryPartId } from '@/lib/integrations/company-registry/parts';
 import { estimateRegistryCost, formatRegistryCost, registryPartCostLabel } from '@/lib/integrations/company-registry/pricing';
 import { NEUTRAL_TONE, WARN_TONE, formatOrgNr, initialActionState, inputCls, pctText, type FetchMoreConfig } from './shared';
 
+/** Det som hämtats för bolaget, som text ("Grunddata · Bokslut") — kolumnen Underlag. */
+function fetchedPartsText(c: CompanyAssessment): string {
+  return c.fetchedParts.map((p) => SCREENING_DATA_PART_LABEL[p]).join(' · ');
+}
+
+/** Delar leverantören erbjuder som INTE finns i underlaget för bolaget än. */
+function remainingParts(c: CompanyAssessment, config: FetchMoreConfig): RegistryPartId[] {
+  return config.parts.filter((p) => !(c.fetchedParts as string[]).includes(p));
+}
+
 /**
  * "Hämta mer" för ett koncernbolag (§ 51.7): kryssa i delar, se kostnaden
  * INNAN anropet, hämta — bedömningen räknas om på de manuella svar som står i
  * rapporten just nu (även osparade) och kostnaden summeras på totalen.
+ * Bara delar som saknas i underlaget erbjuds; är allt hämtat visas ingen
+ * knapp (raden visar i stället vad som hämtats, kolumnen Underlag).
  */
 function GroupCompanyFetch({
   company,
@@ -35,14 +47,16 @@ function GroupCompanyFetch({
       setParts([]);
     }
   }, [state.assessment, onUpdated]);
+  const remaining = remainingParts(company, config);
   const estimate = estimateRegistryCost(config.pricing, parts, 1);
-  const already: string[] = [];
-  if (company.basic) already.push('grunddata');
-  if (company.conditions.some((x) => x.id === 'dividend' && x.source === 'register')) already.push('bokslut');
+  const already = fetchedPartsText(company);
+  if (remaining.length === 0) {
+    return <span className="text-[11.5px] text-foreground-subtle">Allt hämtat</span>;
+  }
   if (!open) {
     return (
       <button type="button" onClick={() => setOpen(true)} className="rounded-full border border-strong px-2.5 py-1 text-[11.5px] font-semibold text-foreground hover:bg-canvas-subtle">
-        Hämta mer…
+        {company.fetchedParts.length > 0 ? 'Hämta mer…' : 'Hämta…'}
       </button>
     );
   }
@@ -56,8 +70,8 @@ function GroupCompanyFetch({
       <p className="text-[11px] font-semibold uppercase tracking-wider text-foreground-muted">
         {company.name || formatOrgNr(company.orgNr)} — från {config.providerName}
       </p>
-      {already.length > 0 && <p className="text-[11px] text-foreground-subtle">Redan hämtat: {already.join(', ')}.</p>}
-      {config.parts.map((id) => (
+      {already && <p className="text-[11px] text-foreground-subtle">Redan hämtat: {already}.</p>}
+      {remaining.map((id) => (
         <label key={id} className="flex cursor-pointer items-start gap-2 text-[12px] text-foreground">
           <input
             type="checkbox"
@@ -358,7 +372,7 @@ export function GroupMap({
                 <td className="px-3 py-1.5 text-foreground-muted">{c.basic?.bolagStatus ?? '–'}</td>
                 <td className="px-3 py-1.5">
                   {c.dataFetched ? (
-                    <span className="text-foreground-muted">Uppslag gjort</span>
+                    <span className="text-foreground-muted">{fetchedPartsText(c) || 'Uppslag gjort'}</span>
                   ) : (
                     <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${WARN_TONE}`}>Inget uppslag</span>
                   )}

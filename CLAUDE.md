@@ -9114,7 +9114,13 @@ kollega) eller till **bolaget**, som båda svarar direkt i systemet:
   `lib/excellence/merge.ts` (**bara hämtade delar ersätter** — bokslut rör
   inte ägarbilden, verklig huvudman ersätter bara huvudmannens rader) och
   räknar om bedömningen med samma manuella svar. Underlaget bär
-  `providerSlug` för detta.
+  `providerSlug` för detta. **Efter en hämtning visar raden vad som hämtats
+  (2026-10-23):** kolumnen Underlag listar bolagets datadelar ("Grunddata ·
+  Bokslut · Verklig huvudman", `CompanyAssessment.fetchedParts` ur den rena
+  `fetchedPartsOf`), "Hämta mer" erbjuder BARA delar som saknas och
+  försvinner ("Allt hämtat") när inget återstår — knappen stod kvar
+  oförändrad efter ett uppslag och såg ut som om inget hänt. Samma text i
+  PDF:ns koncernkarta.
 - **Kostnaden syns hela tiden:** per del i kryssrutorna, per bolag före
   "Hämta", som löpande total i bedömningsvyn ("Denna bedömning har hittills
   kostat …", `sumRegistryCosts` över alla uppslag inkl. hämta-mer), per

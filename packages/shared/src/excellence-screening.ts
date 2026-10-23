@@ -318,6 +318,33 @@ export interface ThresholdRow {
   estimated?: boolean;
 }
 
+/**
+ * Vilka datadelar som faktiskt finns i underlaget för ett bolag (§ 51.7).
+ * Samma id:n som registrets datadelar (`RegistryPartId` i web-appen), så
+ * koncernkartan kan visa VAD som hämtats och bara erbjuda "Hämta mer" för det
+ * som saknas — ett bolag med allt hämtat visar aldrig knappen igen.
+ */
+export type ScreeningDataPart = 'basic' | 'financials' | 'group_structure' | 'beneficial_owners' | 'owner_engagements';
+
+export const SCREENING_DATA_PART_LABEL: Record<ScreeningDataPart, string> = {
+  basic: 'Grunddata',
+  financials: 'Bokslut',
+  group_structure: 'Koncernstruktur',
+  beneficial_owners: 'Verklig huvudman',
+  owner_engagements: 'Ägarnas andra bolag'
+};
+
+/** Delar som finns i underlaget för bolaget — `financials: []` (inget bokslut i registret) räknas som hämtat. */
+export function fetchedPartsOf(facts: Pick<GroupCompanyFacts, 'basic' | 'financials' | 'groupStructureFetched' | 'beneficialOwnersFetched' | 'ownerEngagements'>): ScreeningDataPart[] {
+  const out: ScreeningDataPart[] = [];
+  if (facts.basic) out.push('basic');
+  if (facts.financials !== undefined) out.push('financials');
+  if (facts.groupStructureFetched) out.push('group_structure');
+  if (facts.beneficialOwnersFetched) out.push('beneficial_owners');
+  if (facts.ownerEngagements !== undefined) out.push('owner_engagements');
+  return out;
+}
+
 export interface CompanyAssessment {
   orgNr: string;
   name?: string;
@@ -337,6 +364,8 @@ export interface CompanyAssessment {
   /** Kom med via en ägare som också äger bolaget (samma marknad, § 51.11). */
   personLink?: PersonLinkRef;
   dataFetched: boolean;
+  /** Datadelar som finns i underlaget för bolaget (visas i koncernkartan; styr vad "Hämta mer" erbjuder). */
+  fetchedParts: ScreeningDataPart[];
   basic?: ScreeningBasic;
   /** Grundförutsättningarna i Comblys ordning: ekonomisk verksamhet, < 5 år, börsnoterat, utdelning, koncentration, övertagit verksamhet. */
   conditions: ScreeningCheck[];
@@ -1220,6 +1249,7 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
       name: subject.name,
       role: 'subject',
       dataFetched: subject.dataFetched,
+      fetchedParts: fetchedPartsOf(subject),
       basic: subject.basic,
       conditions: subjectConditions,
       owners: subject.ownership.filter((o) => o.direction === 'owner'),
@@ -1273,6 +1303,7 @@ export function screenExcellence(input: ExcellenceScreeningInput): ExcellenceScr
       manualDeclared: r.manualDeclared,
       personLink: r.personLink,
       dataFetched: base.dataFetched,
+      fetchedParts: fetchedPartsOf(base),
       basic: base.basic,
       conditions,
       owners: base.ownership.filter((o) => o.direction === 'owner'),

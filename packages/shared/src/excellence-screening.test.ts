@@ -9,6 +9,7 @@ import {
   deriveRelatedCompanies,
   describeCompanyAge,
   dividendCheck,
+  fetchedPartsOf,
   indirectPersonOwnership,
   listedCheck,
   ownershipShareRange,
@@ -1024,4 +1025,42 @@ test('classifyOwnerEngagements: startup-bolaget självt hoppas över, saknad SNI
   assert.equal(view?.[0].companies.length, 1);
   assert.equal(view?.[0].companies[0].sniMatch, 'unknown');
   assert.equal(view?.[0].companies[0].relation, 'uncertain');
+});
+
+test('fetchedPartsOf: bara delar som finns i underlaget — tom bokslutslista räknas som hämtat', () => {
+  assert.deepEqual(fetchedPartsOf({ ownership: [], groupStructureFetched: false, beneficialOwnersFetched: false } as never), []);
+  assert.deepEqual(
+    fetchedPartsOf({ basic: { registeredAt: '2025-07-14' }, financials: [], ownership: [], groupStructureFetched: false, beneficialOwnersFetched: true }),
+    ['basic', 'financials', 'beneficial_owners']
+  );
+  assert.deepEqual(fetchedPartsOf({ financials: undefined, ownership: [], groupStructureFetched: true, beneficialOwnersFetched: false, ownerEngagements: [] }), [
+    'group_structure',
+    'owner_engagements'
+  ]);
+});
+
+test('koncernkartan vet vad som hämtats per bolag (styr "Hämta mer")', () => {
+  const res = screenExcellence(
+    input({
+      subject: company({
+        orgNr: '5595728790',
+        ownership: [{ direction: 'owner', owner_kind: 'company', org_nr: '5560000001', name: 'Mor AB', capital_pct: 100 }]
+      }),
+      related: [
+        {
+          orgNr: '5560000001',
+          name: 'Mor AB',
+          dataFetched: true,
+          basic: { registeredAt: '2020-01-01', bolagStatus: 'aktiv', bolagsform: 'AB' },
+          ownership: [],
+          groupStructureFetched: false,
+          beneficialOwnersFetched: false
+        }
+      ]
+    })
+  );
+  assert.deepEqual(res.companies[0].fetchedParts, ['basic', 'financials', 'group_structure', 'beneficial_owners']);
+  const mor = res.companies.find((c) => c.orgNr === '5560000001');
+  assert.ok(mor);
+  assert.deepEqual(mor.fetchedParts, ['basic']);
 });
