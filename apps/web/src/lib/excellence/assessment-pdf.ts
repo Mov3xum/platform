@@ -5,6 +5,7 @@ import { BRAND, rgb01, LOGO_RATIO } from '@/lib/documents/brand';
 import { loadLogoPng, loadPdfFonts } from '@/lib/documents/assets';
 import {
   GROUP_ROLE_LABEL,
+  SCREENING_DATA_PART_LABEL,
   SNI_MATCH_LABEL,
   formatSni,
   SCREENING_REQUEST_STATUS_LABEL,
@@ -443,7 +444,7 @@ export async function buildExcellenceAssessmentPdf(a: ExcellenceAssessment): Pro
         c.basic?.sni?.length ? c.basic.sni.map((x) => x.code).join(', ') : '–',
         age,
         c.basic?.bolagStatus ?? '–',
-        c.dataFetched ? 'Uppslag gjort' : 'Inget uppslag'
+        c.dataFetched ? c.fetchedParts.map((p) => SCREENING_DATA_PART_LABEL[p]).join(' · ') || 'Uppslag gjort' : 'Inget uppslag'
       ];
     }),
     [2.3, 2.2, 1.4, 0.9, 1, 1.8, 0.9, 1.1],
