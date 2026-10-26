@@ -14,7 +14,7 @@ const ICON_VERSION = 2;
 
 export const metadata: Metadata = {
   title: 'Movexum Inkubatorplattform',
-  description: 'Modulär plattform för Movexums inkubatorer',
+  description: 'Modulär plattform för Movexums inkubator',
   applicationName: 'Movexum',
   // PWA / hemskärm (CLAUDE.md § 35): manifest + iOS-specifika taggar. iOS
   // läser inte manifestets ikoner → apple-touch-icon krävs separat.
