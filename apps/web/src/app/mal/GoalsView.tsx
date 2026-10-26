@@ -215,7 +215,7 @@ export function GoalsView({
   };
   if (schemaMissing) {
     return (
-      <div className="mx-auto max-w-3xl rounded-xl border border-movexum-morkgul/30 bg-movexum-pastell-gul p-4 text-sm text-movexum-morkgul dark:bg-movexum-morkgul/20 dark:text-movexum-pastell-gul">
+      <div className="rounded-xl border border-movexum-morkgul/30 bg-movexum-pastell-gul p-4 text-sm text-movexum-morkgul dark:bg-movexum-morkgul/20 dark:text-movexum-pastell-gul">
         Målstyrningens kollektioner saknas på den här instansen. Kör migration 1700000159 (eller synka via
         <code className="mx-1">setup-via-api.mjs</code>) och ladda om.
       </div>
@@ -238,7 +238,7 @@ export function GoalsView({
   };
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-8">
+    <div className="w-full space-y-8">
       {/* Årsrad + kvartal */}
       <section className="flex flex-wrap items-end justify-between gap-4 border-b border-default pb-4">
         <div className="flex flex-wrap items-center gap-2">
