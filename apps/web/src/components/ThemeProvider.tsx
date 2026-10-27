@@ -6,10 +6,14 @@
  * Klassbaserat: `<html class="dark">` aktiverar dark mode. `ThemeScript`
  * injiceras i <head> och sätter klassen FÖRE hydration (ingen färgblink):
  *   1. `localStorage['movexum-theme']` om användaren valt själv,
- *   2. annars `prefers-color-scheme`.
+ *   2. annars **ljust tema** (beslut 2026-10-27: standard är ljust för
+ *      alla — systemets `prefers-color-scheme` följs INTE; mörkt läge är
+ *      ett aktivt val via `ThemeToggle`).
  * `ThemeToggle` (uppe till höger i sidhuvudet) växlar och sparar valet.
  * Valet är en bekvämlighet per webbläsare — ingen datakälla, ingen PII.
  */
+
+export const DEFAULT_THEME: Theme = 'light';
 
 export type Theme = 'light' | 'dark';
 
@@ -24,9 +28,7 @@ const themeScript = `
   try {
     var stored = null;
     try { stored = localStorage.getItem('${THEME_STORAGE_KEY}'); } catch (_) {}
-    var theme = stored === 'dark' || stored === 'light'
-      ? stored
-      : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    var theme = stored === 'dark' || stored === 'light' ? stored : '${DEFAULT_THEME}';
     var root = document.documentElement;
     if (theme === 'dark') root.classList.add('dark'); else root.classList.remove('dark');
     root.dataset.theme = theme;
@@ -44,7 +46,7 @@ export function readCurrentTheme(): Theme {
   return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
 }
 
-/** Läser användarens sparade val (null = följer systemet). */
+/** Läser användarens sparade val (null = inget eget val ⇒ ljust tema). */
 export function readStoredTheme(): Theme | null {
   if (typeof window === 'undefined') return null;
   try {
