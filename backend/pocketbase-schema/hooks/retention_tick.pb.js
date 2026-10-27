@@ -26,6 +26,7 @@
 //   MOVEXUM_RETENTION_COMPASS_SECURITY_DAYS      default 365 (golv 30)
 //   MOVEXUM_RETENTION_WEB_CACHE_DAYS             default 2
 //   MOVEXUM_RETENTION_EMAIL_EVENTS_DAYS          default 730 (golv 90)
+//   MOVEXUM_RETENTION_LOGIN_EVENTS_DAYS          default 365 (golv 90)
 // Ogiltiga värden faller tillbaka på default; värden under golvet höjs till
 // golvet (en felskriven env får aldrig radera audit-spåret).
 //
@@ -97,6 +98,14 @@ cronAdd('movexum-retention-tick', '17 3 * * *', () => {
       fields: ['created'],
       filter: 'created < {:cut}',
       params: { cut: cutoff(intEnv('MOVEXUM_RETENTION_EMAIL_EVENTS_DAYS', 730, 90, 3650)) }
+    },
+    {
+      // Inloggningshistorik (§ 36.4): "när loggade X in" behöver inte mer än
+      // ett år; users.last_login_at/last_active_at berörs inte av gallringen.
+      collection: 'user_login_events',
+      fields: ['created'],
+      filter: 'created < {:cut}',
+      params: { cut: cutoff(intEnv('MOVEXUM_RETENTION_LOGIN_EVENTS_DAYS', 365, 90, 3650)) }
     },
     {
       collection: 'web_cache',

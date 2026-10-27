@@ -14,9 +14,11 @@ import {
   type UpdateUserState
 } from '@/lib/actions/users';
 import { canManageUser, ROLE_LABELS, toggleableModulesForRoles } from '@/lib/users/validate';
+import { compareByLastActive, INACTIVE_AFTER_DAYS, isInactiveUser } from '@/lib/users/activity';
 import { ModulePicker } from './ModulePicker';
 import { UserForm, type StartupOption } from './UserForm';
 import { UserStartupLink } from './UserStartupLink';
+import { LastActiveLabel, PresenceDot, UserActivityPanel, useNow } from './UserActivityPanel';
 
 export interface ManagedUser {
   id: string;
@@ -28,6 +30,10 @@ export interface ManagedUser {
   /** Effektiv allow-lista över moduler i sidofältet (§ 36.3). */
   enabledModules: string[];
   createdAt: string;
+  /** Användarlogg (§ 36.4): senaste hjärtslag / inloggning, stämplat av servern. */
+  lastActiveAt: string | null;
+  lastLoginAt: string | null;
+  loginCount: number;
 }
 
 interface UsersAdminProps {
@@ -398,6 +404,17 @@ function DetailHeader({
             {user.createdAt
               ? new Date(user.createdAt).toLocaleDateString('sv-SE', { timeZone: 'Europe/Stockholm' })
               : '—'}
+            {' · '}
+            Senaste inloggning{' '}
+            {user.lastLoginAt
+              ? new Date(user.lastLoginAt).toLocaleString('sv-SE', {
+                  timeZone: 'Europe/Stockholm',
+                  day: 'numeric',
+                  month: 'short',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })
+              : '—'}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -466,7 +483,8 @@ function UserRow({
   startups,
   assignableRoles,
   actorId,
-  isAdmin
+  isAdmin,
+  now
 }: {
   user: ManagedUser;
   open: boolean;
@@ -476,6 +494,7 @@ function UserRow({
   assignableRoles: Role[];
   actorId: string;
   isAdmin: boolean;
+  now: number | null;
 }) {
   const isSelf = user.id === actorId;
   const manageable = canManageUser(isAdmin ? ['admin'] : ['incubator_lead'], user.roles);
@@ -507,7 +526,17 @@ function UserRow({
               <span className="text-[10.5px] uppercase tracking-[0.12em] text-foreground-subtle">du</span>
             )}
           </div>
-          <div className="truncate text-[12px] text-foreground-subtle">{user.email || '—'}</div>
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 text-[12px] text-foreground-subtle">
+            <span className="truncate">{user.email || '—'}</span>
+            <span className="inline-flex items-center gap-1.5 md:hidden">
+              <PresenceDot lastActiveAt={user.lastActiveAt} now={now} />
+              <LastActiveLabel lastActiveAt={user.lastActiveAt} now={now} />
+            </span>
+          </div>
+        </div>
+        <div className="hidden w-[170px] shrink-0 items-center gap-1.5 text-[12px] text-foreground-muted md:flex">
+          <PresenceDot lastActiveAt={user.lastActiveAt} now={now} />
+          <LastActiveLabel lastActiveAt={user.lastActiveAt} now={now} className="truncate" />
         </div>
         <div className="hidden flex-wrap items-center justify-end gap-1.5 sm:flex">
           {user.roles.map((r) => (
@@ -563,6 +592,8 @@ function UserRow({
                 onDeleted={onDeleted}
               />
 
+              <UserActivityPanel userId={user.id} />
+
               <RolesForm user={user} assignableRoles={assignableRoles} isSelf={isSelf} />
 
               {isMember && (
@@ -600,8 +631,16 @@ export function UsersAdmin({
 }: UsersAdminProps) {
   const [query, setQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<Role | 'all'>('all');
+  const [inactiveOnly, setInactiveOnly] = useState(false);
+  const [sortBy, setSortBy] = useState<'name' | 'active'>('name');
   const [openId, setOpenId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const now = useNow();
+  // Inaktiva = ingen aktivitet på 30 dagar eller aldrig inloggad (§ 36.4).
+  const inactiveCount = useMemo(() => {
+    const ref = now ?? Date.now();
+    return users.filter((u) => isInactiveUser(u.lastActiveAt, ref)).length;
+  }, [users, now]);
 
   const roleCounts = useMemo(() => {
     const counts: Partial<Record<Role, number>> = {};
@@ -611,8 +650,10 @@ export function UsersAdmin({
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return users.filter((u) => {
+    const ref = now ?? Date.now();
+    const list = users.filter((u) => {
       if (roleFilter !== 'all' && !u.roles.includes(roleFilter)) return false;
+      if (inactiveOnly && !isInactiveUser(u.lastActiveAt, ref)) return false;
       if (!q) return true;
       return (
         u.name.toLowerCase().includes(q) ||
@@ -620,7 +661,8 @@ export function UsersAdmin({
         u.linkedStartups.some((s) => s.name.toLowerCase().includes(q))
       );
     });
-  }, [users, query, roleFilter]);
+    return sortBy === 'active' ? [...list].sort(compareByLastActive) : list;
+  }, [users, query, roleFilter, inactiveOnly, sortBy, now]);
 
   return (
     <div className="space-y-4">
@@ -676,6 +718,31 @@ export function UsersAdmin({
             {ROLE_LABELS[r]} · {roleCounts[r]}
           </button>
         ))}
+        <button
+          type="button"
+          onClick={() => setInactiveOnly((v) => !v)}
+          aria-pressed={inactiveOnly}
+          title={`Ingen aktivitet på ${INACTIVE_AFTER_DAYS} dagar, eller aldrig inloggad`}
+          className={`rounded-full border px-3 py-1 text-[11.5px] font-medium transition ${
+            inactiveOnly
+              ? 'border-movexum-morkgul bg-movexum-pastell-gul text-movexum-morkgul'
+              : 'border-default bg-surface text-foreground-muted hover:bg-canvas-muted'
+          }`}
+        >
+          Inaktiva {INACTIVE_AFTER_DAYS}+ dgr · {inactiveCount}
+        </button>
+        <label className="ml-auto flex items-center gap-1.5 text-[11.5px] text-foreground-subtle">
+          Sortera
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value === 'active' ? 'active' : 'name')}
+            className="rounded-lg border border-default bg-surface px-2 py-1 text-[11.5px] text-foreground focus:border-brand focus:outline-none"
+            aria-label="Sortera användare"
+          >
+            <option value="name">Namn</option>
+            <option value="active">Senast aktiv</option>
+          </select>
+        </label>
       </div>
 
       {showCreate && (
@@ -697,7 +764,7 @@ export function UsersAdmin({
           <span>
             {filtered.length} av {users.length} användare
           </span>
-          <span className="hidden sm:inline">Roller · bolag · status</span>
+          <span className="hidden sm:inline">Senast aktiv · roller · bolag</span>
         </div>
         {filtered.length === 0 ? (
           <p className="px-4 py-8 text-center text-[13px] text-foreground-muted">
@@ -716,6 +783,7 @@ export function UsersAdmin({
                 assignableRoles={assignableRoles}
                 actorId={actorId}
                 isAdmin={isAdmin}
+                now={now}
               />
             ))}
           </ul>

@@ -3,10 +3,12 @@ import '@/lib/pb-filter-guard';
 import { cache } from 'react';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { after } from 'next/server';
 import PocketBase from 'pocketbase';
 import { resolveUserModules, type Role } from '@platform/shared';
 import { getPublicPbUrl, getServerPbUrl } from '@/lib/pb-url';
 import { parseAuthCookie, USERS_COLLECTION_NAME, type ParsedAuthCookie } from '@/lib/session-token';
+import { touchUserActivity } from '@/lib/user-activity.server';
 
 const SERVER_PB_URL = getServerPbUrl();
 const PUBLIC_PB_URL = getPublicPbUrl();
@@ -101,6 +103,7 @@ const loadVerifiedUser = cache(async (): Promise<FreshUserRecord | null> => {
       .getOne<FreshUserRecord>(session.userId, { expand: 'tenant' });
     // Defense-in-depth: posten måste vara exakt tokenens subjekt.
     if (!fresh || fresh.id !== session.userId) return null;
+    scheduleActivityHeartbeat(fresh.id, fresh.last_active_at);
     return fresh;
   } catch (err) {
     const status = (err as { status?: number }).status ?? 0;
@@ -113,6 +116,21 @@ const loadVerifiedUser = cache(async (): Promise<FreshUserRecord | null> => {
     return null;
   }
 });
+
+/**
+ * "Senast aktiv" (§ 36.4): varje verifierad session är ett livstecken.
+ * Skrivningen görs EFTER svaret (`after`) och högst var tionde minut per
+ * konto (`touchUserActivity` prövar den sparade stämpeln), så läsvägen får
+ * ingen extra latens och ingen sidvisning loggas — bara när kontot senast
+ * var här. Utanför ett request-scope (t.ex. ett skript) hoppas den över.
+ */
+function scheduleActivityHeartbeat(userId: string, storedLastActiveAt: unknown): void {
+  try {
+    after(() => touchUserActivity(userId, storedLastActiveAt).catch(() => undefined));
+  } catch {
+    // `after` kräver ett request-scope — inget hjärtslag då.
+  }
+}
 
 export async function getCurrentUser(): Promise<SessionUser | null> {
   const m = await loadVerifiedUser();

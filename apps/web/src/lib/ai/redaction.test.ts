@@ -27,6 +27,7 @@ test('denylist håller ute auth-, credential- och privat-innehåll-kollektioner'
     'user_mistral_connectors',
     'rate_limits', // hashade rate-limit-nycklar (§21.8)
     'app_locks', // distribuerade lås (§21.8)
+    'user_login_events', // inloggningshistorik per användare (§36.4)
     // B. Strikt privat ägaren-bara-innehåll
     'chat_threads', // privat innehåll (§17.2)
     'user_files',

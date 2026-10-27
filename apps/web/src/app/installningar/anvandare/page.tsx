@@ -19,6 +19,9 @@ interface MemberRow {
   disabled_modules?: unknown;
   enabled_modules?: unknown;
   created?: string;
+  last_login_at?: string;
+  last_active_at?: string;
+  login_count?: unknown;
   expand?: { linked_startups?: { id: string; name: string }[] };
 }
 
@@ -59,7 +62,7 @@ export default async function AnvandarePage() {
       filter: `tenant = "${escFilter(user.tenant)}"`,
       sort: 'display_name,email',
       fields:
-        'id,email,display_name,roles,verified,disabled_modules,enabled_modules,created,expand.linked_startups.id,expand.linked_startups.name',
+        'id,email,display_name,roles,verified,disabled_modules,enabled_modules,created,last_login_at,last_active_at,login_count,expand.linked_startups.id,expand.linked_startups.name',
       expand: 'linked_startups'
     });
     users = res.items.map((m) => {
@@ -78,7 +81,11 @@ export default async function AnvandarePage() {
           stored: m.enabled_modules,
           legacyDisabled: m.disabled_modules
         }),
-        createdAt: m.created ?? ''
+        createdAt: m.created ?? '',
+        // Användarlogg (§ 36.4): stämplas av servern (hjärtslag + inloggning).
+        lastActiveAt: m.last_active_at?.trim() ? m.last_active_at : null,
+        lastLoginAt: m.last_login_at?.trim() ? m.last_login_at : null,
+        loginCount: typeof m.login_count === 'number' ? m.login_count : 0
       };
     });
   } catch (error) {
@@ -89,7 +96,7 @@ export default async function AnvandarePage() {
     <SettingsSectionPage
       slug="anvandare"
       roles={user.roles}
-      intro="Alla konton i din organisation. Öppna en användare för att ändra roller, koppla bolag, välja vilka moduler som visas i personens sidofält, sätta nytt lösenord eller radera kontot. Bolagsmedlemmar ser bara sitt eget bolags data."
+      intro="Alla konton i din organisation med när de senast var aktiva. Öppna en användare för att se inloggningshistorik och vad personen gjort i plattformen, ändra roller, koppla bolag, välja vilka moduler som visas i personens sidofält, sätta nytt lösenord eller radera kontot. Bolagsmedlemmar ser bara sitt eget bolags data."
     >
       <UsersAdmin
         users={users}

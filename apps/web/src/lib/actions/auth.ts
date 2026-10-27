@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { clientIpFromHeaders } from '@/lib/client-ip';
 import { sanitizeAppPath } from '@/lib/relative-redirect';
+import { recordUserLogin } from '@/lib/user-activity.server';
 import PocketBase from 'pocketbase';
 import { AUTH_COOKIE } from '@/lib/auth.server';
 import { getServerPbUrl } from '@/lib/pb-url';
@@ -69,6 +70,14 @@ export type VerifyEmailState = {
   success?: boolean;
 };
 
+/** Användarlogg (§ 36.4): stämpla inloggningen — fail-soft, aldrig blockerande. */
+async function stampLogin(model: Record<string, unknown> | null): Promise<void> {
+  const userId = typeof model?.id === 'string' ? model.id : '';
+  const tenant = typeof model?.tenant === 'string' ? model.tenant : '';
+  if (!userId || !tenant) return;
+  await recordUserLogin({ userId, tenant, method: 'password' }).catch(() => undefined);
+}
+
 export async function loginAction(_prev: LoginState, formData: FormData): Promise<LoginState> {
   try {
     const email = String(formData.get('email') || '').trim();
@@ -128,6 +137,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
 
     // Lyckad inloggning — nollställ brute-force-räknarna.
     await Promise.all([clearFailures(accountKey), clearFailures(ipKey)]);
+    await stampLogin(pb.authStore.model as Record<string, unknown> | null);
 
     // Trim down the cookie payload to just what getCurrentUser needs.
     // The full PB user record with expanded tenant can easily exceed the 4KB

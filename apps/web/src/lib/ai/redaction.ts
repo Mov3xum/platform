@@ -58,6 +58,10 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   // only systemdata utan värde för modellen — får aldrig nå query_collection.
   'rate_limits',
   'app_locks',
+  // Inloggningshistorik per användare (§ 36.4, migration 1700000206): när
+  // kollegor loggat in är administrationsdata för ledningen, inte underlag
+  // för modellen (`users` är redan denylistad).
+  'user_login_events',
   // B. Strikt privat ägaren-bara-innehåll (att exponera bryter § 21-isoleringen).
   'chat_threads', // privat konversationsinnehåll (1700000083)
   'user_files', // personliga filer, strikt ägaren-bara (1700000085)

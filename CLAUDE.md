@@ -512,7 +512,8 @@ uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
   **Denylist (får ALDRIG nå modellen)** — minimerad till två grupper:
   - **A. Auth, system & krypterade hemligheter:** `users`, `tenants`,
     `verification_tokens`, `pending_signups`, `tenant_integrations`,
-    `user_app_integrations`, `user_mistral_connectors`.
+    `user_app_integrations`, `user_mistral_connectors`, `user_login_events`
+    (inloggningshistorik per användare, § 36.4).
   - **B. Strikt privat ägaren-bara-innehåll** (att exponera bryter
     § 21-isoleringen): `chat_threads`, `user_files`, `deep_jobs`,
     `agent_memory`, `meeting_transcripts`, `procurement_documents` (§ 39.3)
@@ -6340,7 +6341,7 @@ brödsmulor (`ProtoTopBar` slår upp `SETTINGS_ROUTE_LABELS`).
 | Route | Innehåll |
 |---|---|
 | `/installningar` | Hub: kort per sektion grupperade i *Organisation & åtkomst*, *AI & automation*, *Utseende* |
-| `/installningar/anvandare` | **Användare** — alla konton i tenanten med sök/rollfilter, "Ny användare", och per konto: roller, kopplat bolag, **moduler i sidofältet** (§ 36.3), nytt lösenord, radering |
+| `/installningar/anvandare` | **Användare** — alla konton i tenanten med sök/rollfilter, **senast aktiv per konto** (§ 36.4), "Ny användare", och per konto: **aktivitetslogg** (inloggningar + åtgärder), roller, kopplat bolag, **moduler i sidofältet** (§ 36.3), nytt lösenord, radering |
 | `/installningar/moduler` | Borttagen (redirect → `/installningar/anvandare`) — den globala tenant-togglingen finns inte längre, § 36.3 |
 | `/installningar/organisation` | Tenants, infra-status, dataresidens |
 | `/installningar/ai-analys` | **AI-analys** — tre undervyer via `?vy=`: **Kostnadstak** (default, § 9.6), **Användning** (f.d. `/insights`: körningar, tokens, kostnad, kvalitetsfeedback § 9.10, adoption) och **Miljöpåverkan** (f.d. `/admin/ai-miljo`, admin-only, § 28.2). `/insights`, `/admin/ai-miljo` och `/installningar/ai-kostnad` är legacy-routes som redirectar hit (perioden bevaras). Modulen `insights` heter "AI-analys", har ingen egen rail-post längre och pekar hit. |
@@ -6446,6 +6447,74 @@ roll**:
   (ersätter `disabledModules`); cookie-kompaktmodellen har `enabled_modules`.
 - **GDPR/riskklass:** inga personuppgifter (bara modul-id:n), ingen
   AI-inferens → n/a.
+
+---
+
+### 36.4 Användarlogg — senast aktiv & inloggningshistorik (2026-10)
+
+**Behov.** Ledningen ville kunna följa om kontona används: vem som senast
+var inne, vem som inte loggat in på länge, och vad en person gjort i
+plattformen — utan att bygga övervakning av enskilda sidvisningar.
+
+**Vad som loggas (och inte).** Tre stämplar på `users` + en händelserad per
+inloggning (migration **1700000206**):
+- `users.last_active_at` — **hjärtslag med 10 minuters upplösning**
+  (`ACTIVITY_HEARTBEAT_MS` i den rena, enhetstestade
+  `lib/users/activity.ts`). Varje verifierad session (`loadVerifiedUser` i
+  `auth.server.ts`, dvs. varje sidladdning, server action och route handler)
+  schemalägger `touchUserActivity` via `after()` — EFTER svaret, ingen
+  latens — som skriver stämpeln bara när den sparade är äldre än fönstret
+  (+ ett processlokalt memo mot parallella requests). Klockans pollning
+  (§ 50.5) räcker alltså som livstecken i en öppen flik.
+- `users.last_login_at`, `users.login_count` och en rad i
+  **`user_login_events`** (`tenant`, `user`, `method` = `password`) vid varje
+  lyckad inloggning (`recordUserLogin`, anropad från BÅDE `loginAction` och
+  `/api/auth/login`). **Ingen IP, ingen user agent, ingen sidvisning,
+  ingen URL** — bara NÄR kontot var här (GDPR § 5, proportionalitet vid
+  anställdas uppgifter).
+- Vad personen GJORT läses ur det som redan finns: skrivlagrets logg
+  `agent_actions` med personen som `actor` (§ 32) — inget nytt loggas.
+
+**Skrivvägen är serverns.** Allt skrivs av `lib/user-activity.server.ts`
+med den cachade superusern, fail-soft (en stämpel som inte kan skrivas
+stoppar aldrig en inloggning eller en sida; loggen bär status, aldrig id/
+e-post). De tre fälten är **låsta i users självservice-regel**
+(`@request.body.<fält>:isset = false`, § 10.3-mönstret från 1700000174) och
+`user_login_events.createRule` är null, så en användare kan inte skriva om
+sin egen historik via API:t. Utan superuser skrivs inget (varnas en gång).
+
+**Gränssnitt (Inställningar → Användare, admin/incubator_lead):** raden
+visar prick + "Aktiv nu" / "Aktiv för 3 tim sedan" / "Senast aktiv 12 sep" /
+"Aldrig inloggad" (`activityLabel`, räknat efter mount — hydrering), chip
+**Inaktiva 30+ dgr** (`isInactiveUser`: ingen aktivitet på
+`INACTIVE_AFTER_DAYS` eller aldrig inloggad) och sortering "Senast aktiv"
+(`compareByLastActive`). Den öppnade användaren har panelen **Aktivitet**
+(`UserActivityPanel` → `loadUserActivityAction`): senast aktiv, senaste
+inloggning, inloggningar totalt/30 d/90 d (`summarizeLogins`),
+inloggningslistan (25 senaste) och "Åtgärder i plattformen" (klickbara
+rader ur `loadAgentLogEntries` med `actorId`, "via AI-chatten" när agenten
+utförde dem). Samma RBAC + tenant-korsverifiering som övrig
+användaradministration (`loadManagedTarget`); historiken läses med den
+inloggades token (lead-only RLS) och faller tillbaka på superusern bara vid
+PB v0.23.4:s tysta regel-nekande (§ 21.3/§ 21.8). Saknas kollektionen
+(migrationen ej körd) sägs det i panelen — stämplarna på `users` visas ändå.
+
+**Regelefterlevnad.** Rättslig grund: berättigat intresse
+(kontoadministration och säkerhet — ISO 27001 A.8.15 förutsätter loggning av
+inloggningar). Synligt bara för admin/incubator_lead. Lagringsminimering:
+`user_login_events` gallras av `retention_tick` efter 365 dagar
+(`MOVEXUM_RETENTION_LOGIN_EVENTS_DAYS`, golv 90); stämplarna på `users`
+följer kontot (cascade vid radering, art. 17). `user_login_events` är
+**denylistad för AI** (`redaction.ts`, låst i testet) och `users` är det
+redan — ingen AI-väg. RLS: list/view admin/incubator_lead (`:each ?=`),
+create/update/delete null. Speglat i `setup-via-api.mjs`
+(`USERS_LOCKED_SELF_UPDATE_FIELDS`, `patchUsersCollection`,
+`ensureCollection`), asserterat i `verify-baseline.mjs` (must-exist,
+`MUST_BE_SERVER_CREATE_ONLY`, roll-check i list/view, fältlåset,
+`REQUIRED_APP_FIELDS`). Riskklass (EU AI Act): n/a — ingen inferens.
+**Byggs inte:** sidvisningsspårning, IP-/enhetsloggning, "online"-lista för
+kollegor eller rapporter om arbetstid — det vore en ny behandling som kräver
+egen bedömning.
 
 ---
 

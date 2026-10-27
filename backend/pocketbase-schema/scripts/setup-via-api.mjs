@@ -466,7 +466,9 @@ async function ensureAppUser(tenantId) {
 const ANY_AUTH = '@request.auth.id != ""';
 // users.updateRule — speglar migration 1700000174 (fältlåst självservice).
 const USERS_LOCKED_SELF_UPDATE_FIELDS = [
-  'roles', 'tenant', 'linked_startups', 'enabled_modules', 'disabled_modules', 'verified', 'email', 'emailVisibility'
+  'roles', 'tenant', 'linked_startups', 'enabled_modules', 'disabled_modules', 'verified', 'email', 'emailVisibility',
+  // Migration 1700000206 (§ 36.4): aktivitetsstämplarna skrivs bara av servern.
+  'last_login_at', 'last_active_at', 'login_count'
 ];
 const USERS_SELF_UPDATE_RULE =
   '@request.auth.id = id && ' + USERS_LOCKED_SELF_UPDATE_FIELDS.map((f) => `@request.body.${f}:isset = false`).join(' && ');
@@ -694,6 +696,38 @@ await patchUsersCollection([
   // Migration 1700000179: när kompetensprofilen senast sparades (inaktuell-påminnelse).
   { name: 'competence_updated_at', type: 'date', required: false }
 ]);
+
+// 4d. users — användarlogg (migration 1700000206, CLAUDE.md § 36.4): senast
+// inloggad / senast aktiv / antal inloggningar. Skrivs bara av servern
+// (låsta i USERS_SELF_UPDATE_RULE). Själva inloggningshistoriken ligger i
+// `user_login_events` nedan.
+await patchUsersCollection([
+  { name: 'last_login_at', type: 'date', required: false },
+  { name: 'last_active_at', type: 'date', required: false },
+  { name: 'login_count', type: 'number', required: false, min: 0, onlyInt: true }
+]);
+await ensureCollection({
+  id: 'user_login_events_collection',
+  name: 'user_login_events',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'user', type: 'relation', required: true, collectionId: usersId, cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'method', type: 'text', required: false, max: 40 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_user_login_events_tenant_user_created ON user_login_events (tenant, user, created)',
+    'CREATE INDEX idx_user_login_events_tenant_created ON user_login_events (tenant, created)'
+  ],
+  // Lead-only läsning (samma krets som användaradministrationen); server-only skrivning.
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`,
+  createRule: null,
+  updateRule: null,
+  deleteRule: null
+});
 
 // Migration 1700000179 (§ 29.7): missions.needed_tags på befintliga installs.
 await patchCollection('missions', [

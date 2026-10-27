@@ -6,6 +6,7 @@ import { describeLoginInfraError, probePocketBase, probeSummary } from '@/lib/pb
 import { checkRateLimit, clearFailures, recordFailure } from '@/lib/rate-limit';
 import { clientIpFromRequest } from '@/lib/client-ip';
 import { sanitizeAppPath } from '@/lib/relative-redirect';
+import { recordUserLogin } from '@/lib/user-activity.server';
 
 type PbError = {
   status?: number;
@@ -119,6 +120,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   await Promise.all([clearFailures(accountKey), clearFailures(ipKey), clearFailures(emailOnlyKey)]);
 
   const model = pb.authStore.model as Record<string, unknown> | null;
+  // Användarlogg (§ 36.4): senast inloggad + inloggningshistorik. Fail-soft.
+  if (typeof model?.id === 'string' && typeof model?.tenant === 'string') {
+    await recordUserLogin({ userId: model.id, tenant: model.tenant, method: 'password' }).catch(
+      () => undefined
+    );
+  }
   const expandTenant =
     (model?.expand as { tenant?: { id: string; name: string; slug: string } } | undefined)?.tenant;
 

@@ -164,6 +164,8 @@ async function verifyCollectionsExist() {
     'email_events',
     // Kampanjbilder (§ 55.9, migration 1700000204).
     'email_media',
+    // Användarlogg (§ 36.4, migration 1700000206) — inloggningshistorik.
+    'user_login_events',
     // Önskemål & buggar (§ 49, migration 1700000176) — intern backlog.
     'feedback_items',
     // Kompetens-hashtags (§ 29.7, migration 1700000178) — tenantens vokabulär.
@@ -504,6 +506,8 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   'email_campaign_recipients',
   'email_suppressions',
   'email_events',
+  // Användarlogg (§ 36.4): lead-only — passerar svepet (roll-check, ingen startup_member).
+  'user_login_events',
   // Kampanjbilder (§ 55.9, migration 1700000204) → staff/observer-only.
   'email_media',
   // Önskemål & buggar (§ 49, migration 1700000176). Intern backlog för
@@ -620,7 +624,7 @@ function verifyImmutableCollections(collections) {
 // `@request.auth.id = user` och får aldrig öppnas för staff/tenant.
 // Studentprofiler och intressen (§ 54) skapas bara av servern: studenten har
 // ingen användarsession, och ett intresse får aldrig förfalskas av ett bolag.
-const MUST_BE_SERVER_CREATE_ONLY = ['notifications', 'student_profiles', 'talent_interests'];
+const MUST_BE_SERVER_CREATE_ONLY = ['notifications', 'student_profiles', 'talent_interests', 'user_login_events'];
 const MUST_BE_OWNER_ONLY = ['notifications', 'notification_preferences'];
 
 function verifyNotificationRules(collections) {
@@ -732,7 +736,7 @@ const AI_DENYLIST = new Set([
   'chat_threads', 'user_files', 'user_file_chunks', 'deep_jobs',
   'org_knowledge', 'org_knowledge_chunks', 'agent_memory',
   'notifications', 'notification_preferences', 'rate_limits', 'app_locks',
-  'student_profiles', 'talent_interests'
+  'student_profiles', 'talent_interests', 'user_login_events'
 ]);
 
 // PII-stavningar som substring-maskern INTE redan fångar. Förankrade till `_`
@@ -814,6 +818,11 @@ function verifyRlsAndRbac(collections) {
   // Migration 1700000174: självservice-uppdateringen är FÄLTLÅST — en
   // användartoken får aldrig sätta behörighets-/identitetsfält via API:t.
   for (const field of ['roles', 'tenant', 'linked_startups', 'enabled_modules', 'verified', 'email']) {
+    assertRuleContains(users, 'updateRule', `@request.body.${field}:isset = false`);
+  }
+  // Migration 1700000206 (§ 36.4): aktivitetsstämplarna är serverns — en
+  // användare får inte skriva om sin egen inloggningshistorik.
+  for (const field of ['last_login_at', 'last_active_at', 'login_count']) {
     assertRuleContains(users, 'updateRule', `@request.body.${field}:isset = false`);
   }
 
@@ -1181,6 +1190,9 @@ const REQUIRED_APP_FIELDS = [
   // Kompetens-hashtags (§ 29.7, migration 1700000178): utan fälten "sparas"
   // taggar/nivåer tyst bort från Min profil och teammatchningen ser bara områden.
   { collection: 'users', fields: ['competence_tags', 'development_interests', 'competence_updated_at'] },
+  // Användarlogg (§ 36.4, migration 1700000206): utan fälten blir "senast
+  // aktiv" tyst tomt för alla och inloggningsstämpeln försvinner.
+  { collection: 'users', fields: ['last_login_at', 'last_active_at', 'login_count'] },
   // Meriter ur avslutade team (§ 29.7, migration 1700000179): utan fältet
   // tappas behovet på nya team tyst och meriterna blir alltid 0.
   { collection: 'missions', fields: ['needed_tags'] },

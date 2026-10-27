@@ -3,9 +3,10 @@
 import { revalidatePath } from 'next/cache';
 import type PocketBase from 'pocketbase';
 import { type Role } from '@platform/shared';
-import { requireUser } from '@/lib/auth.server';
+import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
+import { loadAgentLogEntries } from '@/lib/feed/agent-log';
 import {
   assignableRolesFor,
   canManageUser,
@@ -581,4 +582,148 @@ export async function deleteUserAction(
   revalidatePath('/installningar/anvandare');
   revalidatePath('/installningar');
   return { status: 'ok', message: `Kontot ${loaded.target.email || ''} är raderat.` };
+}
+
+/* ── Användarlogg (CLAUDE.md § 36.4) ───────────────────────────────── */
+
+export type UserActivityEntry = {
+  id: string;
+  title: string;
+  detail?: string;
+  created: string;
+  href?: string;
+  icon: string;
+  viaAgent: boolean;
+};
+
+export type UserActivityLog = {
+  status: 'ok' | 'error';
+  message?: string;
+  lastLoginAt: string | null;
+  lastActiveAt: string | null;
+  loginCount: number;
+  /** Inloggningar, nyast först (ISO-tidsstämplar), högst 25. */
+  logins: string[];
+  loginsTotal: number;
+  /** false när `user_login_events` saknas (migration 1700000206 ej körd). */
+  historyAvailable: boolean;
+  /** Det personen gjort via skrivlagret (`agent_actions`, actor = personen). */
+  entries: UserActivityEntry[];
+};
+
+const EMPTY_ACTIVITY: Omit<UserActivityLog, 'status' | 'message'> = {
+  lastLoginAt: null,
+  lastActiveAt: null,
+  loginCount: 0,
+  logins: [],
+  loginsTotal: 0,
+  historyAvailable: true,
+  entries: []
+};
+
+function isoOrNull(value: unknown): string | null {
+  if (typeof value !== 'string' || value.trim() === '') return null;
+  const ms = new Date(value.includes('T') ? value : value.replace(' ', 'T')).getTime();
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
+/**
+ * Aktivitetsloggen för ett konto i Inställningar → Användare: senaste
+ * inloggning/aktivitet, inloggningshistorik (`user_login_events`) och det
+ * personen själv gjort i plattformen (skrivlagrets logg, § 32). Samma RBAC +
+ * tenant-korsverifiering som övrig användaradministration
+ * (`loadManagedTarget`). Historiken läses med den inloggades egen token
+ * (lead-only RLS) och faller bara tillbaka på superusern vid PB v0.23.4:s
+ * tysta regel-nekande (§ 21.3) — alltid tenant-filtrerat. Ingen PII i
+ * svaret utöver det listan redan visar; loggar bär status, aldrig id.
+ */
+export async function loadUserActivityAction(userId: string): Promise<UserActivityLog> {
+  const actor = await requireUser();
+  const managed = await loadManagedTarget(actor, String(userId ?? ''));
+  if (!managed.ok) return { status: 'error', message: managed.message, ...EMPTY_ACTIVITY };
+  const su = managed.pb;
+  const target = managed.target;
+
+  let lastLoginAt: string | null = null;
+  let lastActiveAt: string | null = null;
+  let loginCount = 0;
+  try {
+    const row = await su
+      .collection('users')
+      .getOne<{ last_login_at?: unknown; last_active_at?: unknown; login_count?: unknown }>(target.id, {
+        fields: 'id,last_login_at,last_active_at,login_count'
+      });
+    lastLoginAt = isoOrNull(row.last_login_at);
+    lastActiveAt = isoOrNull(row.last_active_at);
+    loginCount = typeof row.login_count === 'number' ? row.login_count : 0;
+  } catch (error) {
+    console.error('[users] activity: failed to read user stamps', {
+      status: (error as { status?: number }).status
+    });
+  }
+
+  const userPb = await getServerPb();
+  const loginFilter = (pb: PocketBase) =>
+    pb.filter('tenant = {:tenant} && user = {:user}', { tenant: actor.tenant, user: target.id });
+  let logins: string[] = [];
+  let loginsTotal = 0;
+  let historyAvailable = true;
+  const readLogins = async (pb: PocketBase) => {
+    const res = await pb.collection('user_login_events').getList<{ created: string }>(1, 25, {
+      filter: loginFilter(pb),
+      sort: '-created',
+      fields: 'id,created'
+    });
+    return res;
+  };
+  try {
+    let res = await readLogins(userPb);
+    // PB v0.23.4 kan tyst neka en behörig token (200 med 0 rader, § 21.8):
+    // en tom lista dubbelkollas via superusern innan den tas som sanning.
+    if (res.totalItems === 0) res = await readLogins(su);
+    logins = res.items.map((r) => isoOrNull(r.created)).filter((v): v is string => v !== null);
+    loginsTotal = res.totalItems;
+  } catch (error) {
+    const status = (error as { status?: number }).status ?? 0;
+    if (status === 404) {
+      historyAvailable = false;
+    } else {
+      try {
+        const res = await readLogins(su);
+        logins = res.items.map((r) => isoOrNull(r.created)).filter((v): v is string => v !== null);
+        loginsTotal = res.totalItems;
+      } catch (inner) {
+        const innerStatus = (inner as { status?: number }).status ?? 0;
+        if (innerStatus === 404) historyAvailable = false;
+        else console.error('[users] activity: failed to read login events', { status: innerStatus });
+      }
+    }
+  }
+
+  // Skrivlagrets logg med personen som actor — admin/incubator_lead läser
+  // tenantens logg (RLS); fail-soft inne i loadAgentLogEntries.
+  let entriesRaw = await loadAgentLogEntries(userPb, actor.tenant, 40, { actorId: target.id });
+  if (entriesRaw.length === 0) {
+    entriesRaw = await loadAgentLogEntries(su, actor.tenant, 40, { actorId: target.id });
+  }
+  const entries: UserActivityEntry[] = entriesRaw.map((e) => ({
+    id: e.id,
+    title: e.title,
+    detail: e.detail,
+    created: isoOrNull(e.created) ?? e.created,
+    href: e.href,
+    icon: e.icon,
+    viaAgent: e.viaAgent
+  }));
+
+  return {
+    status: 'ok',
+    lastLoginAt,
+    lastActiveAt,
+    loginCount,
+    logins,
+    loginsTotal,
+    historyAvailable,
+    entries
+  };
 }
