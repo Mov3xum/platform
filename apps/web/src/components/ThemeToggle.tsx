@@ -2,21 +2,16 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Icon } from '@/components/proto/Icon';
-import {
-  applyTheme,
-  readCurrentTheme,
-  readStoredTheme,
-  THEME_CHANGE_EVENT,
-  type Theme
-} from './ThemeProvider';
+import { applyTheme, readCurrentTheme, THEME_CHANGE_EVENT, type Theme } from './ThemeProvider';
 
 /**
  * Light/dark-växlare (CLAUDE.md § 3.1). Ligger uppe till höger i sidhuvudet
  * (ProtoTopBar för inloggade, Navbar för utloggade). Renderas neutralt på
  * servern och läser det faktiska temat efter mount — `ThemeScript` har redan
- * satt `.dark` på <html>, så ingen färgblink uppstår. Följer dessutom
- * systemets `prefers-color-scheme` så länge användaren inte valt själv, och
- * andra flikar via `storage`-eventet.
+ * satt `.dark` på <html>, så ingen färgblink uppstår. Standard är ljust tema
+ * för alla (systemets `prefers-color-scheme` följs inte); mörkt läge är ett
+ * aktivt val som sparas per webbläsare och följs i andra flikar via
+ * `storage`-eventet.
  */
 export function ThemeToggle({ className = '' }: { className?: string }) {
   const [theme, setTheme] = useState<Theme | null>(null);
@@ -37,23 +32,12 @@ export function ThemeToggle({ className = '' }: { className?: string }) {
         setTheme(next);
       }
     };
-    const media = window.matchMedia?.('(prefers-color-scheme: dark)');
-    const onMedia = (e: MediaQueryListEvent) => {
-      // Bara när användaren inte gjort ett eget val följer vi systemet.
-      if (readStoredTheme()) return;
-      const next: Theme = e.matches ? 'dark' : 'light';
-      document.documentElement.classList.toggle('dark', next === 'dark');
-      document.documentElement.dataset.theme = next;
-      setTheme(next);
-    };
 
     window.addEventListener(THEME_CHANGE_EVENT, onChange);
     window.addEventListener('storage', onStorage);
-    media?.addEventListener?.('change', onMedia);
     return () => {
       window.removeEventListener(THEME_CHANGE_EVENT, onChange);
       window.removeEventListener('storage', onStorage);
-      media?.removeEventListener?.('change', onMedia);
     };
   }, []);
 

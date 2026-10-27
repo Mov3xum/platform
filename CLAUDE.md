@@ -168,10 +168,11 @@ Sora + Nunito Sans.
   i `<head>` och sätter klassen FÖRE hydration → ingen färgblink.
 - `ThemeToggle` (`apps/web/src/components/ThemeToggle.tsx`) ligger uppe
   till höger i sidhuvudet — `ProtoTopBar` (inloggade, bredvid klockan) och
-  `Navbar` (utloggade) — och växlar light/dark. Den följer systemets
-  `prefers-color-scheme` tills användaren valt själv, och andra flikar via
-  `storage`-eventet. (Dark mode var pausat jun–okt 2026; återaktiverat
-  2026-10-14.)
+  `Navbar` (utloggade) — och växlar light/dark. **Standard är ljust tema
+  för alla** (beslut 2026-10-27): systemets `prefers-color-scheme` följs
+  INTE — mörkt läge är ett aktivt val per webbläsare, som följs i andra
+  flikar via `storage`-eventet. (Dark mode var pausat jun–okt 2026;
+  återaktiverat 2026-10-14.)
 - **Logotypen följer temat:** `<Logo variant="auto">` visar `logoLightUrl`
   (eller svart wordmark) på ljus yta och `logoDarkUrl` (eller vit wordmark)
   på mörk. Varje läge använder sin EGEN bild — aldrig det andra lägets
@@ -180,7 +181,7 @@ Sora + Nunito Sans.
   oavsett tema (t.ex. den mörka bildpanelen på login). Incident 2026-10:
   railen hade `variant="dark"` → vit wordmark på vit canvas = osynlig.
 - Preferens lagras i `localStorage` under nyckeln `movexum-theme`.
-  Om nyckeln saknas faller vi tillbaka på `prefers-color-scheme`.
+  Om nyckeln saknas gäller ljust tema (`DEFAULT_THEME` i `ThemeProvider.tsx`).
 - Tailwind v4 dark variant definieras med `@custom-variant dark (&:is(.dark *));`.
 
 ### 3.2 Token-mapping
