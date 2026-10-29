@@ -702,6 +702,52 @@ function mapRow(
         icon: 'people'
       };
     }
+    // Impact Navigator (§ 56) — hållbarhetsanalys per bolag.
+    case 'sustainability_assessments': {
+      const name = str(after.startup_name) || 'bolaget';
+      const version = str(after.version);
+      const startupId = str(after.startup);
+      const href = startupId ? `/impactnavigator/${startupId}` : '/impactnavigator';
+      const vLabel = version ? ` (version ${version})` : '';
+      if (action === 'create') {
+        return { title: `Impact Navigator: ny analys startad för ${name}${vLabel}`, href, icon: 'globe' };
+      }
+      const field = str(row.field);
+      if (field === 'materiality') return { title: `Impact Navigator: väsentlighetsanalys klar för ${name}${vLabel}`, detail: 'Väntar på granskning', href, icon: 'globe' };
+      if (field === 'materiality_confirmed') return { title: `Impact Navigator: väsentligheten bekräftad för ${name}${vLabel}`, href, icon: 'check' };
+      if (field === 'sufficiency') {
+        const q = Number(after.questions);
+        return { title: `Impact Navigator: underlaget prövat för ${name}${vLabel}`, detail: q > 0 ? `${q} kompletteringsfrågor` : undefined, href, icon: 'globe' };
+      }
+      if (field === 'dashboard') {
+        return { title: `Impact Navigator: ${after.update === true ? 'uppdaterad slutanalys' : 'slutanalys klar'} för ${name}${vLabel}`, detail: str(after.impact_level) || undefined, href, icon: 'sparkle' };
+      }
+      return { title: `Impact Navigator: analysen för ${name} ${changedVerb}`, href, icon: 'globe' };
+    }
+    case 'sustainability_gap_questions': {
+      const startupId = str(after.startup);
+      return {
+        title: `Impact Navigator: kompletteringsfråga ${str(after.status) === 'not_available' ? 'markerad som ej tillgänglig' : 'besvarad'}`,
+        detail: str(after.aspect_code) || undefined,
+        href: startupId ? `/impactnavigator/${startupId}` : '/impactnavigator',
+        icon: 'message'
+      };
+    }
+    case 'sustainability_update_events': {
+      const startupId = str(after.startup);
+      return {
+        title: `Impact Navigator: uppdatering inlämnad för ${str(after.startup_name) || 'bolaget'}`,
+        detail: str(after.version) ? `Version ${str(after.version)}` : undefined,
+        href: startupId ? `/impactnavigator/${startupId}` : '/impactnavigator',
+        icon: 'rotate-ccw'
+      };
+    }
+    case 'sustainability_documents': {
+      const startupId = str(after.startup);
+      const href = startupId ? `/impactnavigator/${startupId}` : '/impactnavigator';
+      if (after.deleted === true) return { title: 'Impact Navigator: underlag borttaget', href, icon: 'trash' };
+      return { title: `Impact Navigator: underlag uppladdat för ${str(after.startup_name) || 'bolaget'}`, href, icon: 'upload' };
+    }
     // Önskemål & buggar (§ 49) — intern backlog.
     case 'feedback_items': {
       const title = str(after.title) || 'utan rubrik';
