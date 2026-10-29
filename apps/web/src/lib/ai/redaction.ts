@@ -68,7 +68,7 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   // kör superuser och släpper rader på tenant — utan denylistningen kunde en
   // schemalagd agent läsa ALLA användares notiser i tenanten.
   'notifications',
-  // Hållbarhetsanalysen (§ 56, migration 1700000206): text ur uppladdade
+  // Impact Navigator (§ 56, migration 1700000206): text ur uppladdade
   // tredjepartsdokument och rå modellutdata är fritext som kan bära namn på
   // kontaktpersoner — fältmaskning per fältnamn räcker inte (§ 39.3-precedens).
   // Analyserna själva (sustainability_assessments m.fl.) är läsbara via RLS.

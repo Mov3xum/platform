@@ -1,9 +1,9 @@
 /// <reference path="../pb_data/types.d.ts" />
 
-// CLAUDE.md § 56 — Hållbarhetsanalysen (den fristående appen på
-// inkubator-kohl.vercel.app, av teamet kallad "Sales Navigator") får sina
-// tabeller i vår PocketBase i stället för i Neon/Postgres. Appen fortsätter
-// att köra på sin egen domän men läser och skriver mot dessa kollektioner.
+// CLAUDE.md § 56 — Impact Navigator: den AI-stödda hållbarhetsanalysen per
+// bolag (tidigare den fristående appen på inkubator-kohl.vercel.app, kallad
+// "Sales Navigator") byggs in i plattformen på /impactnavigator och får sina
+// tabeller här i stället för i Neon/Postgres. Den gamla appens dump importeras.
 //
 // Kartläggning mot källans Postgres-schema (pg_dump 2026-10-14):
 //
@@ -29,11 +29,10 @@
 // scripts/lib/sustainability-import.mjs). `external_id` bär källans cuid
 // så importen är idempotent (unikt partiellt index).
 //
-// RLS (§ 21.3): list/view staff/observer (appen är personalverktyg — ingen
+// RLS (§ 21.3): list/view staff/observer (personalverktyg — ingen
 // bolagsmedlemsyta); create pinnar tenant + skapare (§ 21.8, ingen
 // roll-check/join); update Movexum-personal; delete ledningen. Autodate
-// explicit (§ 28.5). Den externa appen skriver med impersonerad
-// användartoken så reglerna gäller även där.
+// explicit (§ 28.5).
 //
 // GDPR § 5: analyserna är bolagsdata; `sustainability_documents.extracted_text`
 // (text ur uppladdade dokument) och `sustainability_ai_jobs.output` (rå

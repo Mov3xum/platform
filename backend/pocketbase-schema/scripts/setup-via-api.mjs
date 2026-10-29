@@ -4548,8 +4548,8 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_LEAD_EACH} || @request.auth.id = created_by)`
 });
 
-// Migration 1700000206 (§ 56): Hållbarhetsanalysen — den fristående appen
-// (inkubator-kohl.vercel.app) får sina tabeller här. Company → startups
+// Migration 1700000206 (§ 56): Impact Navigator — hållbarhetsanalysen per
+// bolag (ersätter den fristående appen). Company → startups
 // (patch ovan), Note → notes, resten sex nya kollektioner. list/view
 // staff/observer; create pinnad (tenant + skapare, eller bara tenant där
 // källan saknar skapare); update Movexum-personal; delete ledning.

@@ -173,7 +173,7 @@ async function verifyCollectionsExist() {
     'screening_requests',
     // Ärenden i Bedömning excellens (§ 51.10, migration 1700000200).
     'screening_cases',
-    // Hållbarhetsanalysen (§ 56, migration 1700000206) — den fristående appens tabeller.
+    // Impact Navigator (§ 56, migration 1700000206) — hållbarhetsanalysen per bolag.
     'sustainability_assessments',
     'sustainability_gap_questions',
     'sustainability_materiality_overrides',

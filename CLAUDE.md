@@ -1011,6 +1011,7 @@ omsättning.
 | `procurement-extract` (AI-utläsning av upphandlingsunderlag, § 39.3) | begränsad | Läser ut strukturerade uppgifter ur ett dokument staff själva laddat upp till ett förifyllt utkast; människan granskar och sparar; ingen profilering |
 | `create_procurement` / `create_procurement_calloff` / `update_procurement_calloff` (chatt-verktyg, § 39.4) | n/a | Deterministiska mutationer via det delade skrivlagret; uppföljningsregler expanderas utan inferens |
 | `create_funding_project` / `create_support_check_type` / `create_support_check_application` (chatt-verktyg, § 46) | n/a | Deterministiska utkast via skrivlagret (checktyp inaktiv, ansökan `draft`); inskick, bedömning, finansiering och beslut är agent-nekade |
+| Impact Navigator (`lib/ai/impact-analysis.ts`, § 56) | begränsad | Hållbarhetsanalys av BOLAG (väsentlighet, tillräcklighet, slutanalys, uppdatering) via Mistral; människan startar varje steg, granskar väsentligheten och slutanalysen; ingen autopublicering |
 | `edu_irl_levels` | minimal | Generellt utbildningsmaterial |
 | `template_pitch_deck` | n/a | Statisk mall, ingen AI-inferens |
 
@@ -10449,54 +10450,85 @@ Det viktigaste från Confetti, på eventet (en plats):
 
 ---
 
-## 56. Hållbarhetsanalysen (extern app) — tabeller i vår PocketBase (2026-10)
+## 56. Impact Navigator — AI-stödd hållbarhetsanalys per bolag (2026-10)
 
-Den fristående appen på `inkubator-kohl.vercel.app/companies` (internt kallad
-"Sales Navigator") är en **AI-stödd hållbarhetsanalys per bolag**:
-väsentlighetsanalys av ESG-aspekter, kompletteringsfrågor, slutanalys
-(risker/möjligheter/greenwashing) och versionerade uppdateringar. Den
-fortsätter att köra på sin egen domän men får sina tabeller i Movexums
-PocketBase (migration **1700000206**) i stället för Neon/Postgres. Runbook
-med fältmappning, anslutningskontrakt och import:
-`docs/integrations/hallbarhetsanalys-extern-app.md`.
+`/impactnavigator` (modul `impactnavigator`, "Portfölj"-railen; staff läser och
+driver, observer läser) ersätter den tidigare fristående appen på
+`inkubator-kohl.vercel.app` ("Sales Navigator"): en **AI-stödd
+hållbarhetsanalys per bolag** — väsentliga ESG-aspekter, prövning av
+underlaget med kompletteringsfrågor, slutanalys (risker, möjligheter,
+greenwashing-risker, vad bolaget behöver jobba på, frågor till coachsamtalet,
+impactnivå) och versionerade uppdateringar. Den gamla appens Postgres-dump
+importeras så historiken följer med. Runbook + kodkarta:
+`docs/integrations/impact-navigator.md`.
 
-- **Analys först, sedan nya kolumner.** Källans `User` → `users` (matchas på
-  e-post, inga konton skapas), `Company` → `startups` (name/phase/industri
-  FANNS; **tillagt:** `sustainability_journey_text`, `sustainability_status`,
-  `sustainability_assigned_to`), `Note` → `notes`. Resten är nya kollektioner:
+- **Datamodell (migration 1700000206, analys först — nya kolumner sedan).**
+  Källans `Company` → `startups` (name/phase/industri FANNS; **tillagt:**
+  `sustainability_journey_text`, `sustainability_status`,
+  `sustainability_assigned_to`), `User` → `users` (matchas på e-post vid
+  import, inga konton skapas), `Note` → `notes`. Nya kollektioner:
   `sustainability_assessments` (unik `(startup, version)`, self-relation
-  `previous_assessment`), `sustainability_gap_questions`,
+  `previous_assessment`, json `materiality`/`sufficiency`/`dashboard`/
+  `update_delta`), `sustainability_gap_questions`,
   `sustainability_materiality_overrides`, `sustainability_update_events`,
-  `sustainability_documents` (riktigt `file`-fält, protected; källans
-  Blob-filer ingick inte i dumpen), `sustainability_ai_jobs` (audit per
-  modellkörning). Alla bär `external_id` (källans cuid — idempotent import)
-  och `source_created_at`. Enum-värden = källans i gemener; källa av sanning
-  `scripts/lib/sustainability-import.mjs`, speglad i migrationen och låst av
-  `sustainability-import.test.mjs`.
-- **RLS (§ 21.3):** list/view staff/observer (personalverktyg utan
-  bolagsmedlemsyta); create pinnar tenant + skapare (§ 21.8); update
-  Movexum-personal; delete ledning. `sustainability_documents` +
-  `sustainability_ai_jobs` denylistade för AI (`redaction.ts`, fritext ur
-  tredjepartsmaterial, § 39.3-precedens); övriga läsbara under RLS +
-  fältmaskning. Speglat i `setup-via-api.mjs` (defs + `FORCE_CREATE_RULES`
-  + `startups`-patch; self-relationen läggs via `patchCollection` efter
-  skapandet), asserterat i `verify-baseline.mjs` (must-exist,
+  `sustainability_documents` (riktigt `file`-fält, protected),
+  `sustainability_ai_jobs` (audit per modellkörning). Alla bär `external_id`
+  (källans cuid — idempotent import) och `source_created_at`. Enum-värden =
+  källans i gemener; källa av sanning `packages/shared/src/impact-navigator.ts`
+  ↔ `scripts/lib/sustainability-import.mjs`, speglade i migrationen och låsta
+  av enhetstest. Migration **1700000207** backfillar modulen i sparade
+  sidmenyer (§ 36.3).
+- **Flödet är människa-i-loopen (art. 14):** varje AI-steg startas med ett
+  klick av Movexum-personal; väsentligheten GRANSKAS (Väsentlig/Osäker/Ej
+  väsentlig per aspekt, `applyImpactOverrides`) innan underlaget prövas;
+  kompletteringsfrågor besvaras av människor; slutanalysen startas
+  uttryckligen; en uppdatering skapar en ny version. Inget publiceras
+  automatiskt. Status: analysens `status` (statusmaskinen `impactNextStep`)
+  och bolagets `sustainability_status` (`impactCompanyStatusFor`).
+- **AI (`lib/ai/impact-analysis.ts`):** fyra isolerade Mistral-körningar
+  (`mistral-large-latest` → medium vid 429/5xx, temp 0.2, egen snäv
+  systemprompt, inga verktyg) som returnerar ETT JSON-objekt i den form den
+  gamla appen producerade; svaren normaliseras tolerant i `@platform/shared`
+  (`normalizeImpact*`, enhetstestade) — modellen skriver aldrig till
+  databasen. Underlag = bolagets resa + dokumenttext + svar (`buildImpactInput`,
+  cappat 90 000 tecken, kapning visas som varning). Tokens loggas i
+  `ai_usage_events` (surface `suggestions`), månadstaket prövas före varje
+  steg (§ 9.6), varje körning bokförs i `sustainability_ai_jobs`.
+  **EU-suveränt** — källans OpenAI (`gpt-5.6`) används inte; historiska
+  analyser bär sin provenans i `model_name`.
+- **Underlag:** route handler `/api/impactnavigator/documents` (§ 18.2-
+  mönstret: staff-only, rate-limit, mime/storlek, textextraktion via
+  kunskapsbasens pipe med personnummer-sanering, superuser-fallback bara vid
+  PB v0.23.4:s tysta regel-nekande). Filproxy
+  `/api/impactnavigator/documents/[id]/file` (protected, tenant-scopad).
+  Importerade dokument har text men ingen fil (originalen låg i Vercel Blob).
+- **RLS (§ 21.3):** list/view staff/observer; create pinnar tenant +
+  skapare (§ 21.8; bara tenant där källan saknar skapare — frågor,
+  AI-körningar); update Movexum-personal; delete ledning. Bolagsmedlemmar
+  har ingen yta. `sustainability_documents` + `sustainability_ai_jobs`
+  **denylistade för AI-chatten** (`redaction.ts`, fritext ur
+  tredjepartsmaterial); analyser/frågor/justeringar/uppdateringar läsbara
+  under RLS + fältmaskning. Speglat i `setup-via-api.mjs` (defs +
+  `FORCE_CREATE_RULES` + `startups`-patch; self-relationen via
+  `patchCollection`), asserterat i `verify-baseline.mjs` (must-exist,
   `MUST_BE_STAFF_OR_OBSERVER`, `REQUIRED_APP_FIELDS`, `AI_DENYLIST`).
-- **Appens anslutning:** egen superuser-hemlighet på Vercel, men varje
-  anrop sker med **impersonerad användartoken** (`users.impersonate`) för den
-  Clerk-inloggade användaren, uppslagen på e-post — RLS gäller därmed även
-  från appen. Appen skriver alltid `tenant` + skaparfält.
+- **Ytor:** `/impactnavigator` (lista: status, impactnivå, version,
+  underlagskvalitet, ansvarig), `/impactnavigator/ny` (befintligt bolagskort
+  eller nytt bolag + bolagets resa), `/impactnavigator/<startup>` (stegen,
+  underlag, väsentlighet, kompletteringar, slutanalys, uppdatering,
+  versioner, anteckningar → `notes`, AI-körningar). Bolagskortet →
+  Utveckling & IRL har sektionen "Impact Navigator" med länk. Alla
+  mutationer auditeras PII-fritt i `agent_actions` (bolagsnamn, version,
+  status, antal — aldrig underlag/svar) och mappas i `feed/agent-log.ts`.
+  Banner § 9.7 på alla ytor; disclaimer i slutanalysen.
 - **Import:** `scripts/import-sustainability-dump.mjs` läser pg_dump
   custom-format utan pg_restore (ren parser i `lib/`, enhetstestad), kör
-  `--dry-run` först, verifierar att migrationen är applicerad, matchar
-  användare på e-post (annars `--fallback-user`), bolag på namn, saneras
-  personnummer i all fritext, loggar bara antal. Dumpen är kunddata — aldrig
-  i repot.
-- **Regelefterlevnad:** riskklass **begränsad** (beslutsstöd om bolag,
-  människa granskar). **Avsteg att besluta (§ 10.2):** källan körde OpenAI
-  `gpt-5.6` (US) — fortsatta analyser via OpenAI mot vår databas kräver
-  maintainerns uttryckliga godkännande, annars byte till Mistral.
-  `model_name` bär provenansen. GDPR § 5: bolagsdata; `cascadeDelete`
-  tenant → startup → analys. Ingen DPIA ännu (skrivs före produktion om
-  dokument med personuppgifter väntas). Inte byggt: bolagskortslänk,
-  rail-modul, SSO, filåterställning.
+  `--dry-run` först, kräver migrationen, matchar användare på e-post (annars
+  `--fallback-user`), bolag på namn, personnummer-sanerar fritext, loggar
+  bara antal. Dumpen är kunddata — aldrig i repot.
+- **Regelefterlevnad:** riskklass **begränsad** (beslutsstöd om bolag, inte
+  individer; människa granskar). GDPR § 5: bolagsdata; fritext saneras; UI
+  varnar för personuppgifter; `cascadeDelete` tenant → startup → analys.
+  Ingen DPIA ännu — skrivs före produktion om dokument med personuppgifter
+  väntas. Inte byggt: chatt-verktyg mot analyserna, PDF-export, SSO/extern
+  domän (medvetet — modulen lever på app.movexum.se som allt annat).

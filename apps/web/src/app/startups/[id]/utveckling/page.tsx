@@ -4,6 +4,7 @@ import { WorkshopAssignmentStatusBadge } from '@/components/Badges';
 import { StartupWorkCards } from '@/components/StartupWorkCards';
 import { StartupPhaseHistoryList, type PhaseHistoryItem } from '@/components/StartupPhaseHistoryList';
 import { IrlWorkspace } from '@/components/irl/IrlWorkspace';
+import { StartupImpactSection } from '@/components/impact/StartupImpactSection';
 import { loadIrlAssessments } from '@/lib/irl/data.server';
 import {
   milestoneCategoryLabels,
@@ -110,6 +111,7 @@ export default async function StartupDevelopmentPage({ params }: { params: Promi
       <SectionNav
         items={[
           ...(flags.isStaffOrObserver ? [{ href: '#irl', label: 'IRL' }] : []),
+          ...(flags.isStaffOrObserver ? [{ href: '#impact', label: 'Hållbarhet' }] : []),
           { href: '#arbete', label: 'Gjort & väntar', count: work.done.length + work.pending.length },
           { href: '#milestones', label: 'Milstolpar', count: milestonesRes?.length },
           { href: '#workshops', label: 'Workshops', count: workshops.length },
@@ -131,6 +133,16 @@ export default async function StartupDevelopmentPage({ params }: { params: Promi
             fallbackIrl={startup.irl_level}
             loadError={irl?.error}
           />
+        </Section>
+      ) : null}
+
+      {flags.isStaffOrObserver ? (
+        <Section
+          id="impact"
+          title="Impact Navigator — hållbarhetsanalys"
+          description="AI-stödd väsentlighets- och slutanalys av bolagets hållbarhetsläge (CLAUDE.md § 56). Genererat av AI – verifiera innan delning."
+        >
+          <StartupImpactSection pb={pb} tenantId={user.tenant} startupId={id} sustainabilityStatus={(startup as { sustainability_status?: string }).sustainability_status} />
         </Section>
       ) : null}
 

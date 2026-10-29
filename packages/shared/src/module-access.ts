@@ -25,29 +25,29 @@ import type { Role } from './index';
 export const DEFAULT_MODULES_BY_ROLE: Record<Role, readonly string[]> = {
   admin: [
     'idag', 'inkorg', 'mal', 'arshjul', 'filer', 'uppdrag', 'inflode',
-    'startups', 'kontakter', 'talang', 'de_minimis', 'bedomning_excellens', 'checkar', 'projekt', 'upphandlingar', 'investerare', 'events', 'community',
+    'startups', 'kontakter', 'talang', 'de_minimis', 'bedomning_excellens', 'impactnavigator', 'checkar', 'projekt', 'upphandlingar', 'investerare', 'events', 'community',
     'education', 'rapporter', 'agenter', 'kunskapsbas', 'insights',
     'integrationer', 'onskemal', 'min_profil', 'mina_aktiviteter'
   ],
   incubator_lead: [
     'idag', 'inkorg', 'mal', 'arshjul', 'filer', 'uppdrag', 'inflode',
-    'startups', 'kontakter', 'talang', 'de_minimis', 'bedomning_excellens', 'checkar', 'projekt', 'upphandlingar', 'investerare', 'events', 'community',
+    'startups', 'kontakter', 'talang', 'de_minimis', 'bedomning_excellens', 'impactnavigator', 'checkar', 'projekt', 'upphandlingar', 'investerare', 'events', 'community',
     'education', 'rapporter', 'agenter', 'kunskapsbas', 'insights',
     'integrationer', 'onskemal', 'min_profil', 'mina_aktiviteter'
   ],
   coach: [
     'idag', 'inkorg', 'mina_aktiviteter', 'arshjul', 'filer',
-    'mal', 'uppdrag', 'inflode', 'startups', 'kontakter', 'talang', 'de_minimis', 'bedomning_excellens', 'checkar', 'projekt', 'upphandlingar', 'events', 'education',
+    'mal', 'uppdrag', 'inflode', 'startups', 'kontakter', 'talang', 'de_minimis', 'bedomning_excellens', 'impactnavigator', 'checkar', 'projekt', 'upphandlingar', 'events', 'education',
     'agenter', 'kunskapsbas', 'onskemal', 'min_profil'
   ],
   mentor: [
     'idag', 'inkorg', 'mina_aktiviteter', 'filer', 'uppdrag',
-    'mal', 'startups', 'kontakter', 'talang', 'de_minimis', 'checkar', 'education', 'agenter', 'kunskapsbas', 'onskemal', 'min_profil'
+    'mal', 'startups', 'kontakter', 'talang', 'de_minimis', 'impactnavigator', 'checkar', 'education', 'agenter', 'kunskapsbas', 'onskemal', 'min_profil'
   ],
   partner: ['idag', 'inkorg', 'filer', 'uppdrag', 'investerare', 'community', 'min_profil'],
   observer: [
     'idag', 'inkorg', 'mina_aktiviteter', 'arshjul', 'filer',
-    'mal', 'startups', 'kontakter', 'talang', 'de_minimis', 'checkar', 'projekt', 'events', 'community', 'onskemal'
+    'mal', 'startups', 'kontakter', 'talang', 'de_minimis', 'impactnavigator', 'checkar', 'projekt', 'events', 'community', 'onskemal'
   ],
   startup_member: ['min_oversikt', 'mina_aktiviteter', 'filer', 'de_minimis', 'checkar', 'community']
 };
