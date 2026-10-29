@@ -4548,6 +4548,206 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_LEAD_EACH} || @request.auth.id = created_by)`
 });
 
+// Migration 1700000206 (§ 56): Hållbarhetsanalysen — den fristående appen
+// (inkubator-kohl.vercel.app) får sina tabeller här. Company → startups
+// (patch ovan), Note → notes, resten sex nya kollektioner. list/view
+// staff/observer; create pinnad (tenant + skapare, eller bara tenant där
+// källan saknar skapare); update Movexum-personal; delete ledning.
+// `sustainability_documents` + `sustainability_ai_jobs` är denylistade för AI.
+// Enum-värden MÅSTE spegla scripts/lib/sustainability-import.mjs.
+const SUST_RULES = (createRule) => ({
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+  createRule,
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+});
+const SUST_CREATE_PINNED = (field) => `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.${field} = @request.auth.id`;
+const SUST_CREATE_TENANT = `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant`;
+const SUST_AUTODATE = [
+  { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+  { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
+];
+const SUST_TAIL = [
+  { name: 'external_id', type: 'text', required: false, max: 40 },
+  { name: 'source_created_at', type: 'date', required: false }
+];
+const SUST_USER = (name) => ({ name, type: 'relation', required: false, collectionId: 'users', cascadeDelete: false, minSelect: 0, maxSelect: 1 });
+const SUST_REL = (name, collectionId, required = false, cascade = false) => ({ name, type: 'relation', required, collectionId, cascadeDelete: cascade, minSelect: required ? 1 : 0, maxSelect: 1 });
+
+await ensureCollection({
+  id: 'sustainability_assessments_collection',
+  name: 'sustainability_assessments',
+  type: 'base',
+  fields: [
+    ...SUST_AUTODATE,
+    SUST_REL('tenant', 'tenants', true, true),
+    SUST_REL('startup', 'startups', true, true),
+    { name: 'version', type: 'number', required: true, min: 1, onlyInt: true },
+    { name: 'type', type: 'select', required: true, maxSelect: 1, values: ['initial', 'update'] },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['materiality_pending', 'materiality_review', 'info_pending', 'needs_more_info', 'final_pending', 'complete', 'failed'] },
+    { name: 'framework_version', type: 'text', required: true, min: 1, max: 60 },
+    { name: 'materiality', type: 'json', required: false, maxSize: 200000 },
+    { name: 'sufficiency', type: 'json', required: false, maxSize: 200000 },
+    { name: 'dashboard', type: 'json', required: false, maxSize: 400000 },
+    { name: 'update_delta', type: 'json', required: false, maxSize: 200000 },
+    { name: 'information_quality_score', type: 'number', required: false, min: 0, max: 100, onlyInt: true },
+    { name: 'model_name', type: 'text', required: false, max: 80 },
+    { name: 'prompt_version', type: 'text', required: false, max: 60 },
+    { name: 'input_hash', type: 'text', required: false, max: 128 },
+    SUST_USER('created_by'),
+    { name: 'completed_at', type: 'date', required: false },
+    ...SUST_TAIL
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_sustainability_assessments_startup_version ON sustainability_assessments (startup, version)',
+    'CREATE INDEX idx_sustainability_assessments_tenant_startup ON sustainability_assessments (tenant, startup)',
+    "CREATE UNIQUE INDEX idx_sustainability_assessments_external ON sustainability_assessments (tenant, external_id) WHERE external_id != ''"
+  ],
+  ...SUST_RULES(SUST_CREATE_PINNED('created_by'))
+});
+// Self-relationen läggs EFTER att kollektionen finns (relation-target resolvas på namn).
+await patchCollection('sustainability_assessments', [SUST_REL('previous_assessment', 'sustainability_assessments')]);
+
+await ensureCollection({
+  id: 'sustainability_gap_questions_collection',
+  name: 'sustainability_gap_questions',
+  type: 'base',
+  fields: [
+    ...SUST_AUTODATE,
+    SUST_REL('tenant', 'tenants', true, true),
+    SUST_REL('assessment', 'sustainability_assessments', true, true),
+    { name: 'aspect_code', type: 'text', required: true, min: 1, max: 40 },
+    { name: 'question', type: 'text', required: true, min: 1, max: 2000 },
+    { name: 'missing_information', type: 'text', required: false, max: 2000 },
+    { name: 'severity', type: 'select', required: true, maxSelect: 1, values: ['required', 'recommended'] },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['open', 'answered', 'not_available'] },
+    { name: 'answer_text', type: 'text', required: false, max: 10000 },
+    ...SUST_TAIL
+  ],
+  indexes: [
+    'CREATE INDEX idx_sustainability_gap_questions_assessment ON sustainability_gap_questions (assessment)',
+    "CREATE UNIQUE INDEX idx_sustainability_gap_questions_external ON sustainability_gap_questions (tenant, external_id) WHERE external_id != ''"
+  ],
+  ...SUST_RULES(SUST_CREATE_TENANT)
+});
+
+await ensureCollection({
+  id: 'sustainability_materiality_overrides_collection',
+  name: 'sustainability_materiality_overrides',
+  type: 'base',
+  fields: [
+    ...SUST_AUTODATE,
+    SUST_REL('tenant', 'tenants', true, true),
+    SUST_REL('assessment', 'sustainability_assessments', true, true),
+    { name: 'aspect_code', type: 'text', required: true, min: 1, max: 40 },
+    { name: 'original_status', type: 'text', required: true, min: 1, max: 40 },
+    { name: 'new_status', type: 'text', required: true, min: 1, max: 40 },
+    { name: 'comment', type: 'text', required: false, max: 5000 },
+    SUST_USER('created_by'),
+    ...SUST_TAIL
+  ],
+  indexes: [
+    'CREATE INDEX idx_sustainability_overrides_assessment ON sustainability_materiality_overrides (assessment)',
+    "CREATE UNIQUE INDEX idx_sustainability_overrides_external ON sustainability_materiality_overrides (tenant, external_id) WHERE external_id != ''"
+  ],
+  ...SUST_RULES(SUST_CREATE_PINNED('created_by'))
+});
+
+await ensureCollection({
+  id: 'sustainability_update_events_collection',
+  name: 'sustainability_update_events',
+  type: 'base',
+  fields: [
+    ...SUST_AUTODATE,
+    SUST_REL('tenant', 'tenants', true, true),
+    SUST_REL('startup', 'startups', true, true),
+    SUST_REL('assessment', 'sustainability_assessments'),
+    SUST_USER('created_by'),
+    { name: 'narrative', type: 'text', required: false, max: 20000 },
+    ...SUST_TAIL
+  ],
+  indexes: [
+    'CREATE INDEX idx_sustainability_update_events_startup ON sustainability_update_events (startup)',
+    "CREATE UNIQUE INDEX idx_sustainability_update_events_external ON sustainability_update_events (tenant, external_id) WHERE external_id != ''"
+  ],
+  ...SUST_RULES(SUST_CREATE_PINNED('created_by'))
+});
+
+await ensureCollection({
+  id: 'sustainability_documents_collection',
+  name: 'sustainability_documents',
+  type: 'base',
+  fields: [
+    ...SUST_AUTODATE,
+    SUST_REL('tenant', 'tenants', true, true),
+    SUST_REL('startup', 'startups', true, true),
+    SUST_REL('assessment', 'sustainability_assessments'),
+    SUST_REL('update_event', 'sustainability_update_events'),
+    SUST_REL('gap_question', 'sustainability_gap_questions'),
+    SUST_USER('uploaded_by'),
+    { name: 'upload_stage', type: 'select', required: true, maxSelect: 1, values: ['idea_description', 'full_information', 'gap_response', 'update'] },
+    { name: 'original_name', type: 'text', required: true, min: 1, max: 300 },
+    { name: 'mime', type: 'text', required: false, max: 150 },
+    { name: 'size_bytes', type: 'number', required: false, min: 0, onlyInt: true },
+    {
+      name: 'file',
+      type: 'file',
+      required: false,
+      maxSelect: 1,
+      maxSize: 26214400,
+      mimeTypes: [
+        'application/pdf',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'text/plain',
+        'text/markdown',
+        'text/csv'
+      ],
+      protected: true
+    },
+    { name: 'storage_path', type: 'text', required: false, max: 500 },
+    { name: 'extracted_text', type: 'text', required: false, max: 300000 },
+    { name: 'extraction_status', type: 'select', required: false, maxSelect: 1, values: ['pending', 'complete', 'failed'] },
+    { name: 'extraction_warning', type: 'text', required: false, max: 500 },
+    ...SUST_TAIL
+  ],
+  indexes: [
+    'CREATE INDEX idx_sustainability_documents_startup ON sustainability_documents (startup)',
+    'CREATE INDEX idx_sustainability_documents_assessment ON sustainability_documents (assessment)',
+    "CREATE UNIQUE INDEX idx_sustainability_documents_external ON sustainability_documents (tenant, external_id) WHERE external_id != ''"
+  ],
+  ...SUST_RULES(SUST_CREATE_PINNED('uploaded_by'))
+});
+
+await ensureCollection({
+  id: 'sustainability_ai_jobs_collection',
+  name: 'sustainability_ai_jobs',
+  type: 'base',
+  fields: [
+    ...SUST_AUTODATE,
+    SUST_REL('tenant', 'tenants', true, true),
+    SUST_REL('startup', 'startups', true, true),
+    SUST_REL('assessment', 'sustainability_assessments'),
+    { name: 'job_type', type: 'select', required: true, maxSelect: 1, values: ['materiality', 'sufficiency', 'final_analysis', 'update_analysis'] },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['pending', 'running', 'complete', 'failed'] },
+    { name: 'input_hash', type: 'text', required: false, max: 128 },
+    { name: 'model_name', type: 'text', required: false, max: 80 },
+    { name: 'prompt_version', type: 'text', required: false, max: 60 },
+    { name: 'output', type: 'json', required: false, maxSize: 400000 },
+    { name: 'error', type: 'text', required: false, max: 2000 },
+    { name: 'completed_at', type: 'date', required: false },
+    ...SUST_TAIL
+  ],
+  indexes: [
+    'CREATE INDEX idx_sustainability_ai_jobs_startup ON sustainability_ai_jobs (startup)',
+    'CREATE INDEX idx_sustainability_ai_jobs_assessment ON sustainability_ai_jobs (assessment)',
+    "CREATE UNIQUE INDEX idx_sustainability_ai_jobs_external ON sustainability_ai_jobs (tenant, external_id) WHERE external_id != ''"
+  ],
+  ...SUST_RULES(SUST_CREATE_TENANT)
+});
+
 // Migration 1700000201 (§ 54): Studenter & talang — behov (talent_needs),
 // studentprofiler (student_profiles) och intressen (talent_interests).
 // Behov + intressen medlem-scopade på startup; studentprofiler staff/observer-
@@ -5612,6 +5812,10 @@ await patchToolRunsCollection(
 await patchCollection('startups', [
   // Från 1700000190 (§ 51.4): controllerns manuella svar i Bedömning excellens.
   { name: 'screening_facts', type: 'json', required: false, maxSize: 60000 },
+  // Från 1700000206 (§ 56): Hållbarhetsanalysens Company-fält som saknades.
+  { name: 'sustainability_journey_text', type: 'text', required: false, max: 20000 },
+  { name: 'sustainability_status', type: 'select', required: false, maxSelect: 1, values: ['draft', 'materiality_review', 'info_collection', 'needs_more_info', 'analyzed'] },
+  { name: 'sustainability_assigned_to', type: 'relation', required: false, collectionId: 'users', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
   // Från 1700000058
   { name: 'org_nr', type: 'text', required: false, max: 12 },
   { name: 'kommun', type: 'text', required: false, max: 100 },
@@ -5843,6 +6047,13 @@ const FORCE_CREATE_RULES = {
     ' && @request.body.published_at:isset = false && @request.body.reviewed_by:isset = false && @request.body.review_note:isset = false',
   // Ärenden i Bedömning excellens (§ 51.10, migration 1700000200).
   screening_cases: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  // Hållbarhetsanalysen (§ 56, migration 1700000206).
+  sustainability_assessments: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  sustainability_gap_questions: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant`,
+  sustainability_materiality_overrides: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  sustainability_update_events: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  sustainability_documents: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.uploaded_by = @request.auth.id`,
+  sustainability_ai_jobs: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant`,
   // Stödcheckar & finansieringsprojekt (§ 46, migrationer 1700000161–167) —
   // roll-/medlemskontroll i skrivlagret och route-handlers.
   funding_projects: `${ANY_AUTH} && @request.auth.tenant != ""`,

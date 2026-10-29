@@ -10446,3 +10446,57 @@ Det viktigaste från Confetti, på eventet (en plats):
   steg nedgraderas aldrig. Eventsidan visar platser/väntelista/incheckade,
   gästfrågor och påminnelsestatus.
 - **Påminnelser**: § 55.4 (systemkampanjer).
+
+---
+
+## 56. Hållbarhetsanalysen (extern app) — tabeller i vår PocketBase (2026-10)
+
+Den fristående appen på `inkubator-kohl.vercel.app/companies` (internt kallad
+"Sales Navigator") är en **AI-stödd hållbarhetsanalys per bolag**:
+väsentlighetsanalys av ESG-aspekter, kompletteringsfrågor, slutanalys
+(risker/möjligheter/greenwashing) och versionerade uppdateringar. Den
+fortsätter att köra på sin egen domän men får sina tabeller i Movexums
+PocketBase (migration **1700000206**) i stället för Neon/Postgres. Runbook
+med fältmappning, anslutningskontrakt och import:
+`docs/integrations/hallbarhetsanalys-extern-app.md`.
+
+- **Analys först, sedan nya kolumner.** Källans `User` → `users` (matchas på
+  e-post, inga konton skapas), `Company` → `startups` (name/phase/industri
+  FANNS; **tillagt:** `sustainability_journey_text`, `sustainability_status`,
+  `sustainability_assigned_to`), `Note` → `notes`. Resten är nya kollektioner:
+  `sustainability_assessments` (unik `(startup, version)`, self-relation
+  `previous_assessment`), `sustainability_gap_questions`,
+  `sustainability_materiality_overrides`, `sustainability_update_events`,
+  `sustainability_documents` (riktigt `file`-fält, protected; källans
+  Blob-filer ingick inte i dumpen), `sustainability_ai_jobs` (audit per
+  modellkörning). Alla bär `external_id` (källans cuid — idempotent import)
+  och `source_created_at`. Enum-värden = källans i gemener; källa av sanning
+  `scripts/lib/sustainability-import.mjs`, speglad i migrationen och låst av
+  `sustainability-import.test.mjs`.
+- **RLS (§ 21.3):** list/view staff/observer (personalverktyg utan
+  bolagsmedlemsyta); create pinnar tenant + skapare (§ 21.8); update
+  Movexum-personal; delete ledning. `sustainability_documents` +
+  `sustainability_ai_jobs` denylistade för AI (`redaction.ts`, fritext ur
+  tredjepartsmaterial, § 39.3-precedens); övriga läsbara under RLS +
+  fältmaskning. Speglat i `setup-via-api.mjs` (defs + `FORCE_CREATE_RULES`
+  + `startups`-patch; self-relationen läggs via `patchCollection` efter
+  skapandet), asserterat i `verify-baseline.mjs` (must-exist,
+  `MUST_BE_STAFF_OR_OBSERVER`, `REQUIRED_APP_FIELDS`, `AI_DENYLIST`).
+- **Appens anslutning:** egen superuser-hemlighet på Vercel, men varje
+  anrop sker med **impersonerad användartoken** (`users.impersonate`) för den
+  Clerk-inloggade användaren, uppslagen på e-post — RLS gäller därmed även
+  från appen. Appen skriver alltid `tenant` + skaparfält.
+- **Import:** `scripts/import-sustainability-dump.mjs` läser pg_dump
+  custom-format utan pg_restore (ren parser i `lib/`, enhetstestad), kör
+  `--dry-run` först, verifierar att migrationen är applicerad, matchar
+  användare på e-post (annars `--fallback-user`), bolag på namn, saneras
+  personnummer i all fritext, loggar bara antal. Dumpen är kunddata — aldrig
+  i repot.
+- **Regelefterlevnad:** riskklass **begränsad** (beslutsstöd om bolag,
+  människa granskar). **Avsteg att besluta (§ 10.2):** källan körde OpenAI
+  `gpt-5.6` (US) — fortsatta analyser via OpenAI mot vår databas kräver
+  maintainerns uttryckliga godkännande, annars byte till Mistral.
+  `model_name` bär provenansen. GDPR § 5: bolagsdata; `cascadeDelete`
+  tenant → startup → analys. Ingen DPIA ännu (skrivs före produktion om
+  dokument med personuppgifter väntas). Inte byggt: bolagskortslänk,
+  rail-modul, SSO, filåterställning.

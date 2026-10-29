@@ -173,6 +173,13 @@ async function verifyCollectionsExist() {
     'screening_requests',
     // Ärenden i Bedömning excellens (§ 51.10, migration 1700000200).
     'screening_cases',
+    // Hållbarhetsanalysen (§ 56, migration 1700000206) — den fristående appens tabeller.
+    'sustainability_assessments',
+    'sustainability_gap_questions',
+    'sustainability_materiality_overrides',
+    'sustainability_update_events',
+    'sustainability_documents',
+    'sustainability_ai_jobs',
     // Studenter & talang (§ 54, migration 1700000201).
     'talent_needs',
     'student_profiles',
@@ -518,6 +525,15 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   // Ärenden i Bedömning excellens (§ 51.10, migration 1700000200) — internt
   // statsstödsunderlag per bolag → staff/observer-only.
   'screening_cases',
+  // Hållbarhetsanalysen (§ 56, migration 1700000206): personalverktyg utan
+  // bolagsmedlemsyta — analyser, frågor, dokumenttext och AI-körningar är
+  // internt underlag → staff/observer-only.
+  'sustainability_assessments',
+  'sustainability_gap_questions',
+  'sustainability_materiality_overrides',
+  'sustainability_update_events',
+  'sustainability_documents',
+  'sustainability_ai_jobs',
   // Studentprofiler (§ 54, migration 1700000201): privatpersoners uppgifter —
   // bolaget ser dem BARA anonymiserat via kod, aldrig via RLS.
   'student_profiles',
@@ -732,7 +748,8 @@ const AI_DENYLIST = new Set([
   'chat_threads', 'user_files', 'user_file_chunks', 'deep_jobs',
   'org_knowledge', 'org_knowledge_chunks', 'agent_memory',
   'notifications', 'notification_preferences', 'rate_limits', 'app_locks',
-  'student_profiles', 'talent_interests'
+  'student_profiles', 'talent_interests',
+  'sustainability_documents', 'sustainability_ai_jobs'
 ]);
 
 // PII-stavningar som substring-maskern INTE redan fångar. Förankrade till `_`
@@ -1164,6 +1181,10 @@ const REQUIRED_APP_FIELDS = [
   // Bedömning excellens (§ 51.4, migration 1700000190): utan fältet "sparas"
   // controllerns manuella svar tyst bort och varje körning börjar om.
   { collection: 'startups', fields: ['screening_facts'] },
+  // Hållbarhetsanalysen (§ 56, migration 1700000206): utan fälten "sparas"
+  // bolagets resa/status/ansvarig tyst bort och importen avbryts.
+  { collection: 'startups', fields: ['sustainability_journey_text', 'sustainability_status', 'sustainability_assigned_to'] },
+  { collection: 'sustainability_assessments', fields: ['external_id', 'source_created_at', 'previous_assessment', 'dashboard'] },
   // KTH IRL på bolagskortet (migration 1700000193): utan fälten "sparas"
   // teknik/IPR/finansiering tyst bort och radarn ritas med tre tomma axlar.
   { collection: 'startup_readiness_assessments', fields: ['trl', 'iprl', 'frl', 'axis_notes'] },
