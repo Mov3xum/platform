@@ -112,6 +112,12 @@ export interface CallMistralOptions {
   temperature?: number;
   maxTokens?: number;
   /**
+   * JSON-läge: modellen tvingas svara med ett giltigt JSON-objekt
+   * (`response_format: { type: 'json_object' }`). Prompten måste ändå
+   * beskriva formen — läget garanterar syntax, inte schema.
+   */
+  responseFormat?: 'json_object';
+  /**
    * När satt strömmas svaret token-för-token: varje text-delta forwardas
    * direkt via `onToken` (för live-utskrift i chatten) medan funktionen ändå
    * returnerar hela det ackumulerade svaret (text + tool_calls + usage). En
@@ -206,6 +212,7 @@ export async function callMistral(
     temperature: options.temperature ?? 0.3
   };
   if (options.onToken) body.stream = true;
+  if (options.responseFormat) body.response_format = { type: options.responseFormat };
 
   const combinedTools: MistralAnyTool[] = [];
   if (options.tools && options.tools.length > 0) {

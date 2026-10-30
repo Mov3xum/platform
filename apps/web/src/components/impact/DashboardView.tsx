@@ -2,217 +2,259 @@ import {
   IMPACT_BMC_LABELS,
   IMPACT_CATEGORY_LABELS,
   IMPACT_HORIZON_LABELS,
+  IMPACT_PRIORITY_LABELS,
+  getImpactAreaAssessmentItems,
+  getImpactDashboardInformationComment,
+  type ImpactAreaAssessmentItem,
   type ImpactDashboard,
   type ImpactUpdateDelta
 } from '@platform/shared';
-import { Chip, GradeChip, ImpactLevelChip } from './chips';
+import { Badge, Chip, ImpactLevelBadge } from './chips';
+import { card } from './ui';
 
-/** Slutanalysen ("dashboard", § 56) — ren presentation av det typade resultatet. */
+/**
+ * Dashboarden (originalets dashboard-sida, steg 4): övergripande bedömning,
+ * tre områdeskort, affärsmodellbedömning, prioriterat arbete / risker /
+ * möjligheter, diskussionsfrågor + greenwashingrisker, informationsläge med
+ * antaganden och begränsningar, disclaimer. Ren presentation.
+ */
 export function DashboardView({ dashboard, delta }: { dashboard: ImpactDashboard; delta?: ImpactUpdateDelta | null }) {
   const d = dashboard;
-  const areas: Array<[keyof ImpactDashboard['areaAssessments'], string]> = [
-    ['overall', 'Helhet'],
-    ['environment', 'Miljö'],
-    ['social', 'Socialt'],
-    ['governance', 'Styrning & ansvar']
-  ];
+  const areas = getImpactAreaAssessmentItems(d);
+  const overall = areas[0];
+  const categories = areas.slice(1);
+
   return (
-    <div className="space-y-6">
-      <div className="rounded-2xl border border-default bg-canvas-subtle p-5">
-        <div className="mb-2 flex flex-wrap items-center gap-2">
-          <ImpactLevelChip level={d.impactLevel.level} />
-          <Chip tone={d.businessModelCompatibility.status === 'COMPATIBLE_WITH_LONG_TERM_SUSTAINABILITY' ? 'green' : d.businessModelCompatibility.status === 'UNCERTAIN' ? 'yellow' : 'orange'}>
-            Affärsmodell: {IMPACT_BMC_LABELS[d.businessModelCompatibility.status]}
-          </Chip>
-          <Chip tone="neutral">Underlagskvalitet {d.informationQualityScore} %</Chip>
-        </div>
-        <p className="text-sm leading-relaxed text-foreground">{d.executiveSummary}</p>
-        {d.impactLevel.rationale ? <p className="mt-2 text-xs text-foreground-muted"><span className="font-semibold">Varför: </span>{d.impactLevel.rationale}</p> : null}
-        {d.informationQualityComment ? <p className="mt-1 text-xs text-foreground-muted">{d.informationQualityComment}</p> : null}
+    <div className="space-y-5">
+      <AreaAssessmentCard item={overall} featured />
+
+      <div className="grid gap-4 xl:grid-cols-3">
+        {categories.map((item) => (
+          <AreaAssessmentCard key={item.key} item={item} />
+        ))}
       </div>
 
       {delta ? (
-        <Block title="Vad som ändrats sedan förra analysen">
-          <TextList items={delta.whatChangedSinceLastAssessment} empty="Inget väsentligt har ändrats enligt underlaget." />
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <Mini title="Nya risker" items={delta.newRisks} />
-            <Mini title="Minskade risker" items={delta.reducedRisks} />
-            <Mini title="Nya möjligheter" items={delta.newOpportunities} />
-            <Mini title="Ändrade områdesbedömningar" items={delta.changedAreaAssessments} />
+        <section className={card}>
+          <h2 className="font-heading text-lg font-semibold text-foreground">Vad som ändrats sedan förra versionen</h2>
+          {delta.changedImpactLevel ? <p className="mt-2 text-sm text-foreground-muted"><span className="font-medium text-foreground">Övergripande nivå: </span>{delta.changedImpactLevel}</p> : null}
+          <List title="Förändringar" items={delta.whatChangedSinceLastAssessment} empty="Inga väsentliga förändringar markerade." />
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <DeltaList title="Nya risker" items={delta.newRisks} />
+            <DeltaList title="Minskade risker" items={delta.reducedRisks} />
+            <DeltaList title="Nya möjligheter" items={delta.newOpportunities} />
           </div>
-          {delta.recommendedNextDiscussions.length ? <div className="mt-3"><Mini title="Att ta upp i nästa samtal" items={delta.recommendedNextDiscussions} /></div> : null}
-        </Block>
+          {delta.changedAreaAssessments.length ? (
+            <div className="mt-4 space-y-2">
+              <p className="text-sm font-medium text-foreground">Ändrade områdesbedömningar</p>
+              {delta.changedAreaAssessments.map((c, i) => (
+                <p key={i} className="text-sm text-foreground-muted">
+                  <span className="font-medium text-foreground">{areaLabel(c.category)}: </span>
+                  {c.previousPotential || c.newPotential ? `${c.previousPotential || '–'} → ${c.newPotential || '–'}. ` : ''}
+                  {c.reason}
+                </p>
+              ))}
+            </div>
+          ) : null}
+          {delta.recommendedNextDiscussions.length ? <List title="Att ta upp i nästa samtal" items={delta.recommendedNextDiscussions} empty="Inget markerat." /> : null}
+        </section>
       ) : null}
 
-      {d.companySustainabilityDescription ? (
-        <Block title="Bolagets hållbarhetsbidrag">
-          <p className="text-sm text-foreground">{d.companySustainabilityDescription}</p>
-        </Block>
-      ) : null}
-
-      <Block title="Områdesbedömning">
-        <div className="grid gap-3 sm:grid-cols-2">
-          {areas.map(([key, label]) => {
-            const a = d.areaAssessments[key];
-            if (!a.assessment && !a.potentialLabel) return null;
-            return (
-              <div key={key} className="rounded-xl border border-default bg-surface p-4">
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <h4 className="text-sm font-semibold text-foreground">{label}</h4>
-                  {a.potentialLabel ? <span className="text-xs text-foreground-muted">{a.potentialLabel}</span> : null}
-                </div>
-                <p className="text-sm text-foreground-muted">{a.assessment}</p>
-                {a.uncertaintyNotes.length ? <ul className="mt-2 list-disc pl-4 text-xs text-foreground-subtle">{a.uncertaintyNotes.map((n, i) => <li key={i}>{n}</li>)}</ul> : null}
-              </div>
-            );
-          })}
+      <section className={card}>
+        <h2 className="font-heading text-lg font-semibold text-foreground">Grundläggande affärsmodellbedömning</h2>
+        <div className="mt-4 space-y-4">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <ImpactLevelBadge level={d.impactLevel.level} />
+              <span className="text-sm text-foreground-muted">Bolagets samlade potential och inriktning.</span>
+            </div>
+            <p className="mt-2 leading-7 text-foreground">{d.impactLevel.rationale}</p>
+          </div>
+          <div className="border-t border-default pt-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-sm font-medium text-foreground-muted">Affärsmodellens förutsättningar</p>
+              <Chip tone={d.businessModelCompatibility.status === 'COMPATIBLE_WITH_LONG_TERM_SUSTAINABILITY' ? 'green' : d.businessModelCompatibility.status === 'UNCERTAIN' ? 'yellow' : 'orange'}>
+                {IMPACT_BMC_LABELS[d.businessModelCompatibility.status]}
+              </Chip>
+            </div>
+            <p className="mt-3 leading-7 text-foreground">{d.businessModelCompatibility.rationale}</p>
+            <p className="mt-3 text-sm font-medium text-foreground-muted">Konsekvenser vid skalning</p>
+            <p className="mt-1 text-sm leading-6 text-foreground-muted">{d.businessModelCompatibility.consequencesIfScaled}</p>
+          </div>
+          {d.companySustainabilityDescription ? (
+            <div className="border-t border-default pt-4">
+              <p className="text-sm font-medium text-foreground-muted">Bolagets hållbarhetsprofil</p>
+              <p className="mt-1 text-sm leading-6 text-foreground">{d.companySustainabilityDescription}</p>
+            </div>
+          ) : null}
         </div>
-      </Block>
+      </section>
 
-      {d.businessModelCompatibility.rationale || d.businessModelCompatibility.consequencesIfScaled ? (
-        <Block title="Affärsmodell och skalning">
-          <p className="text-sm text-foreground">{d.businessModelCompatibility.rationale}</p>
-          {d.businessModelCompatibility.consequencesIfScaled ? <p className="mt-2 text-sm text-foreground-muted"><span className="font-semibold text-foreground">Om bolaget skalar: </span>{d.businessModelCompatibility.consequencesIfScaled}</p> : null}
-        </Block>
-      ) : null}
-
-      <Block title={`Risker (${d.risks.length})`}>
-        <div className="space-y-3">
-          {d.risks.map((r, i) => (
-            <article key={i} className="rounded-xl border border-default bg-surface p-4">
-              <div className="mb-1 flex flex-wrap items-center gap-2">
-                <h4 className="text-sm font-semibold text-foreground">{r.title}</h4>
-                <GradeChip grade={r.severity} />
-                <Chip tone="neutral">{IMPACT_CATEGORY_LABELS[r.category]}</Chip>
-                <Chip tone="neutral">{IMPACT_HORIZON_LABELS[r.timeHorizon]}</Chip>
-                {r.aspectCode ? <span className="text-xs text-foreground-subtle mx-tnum">{r.aspectCode}</span> : null}
+      <div className="grid gap-5 xl:grid-cols-3">
+        <Panel title="Vad bolaget behöver arbeta med">
+          {d.whatCompanyNeedsToWorkOn.map((item, i) => (
+            <div key={`${item.title}-${i}`} className="border-b border-default py-3 last:border-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="font-medium text-foreground">{item.title}</h3>
+                <Badge tone={item.priority === 'HIGH' ? 'risk' : item.priority === 'MEDIUM' ? 'warn' : 'neutral'}>{IMPACT_PRIORITY_LABELS[item.priority]}</Badge>
               </div>
-              <p className="text-sm text-foreground-muted">{r.description}</p>
-              <Detail label="Varför det spelar roll" text={r.whyImportant} />
-              <Detail label="Hur det kan påverka utvecklingen" text={r.howItCanAffectFutureDevelopment} />
-              <Detail label="Förslag på åtgärd" text={r.mitigationSuggestion} strong />
-              <Evidence items={r.evidence} />
-            </article>
+              <p className="mt-1 text-sm text-foreground-muted">{item.description}</p>
+              {item.realisticStartupNextStep ? <p className="mt-1 text-sm text-foreground-muted"><span className="font-medium text-foreground">Realistiskt nästa steg: </span>{item.realisticStartupNextStep}</p> : null}
+            </div>
           ))}
-          {d.risks.length === 0 ? <p className="text-sm text-foreground-subtle">Inga risker identifierade.</p> : null}
-        </div>
-      </Block>
-
-      <Block title={`Möjligheter (${d.opportunities.length})`}>
-        <div className="space-y-3">
+          {d.whatCompanyNeedsToWorkOn.length === 0 ? <Empty /> : null}
+        </Panel>
+        <Panel title="Viktigaste risker">
+          {d.risks.map((risk, i) => (
+            <div key={`${risk.title}-${i}`} className="border-b border-default py-3 last:border-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="font-medium text-foreground">{risk.title}</h3>
+                <Badge tone={risk.severity === 'HIGH' ? 'risk' : risk.severity === 'MEDIUM' ? 'warn' : 'neutral'}>{IMPACT_PRIORITY_LABELS[risk.severity]}</Badge>
+                <Badge tone="info">{IMPACT_CATEGORY_LABELS[risk.category]}</Badge>
+                <Badge>{IMPACT_HORIZON_LABELS[risk.timeHorizon]}</Badge>
+              </div>
+              <p className="mt-1 text-sm text-foreground-muted">{risk.description}</p>
+              {risk.whyImportant ? <p className="mt-1 text-sm text-foreground-muted">{risk.whyImportant}</p> : null}
+              {risk.howItCanAffectFutureDevelopment ? <p className="mt-1 text-sm text-foreground-muted">{risk.howItCanAffectFutureDevelopment}</p> : null}
+              <p className="mt-1 text-sm text-foreground-muted"><span className="font-medium text-foreground">Hantering: </span>{risk.mitigationSuggestion}</p>
+              <Evidence items={risk.evidence} />
+            </div>
+          ))}
+          {d.risks.length === 0 ? <Empty /> : null}
+        </Panel>
+        <Panel title="Potential och möjligheter">
           {d.opportunities.map((o, i) => (
-            <article key={i} className="rounded-xl border border-default bg-surface p-4">
-              <div className="mb-1 flex flex-wrap items-center gap-2">
-                <h4 className="text-sm font-semibold text-foreground">{o.title}</h4>
-                <GradeChip grade={o.potential} positive />
-                <Chip tone="neutral">{IMPACT_CATEGORY_LABELS[o.category]}</Chip>
-                {o.aspectCode ? <span className="text-xs text-foreground-subtle mx-tnum">{o.aspectCode}</span> : null}
+            <div key={`${o.title}-${i}`} className="border-b border-default py-3 last:border-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="font-medium text-foreground">{o.title}</h3>
+                <Badge tone={o.potential === 'HIGH' ? 'good' : o.potential === 'MEDIUM' ? 'info' : 'neutral'}>Potential: {IMPACT_PRIORITY_LABELS[o.potential]}</Badge>
+                <Badge tone="info">{IMPACT_CATEGORY_LABELS[o.category]}</Badge>
               </div>
-              <p className="text-sm text-foreground-muted">{o.description}</p>
-              <Detail label="Varför det spelar roll" text={o.whyImportant} />
-              <Detail label="Hur bolaget kan använda det" text={o.howCompanyCanUseIt} />
-              <Detail label="Rekommenderat steg" text={o.recommendedAction} strong />
+              <p className="mt-1 text-sm text-foreground-muted">{o.description}</p>
+              {o.howCompanyCanUseIt ? <p className="mt-1 text-sm text-foreground-muted">{o.howCompanyCanUseIt}</p> : null}
+              {o.recommendedAction ? <p className="mt-1 text-sm text-foreground-muted"><span className="font-medium text-foreground">Rekommenderad handling: </span>{o.recommendedAction}</p> : null}
               <Evidence items={o.evidence} />
-            </article>
+            </div>
           ))}
-          {d.opportunities.length === 0 ? <p className="text-sm text-foreground-subtle">Inga möjligheter identifierade.</p> : null}
-        </div>
-      </Block>
+          {d.opportunities.length === 0 ? <Empty /> : null}
+        </Panel>
+      </div>
 
-      {d.greenwashingRisks.length ? (
-        <Block title="Greenwashing-risker">
-          <div className="space-y-3">
-            {d.greenwashingRisks.map((g, i) => (
-              <div key={i} className="rounded-xl border border-movexum-gul/40 bg-movexum-pastell-gul/40 p-4 dark:bg-movexum-morkgul/20">
-                <p className="text-sm font-semibold text-foreground">{g.claimOrRisk}</p>
-                <Detail label="Varför riskabelt" text={g.whyRisky} />
-                <Detail label="Så kan det beläggas" text={g.howToSubstantiate} strong />
-              </div>
-            ))}
-          </div>
-        </Block>
-      ) : null}
-
-      {d.whatCompanyNeedsToWorkOn.length ? (
-        <Block title="Vad bolaget behöver jobba på">
-          <ol className="space-y-2">
-            {d.whatCompanyNeedsToWorkOn.map((w, i) => (
-              <li key={i} className="rounded-xl border border-default bg-surface p-4">
-                <div className="mb-1 flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-semibold text-foreground">{i + 1}. {w.title}</span>
-                  <GradeChip grade={w.priority} />
-                </div>
-                <p className="text-sm text-foreground-muted">{w.description}</p>
-                <Detail label="Realistiskt nästa steg" text={w.realisticStartupNextStep} strong />
+      <div className="grid gap-5 lg:grid-cols-2">
+        <Panel title="Frågor att diskutera med bolaget">
+          <ol className="space-y-3">
+            {d.discussionQuestions.map((q, i) => (
+              <li key={`${q.question}-${i}`} className="text-sm">
+                <span className="font-semibold text-foreground">
+                  {i + 1}. {q.question}
+                </span>
+                <p className="mt-1 text-foreground-muted">{q.whyImportant}</p>
+                {q.suggestedOwnerRole || q.aspectCode ? <p className="mt-1 text-xs text-foreground-subtle">{[q.suggestedOwnerRole, q.aspectCode].filter(Boolean).join(' · ')}</p> : null}
               </li>
             ))}
           </ol>
-        </Block>
-      ) : null}
+          {d.discussionQuestions.length === 0 ? <Empty /> : null}
+        </Panel>
+        <Panel title="Greenwashingrisker">
+          {d.greenwashingRisks.map((g, i) => (
+            <div key={`${g.claimOrRisk}-${i}`} className="border-b border-default py-3 last:border-0">
+              <h3 className="font-medium text-foreground">{g.claimOrRisk}</h3>
+              <p className="mt-1 text-sm text-foreground-muted">{g.whyRisky}</p>
+              <p className="mt-1 text-sm text-foreground-muted"><span className="font-medium text-foreground">Så kan det underbyggas: </span>{g.howToSubstantiate}</p>
+            </div>
+          ))}
+          {d.greenwashingRisks.length === 0 ? <Empty /> : null}
+        </Panel>
+      </div>
 
-      {d.discussionQuestions.length ? (
-        <Block title="Frågor till nästa coachsamtal">
-          <ul className="space-y-2">
-            {d.discussionQuestions.map((q, i) => (
-              <li key={i} className="rounded-xl border border-default bg-surface p-4">
-                <p className="text-sm font-semibold text-foreground">{q.question}</p>
-                <p className="mt-1 text-xs text-foreground-muted">{q.whyImportant}</p>
-                <p className="mt-1 text-xs text-foreground-subtle">{[q.suggestedOwnerRole, q.aspectCode].filter(Boolean).join(' · ')}</p>
-              </li>
-            ))}
-          </ul>
-        </Block>
-      ) : null}
-
-      {d.assumptions.length || d.limitations.length ? (
-        <Block title="Antaganden och begränsningar">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Mini title="Antaganden" items={d.assumptions} />
-            <Mini title="Begränsningar" items={d.limitations} />
-          </div>
-        </Block>
-      ) : null}
-
-      <p className="rounded-2xl border border-default bg-canvas-subtle px-4 py-3 text-xs text-foreground-muted">{d.disclaimer}</p>
+      <section className={card}>
+        <h2 className="font-heading text-lg font-semibold text-foreground">Informationsläge och begränsningar</h2>
+        <p className="mt-3 text-foreground">{getImpactDashboardInformationComment(d)}</p>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <List title="Antaganden" items={d.assumptions} empty="Inga uppgifter angivna." />
+          <List title="Begränsningar" items={d.limitations} empty="Inga uppgifter angivna." />
+        </div>
+        <p className="mt-4 rounded-xl bg-canvas-subtle p-3 text-sm text-foreground-muted">{d.disclaimer}</p>
+      </section>
     </div>
   );
 }
 
-function Block({ title, children }: { title: string; children: React.ReactNode }) {
+function areaLabel(category: string): string {
+  return { OVERALL: 'Övergripande', ENVIRONMENT: 'Miljö', SOCIAL: 'Socialt', GOVERNANCE: 'Styrning' }[category] ?? category;
+}
+
+export function AreaAssessmentCard({ item, featured = false }: { item: ImpactAreaAssessmentItem; featured?: boolean }) {
   return (
-    <section>
-      <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-foreground-subtle">{title}</h3>
-      {children}
+    <section className={card}>
+      <p className="text-sm font-medium uppercase tracking-wide text-foreground-subtle">{item.title}</p>
+      <p className={`${featured ? 'text-xl' : 'text-base'} mt-2 font-heading font-semibold text-foreground`}>
+        {featured ? 'Bedömning' : 'Potential'}: {item.potentialLabel}
+      </p>
+      <p className="mt-3 leading-7 text-foreground">{item.assessment}</p>
+      {!featured && item.uncertaintyNotes.length ? (
+        <div className="mt-4 rounded-xl bg-canvas-subtle p-3 text-sm text-foreground-muted">
+          <p className="font-medium text-foreground">Osäkerheter och saknad information</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            {item.uncertaintyNotes.map((note, i) => (
+              <li key={i}>{note}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </section>
   );
 }
-function Detail({ label, text, strong }: { label: string; text: string; strong?: boolean }) {
-  if (!text) return null;
+
+function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <p className={`mt-2 text-sm ${strong ? 'text-foreground' : 'text-foreground-muted'}`}>
-      <span className="font-semibold text-foreground">{label}: </span>
-      {text}
-    </p>
+    <section className={card}>
+      <h2 className="font-heading text-lg font-semibold text-foreground">{title}</h2>
+      <div className="mt-2">{children}</div>
+    </section>
   );
 }
+
+function List({ title, items, empty }: { title: string; items: string[]; empty: string }) {
+  return (
+    <div className="mt-3">
+      <h3 className="font-medium text-foreground">{title}</h3>
+      {items.length ? (
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-foreground-muted">
+          {items.map((item, i) => (
+            <li key={i}>{item}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-1 text-sm italic text-foreground-subtle">{empty}</p>
+      )}
+    </div>
+  );
+}
+
+function DeltaList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div className="rounded-xl bg-canvas-subtle p-3 text-sm">
+      <p className="font-medium text-foreground">{title}</p>
+      <ul className="mt-1 list-disc pl-5 text-foreground-muted">{items.length ? items.map((item, i) => <li key={i}>{item}</li>) : <li>Inget markerat.</li>}</ul>
+    </div>
+  );
+}
+
 function Evidence({ items }: { items: string[] }) {
   if (!items.length) return null;
   return (
-    <details className="mt-2 text-xs text-foreground-subtle">
-      <summary className="cursor-pointer">Underlag ({items.length})</summary>
-      <ul className="mt-1 list-disc pl-4">{items.map((e, i) => <li key={i}>{e}</li>)}</ul>
+    <details className="mt-1 text-xs text-foreground-subtle">
+      <summary className="cursor-pointer">Evidens ({items.length})</summary>
+      <ul className="mt-1 list-disc pl-4">
+        {items.map((e, i) => (
+          <li key={i}>{e}</li>
+        ))}
+      </ul>
     </details>
   );
 }
-function TextList({ items, empty }: { items: string[]; empty: string }) {
-  if (!items.length) return <p className="text-sm text-foreground-subtle">{empty}</p>;
-  return <ul className="list-disc space-y-1 pl-5 text-sm text-foreground">{items.map((t, i) => <li key={i}>{t}</li>)}</ul>;
-}
-function Mini({ title, items }: { title: string; items: string[] }) {
-  return (
-    <div className="rounded-xl border border-default bg-surface p-3">
-      <h4 className="mb-1 text-xs font-semibold text-foreground-muted">{title}</h4>
-      {items.length ? <ul className="list-disc space-y-0.5 pl-4 text-xs text-foreground">{items.map((t, i) => <li key={i}>{t}</li>)}</ul> : <p className="text-xs text-foreground-subtle">–</p>}
-    </div>
-  );
+
+function Empty() {
+  return <p className="py-2 text-sm italic text-foreground-subtle">Inget markerat.</p>;
 }

@@ -1,12 +1,15 @@
 import {
   IMPACT_ASSESSMENT_STATUS_LABELS,
+  IMPACT_CATEGORY_CODE_PREFIXES,
   IMPACT_COMPANY_STATUS_LABELS,
   IMPACT_GRADE_LABELS,
-  IMPACT_LEVEL_LABELS,
+  IMPACT_INFORMATION_STATUS_LABELS,
+  getImpactLevelLabel,
   type ImpactAssessmentStatus,
   type ImpactCompanyStatus,
   type ImpactGrade,
-  type ImpactLevel
+  type ImpactInformationStatus,
+  type ImpactPersistedCategory
 } from '@platform/shared';
 
 /** Statusfärger ur Movexums palett (grön/gul/orange/lila/blå — aldrig röd, § 2.3). */
@@ -18,13 +21,23 @@ const TONE = {
   blue: 'bg-movexum-pastell-bla text-movexum-djupbla dark:bg-movexum-morkbla/60 dark:text-movexum-pastell-bla',
   neutral: 'bg-canvas-muted text-foreground-muted'
 } as const;
-type Tone = keyof typeof TONE;
+export type ChipTone = keyof typeof TONE;
 
-export function Chip({ tone, children }: { tone: Tone; children: React.ReactNode }) {
-  return <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${TONE[tone]}`}>{children}</span>;
+export function Chip({ tone, children, title }: { tone: ChipTone; children: React.ReactNode; title?: string }) {
+  return (
+    <span title={title} className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${TONE[tone]}`}>
+      {children}
+    </span>
+  );
 }
 
-const COMPANY_TONE: Record<ImpactCompanyStatus, Tone> = {
+/** Originalets Badge-toner: good/warn/risk/info/neutral. */
+export function Badge({ tone = 'neutral', children }: { tone?: 'good' | 'warn' | 'risk' | 'info' | 'neutral'; children: React.ReactNode }) {
+  const map: Record<string, ChipTone> = { good: 'green', warn: 'yellow', risk: 'orange', info: 'blue', neutral: 'neutral' };
+  return <Chip tone={map[tone]}>{children}</Chip>;
+}
+
+const COMPANY_TONE: Record<ImpactCompanyStatus, ChipTone> = {
   draft: 'neutral',
   materiality_review: 'purple',
   info_collection: 'blue',
@@ -36,7 +49,7 @@ export function ImpactStatusChip({ status }: { status: ImpactCompanyStatus | nul
   return <Chip tone={COMPANY_TONE[status]}>{IMPACT_COMPANY_STATUS_LABELS[status]}</Chip>;
 }
 
-const ASSESSMENT_TONE: Record<ImpactAssessmentStatus, Tone> = {
+const ASSESSMENT_TONE: Record<ImpactAssessmentStatus, ChipTone> = {
   materiality_pending: 'neutral',
   materiality_review: 'purple',
   info_pending: 'blue',
@@ -49,13 +62,37 @@ export function AssessmentStatusChip({ status }: { status: ImpactAssessmentStatu
   return <Chip tone={ASSESSMENT_TONE[status]}>{IMPACT_ASSESSMENT_STATUS_LABELS[status]}</Chip>;
 }
 
-const LEVEL_TONE: Record<ImpactLevel, Tone> = { IMPACT_DRIVEN: 'green', SUSTAINABILITY_DRIVEN: 'blue', RISK_EXPOSED: 'orange' };
-export function ImpactLevelChip({ level }: { level: ImpactLevel }) {
-  return <Chip tone={LEVEL_TONE[level]}>{IMPACT_LEVEL_LABELS[level]}</Chip>;
+/** Övergripande bedömning — Riskexponerad i orange, övriga nivåer gröna, saknad "Ej bedömt" (originalets ImpactLevelBadge). */
+export function ImpactLevelBadge({ level }: { level?: string | null }) {
+  const label = getImpactLevelLabel(level);
+  const tone: ChipTone = !label ? 'neutral' : level === 'RISK_EXPOSED' ? 'orange' : 'green';
+  return <Chip tone={tone}>{label ?? 'Ej bedömt'}</Chip>;
+}
+/** Bakåtkompatibelt namn. */
+export const ImpactLevelChip = ImpactLevelBadge;
+
+const CATEGORY_TONE: Record<ImpactPersistedCategory, string> = {
+  ENVIRONMENT: 'border-movexum-gron/40 bg-movexum-pastell-gron text-movexum-morkgron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron',
+  SOCIAL: 'border-movexum-bla/40 bg-movexum-pastell-bla text-movexum-djupbla dark:bg-movexum-morkbla/60 dark:text-movexum-pastell-bla',
+  GOVERNANCE: 'border-movexum-gul/50 bg-movexum-pastell-gul text-movexum-morkgul dark:bg-movexum-morkgul/40 dark:text-movexum-pastell-gul',
+  CUSTOM: 'border-default bg-canvas-muted text-foreground-muted'
+};
+/** Visningskod per kategori (ENV-01 …) i kategorins färg. */
+export function AspectCodeBadge({ category, code }: { category: ImpactPersistedCategory; code?: string }) {
+  return (
+    <span className={`inline-flex shrink-0 items-center rounded border px-2 py-0.5 text-xs font-semibold mx-tnum ${CATEGORY_TONE[category] ?? CATEGORY_TONE.CUSTOM}`}>
+      {code ?? IMPACT_CATEGORY_CODE_PREFIXES[category]}
+    </span>
+  );
 }
 
-const GRADE_TONE: Record<ImpactGrade, Tone> = { HIGH: 'orange', MEDIUM: 'yellow', LOW: 'neutral' };
+const GRADE_TONE: Record<ImpactGrade, ChipTone> = { HIGH: 'orange', MEDIUM: 'yellow', LOW: 'neutral' };
 export function GradeChip({ grade, positive }: { grade: ImpactGrade; positive?: boolean }) {
-  const tone: Tone = positive ? (grade === 'HIGH' ? 'green' : grade === 'MEDIUM' ? 'blue' : 'neutral') : GRADE_TONE[grade];
+  const tone: ChipTone = positive ? (grade === 'HIGH' ? 'green' : grade === 'MEDIUM' ? 'blue' : 'neutral') : GRADE_TONE[grade];
   return <Chip tone={tone}>{IMPACT_GRADE_LABELS[grade]}</Chip>;
+}
+
+export function InformationStatusChip({ status }: { status: ImpactInformationStatus }) {
+  const tone: ChipTone = status === 'SUFFICIENT' ? 'green' : status === 'PARTIAL' ? 'yellow' : 'orange';
+  return <Chip tone={tone}>{IMPACT_INFORMATION_STATUS_LABELS[status]}</Chip>;
 }

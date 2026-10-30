@@ -10458,9 +10458,17 @@ driver, observer läser) ersätter den tidigare fristående appen på
 hållbarhetsanalys per bolag** — väsentliga ESG-aspekter, prövning av
 underlaget med kompletteringsfrågor, slutanalys (risker, möjligheter,
 greenwashing-risker, vad bolaget behöver jobba på, frågor till coachsamtalet,
-impactnivå) och versionerade uppdateringar. Den gamla appens Postgres-dump
-importeras så historiken följer med. Runbook + kodkarta:
-`docs/integrations/impact-navigator.md`.
+impactnivå) och versionerade uppdateringar. **Modulen är en portering av den
+gamla appens GitHub-repo (2026-10-30)** — samma sidor, samma svenska
+systempromptar ordagrant (`packages/shared/src/impact-prompts.ts`,
+`IMPACT_PROMPT_VERSION = 2026-08-10-v1+mistral`), samma underlagsbyggare
+(`impact-inputs.ts`: state-plus-delta, 60 000 tecken/dokument, dedupe), samma
+**fem impactnivåer** (Riskexponerad · Ansvarsfullt · Hållbarhetsdrivande ·
+Impactdrivande · Systemförändrande, `IMPACT_LEVELS` + kriterietext),
+samma granskningssemantik och PDF-rapport — men PocketBase i stället för
+Prisma, Mistral i stället för OpenAI, Movexums tokens, RLS § 21 och audit.
+Den gamla appens Postgres-dump importeras så historiken följer med. Runbook +
+kodkarta: `docs/integrations/impact-navigator.md`.
 
 - **Datamodell (migration 1700000206, analys först — nya kolumner sedan).**
   Källans `Company` → `startups` (name/phase/industri FANNS; **tillagt:**
@@ -10478,24 +10486,44 @@ importeras så historiken följer med. Runbook + kodkarta:
   ↔ `scripts/lib/sustainability-import.mjs`, speglade i migrationen och låsta
   av enhetstest. Migration **1700000207** backfillar modulen i sparade
   sidmenyer (§ 36.3).
-- **Flödet är människa-i-loopen (art. 14):** varje AI-steg startas med ett
-  klick av Movexum-personal; väsentligheten GRANSKAS (Väsentlig/Osäker/Ej
-  väsentlig per aspekt, `applyImpactOverrides`) innan underlaget prövas;
-  kompletteringsfrågor besvaras av människor; slutanalysen startas
-  uttryckligen; en uppdatering skapar en ny version. Inget publiceras
-  automatiskt. Status: analysens `status` (statusmaskinen `impactNextStep`)
-  och bolagets `sustainability_status` (`impactCompanyStatusFor`).
+- **Flödet är människa-i-loopen (art. 14), originalets fyra steg:** (1)
+  "Skapa nytt bolag" (`/impactnavigator/ny`: `CompanyCreationIntro` + "Steg
+  1 av 4", obligatorisk idébeskrivning) skapar bolag + version 1, laddar upp
+  filerna via route-handlern och kör väsentlighetsanalysen direkt; (2)
+  `/vasentlighet`: aspekter med visningskod (`ENV-01`), styrka 1–5,
+  drivkrafter, konfidens, evidens — personalen sätter Väsentlig/Osäker/Ej
+  väsentlig, lyfter övervägda aspekter, lägger eget område och kommentar
+  (`applyImpactMaterialityReview`/`createImpactCustomAspect`, sparas i
+  `sustainability_materiality_overrides`); "Godkänn" kör
+  tillräcklighetsprövningen direkt; (3) `/analys`: kompletteringsfrågor
+  (krävs/rekommenderas) besvaras med text, bilaga eller "uppgiften finns
+  inte" (`impactGapResponseStatus`), pröva igen eller kör slutanalysen; (4)
+  `/dashboard` (+ `?version=`): slutanalysen, "Uppdatera bolag" → ny
+  `update`-version med delta, "Exportera rapport" → PDF. Ett misslyckat
+  AI-steg lämnar versionen i föregående läge (bara en misslyckad uppdatering
+  blir `failed`). Inget publiceras automatiskt. Status: analysens `status`
+  (statusmaskinen `impactNextStep`) och bolagets `sustainability_status`
+  (`impactCompanyStatusFor`). Övriga sidor: Dokument, Historik (versioner +
+  AI-körningar), Anteckningar (`notes`), Bolagsuppgifter (inkl. radera
+  analysen — ledning; bolagskortet finns kvar), Jämförelser
+  (`/impactnavigator/jamfor`, sorterbar tabell).
 - **AI (`lib/ai/impact-analysis.ts`):** fyra isolerade Mistral-körningar
-  (`mistral-large-latest` → medium vid 429/5xx, temp 0.2, egen snäv
-  systemprompt, inga verktyg) som returnerar ETT JSON-objekt i den form den
-  gamla appen producerade; svaren normaliseras tolerant i `@platform/shared`
+  (`mistral-large-latest` → medium vid 429/5xx, temp 0.2, inga verktyg,
+  `response_format: json_object` — nytt alternativ i `callMistral`) med
+  originalets systemprompt per steg (`buildImpactSystemPrompt`: gemensam
+  prompt + stegprompt + frågeregler + OUTPUTFORMAT-block som ersätter Zod
+  structured outputs) och originalets JSON-underlag
+  (`buildImpact*AIInput`); svaren normaliseras tolerant i `@platform/shared`
   (`normalizeImpact*`, enhetstestade) — modellen skriver aldrig till
-  databasen. Underlag = bolagets resa + dokumenttext + svar (`buildImpactInput`,
-  cappat 90 000 tecken, kapning visas som varning). Tokens loggas i
-  `ai_usage_events` (surface `suggestions`), månadstaket prövas före varje
-  steg (§ 9.6), varje körning bokförs i `sustainability_ai_jobs`.
-  **EU-suveränt** — källans OpenAI (`gpt-5.6`) används inte; historiska
-  analyser bär sin provenans i `model_name`.
+  databasen. Tokens loggas i `ai_usage_events` (surface `suggestions`),
+  månadstaket prövas före varje steg (§ 9.6), varje körning bokförs i
+  `sustainability_ai_jobs`. **EU-suveränt** — källans OpenAI (`gpt-5.6`)
+  används inte; historiska analyser bär sin provenans i `model_name`.
+  **PDF-rapporten** (`lib/impact/report-pdf.ts`, route
+  `/api/impactnavigator/<id>/rapport`, staff/observer): deterministisk
+  rendering av den senaste färdiga slutanalysen i originalets avsnittsordning
+  med Movexums brand (pdf-lib, Sora/Nunito); AI-disclaimern står i omslag,
+  sidfot och "Om rapporten".
 - **Underlag:** route handler `/api/impactnavigator/documents` (§ 18.2-
   mönstret: staff-only, rate-limit, mime/storlek, textextraktion via
   kunskapsbasens pipe med personnummer-sanering, superuser-fallback bara vid
@@ -10512,11 +10540,13 @@ importeras så historiken följer med. Runbook + kodkarta:
   `FORCE_CREATE_RULES` + `startups`-patch; self-relationen via
   `patchCollection`), asserterat i `verify-baseline.mjs` (must-exist,
   `MUST_BE_STAFF_OR_OBSERVER`, `REQUIRED_APP_FIELDS`, `AI_DENYLIST`).
-- **Ytor:** `/impactnavigator` (lista: status, impactnivå, version,
-  underlagskvalitet, ansvarig), `/impactnavigator/ny` (befintligt bolagskort
-  eller nytt bolag + bolagets resa), `/impactnavigator/<startup>` (stegen,
-  underlag, väsentlighet, kompletteringar, slutanalys, uppdatering,
-  versioner, anteckningar → `notes`, AI-körningar). Bolagskortet →
+- **Ytor:** `/impactnavigator` (Alla bolag: sök på namn/bransch/resa,
+  filter på fas och övergripande bedömning, kort med status/fas/impactnivå,
+  Öppna → dashboard eller väsentlighet, Radera för ledning),
+  `/impactnavigator/jamfor`, `/impactnavigator/ny` (nytt bolag eller
+  befintligt bolagskort), `/impactnavigator/<startup>/{dashboard,
+  vasentlighet, analys, dokument, historik, anteckningar, installningar}`
+  (`lib/impact/shell.tsx` + `tabs.ts`). Bolagskortet →
   Utveckling & IRL har sektionen "Impact Navigator" med länk. Alla
   mutationer auditeras PII-fritt i `agent_actions` (bolagsnamn, version,
   status, antal — aldrig underlag/svar) och mappas i `feed/agent-log.ts`.
