@@ -380,8 +380,12 @@ function readError(err: unknown, what: string): string {
 }
 
 /** Bolagen i Impact Navigator = startups med en hållbarhetsstatus, plus övriga aktiva (för att starta en analys). */
-export async function listImpactCompanies(pb: PocketBase, tenantId: string): Promise<ReadResult<ImpactCompany> & { latest: Map<string, ImpactAssessment> }> {
+export async function listImpactCompanies(
+  pb: PocketBase,
+  tenantId: string
+): Promise<ReadResult<ImpactCompany> & { latest: Map<string, ImpactAssessment>; latestComplete: Map<string, ImpactAssessment> }> {
   const latest = new Map<string, ImpactAssessment>();
+  const latestComplete = new Map<string, ImpactAssessment>();
   let items: ImpactCompany[] = [];
   let error: string | undefined;
   try {
@@ -393,7 +397,7 @@ export async function listImpactCompanies(pb: PocketBase, tenantId: string): Pro
     });
     items = rows.map(rowToImpactCompany);
   } catch (err) {
-    return { items: [], latest, error: readError(err, 'Bolagslistan') };
+    return { items: [], latest, latestComplete, error: readError(err, 'Bolagslistan') };
   }
   try {
     const rows = await pb.collection(ASSESSMENTS).getFullList<AssessmentRow>({
@@ -402,12 +406,14 @@ export async function listImpactCompanies(pb: PocketBase, tenantId: string): Pro
       fields: 'id,startup,version,type,status,information_quality_score,dashboard,completed_at,created,source_created_at,model_name'
     });
     for (const row of rows) {
-      if (!latest.has(row.startup)) latest.set(row.startup, rowToAssessment(row));
+      const a = rowToAssessment(row);
+      if (!latest.has(row.startup)) latest.set(row.startup, a);
+      if (a.status === 'complete' && a.dashboard && !latestComplete.has(row.startup)) latestComplete.set(row.startup, a);
     }
   } catch (err) {
     error = readError(err, 'Analyserna');
   }
-  return { items, latest, error };
+  return { items, latest, latestComplete, error };
 }
 
 export async function getImpactCompany(pb: PocketBase, tenantId: string, startupId: string): Promise<ImpactCompany | null> {
@@ -434,6 +440,16 @@ export async function listAssessments(pb: PocketBase, tenantId: string, startupI
   } catch (err) {
     return { items: [], error: readError(err, 'Analyserna') };
   }
+}
+
+/** Senaste färdiga slutanalysen (dashboarden), annars null. */
+export function latestCompleteAssessment(items: readonly ImpactAssessment[]): ImpactAssessment | null {
+  return [...items].sort((a, b) => b.version - a.version).find((a) => a.status === 'complete' && a.dashboard) ?? null;
+}
+
+/** Senaste INITIAL-versionen som inte misslyckats — det guiden (steg 2–3) jobbar mot. */
+export function activeInitialAssessment(items: readonly ImpactAssessment[]): ImpactAssessment | null {
+  return [...items].sort((a, b) => b.version - a.version).find((a) => a.type === 'initial' && a.status !== 'failed') ?? null;
 }
 
 export async function getAssessment(pb: PocketBase, tenantId: string, id: string): Promise<ImpactAssessment | null> {
@@ -502,7 +518,7 @@ export async function listUpdateEvents(pb: PocketBase, tenantId: string, startup
   }
 }
 
-export async function listDocuments(pb: PocketBase, tenantId: string, startupId: string): Promise<ReadResult<ImpactDocument>> {
+export async function listDocuments(pb: PocketBase, tenantId: string, startupId: string, opts: { withText?: boolean } = {}): Promise<ReadResult<ImpactDocument & { text?: string }>> {
   try {
     const rows = await pb.collection(DOCUMENTS).getFullList<DocumentRow>({
       filter: pb.filter('tenant = {:t} && startup = {:s}', { t: tenantId, s: startupId }),
@@ -510,34 +526,42 @@ export async function listDocuments(pb: PocketBase, tenantId: string, startupId:
       fields: 'id,startup,assessment,update_event,gap_question,upload_stage,original_name,mime,size_bytes,file,extraction_status,extraction_warning,uploaded_by,created,source_created_at,extracted_text,expand.uploaded_by.id,expand.uploaded_by.display_name',
       expand: 'uploaded_by'
     });
-    return { items: rows.map(rowToDocument) };
+    return { items: rows.map((r) => (opts.withText ? { ...rowToDocument(r), text: (r.extracted_text ?? '').slice(0, 20000) } : rowToDocument(r))) };
   } catch (err) {
     return { items: [], error: readError(err, 'Dokumenten') };
   }
 }
 
 /** Dokument med text — det som matas till modellen. Hämtas separat (stora fält). */
-export async function listDocumentTexts(
-  pb: PocketBase,
-  tenantId: string,
-  startupId: string
-): Promise<Array<{ id: string; name: string; stage: ImpactUploadStage; text: string; assessment: string | null; updateEvent: string | null; createdAt: string }>> {
+export interface ImpactDocumentText {
+  id: string;
+  name: string;
+  stage: ImpactUploadStage;
+  /** Tom sträng när ingen text kunde läsas ut (dokumentet finns men matar inte analysen). */
+  text: string;
+  assessment: string | null;
+  updateEvent: string | null;
+  gapQuestion: string | null;
+  createdAt: string;
+}
+
+/** Alla dokument med sin text — det som matas till modellen. Hämtas separat (stora fält). */
+export async function listDocumentTexts(pb: PocketBase, tenantId: string, startupId: string): Promise<ImpactDocumentText[]> {
   const rows = await pb.collection(DOCUMENTS).getFullList<DocumentRow>({
     filter: pb.filter('tenant = {:t} && startup = {:s}', { t: tenantId, s: startupId }),
     sort: 'created',
-    fields: 'id,original_name,upload_stage,extracted_text,assessment,update_event,created,source_created_at'
+    fields: 'id,original_name,upload_stage,extracted_text,assessment,update_event,gap_question,created,source_created_at'
   });
-  return rows
-    .filter((r) => (r.extracted_text ?? '').trim().length > 0)
-    .map((r) => ({
-      id: r.id,
-      name: r.original_name,
-      stage: isImpactUploadStage(r.upload_stage) ? r.upload_stage : 'full_information',
-      text: r.extracted_text ?? '',
-      assessment: r.assessment || null,
-      updateEvent: r.update_event || null,
-      createdAt: r.source_created_at || r.created || ''
-    }));
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.original_name,
+    stage: isImpactUploadStage(r.upload_stage) ? r.upload_stage : 'full_information',
+    text: (r.extracted_text ?? '').trim(),
+    assessment: r.assessment || null,
+    updateEvent: r.update_event || null,
+    gapQuestion: r.gap_question || null,
+    createdAt: r.source_created_at || r.created || ''
+  }));
 }
 
 export async function getDocument(pb: PocketBase, tenantId: string, id: string): Promise<(ImpactDocument & { startup: string }) | null> {

@@ -1897,6 +1897,8 @@ export * from './contacts';
 export * from './contact-groups';
 export * from './feedback';
 export * from './impact-navigator';
+export * from './impact-prompts';
+export * from './impact-inputs';
 export * from './talent';
 export * from './agent-memory';
 export * from './funding';

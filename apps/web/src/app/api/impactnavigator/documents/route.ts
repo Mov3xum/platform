@@ -5,7 +5,7 @@ import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import { extractKnowledgeFromFile, KnowledgeError } from '@/lib/ai/knowledge';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { logAgentAction } from '@/lib/core/write';
-import { DOCUMENTS, getAssessment, getImpactCompany } from '@/lib/impact/data';
+import { DOCUMENTS, getAssessment, getGapQuestion, getImpactCompany } from '@/lib/impact/data';
 import { canManageImpact, isImpactUploadStage } from '@platform/shared';
 
 /**
@@ -80,6 +80,7 @@ export async function POST(request: Request): Promise<Response> {
   }
   const startupId = String(form.get('startup_id') ?? '').trim();
   const assessmentId = String(form.get('assessment_id') ?? '').trim();
+  const gapQuestionId = String(form.get('gap_question_id') ?? '').trim();
   const stage = String(form.get('stage') ?? 'full_information');
   if (!ID_RE.test(startupId)) return NextResponse.json({ error: 'Ogiltigt bolag.' }, { status: 400 });
   if (!isImpactUploadStage(stage)) return NextResponse.json({ error: 'Ogiltigt steg.' }, { status: 400 });
@@ -91,6 +92,12 @@ export async function POST(request: Request): Promise<Response> {
     if (!ID_RE.test(assessmentId)) return NextResponse.json({ error: 'Ogiltig analys.' }, { status: 400 });
     const a = await getAssessment(pb, user.tenant, assessmentId);
     if (!a || a.startup !== startupId) return NextResponse.json({ error: 'Analysen hittades inte.' }, { status: 404 });
+  }
+  if (gapQuestionId) {
+    if (!ID_RE.test(gapQuestionId)) return NextResponse.json({ error: 'Ogiltig fråga.' }, { status: 400 });
+    const q = await getGapQuestion(pb, user.tenant, gapQuestionId);
+    const a = q ? await getAssessment(pb, user.tenant, q.assessment) : null;
+    if (!q || !a || a.startup !== startupId) return NextResponse.json({ error: 'Frågan hittades inte.' }, { status: 404 });
   }
 
   const buffer = Buffer.from(await entry.arrayBuffer());
@@ -108,6 +115,7 @@ export async function POST(request: Request): Promise<Response> {
   fd.append('tenant', user.tenant);
   fd.append('startup', startupId);
   if (assessmentId) fd.append('assessment', assessmentId);
+  if (gapQuestionId) fd.append('gap_question', gapQuestionId);
   fd.append('uploaded_by', user.id);
   fd.append('upload_stage', stage);
   fd.append('original_name', (extracted?.filename || entry.name || 'dokument').slice(0, 300));
@@ -146,6 +154,6 @@ export async function POST(request: Request): Promise<Response> {
     record_id: rec.id,
     after_value: { startup_name: company.name, stage, size_bytes: entry.size, has_text: Boolean(extracted?.text), startup: startupId }
   });
-  revalidatePath(`/impactnavigator/${startupId}`);
-  return NextResponse.json({ ok: true, id: rec.id, hasText: Boolean(extracted?.text), warning: extractionWarning || undefined });
+  revalidatePath(`/impactnavigator/${startupId}`, 'layout');
+  return NextResponse.json({ ok: true, id: rec.id, name: extracted?.filename || entry.name || 'dokument', hasText: Boolean(extracted?.text), warning: extractionWarning || undefined });
 }
