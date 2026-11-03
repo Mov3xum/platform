@@ -302,7 +302,7 @@ export function ModuleEditor({
               )}
               {purpose === 'survey' && (
                 <div className="mx-t-12 mx-muted" style={{ marginTop: 6 }}>
-                  En enkät skapar aldrig lead. Svaren aggregeras med k-anonymitet och kan kopplas som indikator i Mål &amp; VP.
+                  En enkät skapar aldrig lead. Svaren aggregeras med k-anonymitet och kan kopplas som indikator i Måluppföljning.
                 </div>
               )}
             </div>

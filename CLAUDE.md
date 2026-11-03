@@ -7149,7 +7149,11 @@ slides. Ett **målträd per verksamhetsår**: fokusområde (Movexums fem) → m�
 med ägande team → indikatorer med måltal → kvartalsstatus. Indikatorer är
 antingen **beräknade** ur metrikregistret (§ 41) — värdet hämtas live och vid
 varje statusrapportering — eller **manuellt bedömda**. Modul `mal`
-("Mål & VP", Översikt-railen, staff/observer).
+("Måluppföljning" — hette "Mål & VP" t.o.m. 2026-11, Översikt-railen,
+staff/observer). Filterraden har knappen **Mina mål** (`GoalFilter.mine` =
+den inloggades id, URL `?mina=1` — alltid den inloggade, aldrig ett id ur
+URL:en): mål där hen är ägare av ett personligt mål ELLER utpekad ansvarig
+(`isMyGoal`, ren + enhetstestad).
 
 | Fil | Syfte |
 |-----|-------|

@@ -1532,7 +1532,7 @@ export const coreModules: ModuleDefinition[] = [
   },
   {
     id: 'mal',
-    title: 'Mål & VP',
+    title: 'Måluppföljning',
     description:
       'Verksamhetsplanens mål per fokusområde med indikatorer, måltal och kvartalsstatus — beräknade ur data eller manuellt bedömda. Ersätter måluppföljningen i slides.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
