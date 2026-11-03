@@ -786,6 +786,12 @@ export interface GoalFilter {
   level?: GoalLevel | 'none' | null;
   /** Ansvarig (users-id), eller `none` för mål utan ansvarig. */
   responsible?: string | null;
+  /**
+   * "Mina mål": users-id för den inloggade — mål där hen är ägare av ett
+   * personligt mål ELLER utpekad ansvarig (oavsett måltyp). Bredare än
+   * `responsible`, som bara matchar den som räknas som ansvarig.
+   */
+  mine?: string | null;
   /** Mål med minst en indikator i den statusen för kvartalet (`unreported` = inte rapporterad). */
   status?: GoalStatus | 'unreported' | null;
   focusArea?: GoalFocusArea | null;
@@ -819,6 +825,7 @@ export function goalMatchesFilter(node: GoalNode, filter: GoalFilter, quarter: Q
     const r = goalResponsibleId(g);
     if (filter.responsible === 'none' ? r !== null : r !== filter.responsible) return false;
   }
+  if (filter.mine && !isMyGoal(g, filter.mine)) return false;
   if (filter.status) {
     const hit = node.indicators.some((i) => {
       const e = i.byQuarter[quarter];
@@ -836,12 +843,26 @@ export function goalMatchesFilter(node: GoalNode, filter: GoalFilter, quarter: Q
   return true;
 }
 
+/** Är målet "mitt": jag äger det (personligt mål) eller är utpekad ansvarig. */
+export function isMyGoal(goal: Pick<Goal, 'owner_user' | 'responsible'>, userId: string): boolean {
+  if (!userId) return false;
+  return goal.owner_user === userId || goal.responsible === userId;
+}
+
 export function filterGoalNodes(nodes: readonly GoalNode[], filter: GoalFilter, quarter: Quarter): GoalNode[] {
   return nodes.filter((n) => goalMatchesFilter(n, filter, quarter));
 }
 
 export function isGoalFilterActive(filter: GoalFilter): boolean {
-  return !!(filter.team || filter.level || filter.responsible || filter.status || filter.focusArea || String(filter.query ?? '').trim());
+  return !!(
+    filter.team ||
+    filter.level ||
+    filter.responsible ||
+    filter.mine ||
+    filter.status ||
+    filter.focusArea ||
+    String(filter.query ?? '').trim()
+  );
 }
 
 export const GOAL_GROUPINGS = ['focus', 'team', 'level', 'responsible'] as const;

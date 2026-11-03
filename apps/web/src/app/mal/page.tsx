@@ -23,7 +23,7 @@ const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
 const LEAD_ROLES: Role[] = ['admin', 'incubator_lead'];
 
 /**
- * Mål & verksamhetsplan (CLAUDE.md § 42) — målträdet per verksamhetsår med
+ * Måluppföljning — mål & verksamhetsplan (CLAUDE.md § 42) — målträdet per verksamhetsår med
  * kvartalsstatus och live-värden ur metrikregistret (§ 41). Reads via
  * användarens token (RLS § 21); skrivningar via server actions → det delade
  * skrivlagret. Ingen AI-inferens på sidan.
@@ -51,6 +51,8 @@ export default async function MalPage({
     team: str('team') || null,
     level: levelRaw === 'none' || isGoalLevel(levelRaw) ? (levelRaw as GoalFilter['level']) : null,
     responsible: /^[a-zA-Z0-9_-]{1,64}$/.test(str('ansvarig')) ? str('ansvarig') : null,
+    // `?mina=1` = bara mina mål (ägare eller ansvarig) — alltid den inloggade, aldrig ett id ur URL:en.
+    mine: str('mina') === '1' ? user.id : null,
     status: statusRaw === 'unreported' || (GOAL_STATUSES as readonly string[]).includes(statusRaw) ? (statusRaw as GoalStatus | 'unreported') : null,
     focusArea: isGoalFocusArea(sp.fokus) ? sp.fokus : null,
     query: str('sok', 200) || null
@@ -76,7 +78,7 @@ export default async function MalPage({
 
   return (
     <PageShell
-      title="Mål & verksamhetsplan"
+      title="Måluppföljning"
       meta={
         <span className="text-sm text-foreground-subtle">
           {ws.period ? `${ws.period.title || ws.period.year} · ${ws.tree.indicatorCount} indikatorer` : 'Inget verksamhetsår ännu'}

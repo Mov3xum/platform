@@ -31,7 +31,7 @@ export default async function ImporteraMalPage({
     <PageShell
       title="Importera mål"
       tabs={[
-        { id: 'mal', label: 'Mål & VP', href: '/mal' },
+        { id: 'mal', label: 'Måluppföljning', href: '/mal' },
         { id: 'import', label: 'Importera', href: '/mal/import' }
       ]}
     >

@@ -101,7 +101,7 @@ export function GoalsPresentation({
               <Icon name="back" size={14} />
             </button>
             <h1 className="font-heading text-[22px] font-semibold leading-tight text-foreground">
-              {period ? period.title || `Verksamhetsplan ${period.year}` : 'Mål & verksamhetsplan'}
+              {period ? period.title || `Verksamhetsplan ${period.year}` : 'Måluppföljning'}
             </h1>
             <button
               type="button"

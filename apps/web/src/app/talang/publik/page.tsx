@@ -25,7 +25,7 @@ export default async function PublicTalentPage() {
             <li>Ni läser igenom texten under fliken Behov och publicerar. Bolaget kan aldrig publicera själv.</li>
             <li>Studenter registrerar sig på studentsidan och söker, eller blir föreslagna av er/bolaget utifrån den deterministiska rankningen.</li>
             <li>Bolaget ser en students namn och kontakt först när studenten sökt eller tackat ja. Dialog och match markeras av bolaget; utfallet (exjobb genomfört, anställd) registreras när det är klart.</li>
-            <li>Matchade uppdrag syns på bolagskortet och räknas i nyckeltalen (Mål &amp; VP). Studentprofiler gallras efter ett år om studenten inte förlänger.</li>
+            <li>Matchade uppdrag syns på bolagskortet och räknas i nyckeltalen (Måluppföljning). Studentprofiler gallras efter ett år om studenten inte förlänger.</li>
           </ol>
           <p className="mt-3 text-xs text-foreground-subtle">Ingen AI rankar eller bedömer studenter (EU AI Act bilaga III). Rättslig grund för studenterna är samtycke; profiler och intressen når aldrig AI-chatten.</p>
         </Panel>

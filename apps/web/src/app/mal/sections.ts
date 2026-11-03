@@ -51,6 +51,7 @@ export function goalsQuery(
   if (filter.team) p.set('team', filter.team);
   if (filter.level) p.set('niva', filter.level);
   if (filter.responsible) p.set('ansvarig', filter.responsible);
+  if (filter.mine) p.set('mina', '1');
   if (filter.status) p.set('status', filter.status);
   if (filter.focusArea) p.set('fokus', filter.focusArea);
   if (filter.query?.trim()) p.set('sok', filter.query.trim());

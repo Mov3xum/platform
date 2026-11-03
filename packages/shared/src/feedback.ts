@@ -68,7 +68,7 @@ export const FEEDBACK_AREAS: readonly FeedbackArea[] = [
   { id: 'hem', module: 'hem', label: 'Översikt (startsidan)', route: '/hem' },
   { id: 'idag', module: 'idag', label: 'Chatt / AI-agent', route: '/chatt' },
   { id: 'inkorg', module: 'inkorg', label: 'Mina uppgifter', route: '/inkorg' },
-  { id: 'mal', module: 'mal', label: 'Mål & verksamhetsplan', route: '/mal' },
+  { id: 'mal', module: 'mal', label: 'Måluppföljning', route: '/mal' },
   { id: 'arshjul', module: 'arshjul', label: 'Årshjul', route: '/arshjul' },
   { id: 'filer', module: 'filer', label: 'Filer', route: '/filer' },
   { id: 'inflode', module: 'inflode', label: 'Marknadsverktyg / Startupkompassen', route: '/inflode' },
