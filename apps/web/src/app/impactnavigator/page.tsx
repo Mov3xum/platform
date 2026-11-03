@@ -9,7 +9,7 @@ import { IMPACT_COMPARE_HREF, IMPACT_NEW_HREF, impactHref } from '@/lib/impact/t
 import { Badge, ImpactLevelBadge, ImpactStatusChip } from '@/components/impact/chips';
 import { AiNoticeBanner } from '@/components/impact/AiNoticeBanner';
 import { AutoSubmitSelect } from '@/components/impact/AutoSubmitSelect';
-import { btnPrimary, btnSecondary, inputClass, labelClass, noticeWarn } from '@/components/impact/ui';
+import { btnPrimary, btnSecondary, eyebrowAccent, inputClass, labelClass, noticeWarn } from '@/components/impact/ui';
 import { Icon } from '@/components/proto/Icon';
 import { ALL_PHASES, IMPACT_LEVELS, IMPACT_LEVEL_LABELS, canDeleteImpact, canManageImpact, isImpactLevel, type StartupPhase } from '@platform/shared';
 import { DeleteCompanyButton } from './DeleteCompanyButton';
@@ -22,8 +22,10 @@ const NOT_ASSESSED = 'NOT_ASSESSED';
  * Impact Navigator (CLAUDE.md § 56) — bolagsöversikten (originalets
  * /companies): sök på namn/bransch/beskrivning, filter på fas och övergripande
  * bedömning (impactnivå), kortrutnät med status/fas/nivå, "Öppna" (dashboard
- * om det finns en, annars väsentligheten) och Radera (ledning). Läser med
- * användarens token (RLS § 21: sustainability_* är staff/observer-only).
+ * om det finns en, annars väsentligheten) och Radera (ledning). Bara bolag
+ * som finns i Impact Navigator listas — övriga bolagskort väljs under "Skapa
+ * nytt bolag". Läser med användarens token (RLS § 21: sustainability_* är
+ * staff/observer-only).
  */
 export default async function ImpactNavigatorPage({ searchParams }: { searchParams: Promise<{ q?: string; phase?: string; analysis?: string }> }) {
   const user = await requireUser();
@@ -49,7 +51,6 @@ export default async function ImpactNavigatorPage({ searchParams }: { searchPara
       const level = latestComplete.get(c.id)?.dashboard?.impactLevel.level;
       return analysis === NOT_ASSESSED ? !level : level === analysis;
     });
-  const withoutAnalysis = items.filter((c) => !c.status && !latest.has(c.id) && c.startupStatus === 'active');
 
   return (
     <PageShell
@@ -74,8 +75,8 @@ export default async function ImpactNavigatorPage({ searchParams }: { searchPara
         {error ? <p className={noticeWarn}>{error}</p> : null}
 
         <section aria-labelledby="companies-title">
-          <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand">
-            <span className="h-1.5 w-1.5 rounded-full bg-brand" aria-hidden="true" />
+          <p className={eyebrowAccent}>
+            <span className="h-1.5 w-1.5 rounded-full bg-movexum-ljusgron" aria-hidden="true" />
             Bolagsöversikt
           </p>
           <h2 id="companies-title" className="mt-2 font-heading text-2xl font-semibold text-foreground">
@@ -133,7 +134,7 @@ export default async function ImpactNavigatorPage({ searchParams }: { searchPara
                     <Link href={IMPACT_NEW_HREF} className="text-link underline">
                       Skapa det första bolaget
                     </Link>{' '}
-                    eller starta en analys på ett befintligt bolagskort nedan.
+                    — ett nytt bolag eller ett befintligt bolagskort.
                   </>
                 ) : (
                   'Movexum-personal startar den första analysen.'
@@ -145,19 +146,6 @@ export default async function ImpactNavigatorPage({ searchParams }: { searchPara
           </div>
         ) : null}
 
-        {canManage && withoutAnalysis.length > 0 ? (
-          <section className="rounded-2xl border border-default bg-surface p-5 shadow-sm shadow-movexum-svart/5">
-            <h3 className="font-heading text-base font-semibold text-foreground">Aktiva bolag utan analys</h3>
-            <p className="mb-3 text-xs text-foreground-muted">Starta en analys på ett befintligt bolagskort — namn, fas och bransch följer med.</p>
-            <div className="flex flex-wrap gap-2">
-              {withoutAnalysis.map((c) => (
-                <Link key={c.id} href={`${IMPACT_NEW_HREF}?startup=${c.id}`} className="rounded-full border border-default bg-canvas px-3 py-1 text-sm text-foreground-muted transition hover:bg-canvas-subtle hover:text-foreground">
-                  {c.name}
-                </Link>
-              ))}
-            </div>
-          </section>
-        ) : null}
       </div>
     </PageShell>
   );
@@ -165,7 +153,8 @@ export default async function ImpactNavigatorPage({ searchParams }: { searchPara
 
 function CompanyCard({ company, level, hasDashboard, canDelete }: { company: ImpactCompany; level: string | null; hasDashboard: boolean; canDelete: boolean }) {
   return (
-    <article className="group relative flex min-h-[270px] flex-col overflow-hidden rounded-2xl border border-default bg-surface p-5 shadow-sm shadow-movexum-svart/5 transition hover:border-strong hover:shadow-md hover:shadow-movexum-svart/10">
+    <article className="group relative flex min-h-[270px] flex-col overflow-hidden rounded-2xl border border-default bg-surface p-5 shadow-sm shadow-movexum-svart/5 transition duration-300 hover:-translate-y-1 hover:border-movexum-gron/40 hover:shadow-lg hover:shadow-movexum-svart/10">
+      <span aria-hidden="true" className="absolute inset-x-8 top-0 h-px origin-center scale-x-0 bg-gradient-to-r from-transparent via-movexum-ljusgron to-transparent transition-transform duration-300 group-hover:scale-x-100" />
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="truncate font-heading text-lg font-semibold text-foreground">{company.name}</h3>

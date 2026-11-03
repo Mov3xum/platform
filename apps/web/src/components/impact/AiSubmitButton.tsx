@@ -96,8 +96,8 @@ function AiAnalysisOverlay({ title, description, steps, fallbackHref }: { title:
     <div className="fixed inset-0 z-50 grid place-items-center bg-movexum-svart/30 p-4 backdrop-blur-sm" role="status" aria-live="polite">
       <div className="w-full max-w-lg rounded-2xl border border-default bg-surface p-6 shadow-lg shadow-movexum-svart/10">
         <div className="flex items-start gap-4">
-          <div className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-brand text-brand-foreground">
-            <span className="absolute h-14 w-14 animate-ping rounded-xl bg-brand/30" />
+          <div className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-movexum-gron text-movexum-vit dark:bg-movexum-ljusgron dark:text-movexum-morkgron">
+            <span className="absolute h-14 w-14 animate-ping rounded-xl bg-movexum-gron/30" />
             <Icon name="search" size={26} />
           </div>
           <div>
@@ -109,7 +109,7 @@ function AiAnalysisOverlay({ title, description, steps, fallbackHref }: { title:
         <div className="mt-6 space-y-3">
           {steps.map((label, i) => (
             <div key={label} className="flex items-center gap-3 rounded-xl border border-default bg-canvas-subtle px-3 py-2">
-              <span className={`h-2.5 w-2.5 animate-pulse rounded-full bg-brand ${i === 1 ? 'delay-150' : i === 2 ? 'delay-300' : ''}`} />
+              <span className={`h-2.5 w-2.5 animate-pulse rounded-full bg-movexum-gron ${i === 1 ? 'delay-150' : i === 2 ? 'delay-300' : ''}`} />
               <span className="text-sm text-foreground">{label}</span>
             </div>
           ))}

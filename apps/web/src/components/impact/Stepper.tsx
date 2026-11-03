@@ -19,7 +19,7 @@ export function Stepper({ current, startupId }: { current: 1 | 2 | 3; startupId:
         const active = number === currentStep;
         const content = (
           <>
-            <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold mx-tnum ${active || completed ? 'bg-brand text-brand-foreground' : 'bg-canvas-muted text-foreground-subtle'}`}>
+            <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold mx-tnum ${active || completed ? 'bg-movexum-gron text-movexum-vit dark:bg-movexum-ljusgron dark:text-movexum-morkgron' : 'bg-canvas-muted text-foreground-subtle'}`}>
               {number}
             </span>
             <span className="min-w-0">
@@ -28,9 +28,9 @@ export function Stepper({ current, startupId }: { current: 1 | 2 | 3; startupId:
             </span>
           </>
         );
-        const className = `group flex items-center gap-3 rounded-xl border p-3 transition ${active ? 'border-strong bg-surface shadow-sm shadow-movexum-svart/5' : 'border-default bg-surface'}`;
+        const className = `group flex items-center gap-3 rounded-xl border p-3 transition ${active ? 'border-movexum-gron/40 bg-movexum-pastell-gron/40 shadow-sm shadow-movexum-svart/5 dark:bg-movexum-morkgron/20' : 'border-default bg-surface'}`;
         return step.href ? (
-          <Link key={step.label} href={impactHref(startupId, step.href)} aria-current={active ? 'step' : undefined} className={`${className} hover:border-strong hover:bg-canvas-subtle`}>
+          <Link key={step.label} href={impactHref(startupId, step.href)} aria-current={active ? 'step' : undefined} className={`${className} hover:border-movexum-gron/40 hover:bg-movexum-pastell-gron/30 dark:hover:bg-movexum-morkgron/20`}>
             {content}
           </Link>
         ) : (

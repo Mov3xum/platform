@@ -153,7 +153,7 @@ export function FileDropInput({
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
         className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-6 text-center transition ${
-          dragging ? 'border-brand bg-canvas-subtle' : 'border-default bg-canvas hover:border-strong hover:bg-canvas-subtle'
+          dragging ? 'border-movexum-gron bg-movexum-pastell-gron/40 dark:bg-movexum-morkgron/20' : 'border-default bg-canvas hover:border-strong hover:bg-canvas-subtle'
         } ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
       >
         <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-canvas-muted text-foreground-muted">

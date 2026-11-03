@@ -19,6 +19,8 @@ const TONE = {
   orange: 'bg-movexum-pastell-orange text-movexum-morkorange dark:bg-movexum-morkorange/40 dark:text-movexum-pastell-orange',
   purple: 'bg-movexum-pastell-lila text-movexum-morklila dark:bg-movexum-morklila/40 dark:text-movexum-pastell-lila',
   blue: 'bg-movexum-pastell-bla text-movexum-djupbla dark:bg-movexum-morkbla/60 dark:text-movexum-pastell-bla',
+  /** Originalets info-ton: blek mint + forest-grön text. */
+  greenSoft: 'bg-movexum-pastell-gron/70 text-movexum-gron ring-1 ring-inset ring-movexum-gron/15 dark:bg-movexum-morkgron/30 dark:text-movexum-ljusgron dark:ring-movexum-ljusgron/20',
   neutral: 'bg-canvas-muted text-foreground-muted'
 } as const;
 export type ChipTone = keyof typeof TONE;
@@ -33,7 +35,7 @@ export function Chip({ tone, children, title }: { tone: ChipTone; children: Reac
 
 /** Originalets Badge-toner: good/warn/risk/info/neutral. */
 export function Badge({ tone = 'neutral', children }: { tone?: 'good' | 'warn' | 'risk' | 'info' | 'neutral'; children: React.ReactNode }) {
-  const map: Record<string, ChipTone> = { good: 'green', warn: 'yellow', risk: 'orange', info: 'blue', neutral: 'neutral' };
+  const map: Record<string, ChipTone> = { good: 'green', warn: 'yellow', risk: 'orange', info: 'greenSoft', neutral: 'neutral' };
   return <Chip tone={map[tone]}>{children}</Chip>;
 }
 

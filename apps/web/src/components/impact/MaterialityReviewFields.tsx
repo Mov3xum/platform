@@ -92,7 +92,7 @@ export function MaterialityReviewFields({
                     <ul className="mt-2 space-y-2 text-sm text-foreground-muted">
                       {aspect.materialityDrivers.map((driver) => (
                         <li key={driver} className="flex gap-2">
-                          <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />
+                          <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-movexum-gron dark:bg-movexum-ljusgron" />
                           <span>
                             <span className="font-medium text-foreground">{IMPACT_MATERIALITY_DRIVER_LABELS[driver]}:</span> {IMPACT_MATERIALITY_DRIVER_DESCRIPTIONS[driver]}
                           </span>
@@ -205,7 +205,7 @@ export function MaterialityReviewFields({
                     <p className="mt-2 max-w-3xl text-foreground-muted">{aspect.rationale}</p>
                   </div>
                   {editable ? (
-                    <button type="button" onClick={() => setPromotedCodes((c) => (c.includes(aspect.code) ? c : [...c, aspect.code]))} className="shrink-0 rounded-xl bg-brand px-3 py-2 text-sm font-medium text-brand-foreground transition hover:bg-brand-hover">
+                    <button type="button" onClick={() => setPromotedCodes((c) => (c.includes(aspect.code) ? c : [...c, aspect.code]))} className="shrink-0 rounded-xl bg-movexum-gron px-3 py-2 text-sm font-medium text-movexum-vit transition hover:bg-movexum-morkgron dark:bg-movexum-ljusgron dark:text-movexum-morkgron dark:hover:bg-movexum-gron dark:hover:text-movexum-vit">
                       Markera som väsentligt
                     </button>
                   ) : null}

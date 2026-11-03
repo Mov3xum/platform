@@ -10540,6 +10540,12 @@ kodkarta: `docs/integrations/impact-navigator.md`.
   `FORCE_CREATE_RULES` + `startups`-patch; self-relationen via
   `patchCollection`), asserterat i `verify-baseline.mjs` (must-exist,
   `MUST_BE_STAFF_OR_OBSERVER`, `REQUIRED_APP_FIELDS`, `AI_DENYLIST`).
+- **Utseende (2026-11):** modulen bär originalets GRÖNA accent och
+  sidomeny — inom profilen: Movexum grön/mörkgrön/ljusgrön/pastell grön
+  (`components/impact/ui.ts`), aldrig emerald/stone; fokusringar § 3.4;
+  per bolag renderar `ImpactSideNav` originalets meny i `lib/impact/shell.tsx`
+  (inga flikar). Landningssidan visar bara bolag i Impact Navigator —
+  befintliga bolagskort väljs under "Skapa nytt bolag".
 - **Ytor:** `/impactnavigator` (Alla bolag: sök på namn/bransch/resa,
   filter på fas och övergripande bedömning, kort med status/fas/impactnivå,
   Öppna → dashboard eller väsentlighet, Radera för ledning),

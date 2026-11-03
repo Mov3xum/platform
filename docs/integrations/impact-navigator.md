@@ -45,6 +45,18 @@ promptar, samma fem impactnivåer, samma granskningssemantik — men PocketBase
 i stället för Prisma, Mistral i stället för OpenAI, Movexums design-tokens,
 RLS § 21 och audit i `agent_actions`.
 
+**Utseende (2026-11).** Modulen efterliknar originalets uttryck inom
+Movexums grafiska profil (CLAUDE.md § 2–4): originalets forest/mint-palett är
+mappad till Movexum grön (`#4a7d4a`, primärknappar och accent), mörkgrön
+(hover), ljusgrön (prickar, dark mode) och pastell grön (aktiv meny, mjuka
+ytor) — aldrig emerald/stone/rose. Varje bolag har originalets **sidomeny**
+(`components/impact/ImpactSideNav.tsx` i `lib/impact/shell.tsx`: Alla bolag →
+Dashboard … Anteckningar → Jämförelser, med Uppdatera bolag / Exportera
+rapport längst ned) i stället för plattformens flikar. Landningssidan listar
+bara bolag som finns i Impact Navigator (ingen chip-lista över alla aktiva
+bolagskort) — ett befintligt bolagskort väljs under "Skapa nytt bolag".
+Fokusringar följer § 3.4; PDF-rapporten använder samma gröna toner.
+
 | Fil | Syfte | Motsvarighet i originalet |
 |---|---|---|
 | `backend/pocketbase-schema/migrations/1700000206_create_sustainability_analysis.js` | Schema (startups-fält + sex kollektioner), RLS | `prisma/schema.prisma` |
@@ -61,7 +73,7 @@ RLS § 21 och audit i `agent_actions`.
 | `apps/web/src/app/impactnavigator/page.tsx` | Alla bolag: sök, fas- och nivåfilter, kortrutnät, Öppna, Radera | `app/companies/page.tsx` |
 | `apps/web/src/app/impactnavigator/jamfor/page.tsx` | Sorterbar jämförelsetabell | `app/companies/[id]/compare` |
 | `apps/web/src/app/impactnavigator/ny/**` | Intro (fyra steg) + "Steg 1 av 4 — Berätta om bolaget" (idébeskrivning obligatorisk) | `app/companies/new` |
-| `apps/web/src/app/impactnavigator/[startupId]/{vasentlighet,analys,dashboard,dokument,historik,anteckningar,installningar}` | Bolagets sidor (originalets sidomeny som flikar); `lib/impact/shell.tsx` är skalet, `lib/impact/tabs.ts` sökvägarna | `app/companies/[id]/*` |
+| `apps/web/src/app/impactnavigator/[startupId]/{vasentlighet,analys,dashboard,dokument,historik,anteckningar,installningar}` | Bolagets sidor med originalets sidomeny (`components/impact/ImpactSideNav.tsx`); `lib/impact/shell.tsx` är skalet, `lib/impact/tabs.ts` sökvägarna | `app/companies/[id]/*` |
 | `apps/web/src/components/impact/*` | Chips/badges, `Stepper`, `AiSubmitButton` (överlagring, 3 steg, timeout), `FileDropInput`, `MaterialityReviewFields`, `GapResponseFields`, `DashboardView`, `CompanyCreationIntro`, bolagskortets sektion | `src/components/*` |
 | `backend/pocketbase-schema/scripts/import-sustainability-dump.mjs` (+ `lib/`, test) | Import av den gamla appens dump | — |
 

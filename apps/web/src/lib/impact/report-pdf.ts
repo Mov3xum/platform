@@ -10,6 +10,7 @@ import {
   getImpactAreaAssessmentItems,
   getImpactDashboardInformationComment,
   getImpactLevelLabel,
+  movexumPalette,
   type ImpactAreaAssessmentItem,
   type ImpactDashboard
 } from '@platform/shared';
@@ -33,14 +34,15 @@ export interface ImpactReportInput {
 
 const A4: [number, number] = [595.28, 841.89];
 const MARGIN = 54;
-const PRIMARY = rgb01(BRAND.primary);
-const ACCENT = rgb01(BRAND.accent);
+// Originalets forest/mint-palett, i Movexums gröna toner.
+const PRIMARY = rgb01(BRAND.success);
+const ACCENT = rgb01(movexumPalette.ljusgron);
 const INK = rgb01(BRAND.ink);
 const INK_SOFT = rgb01(BRAND.inkSoft);
 const MUTED = rgb01(BRAND.muted);
 const SURFACE = rgb01(BRAND.surface);
 const BORDER = rgb01(BRAND.border);
-const PASTEL = rgb01(BRAND.pastellBla);
+const PASTEL = rgb01(BRAND.pastellGron);
 const WARN = rgb01(BRAND.warning);
 const PAPER = rgb01(BRAND.paper);
 

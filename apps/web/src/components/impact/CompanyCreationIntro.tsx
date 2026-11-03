@@ -27,7 +27,7 @@ export function CompanyCreationIntro() {
       }}
     >
       <section
-        className="relative w-full max-w-6xl overflow-hidden rounded-2xl bg-movexum-morkbla text-movexum-vit shadow-2xl"
+        className="relative w-full max-w-6xl overflow-hidden rounded-2xl bg-[linear-gradient(135deg,var(--movexum-morkgron)_0%,var(--movexum-gron)_55%,var(--movexum-morkgron)_100%)] text-movexum-vit shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <button
@@ -39,8 +39,8 @@ export function CompanyCreationIntro() {
         >
           <Icon name="x" size={18} />
         </button>
-        <div aria-hidden="true" className="pointer-events-none absolute -right-20 -top-24 h-72 w-72 rounded-full bg-movexum-bla/25 blur-3xl" />
-        <div aria-hidden="true" className="pointer-events-none absolute -bottom-32 left-1/3 h-72 w-72 rounded-full bg-movexum-lila/25 blur-3xl" />
+        <div aria-hidden="true" className="pointer-events-none absolute -right-20 -top-24 h-72 w-72 rounded-full bg-movexum-ljusgron/30 blur-3xl" />
+        <div aria-hidden="true" className="pointer-events-none absolute -bottom-32 left-1/3 h-72 w-72 rounded-full bg-movexum-morkgron/40 blur-3xl" />
 
         <div className="relative grid gap-10 px-6 py-8 pr-16 sm:px-8 sm:py-10 sm:pr-20 lg:px-12 lg:py-12 xl:grid-cols-[0.8fr_1.2fr] xl:gap-14 xl:pr-16">
           <div className="flex flex-col justify-between">
@@ -58,7 +58,7 @@ export function CompanyCreationIntro() {
             </div>
             <div className="mt-8">
               <div className="flex items-start gap-3 text-sm leading-6 text-movexum-vit/90">
-                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-movexum-gron text-movexum-vit">
+                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-movexum-ljusgron text-movexum-morkgron">
                   <Icon name="check" size={11} />
                 </span>
                 <p>Du godkänner eller korrigerar alltid verktygets bild innan analysen går vidare.</p>
@@ -66,7 +66,7 @@ export function CompanyCreationIntro() {
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="mt-7 inline-flex items-center gap-2 rounded-xl bg-movexum-vit px-4 py-2.5 text-sm font-semibold text-movexum-morkbla shadow-sm transition hover:bg-movexum-pastell-bla focus:outline-none focus:ring-2 focus:ring-movexum-vit"
+                className="mt-7 inline-flex items-center gap-2 rounded-xl bg-movexum-vit px-4 py-2.5 text-sm font-semibold text-movexum-morkgron shadow-sm transition hover:bg-movexum-pastell-gron focus:outline-none focus:ring-2 focus:ring-movexum-vit"
               >
                 Gå till steg 1
                 <Icon name="arrow" size={15} />
@@ -79,13 +79,13 @@ export function CompanyCreationIntro() {
               <li key={step.number} className="group relative rounded-xl border border-movexum-vit/10 bg-movexum-vit/[0.08] p-5 transition-colors hover:border-movexum-vit/20 hover:bg-movexum-vit/[0.12]">
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-xs tracking-widest text-movexum-vit/65 mx-tnum">STEG {step.number}</span>
-                  <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${step.current ? 'bg-movexum-gron text-movexum-vit' : 'bg-movexum-vit/10 text-movexum-vit'}`}>
+                  <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${step.current ? 'bg-movexum-ljusgron text-movexum-morkgron' : 'bg-movexum-vit/10 text-movexum-vit'}`}>
                     <Icon name={step.icon} size={17} />
                   </span>
                 </div>
                 <h2 className="mt-5 font-heading text-base font-semibold">{step.title}</h2>
                 <p className="mt-2 text-sm leading-6 text-movexum-vit/75">{step.description}</p>
-                {step.current ? <span className="mt-4 inline-flex rounded-full bg-movexum-gron/30 px-2.5 py-1 text-xs font-medium text-movexum-pastell-gron">Du är här</span> : null}
+                {step.current ? <span className="mt-4 inline-flex rounded-full bg-movexum-vit/15 px-2.5 py-1 text-xs font-medium text-movexum-pastell-gron">Du är här</span> : null}
               </li>
             ))}
           </ol>

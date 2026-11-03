@@ -9,9 +9,12 @@ import { PageShell } from '@/components/PageShell';
 import { phaseLabels } from '@/lib/labels';
 import { AiNoticeBanner } from '@/components/impact/AiNoticeBanner';
 import { ImpactStatusChip } from '@/components/impact/chips';
+import { ImpactSideNav } from '@/components/impact/ImpactSideNav';
+import { Icon } from '@/components/proto/Icon';
+import { accentBg, btnPrimary, btnSecondary, noticeWarn } from '@/components/impact/ui';
 import { canDeleteImpact, canManageImpact, type StartupPhase } from '@platform/shared';
 import { getImpactCompany, latestCompleteAssessment, listAssessments, type ImpactAssessment, type ImpactCompany } from './data';
-import { IMPACT_COMPARE_HREF, impactHref, impactReportHref, impactTabs } from './tabs';
+import { impactHref, impactReportHref } from './tabs';
 
 export interface ImpactCompanyContext {
   user: SessionUser;
@@ -34,15 +37,18 @@ export async function loadImpactCompanyContext(startupId: string): Promise<Impac
   return { user, pb, company, assessments: assessments.items, assessmentsError: assessments.error, canManage: canManageImpact(user.roles), canDelete: canDeleteImpact(user.roles) };
 }
 
-/** Sidskalet per bolag: titel, status, flikar (originalets sidomeny) och knapparna Uppdatera bolag / Exportera rapport. */
+/**
+ * Sidskalet per bolag — originalets layout: en sidomeny till vänster
+ * (varumärkesblock, navigation, knapparna Uppdatera bolag / Exportera rapport)
+ * och innehållet till höger. Plattformens PageShell bär titel, status och
+ * länken till bolagskortet.
+ */
 export function ImpactCompanyShell({ ctx, children, meta }: { ctx: ImpactCompanyContext; children: ReactNode; meta?: ReactNode }) {
   const { company, assessments } = ctx;
   const hasDashboard = Boolean(latestCompleteAssessment(assessments));
-  const btn = 'inline-flex items-center rounded-full border border-default bg-surface px-3 py-1.5 text-sm font-medium text-foreground-muted transition hover:bg-canvas-subtle hover:text-foreground';
   return (
     <PageShell
       title={company.name}
-      tabs={impactTabs(company.id)}
       meta={
         <span className="flex flex-wrap items-center gap-2 text-sm text-foreground-muted">
           <ImpactStatusChip status={company.status} />
@@ -53,33 +59,46 @@ export function ImpactCompanyShell({ ctx, children, meta }: { ctx: ImpactCompany
         </span>
       }
       actions={
-        <div className="flex flex-wrap gap-2">
-          {hasDashboard && ctx.canManage ? (
-            <Link href={`${impactHref(company.id, 'dashboard')}#update-company`} className="inline-flex items-center rounded-full bg-brand px-3 py-1.5 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover">
-              Uppdatera bolag
-            </Link>
-          ) : null}
-          {hasDashboard ? (
-            <a href={impactReportHref(company.id)} className={btn}>
-              Exportera rapport
-            </a>
-          ) : null}
-          <Link href={IMPACT_COMPARE_HREF} className={btn}>
-            Jämförelser
-          </Link>
-          <Link href={`/startups/${company.id}`} className={btn}>
-            Bolagskortet
-          </Link>
-          <Link href="/impactnavigator" className={btn}>
-            Alla bolag
-          </Link>
-        </div>
+        <Link href={`/startups/${company.id}`} className={btnSecondary}>
+          Bolagskortet
+          <Icon name="arrow-up-right" size={14} />
+        </Link>
       }
     >
-      <div className="space-y-5">
-        <AiNoticeBanner generated={assessments.some((a) => a.dashboard || a.materiality)} />
-        {ctx.assessmentsError ? <p className="rounded-xl border border-movexum-gul/40 bg-movexum-pastell-gul px-4 py-3 text-sm text-movexum-morkgul">{ctx.assessmentsError}</p> : null}
-        {children}
+      <div className="grid gap-6 lg:grid-cols-[17rem_minmax(0,1fr)] lg:items-start">
+        <aside className="lg:sticky lg:top-4">
+          <div className="flex flex-col gap-5 rounded-2xl border border-default bg-surface p-4 shadow-sm shadow-movexum-svart/5">
+            <div className="flex items-center gap-3 px-1">
+              <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${accentBg}`}>
+                <Icon name="spark" size={18} />
+              </span>
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-foreground-subtle">Movexum</p>
+                <p className="truncate font-heading text-sm font-semibold text-foreground">Impact Navigator</p>
+              </div>
+            </div>
+            <ImpactSideNav startupId={company.id} />
+            {hasDashboard ? (
+              <div className="flex flex-col gap-2 border-t border-default pt-4">
+                {ctx.canManage ? (
+                  <Link href={`${impactHref(company.id, 'dashboard')}#update-company`} className={btnPrimary}>
+                    <Icon name="rotate-ccw" size={15} />
+                    Uppdatera bolag
+                  </Link>
+                ) : null}
+                <a href={impactReportHref(company.id)} className={btnSecondary}>
+                  <Icon name="download" size={15} />
+                  Exportera rapport
+                </a>
+              </div>
+            ) : null}
+          </div>
+        </aside>
+        <div className="min-w-0 space-y-5">
+          <AiNoticeBanner generated={assessments.some((a) => a.dashboard || a.materiality)} />
+          {ctx.assessmentsError ? <p className={noticeWarn}>{ctx.assessmentsError}</p> : null}
+          {children}
+        </div>
       </div>
     </PageShell>
   );

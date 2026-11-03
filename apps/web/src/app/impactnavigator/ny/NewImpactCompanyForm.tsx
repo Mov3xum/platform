@@ -96,8 +96,8 @@ export function NewImpactCompanyForm({ startups, preselectedStartup }: { startup
     <div id="company-form" className="scroll-mt-6">
       <div className="mb-6">
         <div className="flex items-center gap-3">
-          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand text-sm font-semibold text-brand-foreground">1</span>
-          <p className="text-sm font-medium uppercase tracking-wide text-brand">Steg 1 av 4</p>
+          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-movexum-gron text-sm font-semibold text-movexum-vit dark:bg-movexum-ljusgron dark:text-movexum-morkgron">1</span>
+          <p className="text-sm font-medium uppercase tracking-wide text-movexum-gron dark:text-movexum-ljusgron">Steg 1 av 4</p>
         </div>
         <h2 id="company-form-heading" tabIndex={-1} className="mt-3 font-heading text-3xl font-semibold tracking-tight text-foreground outline-none">
           Berätta om bolaget
@@ -244,7 +244,7 @@ export function NewImpactCompanyForm({ startups, preselectedStartup }: { startup
 function SectionHeading({ id, icon, title, text }: { id: string; icon: string; title: string; text: string }) {
   return (
     <div className="mb-4 flex items-center gap-3 border-b border-default pb-4">
-      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-movexum-pastell-bla text-brand dark:bg-canvas-muted">
+      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-movexum-pastell-gron text-movexum-gron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron">
         <Icon name={icon} size={18} />
       </span>
       <div>
@@ -259,7 +259,7 @@ function SectionHeading({ id, icon, title, text }: { id: string; icon: string; t
 
 function ModeButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
-    <button type="button" onClick={onClick} className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${active ? 'bg-brand text-brand-foreground' : 'border border-default text-foreground-muted hover:bg-canvas-subtle'}`}>
+    <button type="button" onClick={onClick} className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${active ? 'bg-movexum-gron text-movexum-vit dark:bg-movexum-ljusgron dark:text-movexum-morkgron' : 'border border-default text-foreground-muted hover:bg-canvas-subtle'}`}>
       {children}
     </button>
   );
