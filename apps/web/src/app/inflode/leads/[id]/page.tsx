@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { contactValueLabel } from '@platform/shared';
 import { notFound, redirect } from 'next/navigation';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
@@ -169,6 +170,21 @@ export default async function LeadDetailPage({
               <Field label="E-post" value={lead.email} mono />
               <Field label="Telefon" value={lead.phone} mono />
               <Field label="Organisation" value={lead.organization} />
+              <Field label="Kommuntillhörighet" value={contactValueLabel('kommun', lead.kommun)} />
+              <Field
+                label="Hur hen kom i kontakt med Movexum"
+                value={contactValueLabel('referral_channel', lead.referral_channel)}
+              />
+              <Field label="Övriga teammedlemmar" value={lead.team_members} multiline />
+              {lead.founder_gender && (
+                <div>
+                  <div className="mx-label">Kön på grundare</div>
+                  <div className="mx-t-13">{contactValueLabel('founder_gender', lead.founder_gender)}</div>
+                  <div className="mx-mono mx-t-xs mx-muted" style={{ marginTop: 2 }}>
+                    Frivillig uppgift för Vinnovas könsstatistik — används aldrig i bedömningen.
+                  </div>
+                </div>
+              )}
               {lead.contact_preference && (
                 <div>
                   <div className="mx-label">Kontaktpreferens</div>

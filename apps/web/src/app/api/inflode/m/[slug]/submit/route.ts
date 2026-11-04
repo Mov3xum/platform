@@ -14,8 +14,10 @@ import { PREVIEW_SOURCE_KEY, type Attribution } from '@/lib/compass/types';
 import {
   attachAiSummary,
   buildSubmissionEntries,
+  leadFieldsFromContact,
   moduleWantsLead,
-  parseContactPreference
+  parseContactPreference,
+  parseContactSubmission
 } from '@/lib/compass/lead-capture';
 
 export const runtime = 'nodejs';
@@ -25,6 +27,8 @@ interface SubmitBody {
   answers: Record<string, string | string[]>;
   attribution?: Attribution;
   contact_preference?: string;
+  /** Avsnittet "Dina uppgifter" (§ 23.11) — valideras mot modulens konfiguration. */
+  contact?: unknown;
 }
 
 /** Tar emot svaren från ModuleWizard (inloggad admin-preview) och skapar lead + conversation. */
@@ -75,7 +79,9 @@ export async function POST(
 
   // Delad whitelist-mappning (dataminimering, GDPR § 5) — samma som publika
   // flödet, ingen divergerande kopia.
-  const leadPayload = mapAnswersToLead(answers);
+  const contact = parseContactSubmission(mod, body.contact);
+  if (contact.error) return NextResponse.json({ error: contact.error }, { status: 400 });
+  const leadPayload = { ...mapAnswersToLead(answers), ...leadFieldsFromContact(contact.values) };
   const attribution = pickAttribution(body.attribution);
 
   // Steg 4-valet: modulen kan vara konfigurerad att INTE skapa lead.

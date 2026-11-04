@@ -156,7 +156,11 @@ export const PII_FIELD_PATTERNS: readonly string[] = [
   'ip_hash',
   // Bedömning excellens (§ 51.4): manuella svar med grundarnas namn/andel/
   // engagemang och fri motiveringstext — når aldrig modellen.
-  'screening_facts'
+  'screening_facts',
+  // Startupkompassen (§ 23.11): övriga teammedlemmars namn + e-post i fritext
+  // (compass_leads.team_members) — tredjeparts-PII, fältmaskas som helhet.
+  // Kön på grundare (compass_leads.founder_gender) fångas av `gender` ovan.
+  'team_members'
 ];
 
 /** Är kollektionen helt utestängd från agentens query-verktyg? */

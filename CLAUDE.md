@@ -4107,6 +4107,81 @@ alls och en avbruten chatt såg ut som en slutförd.
 
 ---
 
+### 23.11 Avsnittet "Dina uppgifter" sist i flödet (2026-11-04)
+
+**Behov (inflödesansvarig).** Idébeskrivningen ska avslutas med ett avsnitt
+där besökaren fyller i namn på idéägaren, e-post, telefonnummer, kön på
+grundare (kvinna / man / mixat team), en ruta med namn + e-post till ev.
+övriga teammedlemmar, kommuntillhörighet (fasta val) och hur hen kom i
+kontakt med Movexum (fasta val). Tidigare fanns bara namn/e-post (+ telefon/
+organisation när krävda) i chattens avslutssteg och quizets kontaktsteg, och
+formuläret hade inget avslutssteg alls.
+
+- **EN komponent, tre flöden.** `components/compass/ContactSection.tsx`
+  renderar avsnittet ur modulens konfiguration och används av chattens
+  avslutssteg (`ChatClosingForm`), quizets sista steg (`ModuleQuiz`) och
+  — nytt — formulärets sista steg (`ModuleWizard`, "Snart klar"). Fält i fast
+  ordning: namn, e-post, telefon, organisation, kön på grundare, övriga
+  teammedlemmar, kommun, kontaktväg. Kontaktpreferensen (§ 23.6) ligger kvar
+  på samma steg.
+- **Källa av sanning:** den rena, enhetstestade
+  `packages/shared/src/compass-contact.ts` — `CONTACT_FIELD_KEYS`,
+  `CONTACT_FIELD_META`, de fasta valen (`FOUNDER_GENDER_OPTIONS`,
+  `KOMMUN_OPTIONS` = Gävleborgs tio kommuner + "annan kommun i Sverige" /
+  "utanför Sverige", `REFERRAL_CHANNEL_OPTIONS`), konfigurationen
+  (`ContactSectionConfig`: `hidden | optional | required` per fält),
+  `cleanContactValues` (dolda fält släpps, fasta val måste vara kända nycklar,
+  fritext trimmas/cappas/personnummer-saneras, e-post formatvalideras) och
+  `missingContactField`. Klient och server kör SAMMA funktioner — klienten är
+  aldrig gränsen (`parseContactSubmission` i `lib/compass/lead-capture.ts`
+  används av `/api/public/m/[slug]/{submit,quiz-result,complete}` och
+  admin-previewens `/api/inflode/m/[slug]/{submit,quiz-result}`).
+- **Konfiguration per modul** (`compass_modules.contact_fields`, json,
+  migration **1700000208**): steg 4 i modul-admin ("Dina uppgifter —
+  avsnittet sist i flödet") har en rad per fält med Visas inte / Frivillig /
+  Obligatorisk; ersätter de tre kryssrutorna. De äldre booleanerna
+  `require_email/phone/organization` HÄRLEDS ur konfigurationen vid sparning
+  (`legacyRequirementsFromSection`) så äldre ytor ser samma krav. **Saknat
+  fält ⇒ legacy** (`legacyContactSection`): chat/quiz visar namn + e-post och
+  telefon/organisation bara när krävda — exakt som förut; wizard får inget
+  avslutssteg. Ingen befintlig modul ändrar alltså utseende förrän någon
+  sparar steg 4. **Nya intag-moduler** (UI och chattens
+  `create_compass_module`) får `CONTACT_SECTION_DEFAULT`: namn + e-post
+  obligatoriska, telefon/kön/teammedlemmar/kommun/kontaktväg frivilliga;
+  enkäter (§ 43) samlar inga kontaktuppgifter. Schema-drift: sparas
+  konfigurationen mot en instans utan migrationen svarar
+  `updateModuleAction` med ett tydligt fel (§ 24.4-invarianten).
+- **Lead-fält** (`compass_leads`, samma migration): `founder_gender`
+  (select), `team_members` (text ≤ 2000), `kommun` (text ≤ 80, nyckel),
+  `referral_channel` (text ≤ 60, nyckel). Kommun/kontaktväg lagras som
+  nycklar (text, inte select) så listorna kan utökas i koden utan migration;
+  okända nycklar avvisas av `cleanContactValues`. Speglat i `setup-via-api.mjs`
+  (compass_leads + compass_modules inline-defs). Avsnittets värden vinner över
+  det som mappats ur frågorna (`leadFieldsFromContact`); tomma värden skriver
+  aldrig över något.
+- **GDPR § 5 / art. 9 (bindande).** Kön på grundare behandlas som art. 9-
+  klass precis som `startups.founder_gender` (§ 10.2, DPIA
+  `docs/privacy/dpia-startups.md`): fältet kan **aldrig** göras obligatoriskt
+  (`neverRequired` — normaliseringen sänker `required` till `optional`, UI:t
+  visar inget sådant val), hjälptexten säger att det bara används för
+  Vinnovas könsstatistik och aldrig i bedömningen, det **fältmaskas för AI**
+  (`gender`-mönstret i `redaction.ts`), **mejlas aldrig** i inflödesnotisen
+  och **exporteras aldrig** i CSV:n — det visas bara i lead-vyn för behörig
+  personal. Övriga teammedlemmar är tredjeparts-PII: personnummer-saneras,
+  fältmaskas för AI (`team_members` i `PII_FIELD_PATTERNS`, låst i
+  `redaction.test.ts`), exporteras inte per lead, men mejlas i notisen och
+  visas i lead-vyn (personalen ska kunna följa upp teamet). Kommun och
+  kontaktväg är verksamhetsdata: lead-vyn, notisen och CSV-exporten
+  (kolumnerna Kommun/Kontaktväg). Inget av fälten når AI-sammanställningen
+  (`buildSubmissionEntries` läser bara frågornas svar) eller den kurerade
+  AI-kontexten. Rättslig grund oförändrad (berättigat intresse +
+  samtyckesgrinden).
+- **Riskklass:** oförändrad (publik AI-chatt = begränsad; formulär/quiz n/a)
+  — ingen ny AI-funktion, bara fler validerade fält i leadet.
+- **Inte byggt:** aggregerad statistik per kommun/kontaktväg i
+  `/inflode/analysis` och k-anonym könsfördelning per period — nästa steg när
+  underlaget finns.
+
 ## 24. AI-sorterat filarkiv — ämnes-/bolagsmappar (/filer)
 
 ### 24.1 Översikt

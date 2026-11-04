@@ -7,6 +7,11 @@
  * listvyn och statistiken så ingen yta räknar annorlunda.
  */
 
+import {
+  missingContactField,
+  type ContactSectionConfig,
+  type ContactValues
+} from '@platform/shared';
 import type { CompassQuestion } from './types';
 
 export type LeadCompletion = 'in_progress' | 'completed' | 'abandoned';
@@ -55,19 +60,6 @@ export function closingQuestions(questions: CompassQuestion[]): CompassQuestion[
   return questions.filter((q) => q.required);
 }
 
-export interface ClosingContact {
-  name?: string;
-  email?: string;
-  phone?: string;
-  organization?: string;
-}
-
-export interface ClosingRequirements {
-  requireEmail?: boolean;
-  requirePhone?: boolean;
-  requireOrganization?: boolean;
-}
-
 function isAnswered(value: unknown): boolean {
   if (Array.isArray(value)) return value.length > 0;
   return typeof value === 'string' && value.trim().length > 0;
@@ -75,25 +67,21 @@ function isAnswered(value: unknown): boolean {
 
 /**
  * Första saknade obligatoriska uppgiften i chattens avslutssteg, som ett
- * svenskt felmeddelande — eller null när allt är ifyllt. Samma kontroll körs
- * i klienten (direkt feedback) och server-side (klienten är aldrig gränsen).
+ * svenskt felmeddelande — eller null när allt är ifyllt: först modulens
+ * obligatoriska frågor, sedan avsnittet "Dina uppgifter" (§ 23.11) enligt
+ * modulens konfiguration. Samma kontroll körs i klienten (direkt feedback)
+ * och server-side (klienten är aldrig gränsen).
  */
 export function missingClosingField(input: {
   questions: CompassQuestion[];
   answers: Record<string, string | string[]>;
-  contact: ClosingContact;
-  requirements: ClosingRequirements;
+  contact: ContactValues;
+  config: ContactSectionConfig;
 }): string | null {
   for (const q of closingQuestions(input.questions)) {
     if (!isAnswered(input.answers[q.key])) return `Fältet "${q.prompt}" är obligatoriskt.`;
   }
-  const { contact, requirements } = input;
-  if (requirements.requireEmail && !isAnswered(contact.email)) return 'E-post krävs.';
-  if (requirements.requirePhone && !isAnswered(contact.phone)) return 'Telefon krävs.';
-  if (requirements.requireOrganization && !isAnswered(contact.organization)) {
-    return 'Organisation krävs.';
-  }
-  return null;
+  return missingContactField(input.contact, input.config);
 }
 
 /** PII-fri notering om var i flödet besökaren var när hen lämnade. */

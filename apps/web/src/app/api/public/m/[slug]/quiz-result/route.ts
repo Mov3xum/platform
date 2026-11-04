@@ -11,8 +11,10 @@ import {
   attachAiSummary,
   buildSubmissionEntries,
   finalizeLead,
+  leadFieldsFromContact,
   moduleWantsLead,
-  parseContactPreference
+  parseContactPreference,
+  parseContactSubmission
 } from '@/lib/compass/lead-capture';
 import { notifyNewInflow } from '@/lib/compass/notify';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
@@ -27,7 +29,8 @@ const MAX_PER_WINDOW = 15;
 
 interface QuizBody {
   answers: Record<string, string | string[]>;
-  contact?: { name?: string; email?: string; phone?: string; organization?: string };
+  /** Avsnittet "Dina uppgifter" (§ 23.11) — valideras mot modulens konfiguration. */
+  contact?: unknown;
   /** Enkätens subjekt ur `?om=<id>` (§ 43). */
   subject?: string;
   attribution?: Attribution;
@@ -41,12 +44,6 @@ interface QuizBody {
 // anropare nollställa per-IP-gränsen genom att rotera headern.
 function clientIp(req: Request): string {
   return clientIpFromRequest(req);
-}
-
-function cleanContact(v: unknown, max: number): string | undefined {
-  if (typeof v !== 'string') return undefined;
-  const t = v.trim();
-  return t ? t.slice(0, max) : undefined;
 }
 
 // Beräknar quiz-resultatet SERVER-side (poäng kan inte manipuleras i klienten)
@@ -80,16 +77,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     return NextResponse.json({ error: 'Samtycke krävs.' }, { status: 400 });
   }
 
-  const contact = body.contact || {};
-  if (module.require_email && !cleanContact(contact.email, 254)) {
-    return NextResponse.json({ error: 'E-post krävs.' }, { status: 400 });
-  }
-  if (module.require_phone && !cleanContact(contact.phone, 50)) {
-    return NextResponse.json({ error: 'Telefon krävs.' }, { status: 400 });
-  }
-  if (module.require_organization && !cleanContact(contact.organization, 200)) {
-    return NextResponse.json({ error: 'Organisation krävs.' }, { status: 400 });
-  }
+  // Avsnittet "Dina uppgifter" (§ 23.11): klienten är aldrig gränsen.
+  const contact = parseContactSubmission(module, body.contact);
+  if (contact.error) return NextResponse.json({ error: contact.error }, { status: 400 });
+  const contactFields = leadFieldsFromContact(contact.values);
 
   const questions = await getPublicModuleQuestions(pb, module.id);
   const quizQuestions: QuizQuestion[] = questions.map((q) => ({
@@ -134,10 +125,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     moduleSlug: slug,
     sessionToken: body.sessionToken,
     fields: {
-    name: cleanContact(contact.name, 200) || 'Anonym',
-    email: cleanContact(contact.email, 254),
-    phone: cleanContact(contact.phone, 50),
-    organization: cleanContact(contact.organization, 200),
+    ...contactFields,
+    name: contactFields.name || 'Anonym',
     idea_category: bucket?.key,
     idea_summary: bucket ? `Quiz "${module.name}": ${bucket.title}` : `Quiz "${module.name}"`,
     ...attribution,

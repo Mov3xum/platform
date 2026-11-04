@@ -11,8 +11,10 @@ import { closingQuestions, missingClosingField } from '@/lib/compass/completion'
 import {
   buildSubmissionEntries,
   finalizeLead,
+  leadFieldsFromContact,
   moduleWantsLead,
-  parseContactPreference
+  parseContactPreference,
+  parseContactSubmission
 } from '@/lib/compass/lead-capture';
 import { notifyNewInflow } from '@/lib/compass/notify';
 import { getPublicModuleQuestions, mapAnswersToLead, pickAttribution, resolvePublicModule } from '@/lib/compass/public';
@@ -29,18 +31,13 @@ const MAX_PER_WINDOW = 10;
 interface CompleteBody {
   sessionToken?: string;
   answers?: Record<string, string | string[]>;
-  contact?: { name?: unknown; email?: unknown; phone?: unknown; organization?: unknown };
+  /** Avsnittet "Dina uppgifter" (§ 23.11) — valideras mot modulens konfiguration. */
+  contact?: unknown;
   contact_preference?: string;
   /** Besökaren bad om sammanfattningen per e-post (till adressen i `contact.email`). */
   send_summary?: boolean;
   attribution?: Attribution;
   consent?: boolean;
-}
-
-function cleanContact(v: unknown, max: number): string | undefined {
-  if (typeof v !== 'string') return undefined;
-  const t = v.trim();
-  return t ? t.slice(0, max) : undefined;
 }
 
 /**
@@ -81,23 +78,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
 
   const questions = await getPublicModuleQuestions(pb, module.id);
   const answers = body.answers && typeof body.answers === 'object' ? body.answers : {};
-  const contact = {
-    name: cleanContact(body.contact?.name, 200),
-    email: cleanContact(body.contact?.email, 254),
-    phone: cleanContact(body.contact?.phone, 50),
-    organization: cleanContact(body.contact?.organization, 200)
-  };
-  // Klienten är aldrig gränsen — samma kontroll som i avslutsformuläret.
-  const missing = missingClosingField({
-    questions,
-    answers,
-    contact,
-    requirements: {
-      requireEmail: module.require_email,
-      requirePhone: module.require_phone,
-      requireOrganization: module.require_organization
-    }
-  });
+  // Avsnittet "Dina uppgifter" (§ 23.11). Klienten är aldrig gränsen — samma
+  // kontroll som i avslutsformuläret.
+  const parsed = parseContactSubmission(module, body.contact);
+  const contact = parsed.values;
+  const missing = missingClosingField({ questions, answers, contact, config: parsed.config });
   if (missing) return NextResponse.json({ error: missing }, { status: 400 });
   if (body.send_summary && !contact.email) {
     return NextResponse.json({ error: 'Ange en e-postadress för att få sammanfattningen skickad.' }, { status: 400 });
@@ -152,10 +137,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
       sessionToken: body.sessionToken,
       fields: {
         ...mapped,
-        name: contact.name || mapped.name,
-        email: contact.email || mapped.email,
-        phone: contact.phone || mapped.phone,
-        organization: contact.organization || mapped.organization,
+        ...leadFieldsFromContact(contact),
         contact_preference: parseContactPreference(body.contact_preference),
         ai_summary: summary,
         ...pickAttribution(body.attribution),

@@ -7,8 +7,10 @@ import { pickAttribution } from '@/lib/compass/public';
 import {
   attachAiSummary,
   buildSubmissionEntries,
+  leadFieldsFromContact,
   moduleWantsLead,
-  parseContactPreference
+  parseContactPreference,
+  parseContactSubmission
 } from '@/lib/compass/lead-capture';
 import { scoreQuiz, resolveBucket, isResultBucketArray, type QuizQuestion } from '@platform/shared';
 import { PREVIEW_SOURCE_KEY, type Attribution } from '@/lib/compass/types';
@@ -18,15 +20,10 @@ export const dynamic = 'force-dynamic';
 
 interface QuizBody {
   answers: Record<string, string | string[]>;
-  contact?: { name?: string; email?: string; phone?: string; organization?: string };
+  /** Avsnittet "Dina uppgifter" (§ 23.11) — valideras mot modulens konfiguration. */
+  contact?: unknown;
   attribution?: Attribution;
   contact_preference?: string;
-}
-
-function cleanContact(v: unknown, max: number): string | undefined {
-  if (typeof v !== 'string') return undefined;
-  const t = v.trim();
-  return t ? t.slice(0, max) : undefined;
 }
 
 // Intern (inloggad admin-preview) av ett quiz-flöde. Speglar den publika
@@ -69,16 +66,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     return NextResponse.json({ error: 'Modulen är inte ett quiz.' }, { status: 400 });
   }
 
-  const contact = body.contact || {};
-  if (mod.require_email && !cleanContact(contact.email, 254)) {
-    return NextResponse.json({ error: 'E-post krävs.' }, { status: 400 });
-  }
-  if (mod.require_phone && !cleanContact(contact.phone, 50)) {
-    return NextResponse.json({ error: 'Telefon krävs.' }, { status: 400 });
-  }
-  if (mod.require_organization && !cleanContact(contact.organization, 200)) {
-    return NextResponse.json({ error: 'Organisation krävs.' }, { status: 400 });
-  }
+  // Avsnittet "Dina uppgifter" (§ 23.11) — samma validering som publika routen.
+  const contact = parseContactSubmission(mod, body.contact);
+  if (contact.error) return NextResponse.json({ error: contact.error }, { status: 400 });
+  const contactFields = leadFieldsFromContact(contact.values);
 
   const questions = await listQuestionsForModule(pb, mod.id);
   const quizQuestions: QuizQuestion[] = questions.map((q) => ({
@@ -98,10 +89,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
 
   const attribution = pickAttribution(body.attribution);
   const lead = await createLead(pb, user.tenant, {
-    name: cleanContact(contact.name, 200) || 'Anonym',
-    email: cleanContact(contact.email, 254),
-    phone: cleanContact(contact.phone, 50),
-    organization: cleanContact(contact.organization, 200),
+    ...contactFields,
+    name: contactFields.name || 'Anonym',
     idea_category: bucket?.key,
     idea_summary: bucket ? `Quiz "${mod.name}": ${bucket.title}` : `Quiz "${mod.name}"`,
     ...attribution,
