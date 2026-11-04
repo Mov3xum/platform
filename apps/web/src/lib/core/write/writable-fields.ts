@@ -150,6 +150,9 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
     success_message: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
     target_audience: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
     consent_note: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    // Startsida i flödet (§ 23.11): beskrivning + syfte innan första frågan.
+    start_page_title: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    start_page_body: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
     flow_type: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
     // Mall för den publika sidan (§ 23.7) — ren presentation, normaliseras
     // (okänt ⇒ classic) i skrivlagret.

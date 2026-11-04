@@ -342,8 +342,11 @@ export function ModuleEditor({
                   defaultValue={mod.hero_eyebrow || ''}
                   className="mx-input"
                   style={{ marginTop: 4 }}
-                  placeholder="STARTUPKOMPASSEN"
+                  placeholder="t.ex. MOVEXUM"
                 />
+                <span className="mx-t-12 mx-muted" style={{ display: 'block', marginTop: 4 }}>
+                  Tomt = ingen text ovanför rubriken.
+                </span>
               </label>
             </div>
             <label className="mx-label">
@@ -355,6 +358,56 @@ export function ModuleEditor({
                 style={{ marginTop: 4, minHeight: 60 }}
               />
             </label>
+
+            <div
+              style={{
+                display: 'grid',
+                gap: 10,
+                padding: 12,
+                borderRadius: 12,
+                border: '1px solid var(--mx-line)',
+                background: 'var(--mx-paper)'
+              }}
+            >
+              <div>
+                <div className="mx-label">Startsida innan {flowType === 'chat' ? 'chatten' : 'frågorna'}</div>
+                <div className="mx-t-12 mx-muted" style={{ marginTop: 4 }}>
+                  En första sida inne i flödet där besökaren läser vad modulen är till för och vad ni
+                  vill ha ut av svaren, innan hen börjar svara. Tom text = ingen startsida. Finns en
+                  samtyckestext (steg 4) visas den på samma sida, med en enda startknapp.
+                </div>
+              </div>
+              <label className="mx-label">
+                Rubrik på startsidan
+                <input
+                  type="text"
+                  name="start_page_title"
+                  defaultValue={mod.start_page_title || ''}
+                  className="mx-input"
+                  style={{ marginTop: 4 }}
+                  placeholder="Innan du börjar"
+                  maxLength={200}
+                />
+              </label>
+              <label className="mx-label">
+                Beskrivning och syfte
+                <textarea
+                  name="start_page_body"
+                  defaultValue={mod.start_page_body || ''}
+                  className="mx-textarea"
+                  style={{ marginTop: 4, minHeight: 140 }}
+                  maxLength={6000}
+                  placeholder={
+                    'Vad är det här till för och vad händer med svaren?\n\n' +
+                    'Tomrad ger nytt stycke. Rader som börjar med "- " blir en punktlista, ' +
+                    '"## " blir en mellanrubrik.'
+                  }
+                />
+                <span className="mx-t-12 mx-muted" style={{ display: 'block', marginTop: 4 }}>
+                  Skriv inte personuppgifter här — texten är publik.
+                </span>
+              </label>
+            </div>
 
             <div className="mx-label" style={{ opacity: layoutMeta.media === 'none' ? 0.6 : 1 }}>
               Bild eller video

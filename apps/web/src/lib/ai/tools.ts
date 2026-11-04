@@ -1056,7 +1056,11 @@ export function buildChatTools(
         name: 'update_compass_module_field',
         description:
           'Uppdaterar ETT fält på en befintlig intag-modul (namn, beskrivning, ' +
-          'välkomst-/tacktext, målgrupp, samtyckesnot, flödestyp eller mall). ' +
+          'välkomst-/tacktext, målgrupp, samtyckesnot, startsida, flödestyp eller mall). ' +
+          'Fälten `start_page_title`/`start_page_body` är STARTSIDAN inne i ' +
+          'flödet: en beskrivning av vad modulen är till för och vad Movexum ' +
+          'vill ha ut av svaren, som besökaren läser innan första frågan ' +
+          '(stycken skiljs av tomrad, rader med "- " blir punkter). ' +
           'Fältet `layout` väljer mall för hela den publika sidan: classic ' +
           '(bild överst), split_left (bild till vänster), split_right (bild till ' +
           'höger), cover (heltäckande bakgrund), panel (färgpanel) eller minimal ' +
@@ -1076,6 +1080,8 @@ export function buildChatTools(
                 'success_message',
                 'target_audience',
                 'consent_note',
+                'start_page_title',
+                'start_page_body',
                 'flow_type',
                 'layout'
               ],
@@ -4537,7 +4543,10 @@ async function runUpdateCompassModuleField(
     'success_message',
     'target_audience',
     'consent_note',
-    'flow_type'
+    'start_page_title',
+    'start_page_body',
+    'flow_type',
+    'layout'
   ];
   if (!allowed.includes(field)) {
     return { ok: false, error: `field måste vara en av: ${allowed.join(', ')}.` };

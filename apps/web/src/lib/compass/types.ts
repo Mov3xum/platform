@@ -206,9 +206,20 @@ export interface CompassModule {
   theme_color?: string;
   intro_message?: string;
   // Startupkompassen — branded publik sida + quiz (migration 1700000108)
+  /**
+   * Liten text ovanför rubriken på den publika sidan. Tom ⇒ ingen eyebrow
+   * (sedan 2026-11; tidigare föll sidan tillbaka på "STARTUPKOMPASSEN").
+   */
   hero_eyebrow?: string;
   welcome_title?: string;
   welcome_body?: string;
+  /**
+   * Startsida INUTI flödet (migration 1700000208, § 23.11): rubrik + text
+   * med beskrivning och syfte som besökaren läser innan första frågan/
+   * chatten. Tom text ⇒ ingen startsida.
+   */
+  start_page_title?: string;
+  start_page_body?: string;
   /** Omslagsbild (filnamn på compass_modules.hero_image, migration 1700000122). */
   hero_image?: string;
   /** Omslagsvideo (filnamn på compass_modules.hero_video, migration 1700000141). */
