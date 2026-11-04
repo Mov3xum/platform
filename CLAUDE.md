@@ -10654,10 +10654,27 @@ kodkarta: `docs/integrations/impact-navigator.md`.
   rendering av den senaste färdiga slutanalysen i originalets avsnittsordning
   med Movexums brand (pdf-lib, Sora/Nunito); AI-disclaimern står i omslag,
   sidfot och "Om rapporten".
+- **Lease, tidsgräns, mockläge (2026-11, porterat från originalet):**
+  medan ett steg körs bär versionens `input_hash` ett analys-lease
+  (`packages/shared/src/impact-lease.ts`); en andra begäran får
+  `analysis-running` och sidorna visar "pågår" i stället för knappar; ett
+  lease äldre än tidsgränsen + 60 s (minst 330 s) återtas och pågående
+  jobb markeras `failed` — ett avbrutet steg låser aldrig en version för
+  gott. Efter ett lyckat steg bär `input_hash` SHA-256 av underlaget. Varje
+  steg har 240 s tidsgräns och högst 2 omförsök (env `IMPACT_<STEG>_TIMEOUT_MS`,
+  `IMPACT_<STEG>_MAX_RETRIES`), och utfallet blir originalets felkoder och
+  svenska texter per yta (`lib/impact/messages.ts`); väsentlighets- och
+  gapsidan visar dessutom senaste misslyckade körningens orsak. **Mockläge**
+  (`packages/shared/src/impact-mock.ts` = originalets MockAIService):
+  `IMPACT_AI_MOCK_MODE=true`, eller automatiskt utan `MISTRAL_API_KEY` när
+  `NODE_ENV` inte är `production` (lokal dev/test); `model_name = 'mock'`
+  syns alltid. "Ta bort" i
+  uppladdningsytan raderar dokumentet på servern (det matar aldrig analysen
+  i smyg), och formuläret spärras medan en uppladdning pågår.
 - **Underlag:** route handler `/api/impactnavigator/documents` (§ 18.2-
   mönstret: staff-only, rate-limit, mime/storlek, textextraktion via
   kunskapsbasens pipe med personnummer-sanering, superuser-fallback bara vid
-  PB v0.23.4:s tysta regel-nekande). Filproxy
+  PB v0.23.4:s tysta regel-nekande; PB:s fältfel svaras i klartext). Filproxy
   `/api/impactnavigator/documents/[id]/file` (protected, tenant-scopad).
   Importerade dokument har text men ingen fil (originalen låg i Vercel Blob).
 - **RLS (§ 21.3):** list/view staff/observer; create pinnar tenant +
@@ -10717,94 +10734,7 @@ kodkarta: `docs/integrations/impact-navigator.md`.
   individer; människa granskar). GDPR § 5: bolagsdata; fritext saneras; UI
   varnar för personuppgifter; `cascadeDelete` tenant → startup → analys.
   Ingen DPIA ännu — skrivs före produktion om dokument med personuppgifter
-  väntas. Inte byggt: chatt-verktyg mot analyserna, PDF-export, SSO/extern
-  domän (medvetet — modulen lever på app.movexum.se som allt annat).
-
----
-
-## 57. Användaraktivitet — hjälp nya användare igång (2026-11)
-
-### 57.1 Översikt
-
-Inställningar → **Användare** visar per konto hur personen använder
-plattformen: **senast inloggad**, antal inloggningar, **senast aktiv** (och
-på vilken sida), aktiva dagar de senaste 30 dagarna (dagsremsa), **mest
-använda sidor** (staplar per modul) och — det viktigaste för introduktionen
-— **sidor som ligger i personens sidmeny men aldrig öppnats**. Listan har
-filtren **Aldrig inloggad · Vilande · Aktiva** och varje rad bär en status
-("Aktiv för 2 h sedan" / "Vilande · för 6 veckor sedan" / "Aldrig
-inloggad"); hubben (`/installningar`) visar "N aldrig inloggade" på
-Användare-kortet. Personen ser **samma uppgifter om sig själv** under Mitt
-konto → **Din aktivitet** (`/konto#aktivitet`).
-
-**Syfte och gräns (bindande).** Underlaget finns för att hjälpa användare
-igång och se var en genomgång gör mest nytta. Det är **inte ett
-prestationsmått** och får inte användas för uppföljning av enskilda
-medarbetares arbetsinsats (samma princip som belastningen i § 29.7). Bygg
-aldrig: per-sida-/per-post-loggar, tidsmätning per session, IP/user agent,
-"vem tittade på vilket bolag", eller export/rankning av personal.
-
-| Fil | Syfte |
-|-----|-------|
-| `packages/shared/src/user-activity.ts` (+ `.test.ts`) | REN modul: `moduleIdForPath` (längsta route vinner, alias slås ihop), `applyVisit`/`applyLogin` (returnerar ny post, rensar gamla modulrader + dagar utanför fönstret), `activityStatus` (never/active/dormant), `activeDaysWithin`, `topModules`, `neverOpenedModules`, `formatRelativeTime`, tolerant `normalizeUserActivity` |
-| `backend/pocketbase-schema/migrations/1700000209_create_user_activity.js` | Collection `user_activity` |
-| `apps/web/src/lib/user-activity/record.server.ts` | ENDA skrivvägen: `recordLogin`, `recordVisit` (superuser EFTER verifierad session; serialiserat per användare; throttle per modul `VISIT_THROTTLE_MS` = 60 s; best-effort) |
-| `apps/web/src/lib/user-activity/data.server.ts` | `loadTenantActivity` (ledningen, RLS; superuser bara vid tyst regel-nekande § 21.3) + `loadMyActivity` |
-| `apps/web/src/app/api/activity/visit/route.ts` | Beacon-route: session ur `getCurrentUser`, modul-id valideras mot `coreModules`, rate-limit 120/5 min per användare (bara räknade besök belastar) |
-| `apps/web/src/components/proto/ActivityBeacon.tsx` | Klient i `ProtoShell`: POST:ar modul-id (aldrig sökväg) när sidmenyns modul byts; samma modul igen först efter 5 min; `keepalive`, svaret ignoreras |
-| `apps/web/src/components/user-activity/ActivityOverview.tsx` | Delad vy (`ActivityOverview`, `ActivityStatusChip`) för Användare och Mitt konto |
-| `apps/web/src/app/api/auth/login/route.ts`, `lib/actions/auth.ts` | `recordLogin` efter lyckad `authWithPassword` (fire-and-forget) |
-
-### 57.2 Datamodell — `user_activity` (migration 1700000209)
-
-En rad per användare (unikt index på `user`): `tenant`/`user` (cascade),
-`first_login_at`, `last_login_at`, `login_count`, `last_seen_at`,
-`last_module` (modul-id), `modules` (json `{ [modulId]: { visits, first_at,
-last_at } }`), `active_days` (json, svenska kalenderdatum). Fälten ligger
-**inte** på `users`: `users.viewRule` är tenant-bred (alla skulle se
-varandras aktivitet) och fältlåset 1700000174 hade behövt utökas.
-
-- **Dataminimering (GDPR § 5):** aggregat per MODUL (sida i sidmenyn) —
-  aldrig sökväg, post, bolag, IP, user agent eller innehåll. `active_days`
-  rullande 90 dagar (`ACTIVE_DAYS_WINDOW`), modulrader utan besök på 365
-  dagar (`MODULE_STAT_RETENTION_DAYS`) rensas vid nästa skrivning. Ett
-  "besök" är ett per modul och throttle-fönster, inte en sidvisning.
-  Raden kaskadraderas med kontot (art. 17).
-- **Rättslig grund:** berättigat intresse (introduktion och stöd till
-  användare av ett internt verktyg). **Transparens (art. 13/15):** Mitt
-  konto visar personens egen rad med syfte och vem som ser den.
-- **RLS (§ 21.3):** create/update/delete = **null** (bara servern — en
-  användare ska inte kunna PATCH:a sin egen eller någon annans aktivitet);
-  list/view = ledningen i samma tenant (admin/incubator_lead, `:each ?=`)
-  ELLER personen själv (skalär `@request.auth.id = user`). Coach, mentor,
-  observer och bolagsmedlemmar ser aldrig andras aktivitet.
-  `verify-baseline.mjs` asserterar det (`verifyUserActivityRules`,
-  `MUST_BE_SERVER_CREATE_ONLY`, must-exist); speglat i `setup-via-api.mjs`.
-- **AI:** `user_activity` är **denylistad** (`lib/ai/redaction.ts` +
-  `AI_DENYLIST`) — när/hur ofta någon använder plattformen når aldrig en
-  modell. Riskklass (EU AI Act): n/a — ingen inferens, ingen profilering.
-
-### 57.3 Flöde och robusthet
-
-- **Inloggning:** båda inloggningsvägarna anropar `recordLogin` efter
-  lyckad autentisering; ett fel där påverkar aldrig inloggningen.
-- **Besök:** `ActivityBeacon` i skalet (alla inloggade, även bolagsmedlemmar)
-  mappar `pathname` → modul-id med `moduleIdForPath(pathname, coreModules)`
-  (`/installningar/anvandare` ⇒ `anvandare`, `/toolbox` ⇒ `agenter`;
-  `/konto`, `/login` ⇒ inget). Servern litar bara på sessionen och på att
-  id:t finns i modulregistret. Personen kan i teorin skicka extra besök på
-  sin EGEN rad — det är statistik om en själv, inte audit.
-- **Skrivningar** serialiseras per användare i processen och ett
-  `validation_not_unique` vid parallell create blir en update; två
-  containrar kan räkna ett extra besök — ofarligt. Saknas superuser eller
-  kollektionen (migrationen inte körd) loggas det en gång PII-fritt och
-  Inställningar visar en gul banner ("kör migration 1700000209"); allt
-  annat fungerar som förut.
-- **Relativa tider** räknas mot serverns klocka som skickas som ISO-prop
-  (`now`) så hydreringen inte skiljer sig. "Vilande" = ingen aktivitet på
-  `DORMANT_AFTER_DAYS` = 30 dagar; senast sedd väger tyngre än senaste
-  inloggning (sessionen lever 14 dagar).
-- **Inte byggt (medvetet):** påminnelsemejl till den som aldrig loggat in,
-  export, veckorapport till ledningen, per-bolag-vy för bolagsmedlemmars
-  aktivitet — lägg till först om behovet visar sig, och omprova § 57.1:s
-  gräns innan dess.
+  väntas. Inte byggt: chatt-verktyg mot analyserna, SSO/extern domän
+  (medvetet — modulen lever på app.movexum.se som allt annat). Hela flödet
+  är verifierat end-to-end mot PocketBase 0.23.4 lokalt med mockläget;
+  runbook + felsökning: `docs/integrations/impact-navigator.md` § 3.1–3.2.

@@ -86,7 +86,9 @@ Fokusringar följer § 3.4; PDF-rapporten använder samma gröna toner.
    bolaget + version 1, laddar upp filerna (route handler) och kör
    **väsentlighetsanalysen** (AI-steg 1) direkt → `materiality_review`.
    Misslyckas AI-steget stannar versionen i `materiality_pending` och
-   "Försök igen" finns på väsentlighetssidan.
+   "Kör om väsentlighetsanalysen" finns på väsentlighetssidan — tillsammans
+   med den senaste körningens felorsak (ur `sustainability_ai_jobs`) och
+   antalet sparade dokument, så ett stopp aldrig är tyst.
 2. **Väsentliga områden** (`/vasentlighet`): aspekterna per kategori med
    visningskod (`ENV-01`), styrka 1–5, drivkrafter, konfidens, evidens;
    personalen sätter Väsentlig / Osäker / Ej väsentlig per aspekt,
@@ -113,6 +115,69 @@ Fokusringar följer § 3.4; PDF-rapporten använder samma gröna toner.
    **radera analysen** (ledning; bolagskortet finns kvar).
 6. Bolagskortet (Utveckling & IRL) visar läget och länkar hit; allt loggas
    i `agent_actions` och syns i Bolagsnytt/`/aktivitet`.
+
+### 3.1 AI-körningarna: lease, tidsgräns, mockläge (porterat 2026-11)
+
+- **Analys-lease** (`packages/shared/src/impact-lease.ts`, originalets
+  `lease.ts`): medan ett steg körs bär analysversionens `input_hash` ett
+  `analysis-lease:<steg>:<startedAt>:<token>`. En andra begäran för samma
+  steg (dubbelklick, ny flik) får `analysis-running` ("En annan
+  analyskörning är redan aktiv." / "En analyskörning pågår redan …") och
+  sidorna visar "Väsentlighetsanalysen pågår" / "Informationsgapanalysen
+  pågår" / låst slutanalys i stället för knappar. Ett lease är övergivet
+  (stale) först efter stegets tidsgräns + 60 s, minst 330 s; då återtas det
+  (status tillbaka till steget före, pågående jobb markeras `failed` med
+  "Körningen återtogs efter att analysens tidsgräns passerat.") och steget
+  kan köras om. Efter ett lyckat steg bär `input_hash` SHA-256 av
+  AI-underlaget (som originalet). Ett avbrutet steg låser alltså aldrig en
+  version för gott — det var ett blockerande fel i första porteringen.
+- **Tidsgräns och omförsök** (`lib/ai/impact-analysis.ts`): 240 s per
+  försök och högst 2 omförsök vid 429/5xx/nätverk (originalets standard),
+  env-överstyrbart per steg: `IMPACT_<MATERIALITY|SUFFICIENCY|FINAL|UPDATE>_TIMEOUT_MS`
+  / `IMPACT_AI_TIMEOUT_MS`, `IMPACT_<STEG>_MAX_RETRIES` /
+  `IMPACT_AI_MAX_RETRIES` (Coolify, aldrig i kod). Utfallet
+  (`timeout`/`configuration`/`invalid_output`/`empty_output`/`unavailable`)
+  blir originalets felkod (`analysis-timeout`, `analysis-configuration`,
+  `analysis-invalid-output`, `analysis-unavailable`) och ordagrant dess
+  svenska text per yta (`lib/impact/messages.ts`); efter "Godkänn och
+  fortsätt" bär adressen koden (`/analys?error=…`) som originalet. Varje
+  körning loggas som `movexum.impact_ai_step` (steg, modell, latens,
+  omförsök, tokens, utfall).
+- **Mockläge** (`packages/shared/src/impact-mock.ts`, originalets
+  `MockAIService` ordagrant): deterministiska svar utan modellanrop för
+  lokal utveckling, tester och staging utan nyckel. Aktiveras med
+  `IMPACT_AI_MOCK_MODE=true`, eller automatiskt när `MISTRAL_API_KEY`
+  saknas och `NODE_ENV` inte är `production` (`lib/ai/impact-runtime.ts`;
+  staging kör `NODE_ENV=production` — sätt flaggan uttryckligen där); utan
+  nyckel i en produktionsbyggd container felar steget som "konfiguration" (degraderat läge felar aldrig
+  tyst, § 10.4). Mocken går genom samma normaliserare som ett modellsvar
+  och syns alltid: `model_name = 'mock'` på jobb och version (Historik).
+  Originalet körde mock som default — plattformen gör det inte, eftersom
+  Mistral-nyckeln redan finns i drift.
+
+### 3.2 Felsökning: "0 dokument" / väsentligheten slutförs inte
+
+1. Öppna bolagets **Historik** → AI-körningar: raden visar modell, status
+   och felorsak per steg. Väsentlighetssidan visar samma felorsak ovanför
+   "Kör om väsentlighetsanalysen".
+2. Uppladdningen svarar nu med PocketBases fältfel i klartext (t.ex.
+   mime-typ, saknad kollektion ⇒ "kör migration 1700000206 / Sync
+   PocketBase") och loggar `[impactnavigator/documents] upload failed`
+   med status + fältnycklar. 0 dokument efter "Skapa bolag" betyder att
+   uppladdningen avvisades — felet står i formuläret med länk till bolagets
+   sida, där underlaget laddas upp igen och analysen körs därifrån.
+3. `MISTRAL_API_KEY` saknas på web-appen ⇒ "AI-tjänsten är inte korrekt
+   konfigurerad" (produktionsbyggd container, dvs. även staging) eller
+   mockläge (lokal dev/test, eller `IMPACT_AI_MOCK_MODE=true`). En JSON som
+   inte kan tolkas ⇒ `analysis-invalid-output`; 429/5xx efter omförsöken ⇒
+   `analysis-unavailable`; > 240 s ⇒ `analysis-timeout`.
+4. Hela flödet (skapa bolag med PDF/DOCX/TXT → väsentlighet → godkänn →
+   kompletteringar → slutanalys → dashboard → uppdatering → alla flikar →
+   PDF) är verifierat mot en lokal PocketBase 0.23.4 med mockläget
+   (Playwright, 2026-11-04). `setup-via-api.mjs` kan sedan dess
+   bootstrappa en TOM instans: defs vars relationsmål kommer senare i filen
+   skjuts upp och skapas i ett andra pass, self-relationer läggs till
+   efter create, och `tasks.rule_key` finns i defen (indexet krävde det).
 
 ## 4. Import av dumpen
 
@@ -158,7 +223,11 @@ node backend/pocketbase-schema/scripts/import-sustainability-dump.mjs --dump ./m
   pinnad till tenant + skapare. Bolagsmedlemmar har ingen yta.
 - **Kostnad:** tokens loggas i `ai_usage_events` (surface `suggestions`) och
   räknas mot månadstaket (§ 9.6), som prövas före varje steg.
-- **Verifiering:** `yarn test`, `yarn typecheck`, `yarn lint` gröna.
-  Migrationerna har **inte** körts mot en PocketBase-instans i byggmiljön
-  (binären kunde inte köras där) — kör på staging och låt
-  `verify-baseline.mjs` fälla deployen om något avviker.
+- **Verifiering:** `yarn test`, `yarn typecheck`, `yarn lint`, `yarn build`
+  gröna; flödet körs end-to-end mot PocketBase 0.23.4 lokalt (§ 3.2 p. 4).
+  Migrationen 1700000206 är speglad i `setup-via-api.mjs` (som skapade
+  kollektionerna lokalt) — på staging låter `verify-baseline.mjs` deployen
+  falla om något avviker. Observerat vid lokal bootstrap: migration
+  **1700000051** (`mission_comments`) kan inte appliceras på en helt tom
+  PB-instans (self-relation vid create) — bara relevant för nya instanser
+  utan migrationshistorik.

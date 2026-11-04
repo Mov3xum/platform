@@ -178,7 +178,18 @@ function isAlreadyExistingCollectionError(err) {
   );
 }
 
-async function ensureCollection(definition) {
+// Kollektioner vars relationsmål inte finns ännu (tom instans där defs:en
+// ligger före målets def i filen). Skapas i ett andra pass före seedningen.
+const deferredCollections = [];
+const deferredPatches = [];
+
+function isMissingRelationCollectionError(err) {
+  const fields = err?.response?.data?.fields ?? err?.data?.data?.fields;
+  if (!fields || typeof fields !== 'object') return false;
+  return Object.values(fields).some((f) => f?.collectionId?.code === 'validation_field_relation_missing_collection');
+}
+
+async function ensureCollection(definition, { allowDefer = true } = {}) {
   const normalizedDefinition = {
     ...definition,
     fields: await normalizeFields(definition.fields, definition.name)
@@ -242,8 +253,24 @@ async function ensureCollection(definition) {
     throw e;
   }
 
+  // PB avvisar en relation som pekar på kollektionen själv vid create
+  // ("The relation collection doesn't exist") — skapa utan self-relationerna
+  // och lägg dem till direkt efteråt när id:t finns.
+  const selfRefs = new Set([definition.id, definition.name].filter(Boolean));
+  const selfRelationFields = (normalizedDefinition.fields || []).filter(
+    (f) => f?.type === 'relation' && selfRefs.has(f.collectionId)
+  );
+  const createPayload = selfRelationFields.length
+    ? { ...normalizedDefinition, fields: (normalizedDefinition.fields || []).filter((f) => !selfRelationFields.includes(f)) }
+    : normalizedDefinition;
+
   try {
-    await pb.collections.create(normalizedDefinition);
+    const created = await pb.collections.create(createPayload);
+    if (selfRelationFields.length) {
+      await pb.collections.update(created.id, {
+        fields: [...(created.fields || []), ...selfRelationFields.map((f) => ({ ...f, collectionId: created.id }))]
+      });
+    }
   } catch (err) {
     // Idempotency guard: in some environments the pre-check can miss an
     // already existing collection and create then returns name/id conflict.
@@ -255,6 +282,11 @@ async function ensureCollection(definition) {
         return;
       }
     }
+    if (allowDefer && isMissingRelationCollectionError(err)) {
+      deferredCollections.push(definition);
+      warn(`collection "${definition.name}" refererar en kollektion som inte finns ännu — skapas i andra passet`);
+      return;
+    }
     console.error(
       `\n✗ create collection failed: ${definition.name}\n` +
       `${describeError(err)}\n` +
@@ -263,9 +295,31 @@ async function ensureCollection(definition) {
     throw err;
   }
   ok(`collection "${definition.name}" skapad`);
+  await drainDeferredCollections();
 }
 
-async function patchUsersCollection(addFields, ruleUpdates = {}) {
+// Försök skapa uppskjutna kollektioner så snart en ny kollektion finns —
+// deras relationsmål kan ha kommit på plats. Ingen rekursion (flaggan).
+let drainingDeferred = false;
+async function drainDeferredCollections() {
+  if (drainingDeferred || deferredCollections.length === 0) return;
+  drainingDeferred = true;
+  try {
+    let progress = true;
+    while (progress && deferredCollections.length > 0) {
+      const batch = deferredCollections.splice(0, deferredCollections.length);
+      for (const definition of batch) await ensureCollection(definition);
+      progress = deferredCollections.length < batch.length;
+    }
+    if (deferredPatches.length > 0 && deferredCollections.length === 0) {
+      for (const replay of deferredPatches.splice(0, deferredPatches.length)) await replay();
+    }
+  } finally {
+    drainingDeferred = false;
+  }
+}
+
+async function patchUsersCollectionInner(addFields, ruleUpdates = {}) {
   const users = await pb.collections.getOne('users');
   const existingNames = new Set((users.fields || []).map((f) => f.name));
   const newFields = addFields.filter((f) => !existingNames.has(f.name));
@@ -280,7 +334,7 @@ async function patchUsersCollection(addFields, ruleUpdates = {}) {
   ok(`users uppdaterad (+${newFields.length} fält${Object.keys(ruleUpdates).length ? ', regler' : ''})`);
 }
 
-async function patchTenantsCollection(addFields, ruleUpdates = {}) {
+async function patchTenantsCollectionInner(addFields, ruleUpdates = {}) {
   const tenants = await pb.collections.getOne('tenants');
   const existingNames = new Set((tenants.fields || []).map((f) => f.name));
   const newFields = addFields.filter((f) => !existingNames.has(f.name));
@@ -295,7 +349,7 @@ async function patchTenantsCollection(addFields, ruleUpdates = {}) {
   ok(`tenants uppdaterad (+${newFields.length} fält${Object.keys(ruleUpdates).length ? ', regler' : ''})`);
 }
 
-async function patchActivitiesCollection(addFields) {
+async function patchActivitiesCollectionInner(addFields) {
   const activities = await pb.collections.getOne('activities');
   const existingNames = new Set((activities.fields || []).map((f) => f.name));
   const newFields = addFields.filter((f) => !existingNames.has(f.name));
@@ -309,7 +363,7 @@ async function patchActivitiesCollection(addFields) {
   ok(`activities uppdaterad (+${newFields.length} fält)`);
 }
 
-async function patchToolRunsCollection(addFields, fieldUpdates = {}) {
+async function patchToolRunsCollectionInner(addFields, fieldUpdates = {}) {
   // Generic helper for extending tool_runs:
   //  - addFields: new fields appended if absent (idempotent by name)
   //  - fieldUpdates: { fieldName: { required?: boolean, ... } } — flips
@@ -352,8 +406,72 @@ async function patchToolRunsCollection(addFields, fieldUpdates = {}) {
 // Generic patch helper for any collection. Same shape as
 // patchToolRunsCollection but takes collection name as a parameter.
 // Used by all the *Collection-patches at the bottom of the file.
+async function patchUsersCollection(...args) {
+  try {
+    await patchUsersCollectionInner(...args);
+  } catch (err) {
+    if (isMissingRelationCollectionError(err)) {
+      deferredPatches.push(() => patchUsersCollectionInner(...args));
+      warn(`patchUsersCollection: patch refererar en kollektion som inte finns ännu — görs om i andra passet`);
+      return;
+    }
+    throw err;
+  }
+}
+
+async function patchTenantsCollection(...args) {
+  try {
+    await patchTenantsCollectionInner(...args);
+  } catch (err) {
+    if (isMissingRelationCollectionError(err)) {
+      deferredPatches.push(() => patchTenantsCollectionInner(...args));
+      warn(`patchTenantsCollection: patch refererar en kollektion som inte finns ännu — görs om i andra passet`);
+      return;
+    }
+    throw err;
+  }
+}
+
+async function patchActivitiesCollection(...args) {
+  try {
+    await patchActivitiesCollectionInner(...args);
+  } catch (err) {
+    if (isMissingRelationCollectionError(err)) {
+      deferredPatches.push(() => patchActivitiesCollectionInner(...args));
+      warn(`patchActivitiesCollection: patch refererar en kollektion som inte finns ännu — görs om i andra passet`);
+      return;
+    }
+    throw err;
+  }
+}
+
+async function patchToolRunsCollection(...args) {
+  try {
+    await patchToolRunsCollectionInner(...args);
+  } catch (err) {
+    if (isMissingRelationCollectionError(err)) {
+      deferredPatches.push(() => patchToolRunsCollectionInner(...args));
+      warn(`patchToolRunsCollection: patch refererar en kollektion som inte finns ännu — görs om i andra passet`);
+      return;
+    }
+    throw err;
+  }
+}
+
 async function patchCollection(name, addFields = [], fieldUpdates = {}) {
-  const collection = await pb.collections.getOne(name);
+  let collection;
+  try {
+    collection = await pb.collections.getOne(name);
+  } catch (err) {
+    // En tom instans (lokal dev, ny miljö) saknar kollektionen tills dess
+    // ensureCollection körts längre ned — defs där bär redan patch-fälten,
+    // så hoppa över i stället för att fälla hela bootstrapen.
+    if (err?.status === 404) {
+      warn(`${name} finns inte ännu — patch hoppas över (skapas av ensureCollection)`);
+      return;
+    }
+    throw err;
+  }
   const fields = [...(collection.fields || [])];
   const existingNames = new Set(fields.map((f) => f.name));
   const newFields = addFields.filter((f) => !existingNames.has(f.name));
@@ -375,9 +493,18 @@ async function patchCollection(name, addFields = [], fieldUpdates = {}) {
     return;
   }
 
-  await pb.collections.update(name, {
-    fields: await normalizeFields([...fields, ...newFields], name)
-  });
+  try {
+    await pb.collections.update(name, {
+      fields: await normalizeFields([...fields, ...newFields], name)
+    });
+  } catch (err) {
+    if (isMissingRelationCollectionError(err)) {
+      deferredPatches.push(() => patchCollection(name, addFields, fieldUpdates));
+      warn(`${name}: patch refererar en kollektion som inte finns ännu — görs om i andra passet`);
+      return;
+    }
+    throw err;
+  }
   ok(`${name} uppdaterad (+${newFields.length} fält, ${Object.keys(fieldUpdates).length} patches)`);
 }
 
@@ -2066,7 +2193,10 @@ await ensureCollection({
     { name: 'startup', type: 'relation', required: false, collectionId: 'startups_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'contact', type: 'relation', required: false, collectionId: 'contacts_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'event', type: 'relation', required: false, collectionId: 'incubator_events_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
-    { name: 'mission', type: 'relation', required: false, collectionId: 'missions_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 }
+    { name: 'mission', type: 'relation', required: false, collectionId: 'missions_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    // Migration 1700000152: idempotensnyckeln måste finnas när indexet nedan
+    // skapas — annars fäller en tom instans hela bootstrapen ("no such column").
+    { name: 'rule_key', type: 'text', required: false, max: 120 }
   ],
   indexes: [
     'CREATE INDEX idx_tasks_tenant ON tasks (tenant)',
@@ -5971,6 +6101,18 @@ await patchTenantsCollection([
     thumbs: []
   }
 ]);
+
+// 18b. andra passet: kollektioner som väntade på sina relationsmål ----------
+for (let pass = 0; deferredCollections.length > 0; pass++) {
+  const batch = deferredCollections.splice(0, deferredCollections.length);
+  for (const definition of batch) {
+    await ensureCollection(definition, { allowDefer: pass < batch.length });
+  }
+  if (deferredCollections.length === batch.length) {
+    throw new Error(`kunde inte skapa kollektioner (cirkulära/okända relationer): ${deferredCollections.map((d) => d.name).join(', ')}`);
+  }
+}
+for (const replay of deferredPatches.splice(0, deferredPatches.length)) await replay();
 
 // 19. seed Movexum tenant ---------------------------------------------------
 const tenant = await ensureRecord('tenants', 'slug = "movexum"', {

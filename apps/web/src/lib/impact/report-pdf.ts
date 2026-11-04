@@ -113,7 +113,7 @@ function drawHeader(ctx: Ctx, page: PDFPage) {
   } else {
     page.drawText('movexum', { x: MARGIN, y: ctx.height - 30, size: 11, font: ctx.heading, color: col(PRIMARY) });
   }
-  const label = clean(ctx, 'IMPACT NAVIGATOR');
+  const label = clean(ctx, 'MOVEXUM IMPACT NAVIGATOR');
   page.drawText(label, { x: A4[0] - MARGIN - ctx.bold.widthOfTextAtSize(label, 7.5), y: ctx.height - 29, size: 7.5, font: ctx.bold, color: col(PRIMARY) });
   const name = wrap(clean(ctx, ctx.companyName), ctx.body, 7.5, 250)[0];
   page.drawText(name, { x: MARGIN + 110, y: ctx.height - 29, size: 7.5, font: ctx.body, color: col(MUTED) });
@@ -281,7 +281,7 @@ function drawCover(ctx: Ctx, input: ImpactReportInput) {
 
   if (ctx.logo) page.drawImage(ctx.logo, { x: 58, y: A4[1] - 84, width: 16 * LOGO_RATIO, height: 16 });
   else page.drawText('movexum', { x: 58, y: A4[1] - 84, size: 15, font: ctx.heading, color: col(PRIMARY) });
-  page.drawText(clean(ctx, 'IMPACT NAVIGATOR'), { x: 58, y: A4[1] - 104, size: 9, font: ctx.bold, color: col(PRIMARY) });
+  page.drawText(clean(ctx, 'MOVEXUM IMPACT NAVIGATOR'), { x: 58, y: A4[1] - 104, size: 9, font: ctx.bold, color: col(PRIMARY) });
 
   page.drawText(clean(ctx, 'Impactrapport'), { x: 58, y: A4[1] - 200, size: 34, font: ctx.heading, color: col(INK) });
   let y = A4[1] - 246;
