@@ -10640,6 +10640,27 @@ kodkarta: `docs/integrations/impact-navigator.md`.
   per bolag renderar `ImpactSideNav` originalets meny i `lib/impact/shell.tsx`
   (inga flikar). Landningssidan visar bara bolag i Impact Navigator —
   befintliga bolagskort väljs under "Skapa nytt bolag".
+  **Grön zon (2026-11).** Hela modulen (topbar + vy) bär aurora-gradienten i
+  Movexums gröna toner i stället för den blå/lila: `lib/app-zone.ts` (ren,
+  enhetstestad) mappar `/impactnavigator…` → zonen `impact`, `MainColumn`
+  (klient, ersätter den nakna `.mx-main-col`-diven i `ProtoShell`) sätter
+  `data-zone` redan vid server-renderingen och `prototype.css` byter
+  `--mx-app-gradient` per zon — samma komposition, andra toner, så det känns
+  som samma system men en hållbarhetsdel. Sidomenyn: brand-block i grön
+  gradient, aktiv post Movexum grön med vit text, hover pastell grön. En ny
+  zon = en rad i `ZONE_PREFIXES` + ett CSS-block; aldrig en egen bakgrund i
+  sidan.
+  **Brödsmulor utan record-id (2026-11).** Topbaren visade
+  `Impact Navigator / omip77vgymfj3hu / vasentlighet`. `lib/crumbs.ts` (ren,
+  enhetstestad) bygger nu smulorna ur tre lager — modulregistret, fasta
+  sökvägar (`STATIC_ROUTE_LABELS`: "Nytt bolag", "Jämförelser", plus
+  Inställningar-sektionerna) och etiketter som SIDAN registrerat via
+  `<CrumbLabels labels={{ '/impactnavigator/<id>': bolagsnamn, …sidrubriker }}>`
+  (`lib/crumb-labels.ts`, klientminne + `useSyncExternalStore`). Ett segment
+  som ser ut som ett PocketBase-id visas aldrig rått — platshållare "…" tills
+  etiketten finns. Andra detaljsidor (bolagskort, uppdrag …) kan använda samma
+  komponent; etiketterna är visningsnamn sidan redan renderar, ingen ny
+  dataväg.
 - **Ytor:** `/impactnavigator` (Alla bolag: sök på namn/bransch/resa,
   filter på fas och övergripande bedömning, kort med status/fas/impactnivå,
   Öppna → dashboard eller väsentlighet, Radera för ledning),

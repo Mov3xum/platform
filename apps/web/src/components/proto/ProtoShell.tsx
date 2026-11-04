@@ -1,6 +1,7 @@
 import type { SessionUser } from '@/lib/auth.server';
 import { ProtoRail } from './ProtoRail';
 import { ProtoTopBar } from './ProtoTopBar';
+import { MainColumn } from './MainColumn';
 import { MobileRailProvider, MobileRailBackdrop } from './MobileRail';
 import type { SwitchableStartup } from './StartupSwitcher';
 import { MobileBottomNav } from './MobileBottomNav';
@@ -45,10 +46,10 @@ export function ProtoShell({ user, children, counts, switchableStartups }: Props
         switchableStartups={switchableStartups}
       />
       <MobileRailBackdrop />
-      <div className="mx-main-col">
+      <MainColumn>
         <ProtoTopBar unseenNotifications={counts?.notiser ?? 0} notificationsHref={notificationsHref} />
         <main className="mx-view">{children}</main>
-      </div>
+      </MainColumn>
       <InstallPrompt />
       {mobileNav && <MobileBottomNav nav={mobileNav} />}
     </MobileRailProvider>
