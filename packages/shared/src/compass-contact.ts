@@ -48,7 +48,11 @@ export interface ContactFieldMeta {
   label: string;
   /** Kort hjälptext under fältet (visas för besökaren). */
   hint?: string;
-  /** Fält som aldrig får vara obligatoriska (art. 9-klass). */
+  /**
+   * Fält som aldrig får vara obligatoriska. Reserverat — kön på grundare har
+   * sedan 2026-11-04 alternativet "Vill inte ange", så det kan krävas utan
+   * att tvinga fram en uppgift (GDPR art. 9-klass, § 23.11).
+   */
   neverRequired?: boolean;
   /** Lead-fältets max-längd (speglar schemat i migration 1700000208). */
   max: number;
@@ -61,8 +65,7 @@ export const CONTACT_FIELD_META: Record<ContactFieldKey, ContactFieldMeta> = {
   organization: { label: 'Organisation', max: 200 },
   founder_gender: {
     label: 'Kön på grundare',
-    hint: 'Frivilligt. Används bara för Vinnovas statistik över könsfördelning i stödprogrammen — aldrig i bedömningen av idén.',
-    neverRequired: true,
+    hint: 'Används bara för Vinnovas statistik över könsfördelning i stödprogrammen — aldrig i bedömningen av idén. Du kan välja att inte ange.',
     max: 20
   },
   team_members: {
@@ -74,12 +77,20 @@ export const CONTACT_FIELD_META: Record<ContactFieldKey, ContactFieldMeta> = {
   referral_channel: { label: 'Hur kom du i kontakt med Movexum?', max: 60 }
 };
 
-/** Kön på grundare — fasta val (kvinna / man / mixat team). */
+/**
+ * Kön på grundare — fasta val (kvinna / man / mixat team) plus "Vill inte
+ * ange" (migration 1700000209), så att fältet kan vara obligatoriskt och
+ * ändå ge besökaren en utväg: ett svar utan att tvinga fram en uppgift.
+ */
 export const FOUNDER_GENDER_OPTIONS = [
   { value: 'kvinna', label: 'Kvinna' },
   { value: 'man', label: 'Man' },
-  { value: 'mixat_team', label: 'Mixat team' }
+  { value: 'mixat_team', label: 'Mixat team' },
+  { value: 'vill_inte_ange', label: 'Vill inte ange' }
 ] as const;
+
+/** Besökaren svarade men valde att inte ange kön. */
+export const FOUNDER_GENDER_DECLINED: FounderGender = 'vill_inte_ange';
 
 export type FounderGender = (typeof FOUNDER_GENDER_OPTIONS)[number]['value'];
 
@@ -192,8 +203,8 @@ function isMode(v: unknown): v is ContactFieldMode {
 
 /**
  * Normaliserar `contact_fields` ur databasen (json, sträng eller null).
- * Okända nycklar släpps, okända lägen blir `hidden`, och fält som aldrig får
- * vara obligatoriska (kön) sänks till `optional`. Saknat/ogiltigt värde ⇒
+ * Okända nycklar släpps, okända lägen blir `hidden`, och fält märkta
+ * `neverRequired` sänks till `optional`. Saknat/ogiltigt värde ⇒
  * legacy-konfigurationen (aldrig ett undantag).
  */
 export function normalizeContactSection(

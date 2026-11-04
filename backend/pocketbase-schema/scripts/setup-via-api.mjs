@@ -2602,7 +2602,7 @@ await ensureCollection({
     // Avsnittet "Dina uppgifter" (migration 1700000208, § 23.11). founder_gender
     // = art. 9-klass (fältmaskas för AI); kommun/referral_channel = nycklar ur
     // packages/shared/src/compass-contact.ts (text, validerade i koden).
-    { name: 'founder_gender', type: 'select', required: false, maxSelect: 1, values: ['kvinna', 'man', 'mixat_team'] },
+    { name: 'founder_gender', type: 'select', required: false, maxSelect: 1, values: ['kvinna', 'man', 'mixat_team', 'vill_inte_ange'] },
     { name: 'team_members', type: 'text', required: false, max: 2000 },
     { name: 'kommun', type: 'text', required: false, max: 80 },
     { name: 'referral_channel', type: 'text', required: false, max: 60 }

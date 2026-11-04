@@ -4155,16 +4155,21 @@ formuläret hade inget avslutssteg alls.
   (select), `team_members` (text ≤ 2000), `kommun` (text ≤ 80, nyckel),
   `referral_channel` (text ≤ 60, nyckel). Kommun/kontaktväg lagras som
   nycklar (text, inte select) så listorna kan utökas i koden utan migration;
-  okända nycklar avvisas av `cleanContactValues`. Speglat i `setup-via-api.mjs`
+  okända nycklar avvisas av `cleanContactValues`. `founder_gender` är däremot
+  en PB-select — ett nytt val kräver en migration (precedens 1700000209) och
+  speglas i `FOUNDER_GENDER_OPTIONS`. Speglat i `setup-via-api.mjs`
   (compass_leads + compass_modules inline-defs). Avsnittets värden vinner över
   det som mappats ur frågorna (`leadFieldsFromContact`); tomma värden skriver
   aldrig över något.
 - **GDPR § 5 / art. 9 (bindande).** Kön på grundare behandlas som art. 9-
   klass precis som `startups.founder_gender` (§ 10.2, DPIA
-  `docs/privacy/dpia-startups.md`): fältet kan **aldrig** göras obligatoriskt
-  (`neverRequired` — normaliseringen sänker `required` till `optional`, UI:t
-  visar inget sådant val), hjälptexten säger att det bara används för
-  Vinnovas könsstatistik och aldrig i bedömningen, det **fältmaskas för AI**
+  `docs/privacy/dpia-startups.md`). Valen är Kvinna / Man / Mixat team /
+  **Vill inte ange** (`vill_inte_ange`, migration **1700000209**, union på
+  select-värdena): med utvägen på plats får fältet göras obligatoriskt — ett
+  svar krävs, aldrig en uppgift (besökaren tvingas inte avslöja något; beslut
+  2026-11-04). `neverRequired`-mekanismen i `compass-contact.ts` finns kvar
+  för framtida fält men används inte. Hjälptexten säger att det bara används
+  för Vinnovas könsstatistik och aldrig i bedömningen, det **fältmaskas för AI**
   (`gender`-mönstret i `redaction.ts`), **mejlas aldrig** i inflödesnotisen
   och **exporteras aldrig** i CSV:n — det visas bara i lead-vyn för behörig
   personal. Övriga teammedlemmar är tredjeparts-PII: personnummer-saneras,

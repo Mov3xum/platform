@@ -511,10 +511,11 @@ export function ModuleEditor({
                       <tr key={key}>
                         <td style={{ padding: '6px 8px 6px 0', verticalAlign: 'top' }}>
                           <span className="mx-t-13 mx-fw-6">{meta.label}</span>
-                          {meta.neverRequired && (
+                          {key === 'founder_gender' && (
                             <span className="mx-t-xs mx-muted" style={{ display: 'block', fontWeight: 400 }}>
-                              Alltid frivilligt (GDPR art. 9-klass) — används bara för Vinnovas
-                              statistik, aldrig i bedömningen.
+                              Kvinna / Man / Mixat team / Vill inte ange. Kan vara obligatoriskt —
+                              besökaren kan alltid välja &quot;Vill inte ange&quot;. Används bara för
+                              Vinnovas statistik, aldrig i bedömningen.
                             </span>
                           )}
                         </td>

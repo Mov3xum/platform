@@ -181,7 +181,7 @@ export default async function LeadDetailPage({
                   <div className="mx-label">Kön på grundare</div>
                   <div className="mx-t-13">{contactValueLabel('founder_gender', lead.founder_gender)}</div>
                   <div className="mx-mono mx-t-xs mx-muted" style={{ marginTop: 2 }}>
-                    Frivillig uppgift för Vinnovas könsstatistik — används aldrig i bedömningen.
+                    Uppgift för Vinnovas könsstatistik — används aldrig i bedömningen.
                   </div>
                 </div>
               )}

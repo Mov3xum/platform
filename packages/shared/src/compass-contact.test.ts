@@ -28,13 +28,13 @@ test('legacy: chat/quiz visar namn + e-post, telefon/organisation bara när krä
   assert.equal(hasContactSection(legacyContactSection('wizard', {})), false);
 });
 
-test('normalizeContactSection: json-sträng, okända lägen ⇒ hidden, kön aldrig obligatoriskt, ogiltigt ⇒ fallback', () => {
+test('normalizeContactSection: json-sträng, okända lägen ⇒ hidden, kön får krävas (Vill inte ange finns), ogiltigt ⇒ fallback', () => {
   const cfg = normalizeContactSection(
     JSON.stringify({ name: 'required', founder_gender: 'required', kommun: 'weird', extra: 'required' }),
     CONTACT_SECTION_NONE
   );
   assert.equal(cfg.name, 'required');
-  assert.equal(cfg.founder_gender, 'optional');
+  assert.equal(cfg.founder_gender, 'required');
   assert.equal(cfg.kommun, 'hidden');
   assert.ok(!('extra' in cfg));
   assert.deepEqual(normalizeContactSection('{not json', CONTACT_SECTION_DEFAULT), CONTACT_SECTION_DEFAULT);
@@ -57,11 +57,11 @@ test('contactSectionForModule: lagrad konfiguration vinner över legacy-booleane
 });
 
 test('contactSectionFromForm + legacyRequirementsFromSection', () => {
-  const form: Record<string, string> = { contact_email: 'required', contact_phone: 'optional', contact_founder_gender: 'required' };
+  const form: Record<string, string> = { contact_email: 'required', contact_phone: 'optional', contact_founder_gender: 'nope' };
   const cfg = contactSectionFromForm((n) => form[n]);
   assert.equal(cfg.email, 'required');
   assert.equal(cfg.phone, 'optional');
-  assert.equal(cfg.founder_gender, 'optional');
+  assert.equal(cfg.founder_gender, 'hidden');
   assert.equal(cfg.team_members, 'hidden');
   assert.deepEqual(legacyRequirementsFromSection(cfg), {
     require_email: true,
@@ -115,6 +115,11 @@ test('missingContactField: första obligatoriska som saknas, i fast ordning', ()
 test('etiketter för fasta val och alla fält har metadata', () => {
   assert.equal(contactValueLabel('kommun', 'gavle'), 'Gävle');
   assert.equal(contactValueLabel('founder_gender', 'mixat_team'), 'Mixat team');
+  assert.equal(contactValueLabel('founder_gender', 'vill_inte_ange'), 'Vill inte ange');
+  // "Vill inte ange" är ett giltigt svar — ett obligatoriskt könsfält släpper igenom det.
+  const req = { ...CONTACT_SECTION_NONE, founder_gender: 'required' as const };
+  assert.equal(missingContactField({}, req), 'Kön på grundare krävs.');
+  assert.equal(missingContactField(cleanContactValues({ founder_gender: 'vill_inte_ange' }, req), req), null);
   assert.equal(contactValueLabel('referral_channel', 'event'), 'Event, föreläsning eller mässa');
   assert.equal(contactValueLabel('kommun', 'okand'), 'okand');
   assert.equal(contactValueLabel('name', ''), undefined);
