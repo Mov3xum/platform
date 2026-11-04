@@ -10,8 +10,10 @@ import {
   attachAiSummary,
   buildSubmissionEntries,
   finalizeLead,
+  leadFieldsFromContact,
   moduleWantsLead,
-  parseContactPreference
+  parseContactPreference,
+  parseContactSubmission
 } from '@/lib/compass/lead-capture';
 import { notifyNewInflow } from '@/lib/compass/notify';
 import { storeSurveyResponse } from '@/lib/compass/survey';
@@ -31,6 +33,8 @@ interface SubmitBody {
   attribution?: Attribution;
   consent?: boolean;
   contact_preference?: string;
+  /** Avsnittet "Dina uppgifter" (§ 23.11) — valideras mot modulens konfiguration. */
+  contact?: unknown;
   /** Enkätens subjekt ur `?om=<id>` (§ 43) — valideras server-side. */
   subject?: string;
   /** Sessionstoken (§ 23.10) — slutför det pågående leadet i stället för att skapa ett nytt. */
@@ -103,7 +107,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     return NextResponse.json({ ok: true });
   }
 
-  const leadPayload = mapAnswersToLead(answers);
+  // Avsnittet "Dina uppgifter" (§ 23.11): klienten är aldrig gränsen.
+  const contact = parseContactSubmission(module, body.contact);
+  if (contact.error) return NextResponse.json({ error: contact.error }, { status: 400 });
+
+  const leadPayload = { ...mapAnswersToLead(answers), ...leadFieldsFromContact(contact.values) };
   const attribution = pickAttribution(body.attribution);
   const contactPreference = parseContactPreference(body.contact_preference);
 

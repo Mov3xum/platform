@@ -234,6 +234,7 @@ import {
   goalTeamLabel,
   groupGoalNodes,
   isGoalFilterActive,
+  isMyGoal,
   wouldCreateGoalCycle
 } from './goals.ts';
 
@@ -305,12 +306,18 @@ test('filterGoalNodes, groupGoalNodes och goalStatusForQuarter', () => {
   assert.deepEqual(ids(filterGoalNodes(tree.nodes, { team: 'team:projekt|gsai' }, 3)), ['o4']);
   assert.deepEqual(ids(filterGoalNodes(tree.nodes, { level: 'personal' }, 3)), ['o3']);
   assert.deepEqual(ids(filterGoalNodes(tree.nodes, { responsible: 'u3' }, 3)), ['o3'], 'ägaren räknas som ansvarig för personliga mål');
+  assert.deepEqual(ids(filterGoalNodes(tree.nodes, { mine: 'u3' }, 3)), ['o3'], 'mina mål: ägare av personligt mål');
+  assert.deepEqual(ids(filterGoalNodes(tree.nodes, { mine: 'u2' }, 3)), ['o2'], 'mina mål: utpekad ansvarig');
+  assert.deepEqual(ids(filterGoalNodes(tree.nodes, { mine: 'ingen' }, 3)), [], 'mina mål: okänd användare ger inget');
+  assert.equal(isMyGoal({ owner_user: 'u3', responsible: 'u2' }, 'u3'), true, 'ägaren räknas även när annan är ansvarig');
+  assert.equal(isMyGoal({ owner_user: 'u3', responsible: 'u2' }, ''), false);
   assert.deepEqual(ids(filterGoalNodes(tree.nodes, { status: 'risk' }, 3)), ['o2']);
   assert.deepEqual(ids(filterGoalNodes(tree.nodes, { status: 'unreported' }, 3)), ['o4']);
   assert.deepEqual(ids(filterGoalNodes(tree.nodes, { query: 'soderhamn' }, 3)), ['o2'], 'sök tål diakritik');
   assert.equal(isGoalFilterActive({}), false);
   assert.equal(isGoalFilterActive({ query: '  ' }), false);
   assert.equal(isGoalFilterActive({ level: 'team' }), true);
+  assert.equal(isGoalFilterActive({ mine: 'u1' }), true);
 
   const byTeam = groupGoalNodes(tree.nodes, 'team');
   assert.deepEqual(byTeam.map((g) => [g.label, g.sublabel ?? null, ids(g.nodes)]), [

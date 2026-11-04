@@ -13,7 +13,12 @@ import { COMPASS_LAYOUT_META, normalizeCompassLayout,
   SURVEY_SUBJECT_KINDS,
   SURVEY_SUBJECT_KIND_LABELS,
   normalizeCompassPurpose,
-  type CompassPurpose
+  type CompassPurpose,
+  CONTACT_FIELD_KEYS,
+  CONTACT_FIELD_META,
+  CONTACT_FIELD_MODES,
+  CONTACT_FIELD_MODE_LABEL,
+  contactSectionForModule
 } from '@platform/shared';
 import type { CompassLayout } from '@platform/shared';
 import type { CompassModule, CompassQuestion, FlowType } from '@/lib/compass/types';
@@ -78,6 +83,8 @@ export function ModuleEditor({
   const [purpose, setPurpose] = useState<CompassPurpose>(normalizeCompassPurpose(mod.purpose));
   const [layout, setLayout] = useState<CompassLayout>(() => normalizeCompassLayout(mod.layout));
   const layoutMeta = COMPASS_LAYOUT_META[layout];
+  // Avsnittet "Dina uppgifter" (§ 23.11) — lagrad konfiguration eller legacy.
+  const contactSection = contactSectionForModule(mod);
   const [isPending, startTransition] = useTransition();
   const [pendingIntent, setPendingIntent] = useState<string | null>(null);
   const isPublished = Boolean(mod.is_active && mod.public_url_enabled);
@@ -302,7 +309,7 @@ export function ModuleEditor({
               )}
               {purpose === 'survey' && (
                 <div className="mx-t-12 mx-muted" style={{ marginTop: 6 }}>
-                  En enkät skapar aldrig lead. Svaren aggregeras med k-anonymitet och kan kopplas som indikator i Mål &amp; VP.
+                  En enkät skapar aldrig lead. Svaren aggregeras med k-anonymitet och kan kopplas som indikator i Måluppföljning.
                 </div>
               )}
             </div>
@@ -342,8 +349,11 @@ export function ModuleEditor({
                   defaultValue={mod.hero_eyebrow || ''}
                   className="mx-input"
                   style={{ marginTop: 4 }}
-                  placeholder="STARTUPKOMPASSEN"
+                  placeholder="t.ex. MOVEXUM"
                 />
+                <span className="mx-t-12 mx-muted" style={{ display: 'block', marginTop: 4 }}>
+                  Tomt = ingen text ovanför rubriken.
+                </span>
               </label>
             </div>
             <label className="mx-label">
@@ -355,6 +365,56 @@ export function ModuleEditor({
                 style={{ marginTop: 4, minHeight: 60 }}
               />
             </label>
+
+            <div
+              style={{
+                display: 'grid',
+                gap: 10,
+                padding: 12,
+                borderRadius: 12,
+                border: '1px solid var(--mx-line)',
+                background: 'var(--mx-paper)'
+              }}
+            >
+              <div>
+                <div className="mx-label">Startsida innan {flowType === 'chat' ? 'chatten' : 'frågorna'}</div>
+                <div className="mx-t-12 mx-muted" style={{ marginTop: 4 }}>
+                  En första sida inne i flödet där besökaren läser vad modulen är till för och vad ni
+                  vill ha ut av svaren, innan hen börjar svara. Tom text = ingen startsida. Finns en
+                  samtyckestext (steg 4) visas den på samma sida, med en enda startknapp.
+                </div>
+              </div>
+              <label className="mx-label">
+                Rubrik på startsidan
+                <input
+                  type="text"
+                  name="start_page_title"
+                  defaultValue={mod.start_page_title || ''}
+                  className="mx-input"
+                  style={{ marginTop: 4 }}
+                  placeholder="Innan du börjar"
+                  maxLength={200}
+                />
+              </label>
+              <label className="mx-label">
+                Beskrivning och syfte
+                <textarea
+                  name="start_page_body"
+                  defaultValue={mod.start_page_body || ''}
+                  className="mx-textarea"
+                  style={{ marginTop: 4, minHeight: 140 }}
+                  maxLength={6000}
+                  placeholder={
+                    'Vad är det här till för och vad händer med svaren?\n\n' +
+                    'Tomrad ger nytt stycke. Rader som börjar med "- " blir en punktlista, ' +
+                    '"## " blir en mellanrubrik.'
+                  }
+                />
+                <span className="mx-t-12 mx-muted" style={{ display: 'block', marginTop: 4 }}>
+                  Skriv inte personuppgifter här — texten är publik.
+                </span>
+              </label>
+            </div>
 
             <div className="mx-label" style={{ opacity: layoutMeta.media === 'none' ? 0.6 : 1 }}>
               Bild eller video
@@ -489,29 +549,58 @@ export function ModuleEditor({
             </label>
 
             <div className="mx-label">
-              Obligatoriska uppgifter från besökaren
-              <div className="mx-flex mx-items-c mx-gap-3 mx-wrap" style={{ marginTop: 6 }}>
-                <label className="mx-flex mx-items-c mx-gap-2 mx-t-13" style={{ cursor: 'pointer' }}>
-                  <input type="checkbox" name="require_email" defaultChecked={!!mod.require_email} />
-                  <span>E-post</span>
-                </label>
-                <label className="mx-flex mx-items-c mx-gap-2 mx-t-13" style={{ cursor: 'pointer' }}>
-                  <input type="checkbox" name="require_phone" defaultChecked={!!mod.require_phone} />
-                  <span>Telefon</span>
-                </label>
-                <label className="mx-flex mx-items-c mx-gap-2 mx-t-13" style={{ cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    name="require_organization"
-                    defaultChecked={!!mod.require_organization}
-                  />
-                  <span>Organisation</span>
-                </label>
-              </div>
+              Dina uppgifter — avsnittet sist i flödet
+              <span className="mx-t-xs mx-muted" style={{ display: 'block', marginTop: 4, fontWeight: 400 }}>
+                Välj vilka uppgifter besökaren fyller i efter frågorna och vilka som är
+                obligatoriska. Gäller alla flödestyper: i AI-chatten som avslutssteg efter samtalet
+                (med sammanfattning som PDF/e-post), i formulär och quiz som sista steg.
+              </span>
+              <table style={{ marginTop: 8, width: '100%', borderCollapse: 'collapse' }}>
+                <tbody>
+                  {CONTACT_FIELD_KEYS.map((key) => {
+                    const meta = CONTACT_FIELD_META[key];
+                    const current = contactSection[key];
+                    return (
+                      <tr key={key}>
+                        <td style={{ padding: '6px 8px 6px 0', verticalAlign: 'top' }}>
+                          <span className="mx-t-13 mx-fw-6">{meta.label}</span>
+                          {key === 'founder_gender' && (
+                            <span className="mx-t-xs mx-muted" style={{ display: 'block', fontWeight: 400 }}>
+                              Kvinna / Man / Mixat team / Vill inte ange. Kan vara obligatoriskt —
+                              besökaren kan alltid välja &quot;Vill inte ange&quot;. Används bara för
+                              Vinnovas statistik, aldrig i bedömningen.
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: '6px 0', whiteSpace: 'nowrap' }}>
+                          {CONTACT_FIELD_MODES.filter((m) => !(meta.neverRequired && m === 'required')).map(
+                            (mode) => (
+                              <label
+                                key={mode}
+                                className="mx-t-12"
+                                style={{ marginRight: 12, cursor: 'pointer', fontWeight: 400 }}
+                              >
+                                <input
+                                  type="radio"
+                                  name={`contact_${key}`}
+                                  value={mode}
+                                  defaultChecked={current === mode}
+                                  style={{ marginRight: 4 }}
+                                />
+                                {CONTACT_FIELD_MODE_LABEL[mode]}
+                              </label>
+                            )
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
               <span className="mx-t-xs mx-muted" style={{ display: 'block', marginTop: 6 }}>
-                Gäller alla flödestyper. I AI-chatten ställs de obligatoriska frågorna och
-                kontaktfälten i ett avslutssteg efter samtalet — besökaren måste fylla i dem innan
-                leadet skickas in, och kan få en sammanfattning som PDF eller per e-post.
+                Kön, kommun och kontaktväg är fasta val. Övriga teammedlemmar är en fritextruta
+                (namn + e-post). Kön på grundare och teammedlemmar når aldrig AI-analysen och
+                exporteras inte per lead.
               </span>
             </div>
 

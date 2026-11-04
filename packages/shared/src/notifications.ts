@@ -126,6 +126,9 @@ export const NOTIFICATION_KINDS = [
   // Plattformen (§ 49)
   'feedback_answered',
   'feedback_done',
+  'feedback_started',
+  'feedback_test',
+  'feedback_tested',
   // Bedömning excellens (§ 51.6)
   'screening_request',
   'screening_answered',
@@ -352,6 +355,34 @@ export const NOTIFICATION_CATALOG: Record<NotificationKind, NotificationKindMeta
     category: 'plattform',
     priority: 'normal',
     audience: 'staff',
+    defaults: NORMAL_DEFAULTS
+  },
+  feedback_started: {
+    label: 'Ditt önskemål är påbörjat',
+    description: 'När ledningen börjar jobba på ett kort du lagt upp under Önskemål & buggar.',
+    icon: 'bolt',
+    category: 'plattform',
+    priority: 'normal',
+    audience: 'staff',
+    defaults: NORMAL_DEFAULTS
+  },
+  feedback_test: {
+    label: 'Testa ett önskemål',
+    description: 'När ledningen ber dig pröva att ett kort under Önskemål & buggar är åtgärdat och återkoppla.',
+    icon: 'eye',
+    category: 'plattform',
+    priority: 'normal',
+    audience: 'staff',
+    defaults: NORMAL_DEFAULTS
+  },
+  feedback_tested: {
+    label: 'Återkoppling på ett önskemål',
+    description: 'När testaren återkopplar på ett kort som väntade på test (bara ledningen).',
+    icon: 'message',
+    category: 'plattform',
+    priority: 'normal',
+    audience: 'staff',
+    groupable: true,
     defaults: NORMAL_DEFAULTS
   },
   screening_request: {

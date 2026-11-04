@@ -34,6 +34,7 @@ import {
   goalTeamKey,
   goalTeamLabel,
   isGoalFilterActive,
+  isMyGoal,
   wouldCreateGoalCycle,
   isAggregateOnlyIndicator,
   progressTowardsTarget,
@@ -313,6 +314,7 @@ export function GoalsView({
             onGrouping={changeGrouping}
             filter={filter}
             onFilter={setFilter}
+            currentUserId={currentUserId}
             people={people}
             quarter={quarter}
             shown={shownNodes.length}
@@ -419,7 +421,8 @@ function GoalFilterBar({
   onFilter,
   people,
   quarter,
-  shown
+  shown,
+  currentUserId
 }: {
   nodes: GoalNode[];
   grouping: GoalGrouping;
@@ -429,6 +432,7 @@ function GoalFilterBar({
   people: PersonOption[];
   quarter: Quarter;
   shown: number;
+  currentUserId: string;
 }) {
   // Team + delteam som faktiskt används i året.
   const teamOptions: { value: string; label: string; indent: boolean }[] = [];
@@ -451,6 +455,8 @@ function GoalFilterBar({
   const anyWithoutLevel = nodes.some((n) => goalLevelOf(n.goal) === null);
   const set = (patch: Partial<GoalFilter>) => onFilter((f) => ({ ...f, ...patch }));
   const selectClass = `${inputClass} py-1.5`;
+  const mineActive = !!filter.mine;
+  const mineCount = nodes.filter((n) => isMyGoal(n.goal, currentUserId)).length;
 
   return (
     <section className="space-y-3 rounded-2xl border border-default bg-canvas-subtle p-3" aria-label="Filtrera och gruppera mål">
@@ -471,6 +477,21 @@ function GoalFilterBar({
             </button>
           ))}
         </div>
+        <button
+          type="button"
+          onClick={() => set({ mine: mineActive ? null : currentUserId })}
+          aria-pressed={mineActive}
+          title="Mål där du är ägare eller ansvarig"
+          className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-movexum-pastell-lila dark:focus-visible:ring-movexum-morklila ${
+            mineActive
+              ? 'border-brand bg-brand text-brand-foreground'
+              : 'border-default bg-surface text-foreground-muted hover:bg-canvas-muted'
+          }`}
+        >
+          <Icon name="user" size={12} />
+          Mina mål
+          <span className="mx-tnum opacity-80">{mineCount}</span>
+        </button>
         <span className="ml-auto text-xs text-foreground-subtle mx-tnum">
           Visar {shown} av {nodes.length} mål
         </span>

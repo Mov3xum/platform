@@ -1,6 +1,11 @@
 'use client';
 
 import { useState } from 'react';
+import {
+  compassStartPageTitle,
+  hasCompassStartPage,
+  parseCompassStartPageBlocks
+} from '@platform/shared';
 import type { CompassQuestion, NextModuleLink } from '@/lib/compass/types';
 import type { PublicCompassModule } from '@/lib/compass/public';
 import { CompassChat } from './CompassChat';
@@ -26,31 +31,57 @@ const FLOW_LABEL: Record<string, string> = {
   wizard: 'Formulär'
 };
 
-// Publik (oinloggad) körning av en Startupkompass-modul. Visar en
-// samtyckesgrind före all datainsamling (GDPR art. 7) och dispatchar sedan
-// till rätt flöde. Skickar consent=true till de publika API-routarna.
+// Publik (oinloggad) körning av en Startupkompass-modul. Visar först
+// modulens STARTSIDA (beskrivning + syfte, § 23.11) och/eller en
+// samtyckesgrind före all datainsamling (GDPR art. 7) — på EN sida med EN
+// knapp när båda finns — och dispatchar sedan till rätt flöde. Skickar
+// consent=true till de publika API-routarna.
 export function PublicModuleRunner({ module, questions, nextModule, subject }: Props) {
   const hasConsentGate = Boolean(module.consent_note);
-  const [consented, setConsented] = useState(!hasConsentGate);
+  const hasStartPage = hasCompassStartPage(module);
+  const [started, setStarted] = useState(!hasConsentGate && !hasStartPage);
 
-  if (!consented) {
+  if (!started) {
+    const startBlocks = hasStartPage ? parseCompassStartPageBlocks(module.start_page_body) : [];
     return (
-      <div className="mx-consent">
+      <div className="mx-consent mx-startpage">
         <div className="mx-mono mx-t-xs mx-t-up mx-muted">Innan vi börjar</div>
         <h2 className="mx-disp" style={{ fontSize: 24, fontWeight: 700, margin: 0, color: 'var(--mx-ink)' }}>
-          Så hanterar vi dina uppgifter
+          {hasStartPage ? compassStartPageTitle(module) : 'Så hanterar vi dina uppgifter'}
         </h2>
-        <p className="mx-t-13 mx-muted" style={{ lineHeight: 1.65, maxWidth: 560 }}>
-          {module.consent_note}
-        </p>
+        {hasStartPage && (
+          <div className="mx-startpage-body">
+            {startBlocks.map((block, i) => {
+              if (block.kind === 'heading') return <h3 key={i}>{block.text}</h3>;
+              if (block.kind === 'list') {
+                return (
+                  <ul key={i}>
+                    {block.items.map((item, j) => (
+                      <li key={j}>{item}</li>
+                    ))}
+                  </ul>
+                );
+              }
+              return <p key={i}>{block.text}</p>;
+            })}
+          </div>
+        )}
+        {hasConsentGate && (
+          <div className={hasStartPage ? 'mx-startpage-consent' : undefined}>
+            {hasStartPage && (
+              <div className="mx-mono mx-t-xs mx-t-up mx-muted" style={{ marginBottom: 6 }}>
+                Så hanterar vi dina uppgifter
+              </div>
+            )}
+            <p className="mx-t-13 mx-muted" style={{ lineHeight: 1.65, maxWidth: 560, margin: 0 }}>
+              {module.consent_note}
+            </p>
+          </div>
+        )}
         <div className="mx-consent-cta">
           <span className="mx-chip mx-mono">{FLOW_LABEL[module.flow_type]}</span>
-          <button
-            type="button"
-            className="mx-btn mx-primary mx-lg"
-            onClick={() => setConsented(true)}
-          >
-            Jag förstår, starta <span aria-hidden>→</span>
+          <button type="button" className="mx-btn mx-primary mx-lg" onClick={() => setStarted(true)}>
+            {hasConsentGate ? 'Jag förstår, starta' : 'Starta'} <span aria-hidden>→</span>
           </button>
         </div>
       </div>
@@ -76,9 +107,7 @@ export function PublicModuleRunner({ module, questions, nextModule, subject }: P
                 ? {
                     apiBase: PUBLIC_API_BASE,
                     questions,
-                    requireEmail: module.require_email,
-                    requirePhone: module.require_phone,
-                    requireOrganization: module.require_organization,
+                    contactSection: module.contact_section,
                     successMessage: module.success_message
                   }
                 : undefined
@@ -100,9 +129,7 @@ export function PublicModuleRunner({ module, questions, nextModule, subject }: P
         questions={questions}
         apiBase={PUBLIC_API_BASE}
         consent
-        requireEmail={module.require_email}
-        requirePhone={module.require_phone}
-        requireOrganization={module.require_organization}
+        contactSection={module.contact_section}
         successMessage={module.success_message}
         nextModule={nextModule}
         subject={subject}
@@ -117,6 +144,7 @@ export function PublicModuleRunner({ module, questions, nextModule, subject }: P
       questions={questions}
       apiBase={PUBLIC_API_BASE}
       consent
+      contactSection={module.contact_section}
       successMessage={module.success_message}
       redirectUrl={module.redirect_url}
       nextModule={nextModule}

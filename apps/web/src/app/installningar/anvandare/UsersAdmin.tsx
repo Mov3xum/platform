@@ -2,7 +2,15 @@
 
 import { useActionState, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { ALL_ROLES, defaultModulesForRoles, type Role } from '@platform/shared';
+import {
+  ALL_ROLES,
+  activityStatus,
+  defaultModulesForRoles,
+  emptyUserActivity,
+  type Role,
+  type UserActivityStats,
+  type UserActivityStatus
+} from '@platform/shared';
 import { Avatar, Chip } from '@/components/proto';
 import { Icon } from '@/components/proto/Icon';
 import {
@@ -17,6 +25,7 @@ import { canManageUser, ROLE_LABELS, toggleableModulesForRoles } from '@/lib/use
 import { ModulePicker } from './ModulePicker';
 import { UserForm, type StartupOption } from './UserForm';
 import { UserStartupLink } from './UserStartupLink';
+import { ActivityOverview, ActivityStatusChip } from '@/components/user-activity/ActivityOverview';
 
 export interface ManagedUser {
   id: string;
@@ -28,6 +37,8 @@ export interface ManagedUser {
   /** Effektiv allow-lista över moduler i sidofältet (§ 36.3). */
   enabledModules: string[];
   createdAt: string;
+  /** Användaraktivitet (§ 57) — null = ingen rad (aldrig inloggad). */
+  activity: UserActivityStats | null;
 }
 
 interface UsersAdminProps {
@@ -36,6 +47,10 @@ interface UsersAdminProps {
   assignableRoles: Role[];
   actorId: string;
   isAdmin: boolean;
+  /** Serverns klocka (ISO) — relativa tider blir identiska vid hydrering. */
+  now: string;
+  /** Sant när aktivitetsraderna inte kunde läsas (migration 1700000209 ej körd). */
+  activityUnavailable: boolean;
 }
 
 const initialUpdate: UpdateUserState = { status: 'idle' };
@@ -456,6 +471,28 @@ function DetailHeader({
   );
 }
 
+/* ── Aktivitet (§ 57) ───────────────────────────────────────────────── */
+
+/**
+ * Hur personen använder plattformen: senaste inloggning, senast aktiv, mest
+ * använda sidor och det som ligger i sidmenyn men aldrig öppnats — underlag
+ * för att hjälpa någon igång. Stöd för introduktion, inte ett prestationsmått.
+ */
+function ActivityPanel({ user, now }: { user: ManagedUser; now: string }) {
+  const enabledIds = useMemo(
+    () => toggleableModulesForRoles(user.roles).map((m) => m.id).filter((id) => user.enabledModules.includes(id)),
+    [user.roles, user.enabledModules]
+  );
+  return (
+    <Panel
+      title="Aktivitet i plattformen"
+      description="Inloggningar och vilka sidor personen använder — för att se var en genomgång gör mest nytta. Personen ser samma uppgifter under Mitt konto."
+    >
+      <ActivityOverview stats={user.activity} now={now} enabledModuleIds={enabledIds} />
+    </Panel>
+  );
+}
+
 /* ── Rad + detalj ───────────────────────────────────────────────────── */
 
 function UserRow({
@@ -466,7 +503,8 @@ function UserRow({
   startups,
   assignableRoles,
   actorId,
-  isAdmin
+  isAdmin,
+  now
 }: {
   user: ManagedUser;
   open: boolean;
@@ -476,6 +514,7 @@ function UserRow({
   assignableRoles: Role[];
   actorId: string;
   isAdmin: boolean;
+  now: string;
 }) {
   const isSelf = user.id === actorId;
   const manageable = canManageUser(isAdmin ? ['admin'] : ['incubator_lead'], user.roles);
@@ -530,6 +569,7 @@ function UserRow({
               Ej verifierad
             </Chip>
           )}
+          <ActivityStatusChip stats={user.activity} now={now} />
         </div>
         <span
           className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-foreground-subtle transition ${
@@ -549,6 +589,8 @@ function UserRow({
               </Chip>
             ))}
           </div>
+
+          <ActivityPanel user={user} now={now} />
 
           {!manageable ? (
             <p className="rounded-xl bg-movexum-pastell-gul px-4 py-3 text-[12.5px] text-movexum-morkgul">
@@ -596,10 +638,26 @@ export function UsersAdmin({
   startups,
   assignableRoles,
   actorId,
-  isAdmin
+  isAdmin,
+  now,
+  activityUnavailable
 }: UsersAdminProps) {
   const [query, setQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<Role | 'all'>('all');
+  const [activityFilter, setActivityFilter] = useState<UserActivityStatus | 'all'>('all');
+  const nowDate = useMemo(() => new Date(now), [now]);
+  const statusOf = useMemo(() => {
+    const map = new Map<string, UserActivityStatus>();
+    for (const u of users) {
+      map.set(u.id, activityStatus(u.activity ?? emptyUserActivity(), nowDate));
+    }
+    return map;
+  }, [users, nowDate]);
+  const activityCounts = useMemo(() => {
+    const counts: Record<UserActivityStatus, number> = { never: 0, active: 0, dormant: 0 };
+    for (const st of statusOf.values()) counts[st] += 1;
+    return counts;
+  }, [statusOf]);
   const [openId, setOpenId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
 
@@ -613,6 +671,7 @@ export function UsersAdmin({
     const q = query.trim().toLowerCase();
     return users.filter((u) => {
       if (roleFilter !== 'all' && !u.roles.includes(roleFilter)) return false;
+      if (activityFilter !== 'all' && statusOf.get(u.id) !== activityFilter) return false;
       if (!q) return true;
       return (
         u.name.toLowerCase().includes(q) ||
@@ -620,7 +679,7 @@ export function UsersAdmin({
         u.linkedStartups.some((s) => s.name.toLowerCase().includes(q))
       );
     });
-  }, [users, query, roleFilter]);
+  }, [users, query, roleFilter, activityFilter, statusOf]);
 
   return (
     <div className="space-y-4">
@@ -676,7 +735,40 @@ export function UsersAdmin({
             {ROLE_LABELS[r]} · {roleCounts[r]}
           </button>
         ))}
+        {!activityUnavailable && (
+          <>
+            <span className="mx-1 h-4 w-px bg-canvas-muted" aria-hidden />
+            {(['never', 'dormant', 'active'] as UserActivityStatus[]).map((st) => (
+              <button
+                key={st}
+                type="button"
+                onClick={() => setActivityFilter(activityFilter === st ? 'all' : st)}
+                className={`rounded-full border px-3 py-1 text-[11.5px] font-medium transition ${
+                  activityFilter === st
+                    ? 'border-brand bg-brand text-brand-foreground'
+                    : 'border-default bg-surface text-foreground-muted hover:bg-canvas-muted'
+                }`}
+                title={
+                  st === 'never'
+                    ? 'Har aldrig loggat in'
+                    : st === 'dormant'
+                      ? 'Ingen aktivitet på 30 dagar'
+                      : 'Aktiv de senaste 30 dagarna'
+                }
+              >
+                {st === 'never' ? 'Aldrig inloggad' : st === 'dormant' ? 'Vilande' : 'Aktiva'} · {activityCounts[st]}
+              </button>
+            ))}
+          </>
+        )}
       </div>
+
+      {activityUnavailable && (
+        <p className="rounded-xl bg-movexum-pastell-gul px-4 py-3 text-[12.5px] text-movexum-morkgul">
+          Aktivitetsuppgifterna kunde inte läsas — kör migration 1700000209 (<code>user_activity</code>) eller
+          synka PocketBase-schemat. Användarna administreras som vanligt.
+        </p>
+      )}
 
       {showCreate && (
         <div className="rounded-2xl border border-brand/30 bg-canvas-subtle p-1">
@@ -697,7 +789,7 @@ export function UsersAdmin({
           <span>
             {filtered.length} av {users.length} användare
           </span>
-          <span className="hidden sm:inline">Roller · bolag · status</span>
+          <span className="hidden sm:inline">Roller · bolag · aktivitet</span>
         </div>
         {filtered.length === 0 ? (
           <p className="px-4 py-8 text-center text-[13px] text-foreground-muted">
@@ -716,6 +808,7 @@ export function UsersAdmin({
                 assignableRoles={assignableRoles}
                 actorId={actorId}
                 isAdmin={isAdmin}
+                now={now}
               />
             ))}
           </ul>

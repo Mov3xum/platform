@@ -93,7 +93,7 @@ export function ActivityGoalPanel(p: ActivityGoalPanelProps) {
         {p.options.length === 0 ? (
           <p className="text-[12.5px] text-foreground-subtle">
             Inga mål räknas ur aktiviteter ännu. Lägg till en indikator med mätkällan &ldquo;Kopplade
-            aktiviteter&rdquo; i <Link href="/mal" className="text-link hover:underline">Mål &amp; VP</Link>.
+            aktiviteter&rdquo; i <Link href="/mal" className="text-link hover:underline">Måluppföljning</Link>.
           </p>
         ) : (
           <ul className="space-y-1">

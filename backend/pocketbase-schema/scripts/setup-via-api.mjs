@@ -1652,6 +1652,39 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && @request.auth.id = user`
 });
 
+// Migration 1700000209: user_activity — användaraktivitet (CLAUDE.md § 57).
+// En rad per användare: inloggningar, senast aktiv och aggregat per MODUL
+// (aldrig sökvägar/poster, ingen IP/user agent). Skrivs BARA av servern
+// (create/update/delete = null, som notifications); läses av ledningen i
+// tenanten (`:each ?=`) eller personen själv (skalär ägarcheck). AI-denylistad.
+await ensureCollection({
+  id: 'user_activity_collection',
+  name: 'user_activity',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'user', type: 'relation', required: true, collectionId: usersId, cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'first_login_at', type: 'date', required: false },
+    { name: 'last_login_at', type: 'date', required: false },
+    { name: 'login_count', type: 'number', required: false, min: 0, onlyInt: true },
+    { name: 'last_seen_at', type: 'date', required: false },
+    { name: 'last_module', type: 'text', required: false, max: 40 },
+    { name: 'modules', type: 'json', required: false, maxSize: 30000 },
+    { name: 'active_days', type: 'json', required: false, maxSize: 4000 }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_user_activity_user ON user_activity (user)',
+    'CREATE INDEX idx_user_activity_tenant_seen ON user_activity (tenant, last_seen_at)'
+  ],
+  listRule: `${ANY_AUTH} && ((${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}) || @request.auth.id = user)`,
+  viewRule: `${ANY_AUTH} && ((${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}) || @request.auth.id = user)`,
+  createRule: null,
+  updateRule: null,
+  deleteRule: null
+});
+
 // Migration 1700000024: strategies — strategiska planer per bolag.
 await ensureCollection({
   id: 'strategies_collection',
@@ -2728,7 +2761,14 @@ await ensureCollection({
     { name: 'quiz_result_bucket', type: 'text', required: false, max: 60 },
     { name: 'quiz_score', type: 'number', required: false, min: 0 },
     // Genomförandestatus (migration 1700000192, § 23.10). Saknat = slutförd.
-    { name: 'completion', type: 'select', required: false, maxSelect: 1, values: ['in_progress', 'completed', 'abandoned'] }
+    { name: 'completion', type: 'select', required: false, maxSelect: 1, values: ['in_progress', 'completed', 'abandoned'] },
+    // Avsnittet "Dina uppgifter" (migration 1700000208, § 23.11). founder_gender
+    // = art. 9-klass (fältmaskas för AI); kommun/referral_channel = nycklar ur
+    // packages/shared/src/compass-contact.ts (text, validerade i koden).
+    { name: 'founder_gender', type: 'select', required: false, maxSelect: 1, values: ['kvinna', 'man', 'mixat_team', 'vill_inte_ange'] },
+    { name: 'team_members', type: 'text', required: false, max: 2000 },
+    { name: 'kommun', type: 'text', required: false, max: 80 },
+    { name: 'referral_channel', type: 'text', required: false, max: 60 }
   ],
   indexes: [
     'CREATE INDEX idx_compass_leads_tenant_status ON compass_leads (tenant, status)',
@@ -2861,7 +2901,10 @@ await ensureCollection({
     // spegla COMPASS_PURPOSES / SURVEY_SUBJECT_KINDS i compass-survey.ts.
     { name: 'purpose', type: 'select', required: false, maxSelect: 1, values: ['intake', 'survey'] },
     { name: 'subject_kind', type: 'select', required: false, maxSelect: 1, values: ['none', 'startup', 'event', 'partner', 'staff'] },
-    { name: 'anonymous', type: 'bool', required: false }
+    { name: 'anonymous', type: 'bool', required: false },
+    // Avsnittet "Dina uppgifter" (migration 1700000208, § 23.11): läge per
+    // kontaktfält (hidden/optional/required). Saknat ⇒ legacy-booleanerna.
+    { name: 'contact_fields', type: 'json', required: false, maxSize: 4000 }
   ],
   indexes: [
     'CREATE UNIQUE INDEX idx_compass_modules_tenant_slug ON compass_modules (tenant, slug)',
@@ -4501,24 +4544,44 @@ await ensureCollection({
     { name: 'description', type: 'text', required: true, min: 1, max: 5000 },
     { name: 'kind', type: 'select', required: true, maxSelect: 1, values: ['bug', 'feature', 'change', 'question'] },
     { name: 'area', type: 'text', required: true, min: 1, max: 40 },
-    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['open', 'answered', 'done'] },
+    // Migration 1700000208: fyrstegsflöde (answered kvar för befintliga rader).
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['open', 'answered', 'in_progress', 'awaiting_feedback', 'done'] },
     { name: 'answer', type: 'text', required: false, max: 5000 },
     { name: 'answered_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
     { name: 'answered_at', type: 'date', required: false },
     { name: 'done_by', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
-    { name: 'done_at', type: 'date', required: false }
+    { name: 'done_at', type: 'date', required: false },
+    // Migration 1700000208: testare + återkoppling.
+    { name: 'tester', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'test_note', type: 'text', required: false, max: 2000 },
+    { name: 'tested_at', type: 'date', required: false }
   ],
   indexes: [
     'CREATE INDEX idx_feedback_items_tenant ON feedback_items (tenant)',
     'CREATE INDEX idx_feedback_items_tenant_status ON feedback_items (tenant, status)',
-    'CREATE INDEX idx_feedback_items_author ON feedback_items (author)'
+    'CREATE INDEX idx_feedback_items_author ON feedback_items (author)',
+    'CREATE INDEX idx_feedback_items_tester ON feedback_items (tester)'
   ],
   listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
   createRule: `${ANY_AUTH} && @request.auth.tenant != ""`,
-  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = author || ${STAFF_OR_LEAD_EACH})`,
+  // Migration 1700000208: även testaren (fältgränsen ligger i server-actionen).
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = author || @request.auth.id = tester || ${STAFF_OR_LEAD_EACH})`,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (@request.auth.id = author || ${STAFF_OR_LEAD_EACH})`
 });
+// Migration 1700000208 för en instans som redan har kollektionen:
+// status-värdena unionas (patchCollection ERSÄTTER values → hela listan) och
+// testarfälten läggs till. Backfill answered → in_progress görs av
+// migrationen (läsvägen tolkar ändå ett kvarvarande answered som in_progress).
+await patchCollection(
+  'feedback_items',
+  [
+    { name: 'tester', type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+    { name: 'test_note', type: 'text', required: false, max: 2000 },
+    { name: 'tested_at', type: 'date', required: false }
+  ],
+  { status: { values: ['open', 'answered', 'in_progress', 'awaiting_feedback', 'done'] } }
+);
 
 // Migration 1700000178: competence_tags — tenant-gemensam hashtag-vokabulär
 // för kompetenser (§ 29.7). Seedade taggar (status approved) + taggar kollegor
@@ -5031,7 +5094,8 @@ await convertSelectFieldToText('notifications', 'kind', {
     'task_assigned', 'due_soon', 'workshop_assigned', 'document_assigned', 'event_invited',
     'agreement_to_sign', 'agreement_signed', 'contact_request', 'contact_decision',
     'support_check_submitted', 'support_check_changes', 'support_check_decision', 'support_check_comment',
-    'feedback_answered', 'feedback_done', 'screening_request', 'screening_answered',
+    'feedback_answered', 'feedback_done', 'feedback_started', 'feedback_test', 'feedback_tested',
+    'screening_request', 'screening_answered',
     'talent_interest', 'talent_need_review', 'talent_need_published', 'talent_student_response'
   ];
   const col = await pb.collections.getOne('notifications');

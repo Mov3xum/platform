@@ -8,6 +8,7 @@ import {
   normalizeLeadCompletion,
   progressNote
 } from './completion';
+import { CONTACT_SECTION_NONE } from '@platform/shared';
 import type { CompassQuestion } from './types';
 
 function q(key: string, required = false): CompassQuestion {
@@ -44,40 +45,32 @@ test('avslutssteget ställer bara obligatoriska frågor', () => {
 
 test('missingClosingField: obligatoriska frågor före kontaktfält, null när allt finns', () => {
   const questions = [q('idea', true), q('extra')];
+  const none = { ...CONTACT_SECTION_NONE };
   assert.match(
-    missingClosingField({ questions, answers: {}, contact: {}, requirements: {} }) ?? '',
+    missingClosingField({ questions, answers: {}, contact: {}, config: none }) ?? '',
     /Fråga idea/
   );
+  const cfg = { ...CONTACT_SECTION_NONE, email: 'required' as const, phone: 'required' as const, kommun: 'required' as const };
   assert.equal(
-    missingClosingField({
-      questions,
-      answers: { idea: 'En app' },
-      contact: {},
-      requirements: { requireEmail: true }
-    }),
+    missingClosingField({ questions, answers: { idea: 'En app' }, contact: {}, config: cfg }),
     'E-post krävs.'
   );
   assert.equal(
-    missingClosingField({
-      questions,
-      answers: { idea: 'En app' },
-      contact: { email: 'a@b.se' },
-      requirements: { requireEmail: true, requirePhone: true }
-    }),
-    'Telefon krävs.'
+    missingClosingField({ questions, answers: { idea: 'En app' }, contact: { email: 'a@b.se' }, config: cfg }),
+    'Telefonnummer krävs.'
   );
   assert.equal(
     missingClosingField({
       questions,
       answers: { idea: 'En app' },
-      contact: { email: 'a@b.se', phone: '070', organization: 'AB' },
-      requirements: { requireEmail: true, requirePhone: true, requireOrganization: true }
+      contact: { email: 'a@b.se', phone: '070', kommun: 'gavle' },
+      config: cfg
     }),
     null
   );
   // Tomma listor/blanksteg räknas inte som svar.
   assert.match(
-    missingClosingField({ questions, answers: { idea: '   ' }, contact: {}, requirements: {} }) ?? '',
+    missingClosingField({ questions, answers: { idea: '   ' }, contact: {}, config: none }) ?? '',
     /obligatoriskt/
   );
 });

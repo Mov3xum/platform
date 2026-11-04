@@ -1532,7 +1532,7 @@ export const coreModules: ModuleDefinition[] = [
   },
   {
     id: 'mal',
-    title: 'Mål & VP',
+    title: 'Måluppföljning',
     description:
       'Verksamhetsplanens mål per fokusområde med indikatorer, måltal och kvartalsstatus — beräknade ur data eller manuellt bedömda. Ersätter måluppföljningen i slides.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
@@ -1815,6 +1815,7 @@ export * from './voice';
 export * from './chat-attachments';
 export * from './compass-authoring';
 export * from './compass-layout';
+export * from './compass-contact';
 export * from './login-branding';
 // ─── Mötesläge i chatten (ren möteslogik, enhetstestad, § 34) ────────────────
 export * from './meeting';
@@ -1947,3 +1948,5 @@ export interface OrgKnowledgeChunk {
 }
 export * from './kth-irl';
 export * from './excellence-irl';
+
+export * from './user-activity';

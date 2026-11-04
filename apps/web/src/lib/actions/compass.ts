@@ -23,12 +23,17 @@ import {
 } from '@/lib/compass/types';
 import {
   ALL_PHASES,
+  CONTACT_SECTION_DEFAULT,
   DEFAULT_COMPASS_LAYOUT,
+  contactSectionFromForm,
+  legacyRequirementsFromSection,
   normalizeCompassLayout,
   validateWorkshopMediaFile,
   type StartupPhase,
   normalizeCompassPurpose,
-  normalizeSurveySubjectKind
+  normalizeSurveySubjectKind,
+  COMPASS_START_PAGE_BODY_MAX,
+  COMPASS_START_PAGE_TITLE_MAX
 } from '@platform/shared';
 
 const STAFF_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor'] as const;
@@ -569,6 +574,10 @@ export async function createModuleAction(formData: FormData) {
         // en ENKÄT (§ 43) gör det aldrig.
         purpose,
         create_lead: purpose !== 'survey',
+        // Avsnittet "Dina uppgifter" (§ 23.11): nya intag-moduler får hela
+        // avsnittet som standard; en enkät samlar inga kontaktuppgifter.
+        contact_fields: purpose === 'survey' ? null : CONTACT_SECTION_DEFAULT,
+        require_email: purpose !== 'survey',
         sort_order: 999
       })
     );
@@ -748,11 +757,15 @@ async function applyModuleUpdate(
     hero_eyebrow: String(formData.get('hero_eyebrow') || '').trim().slice(0, 120),
     welcome_title: String(formData.get('welcome_title') || '').trim().slice(0, 200),
     welcome_body: String(formData.get('welcome_body') || '').trim().slice(0, 4000),
+    // Startsida i flödet (§ 23.11) — beskrivning + syfte innan första frågan.
+    start_page_title: String(formData.get('start_page_title') || '')
+      .trim()
+      .slice(0, COMPASS_START_PAGE_TITLE_MAX),
+    start_page_body: String(formData.get('start_page_body') || '')
+      .trim()
+      .slice(0, COMPASS_START_PAGE_BODY_MAX),
     chat_persona: String(formData.get('chat_persona') || '').trim().slice(0, 4000),
     max_exchanges: Number.isFinite(maxExchanges) && maxExchanges >= 0 ? Math.min(maxExchanges, 100) : 0,
-    require_email: formData.get('require_email') === 'on',
-    require_phone: formData.get('require_phone') === 'on',
-    require_organization: formData.get('require_organization') === 'on',
     // Steg 4: "Skapa lead i Startupkompassen när modulen slutförs" — en
     // ENKÄT (§ 43) skapar aldrig lead oavsett kryssruta.
     create_lead: wantedPurpose === 'survey' ? false : formData.get('create_lead') === 'on',
@@ -760,6 +773,20 @@ async function applyModuleUpdate(
     is_active: formData.get('is_active') === 'on',
     public_url_enabled: formData.get('public_url_enabled') === 'on'
   };
+
+  // Avsnittet "Dina uppgifter" (§ 23.11, migration 1700000208). Bara när
+  // formuläret skickar fälten (äldre formulär lämnar konfigurationen orörd);
+  // normaliseras alltid (okänt läge ⇒ dolt, kön aldrig obligatoriskt). De tre
+  // äldre booleanerna härleds ur avsnittet så äldre ytor/instanser ser samma
+  // krav.
+  const sendsContactSection = formData.has('contact_email') || formData.has('contact_name');
+  const wantedContact = sendsContactSection
+    ? contactSectionFromForm((name) => formData.get(name))
+    : null;
+  if (wantedContact) {
+    patch.contact_fields = wantedContact;
+    Object.assign(patch, legacyRequirementsFromSection(wantedContact));
+  }
 
   // Mall för den publika sidan (§ 23.7). Normaliseras alltid (okänt ⇒ classic)
   // — klienten är aldrig säkerhetsgränsen. Bara satt när formuläret skickar
@@ -942,6 +969,11 @@ async function applyModuleUpdate(
       'Övriga fält sparades, men syftet "enkät" kunde inte sparas: fältet purpose saknas i databasen (PocketBase-migration 1700000160 är inte applicerad).'
     );
   }
+  if (wantedContact && saved && !('contact_fields' in saved)) {
+    throw new Error(
+      'Övriga fält sparades, men avsnittet "Dina uppgifter" kunde inte sparas: fältet contact_fields saknas i databasen (PocketBase-migration 1700000208 är inte applicerad).'
+    );
+  }
   if (
     wantedLayout &&
     wantedLayout !== DEFAULT_COMPASS_LAYOUT &&
@@ -950,6 +982,11 @@ async function applyModuleUpdate(
   ) {
     throw new Error(
       'Övriga fält sparades, men mallen kunde inte sparas: fältet layout saknas i databasen (PocketBase-migration 1700000154 är inte applicerad).'
+    );
+  }
+  if (patch.start_page_body && saved && !('start_page_body' in saved)) {
+    throw new Error(
+      'Övriga fält sparades, men startsidan kunde inte sparas: fältet start_page_body saknas i databasen (PocketBase-migration 1700000208 är inte applicerad).'
     );
   }
 

@@ -75,6 +75,10 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   'sustainability_documents',
   'sustainability_ai_jobs',
   'notification_preferences',
+  // Användaraktivitet (§ 57, migration 1700000209): när/hur ofta en person
+  // använder plattformen är stöd för introduktion — aldrig underlag för en
+  // modell och aldrig profilering av medarbetare.
+  'user_activity',
   // Tenant-bred kunskapsbas (1700000118–119, § 26). Innehållet (uppladdat
   // verksamhetsmaterial + dess embeddings) når AI ENBART via det kurerade
   // `search_knowledge`-verktyget — aldrig via det generiska query_collection.
@@ -156,7 +160,11 @@ export const PII_FIELD_PATTERNS: readonly string[] = [
   'ip_hash',
   // Bedömning excellens (§ 51.4): manuella svar med grundarnas namn/andel/
   // engagemang och fri motiveringstext — når aldrig modellen.
-  'screening_facts'
+  'screening_facts',
+  // Startupkompassen (§ 23.11): övriga teammedlemmars namn + e-post i fritext
+  // (compass_leads.team_members) — tredjeparts-PII, fältmaskas som helhet.
+  // Kön på grundare (compass_leads.founder_gender) fångas av `gender` ovan.
+  'team_members'
 ];
 
 /** Är kollektionen helt utestängd från agentens query-verktyg? */

@@ -1,10 +1,17 @@
 'use client';
 
 import { useMemo, useState, type FormEvent } from 'react';
+import {
+  cleanContactValues,
+  hasContactSection,
+  missingContactField,
+  type ContactSectionConfig
+} from '@platform/shared';
 import type { CompassQuestion, NextModuleLink } from '@/lib/compass/types';
 import { QuestionInput, readAttribution } from './QuestionInput';
 import { NextModuleCta } from './NextModuleCta';
 import { ContactPreferencePicker } from './ContactPreferencePicker';
+import { ContactSection } from './ContactSection';
 import { resolveNextQuestionIndex } from '@/lib/compass/question-flow';
 import { useFlowProgress } from './useFlowProgress';
 
@@ -26,6 +33,11 @@ interface Props {
   subject?: string | null;
   /** Bokför pågående/avbrutet flöde (§ 23.10) — bara publika flöden. */
   trackProgress?: boolean;
+  /**
+   * Avsnittet "Dina uppgifter" (§ 23.11) — visas som ett sista steg efter
+   * frågorna när modulen har minst ett synligt fält.
+   */
+  contactSection: ContactSectionConfig;
 }
 
 export function ModuleWizard({
@@ -37,13 +49,15 @@ export function ModuleWizard({
   consent,
   subject,
   nextModule,
-  trackProgress
+  trackProgress,
+  contactSection
 }: Props) {
   const [step, setStep] = useState(0);
   // Besökta steg (för "Tillbaka") — hopplogik (next_key) kan skippa frågor,
   // så step-1 är inte alltid den fråga besökaren faktiskt såg senast.
   const [trail, setTrail] = useState<number[]>([]);
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
+  const [contact, setContact] = useState<Record<string, string>>({});
   const [contactPreference, setContactPreference] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
@@ -57,8 +71,12 @@ export function ModuleWizard({
   });
 
   const total = questions.length;
-  const q = questions[step];
-  const progress = total === 0 ? 0 : Math.round((100 * (step + (done ? 1 : 0))) / total);
+  const hasContact = hasContactSection(contactSection);
+  // Index `total` = avsnittet "Dina uppgifter" (sista steget) när det finns.
+  const onContactStep = hasContact && step === total;
+  const q = onContactStep ? undefined : questions[step];
+  const steps = total + (hasContact ? 1 : 0);
+  const progress = steps === 0 ? 0 : Math.round((100 * (step + (done ? 1 : 0))) / steps);
 
   if (total === 0) {
     return <p className="mx-muted mx-t-13">Den här modulen har inga frågor publicerade ännu.</p>;
@@ -92,23 +110,33 @@ export function ModuleWizard({
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!q) return;
-    const value = answers[q.key];
-    if (q.required && (value === undefined || value === '' || (Array.isArray(value) && value.length === 0))) {
-      setError('Det här fältet är obligatoriskt.');
-      return;
+    if (onContactStep) {
+      // Samma validering som server-side (klienten är aldrig gränsen).
+      const missing = missingContactField(cleanContactValues(contact, contactSection), contactSection);
+      if (missing) {
+        setError(missing);
+        return;
+      }
+    } else {
+      if (!q) return;
+      const value = answers[q.key];
+      if (q.required && (value === undefined || value === '' || (Array.isArray(value) && value.length === 0))) {
+        setError('Det här fältet är obligatoriskt.');
+        return;
+      }
+      setError(null);
+
+      const nextStep = resolveNextQuestionIndex(questions, step, value);
+      if (nextStep < total || hasContact) {
+        setTrail((t) => [...t, step]);
+        setStep(nextStep < total ? nextStep : total);
+        progressTracker.report(answers, step + 1, total);
+        return;
+      }
     }
     setError(null);
 
-    const nextStep = resolveNextQuestionIndex(questions, step, value);
-    if (nextStep < total) {
-      setTrail((t) => [...t, step]);
-      setStep(nextStep);
-      progressTracker.report(answers, step + 1, total);
-      return;
-    }
-
-    // Sista frågan — skicka in
+    // Sista steget — skicka in
     setSubmitting(true);
     try {
       const res = await fetch(`${apiBase}/${encodeURIComponent(moduleSlug)}/submit`, {
@@ -116,6 +144,7 @@ export function ModuleWizard({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           answers,
+          contact: hasContact ? contact : undefined,
           attribution,
           consent,
           contact_preference: contactPreference || undefined,
@@ -148,14 +177,15 @@ export function ModuleWizard({
     setAnswers((prev) => ({ ...prev, [q.key]: value }));
   }
 
-  if (!q) return null;
-  const current = answers[q.key];
+  if (!q && !onContactStep) return null;
+  const current = q ? answers[q.key] : undefined;
+  const isLast = onContactStep || (!hasContact && step + 1 === total);
 
   return (
     <form onSubmit={onSubmit} style={{ display: 'grid', gap: 16 }}>
       {/* Progress */}
       <div className="mx-flex mx-items-c mx-gap-2 mx-mono mx-t-xs mx-muted mx-t-up">
-        <span>Fråga {step + 1} av {total}</span>
+        <span>{onContactStep ? 'Snart klar' : `Fråga ${step + 1} av ${total}`}</span>
         <span className="mx-grow" />
         <span>{progress}%</span>
       </div>
@@ -163,23 +193,34 @@ export function ModuleWizard({
         <i style={{ width: `${progress}%` }} />
       </div>
 
-      {/* Question */}
-      <div>
-        <div className="mx-qprompt">{q.prompt}</div>
-        {q.help_text && (
-          <div className="mx-t-13 mx-muted" style={{ marginTop: 8, lineHeight: 1.5 }}>
-            {q.help_text}
-          </div>
-        )}
-      </div>
+      {onContactStep ? (
+        /* Avsnittet "Dina uppgifter" (§ 23.11) — sist, efter frågorna. */
+        <ContactSection
+          config={contactSection}
+          values={contact}
+          onChange={(key, value) => setContact((c) => ({ ...c, [key]: value }))}
+        />
+      ) : (
+        q && (
+          <>
+            {/* Question */}
+            <div>
+              <div className="mx-qprompt">{q.prompt}</div>
+              {q.help_text && (
+                <div className="mx-t-13 mx-muted" style={{ marginTop: 8, lineHeight: 1.5 }}>
+                  {q.help_text}
+                </div>
+              )}
+            </div>
 
-      {/* Input */}
-      <QuestionInput question={q} value={current} onChange={setValue} />
-
-      {/* Kontaktpreferens — visas på sista frågan, innan inskick. */}
-      {step + 1 === total && (
-        <ContactPreferencePicker value={contactPreference} onChange={setContactPreference} />
+            {/* Input */}
+            <QuestionInput question={q} value={current} onChange={setValue} />
+          </>
+        )
       )}
+
+      {/* Kontaktpreferens — visas på sista steget, innan inskick. */}
+      {isLast && <ContactPreferencePicker value={contactPreference} onChange={setContactPreference} />}
 
       {error && (
         <div
@@ -211,7 +252,7 @@ export function ModuleWizard({
           ← Tillbaka
         </button>
         <button type="submit" className="mx-btn mx-primary" disabled={submitting}>
-          {step + 1 === total ? (submitting ? 'Skickar…' : 'Skicka in →') : 'Nästa →'}
+          {isLast ? (submitting ? 'Skickar…' : 'Skicka in →') : 'Nästa →'}
         </button>
       </div>
     </form>

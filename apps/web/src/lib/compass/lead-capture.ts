@@ -1,6 +1,13 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
-import { isSurveyModule } from '@platform/shared';
+import {
+  cleanContactValues,
+  contactSectionForModule,
+  isSurveyModule,
+  missingContactField,
+  type ContactSectionConfig,
+  type ContactValues
+} from '@platform/shared';
 import { summarizeSubmission, type SubmissionEntry } from './chat';
 import { createConversation, createLead, findConversationBySession, patchConversation, updateLead } from './store';
 import { assertWithinAiBudget } from '@/lib/ai/budget.server';
@@ -26,6 +33,40 @@ export function moduleWantsLead(module: Pick<CompassModule, 'create_lead' | 'pur
   // En ENKÄT (§ 43) skapar aldrig lead — svaren lagras per fråga i stället.
   if (isSurveyModule(module)) return false;
   return module.create_lead !== false;
+}
+
+/**
+ * Avsnittet "Dina uppgifter" (§ 23.11) server-side: modulens konfiguration
+ * (lagrad eller legacy), besökarens värden tvättade mot den (dolda fält
+ * släpps, fasta val valideras, fritext saneras) och första saknade
+ * obligatoriska fält. Klienten är aldrig gränsen — samma rena funktioner
+ * som avsnittet i webbläsaren använder.
+ */
+export function parseContactSubmission(
+  module: Pick<CompassModule, 'flow_type' | 'contact_fields' | 'require_email' | 'require_phone' | 'require_organization'>,
+  raw: unknown
+): { config: ContactSectionConfig; values: ContactValues; error: string | null } {
+  const config = contactSectionForModule(module);
+  const values = cleanContactValues(raw, config);
+  return { config, values, error: missingContactField(values, config) };
+}
+
+/**
+ * Lead-fält ur avsnittet. Avsnittets värden vinner över det som mappats ur
+ * frågorna (`mapAnswersToLead`) — besökaren fyllde i dem sist och medvetet.
+ * Tomma värden skriver aldrig över något (finalizeLead släpper dem).
+ */
+export function leadFieldsFromContact(values: ContactValues): Partial<Lead> {
+  const out: Partial<Lead> = {};
+  if (values.name) out.name = values.name;
+  if (values.email) out.email = values.email;
+  if (values.phone) out.phone = values.phone;
+  if (values.organization) out.organization = values.organization;
+  if (values.founder_gender) out.founder_gender = values.founder_gender as Lead['founder_gender'];
+  if (values.team_members) out.team_members = values.team_members;
+  if (values.kommun) out.kommun = values.kommun;
+  if (values.referral_channel) out.referral_channel = values.referral_channel;
+  return out;
 }
 
 /** Validerar besökarens kontaktpreferens — okända värden släpps aldrig in. */

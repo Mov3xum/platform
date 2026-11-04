@@ -2,7 +2,14 @@
 // Hjälper de andra modul-filerna att hålla sig till PocketBase-schemat
 // från migration 1700000039 + 1700000049 + 1700000108.
 
-import type { CompassLayout, CompassPurpose, ResultBucket, SurveySubjectKind } from '@platform/shared';
+import type {
+  CompassLayout,
+  CompassPurpose,
+  ContactSectionConfig,
+  FounderGender,
+  ResultBucket,
+  SurveySubjectKind
+} from '@platform/shared';
 
 export type { CompassLayout, ResultBucket };
 
@@ -126,6 +133,15 @@ export interface Lead {
   /** Besökarens kontaktpreferens (migration 1700000125). */
   contact_preference?: ContactPreference;
   /**
+   * Avsnittet "Dina uppgifter" (migration 1700000208, § 23.11). Nycklar ur
+   * `@platform/shared` compass-contact.ts; `founder_gender` är art. 9-klass
+   * (fältmaskad för AI, aldrig i export), `team_members` är tredjeparts-PII.
+   */
+  founder_gender?: FounderGender;
+  team_members?: string;
+  kommun?: string;
+  referral_channel?: string;
+  /**
    * Vad besökaren gjorde (migration 1700000192, § 23.10): pågående, slutförd
    * eller avbruten. Saknat = slutförd. Skilt från `status` (personalens
    * pipeline).
@@ -206,9 +222,20 @@ export interface CompassModule {
   theme_color?: string;
   intro_message?: string;
   // Startupkompassen — branded publik sida + quiz (migration 1700000108)
+  /**
+   * Liten text ovanför rubriken på den publika sidan. Tom ⇒ ingen eyebrow
+   * (sedan 2026-11; tidigare föll sidan tillbaka på "STARTUPKOMPASSEN").
+   */
   hero_eyebrow?: string;
   welcome_title?: string;
   welcome_body?: string;
+  /**
+   * Startsida INUTI flödet (migration 1700000208, § 23.11): rubrik + text
+   * med beskrivning och syfte som besökaren läser innan första frågan/
+   * chatten. Tom text ⇒ ingen startsida.
+   */
+  start_page_title?: string;
+  start_page_body?: string;
   /** Omslagsbild (filnamn på compass_modules.hero_image, migration 1700000122). */
   hero_image?: string;
   /** Omslagsvideo (filnamn på compass_modules.hero_video, migration 1700000141). */
@@ -225,6 +252,12 @@ export interface CompassModule {
   require_email?: boolean;
   require_phone?: boolean;
   require_organization?: boolean;
+  /**
+   * Avsnittet "Dina uppgifter" (migration 1700000208, § 23.11): läge per
+   * kontaktfält. Saknat ⇒ legacy-konfigurationen ur require_*-booleanerna
+   * (`contactSectionForModule`). Lagras som json — läs aldrig rått.
+   */
+  contact_fields?: Partial<ContactSectionConfig> | string | null;
   /**
    * Mottagaradresser (komma-/radseparerade) dit nya inflöden mejlas via Resend.
    * Tom → fallback på env MOVEXUM_INFLOW_EMAIL (migration 1700000110).

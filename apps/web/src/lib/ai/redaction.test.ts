@@ -96,7 +96,8 @@ test('PII-mönstren täcker direkt-PII, GDPR art. 9 och pseudonym-PII', () => {
     'session_token', // compass-besökarsession
     'street_address',
     'postal_code',
-    'ip_hash'
+    'ip_hash',
+    'team_members' // § 23.11 — övriga teammedlemmar (namn + e-post) på compass_leads
   ]) {
     assert.ok(PII_FIELD_PATTERNS.includes(p), `mönstret '${p}' saknas`);
   }

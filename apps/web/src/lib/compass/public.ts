@@ -2,7 +2,7 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { getPublicPbUrl } from '@/lib/pb-url';
-import { sortCompassQuestions } from '@platform/shared';
+import { contactSectionForModule, sortCompassQuestions, type ContactSectionConfig } from '@platform/shared';
 import { moduleWantsLead } from './lead-capture';
 import type { CompassModule, CompassQuestion, NextModuleLink } from './types';
 
@@ -43,6 +43,8 @@ export type PublicCompassModule = Pick<
   | 'hero_eyebrow'
   | 'welcome_title'
   | 'welcome_body'
+  | 'start_page_title'
+  | 'start_page_body'
   | 'hero_image'
   | 'hero_video'
   | 'target_audience'
@@ -62,11 +64,17 @@ export type PublicCompassModule = Pick<
    * eller andra interna fält.
    */
   collects_lead: boolean;
+  /**
+   * Avsnittet "Dina uppgifter" (§ 23.11) — normaliserad konfiguration
+   * (lagrad eller legacy). Ren modulkonfiguration, ingen PII.
+   */
+  contact_section: ContactSectionConfig;
 };
 
 export function toPublicModule(m: CompassModule): PublicCompassModule {
   return {
     collects_lead: moduleWantsLead(m),
+    contact_section: contactSectionForModule(m),
     id: m.id,
     slug: m.slug,
     public_slug: m.public_slug,
@@ -80,6 +88,8 @@ export function toPublicModule(m: CompassModule): PublicCompassModule {
     hero_eyebrow: m.hero_eyebrow,
     welcome_title: m.welcome_title,
     welcome_body: m.welcome_body,
+    start_page_title: m.start_page_title,
+    start_page_body: m.start_page_body,
     hero_image: m.hero_image,
     hero_video: m.hero_video,
     target_audience: m.target_audience,

@@ -138,6 +138,10 @@ export interface InflowNotificationFields {
   ideaCategory?: string;
   /** Besökarens kontaktpreferens (läsbar etikett, migration 1700000125). */
   contactPreference?: string;
+  /** Avsnittet "Dina uppgifter" (§ 23.11) — läsbara etiketter. Kön skickas aldrig. */
+  kommun?: string;
+  referralChannel?: string;
+  teamMembers?: string;
   /** AI-sammanställning av det inskickade (migration 1700000125). */
   aiSummary?: string;
   /** Direktlänk till leadet i /inflode/leads/<id> (om APP-URL är satt). */
@@ -217,6 +221,9 @@ export async function sendInflowNotification(
                 ${row('E-post', fields.email)}
                 ${row('Telefon', fields.phone)}
                 ${row('Organisation', fields.organization)}
+                ${row('Kommun', fields.kommun)}
+                ${row('Kontaktväg', fields.referralChannel)}
+                ${row('Övriga teammedlemmar', fields.teamMembers)}
                 ${row('Kategori', fields.ideaCategory)}
                 ${row('Idé / sammanfattning', fields.ideaSummary)}
                 ${row('Kontaktpreferens', fields.contactPreference)}

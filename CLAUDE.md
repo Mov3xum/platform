@@ -4107,6 +4107,86 @@ alls och en avbruten chatt såg ut som en slutförd.
 
 ---
 
+### 23.11 Avsnittet "Dina uppgifter" sist i flödet (2026-11-04)
+
+**Behov (inflödesansvarig).** Idébeskrivningen ska avslutas med ett avsnitt
+där besökaren fyller i namn på idéägaren, e-post, telefonnummer, kön på
+grundare (kvinna / man / mixat team), en ruta med namn + e-post till ev.
+övriga teammedlemmar, kommuntillhörighet (fasta val) och hur hen kom i
+kontakt med Movexum (fasta val). Tidigare fanns bara namn/e-post (+ telefon/
+organisation när krävda) i chattens avslutssteg och quizets kontaktsteg, och
+formuläret hade inget avslutssteg alls.
+
+- **EN komponent, tre flöden.** `components/compass/ContactSection.tsx`
+  renderar avsnittet ur modulens konfiguration och används av chattens
+  avslutssteg (`ChatClosingForm`), quizets sista steg (`ModuleQuiz`) och
+  — nytt — formulärets sista steg (`ModuleWizard`, "Snart klar"). Fält i fast
+  ordning: namn, e-post, telefon, organisation, kön på grundare, övriga
+  teammedlemmar, kommun, kontaktväg. Kontaktpreferensen (§ 23.6) ligger kvar
+  på samma steg.
+- **Källa av sanning:** den rena, enhetstestade
+  `packages/shared/src/compass-contact.ts` — `CONTACT_FIELD_KEYS`,
+  `CONTACT_FIELD_META`, de fasta valen (`FOUNDER_GENDER_OPTIONS`,
+  `KOMMUN_OPTIONS` = Gävleborgs tio kommuner + "annan kommun i Sverige" /
+  "utanför Sverige", `REFERRAL_CHANNEL_OPTIONS`), konfigurationen
+  (`ContactSectionConfig`: `hidden | optional | required` per fält),
+  `cleanContactValues` (dolda fält släpps, fasta val måste vara kända nycklar,
+  fritext trimmas/cappas/personnummer-saneras, e-post formatvalideras) och
+  `missingContactField`. Klient och server kör SAMMA funktioner — klienten är
+  aldrig gränsen (`parseContactSubmission` i `lib/compass/lead-capture.ts`
+  används av `/api/public/m/[slug]/{submit,quiz-result,complete}` och
+  admin-previewens `/api/inflode/m/[slug]/{submit,quiz-result}`).
+- **Konfiguration per modul** (`compass_modules.contact_fields`, json,
+  migration **1700000208**): steg 4 i modul-admin ("Dina uppgifter —
+  avsnittet sist i flödet") har en rad per fält med Visas inte / Frivillig /
+  Obligatorisk; ersätter de tre kryssrutorna. De äldre booleanerna
+  `require_email/phone/organization` HÄRLEDS ur konfigurationen vid sparning
+  (`legacyRequirementsFromSection`) så äldre ytor ser samma krav. **Saknat
+  fält ⇒ legacy** (`legacyContactSection`): chat/quiz visar namn + e-post och
+  telefon/organisation bara när krävda — exakt som förut; wizard får inget
+  avslutssteg. Ingen befintlig modul ändrar alltså utseende förrän någon
+  sparar steg 4. **Nya intag-moduler** (UI och chattens
+  `create_compass_module`) får `CONTACT_SECTION_DEFAULT`: namn + e-post
+  obligatoriska, telefon/kön/teammedlemmar/kommun/kontaktväg frivilliga;
+  enkäter (§ 43) samlar inga kontaktuppgifter. Schema-drift: sparas
+  konfigurationen mot en instans utan migrationen svarar
+  `updateModuleAction` med ett tydligt fel (§ 24.4-invarianten).
+- **Lead-fält** (`compass_leads`, samma migration): `founder_gender`
+  (select), `team_members` (text ≤ 2000), `kommun` (text ≤ 80, nyckel),
+  `referral_channel` (text ≤ 60, nyckel). Kommun/kontaktväg lagras som
+  nycklar (text, inte select) så listorna kan utökas i koden utan migration;
+  okända nycklar avvisas av `cleanContactValues`. `founder_gender` är däremot
+  en PB-select — ett nytt val kräver en migration (precedens 1700000209) och
+  speglas i `FOUNDER_GENDER_OPTIONS`. Speglat i `setup-via-api.mjs`
+  (compass_leads + compass_modules inline-defs). Avsnittets värden vinner över
+  det som mappats ur frågorna (`leadFieldsFromContact`); tomma värden skriver
+  aldrig över något.
+- **GDPR § 5 / art. 9 (bindande).** Kön på grundare behandlas som art. 9-
+  klass precis som `startups.founder_gender` (§ 10.2, DPIA
+  `docs/privacy/dpia-startups.md`). Valen är Kvinna / Man / Mixat team /
+  **Vill inte ange** (`vill_inte_ange`, migration **1700000209**, union på
+  select-värdena): med utvägen på plats får fältet göras obligatoriskt — ett
+  svar krävs, aldrig en uppgift (besökaren tvingas inte avslöja något; beslut
+  2026-11-04). `neverRequired`-mekanismen i `compass-contact.ts` finns kvar
+  för framtida fält men används inte. Hjälptexten säger att det bara används
+  för Vinnovas könsstatistik och aldrig i bedömningen, det **fältmaskas för AI**
+  (`gender`-mönstret i `redaction.ts`), **mejlas aldrig** i inflödesnotisen
+  och **exporteras aldrig** i CSV:n — det visas bara i lead-vyn för behörig
+  personal. Övriga teammedlemmar är tredjeparts-PII: personnummer-saneras,
+  fältmaskas för AI (`team_members` i `PII_FIELD_PATTERNS`, låst i
+  `redaction.test.ts`), exporteras inte per lead, men mejlas i notisen och
+  visas i lead-vyn (personalen ska kunna följa upp teamet). Kommun och
+  kontaktväg är verksamhetsdata: lead-vyn, notisen och CSV-exporten
+  (kolumnerna Kommun/Kontaktväg). Inget av fälten når AI-sammanställningen
+  (`buildSubmissionEntries` läser bara frågornas svar) eller den kurerade
+  AI-kontexten. Rättslig grund oförändrad (berättigat intresse +
+  samtyckesgrinden).
+- **Riskklass:** oförändrad (publik AI-chatt = begränsad; formulär/quiz n/a)
+  — ingen ny AI-funktion, bara fler validerade fält i leadet.
+- **Inte byggt:** aggregerad statistik per kommun/kontaktväg i
+  `/inflode/analysis` och k-anonym könsfördelning per period — nästa steg när
+  underlaget finns.
+
 ## 24. AI-sorterat filarkiv — ämnes-/bolagsmappar (/filer)
 
 ### 24.1 Översikt
@@ -7149,7 +7229,11 @@ slides. Ett **målträd per verksamhetsår**: fokusområde (Movexums fem) → m�
 med ägande team → indikatorer med måltal → kvartalsstatus. Indikatorer är
 antingen **beräknade** ur metrikregistret (§ 41) — värdet hämtas live och vid
 varje statusrapportering — eller **manuellt bedömda**. Modul `mal`
-("Mål & VP", Översikt-railen, staff/observer).
+("Måluppföljning" — hette "Mål & VP" t.o.m. 2026-11, Översikt-railen,
+staff/observer). Filterraden har knappen **Mina mål** (`GoalFilter.mine` =
+den inloggades id, URL `?mina=1` — alltid den inloggade, aldrig ett id ur
+URL:en): mål där hen är ägare av ett personligt mål ELLER utpekad ansvarig
+(`isMyGoal`, ren + enhetstestad).
 
 | Fil | Syfte |
 |-----|-------|
@@ -8360,15 +8444,39 @@ upp **kort** med det de saknar, det som krånglar eller det de undrar över.
 Varje kort har en **typ** (bugg / ny funktion / ändring / fråga), ett
 **område** (vilken sida i plattformen det gäller — dropdown, t.ex.
 "Rapportering") och en beskrivning. **Ledningen** (admin/incubator_lead)
-**svarar** på kortet och **klarmarkerar** när det är gjort; ett klart kort kan
-återöppnas. Filter på status/typ/sida/"bara mina" + fritextsök. Korten visas
-som **lista** eller **kanban-tavla** (Öppen · Besvarad · Klar) — valet sparas
-per webbläsare (`localStorage` `movexum-feedback-view`, bekvämlighet).
-Ledningen drar kort mellan kolumnerna (HTML5-DnD, samma mönster som
-`TaskKanban` § 15.7; på mobil en "Flytta till"-select); kolumnen Besvarad
-kräver att ett svar redan finns (`setFeedbackStatusAction` avvisar flytten
-med tydligt fel — kolumnen är ingen fri hink). Flytten är optimistisk i
-klienten och rullas tillbaka vid fel.
+**svarar** på kortet och driver det genom flödet.
+
+**Flödet (2026-11, migration 1700000208):** Öppen → **Påbörjad** → **Väntar
+återkoppling** → Klar. **Ledningen** (admin/incubator_lead) **svarar**,
+**påbörjar**, **skickar för test** och **klarmarkerar**; ett klart kort kan
+återöppnas. "Skicka för test" pekar ut en **testare** — som standard **den
+som lade upp kortet** (`defaultFeedbackTester`; valfri annan kollega ur
+Movexum-personalen) — flyttar kortet till Väntar återkoppling och
+notifierar testaren (`feedback_test`, § 50). Testaren (eller ledningen)
+**återkopplar** i systemet: *Fungerar* ⇒ Klar (klarmarkerad av testaren),
+*Fungerar inte* + obligatorisk not ⇒ tillbaka till Påbörjad
+(`submitFeedbackTestAction`, `statusAfterFeedbackTest`); ledningen får
+notisen `feedback_tested`. Ett svar på ett ännu öppet kort flyttar det till
+Påbörjad (`feedback_started` till författaren); i övrigt ändrar ett svar
+inte statusen. Dra-och-släpp till Väntar återkoppling utan testare pekar ut
+författaren (`testerAfterStatusChange`); till Klar/Öppen/Påbörjad rör inte
+testaren. Det gamla värdet `answered` ("Besvarad") ligger kvar i schemat,
+backfillas till `in_progress` av migrationen och tolkas så av läsvägen
+(`normalizeFeedbackStatus`) — ett schema utan migrationen får ett fel som
+namnger den (`withSchemaHint`), aldrig en tyst no-op.
+
+**Sidan (full bredd på desktop):** ett **flödesband** med fyra steg + "Alla"
+(antal per steg, klick = statusfilter), en verktygsrad (typ, sida, "Mina
+kort" = författare ELLER testare via `isMyFeedback`, "Att testa" = kort som
+väntar på MIN återkoppling, sök, vyväxling) och korten som **tavla**
+(default; fyra kolumner på bred skärm, dra-och-släpp för ledningen — samma
+mönster som `TaskKanban` § 15.7; på mobil en "Flytta till"-select) eller
+**radlista** som fälls ut per rad till hela kortet. Valet sparas per
+webbläsare (`localStorage` `movexum-feedback-view`, bekvämlighet). En notis
+med `#kort-<id>` öppnar raden och scrollar dit. Flytten är optimistisk i
+klienten och rullas tillbaka vid fel. Testarväljaren får Movexum-personalen
+som id + visningsnamn (`listStaffUsers`, aldrig e-post) och bara när den
+inloggade är ledning.
 
 | Fil | Syfte |
 |-----|-------|
@@ -8387,10 +8495,16 @@ klienten och rullas tillbaka vid fel.
   `area` (**text**, ≤ 40 — nyckel ur `FEEDBACK_AREAS`; medvetet inte select så
   en ny sida kan läggas till i listan utan migration; valideringen ligger i
   koden), `status` (select — MÅSTE spegla `FEEDBACK_STATUSES`: `open |
-  answered | done`), `answer` (≤ 5000), `answered_by`/`answered_at`,
-  `done_by`/`done_at`, autodate explicit (§ 28.5). Speglad i
-  `setup-via-api.mjs` (def + `FORCE_CREATE_RULES`) och asserterad i
-  `verify-baseline.mjs` (must-exist + `MUST_BE_STAFF_OR_OBSERVER`).
+  in_progress | awaiting_feedback | done`; `answered` kvar i schemat för
+  äldre rader, migration **1700000208**), `answer` (≤ 5000),
+  `answered_by`/`answered_at`, `done_by`/`done_at`, **`tester`** (→ users,
+  ingen cascade — vem som testar/återkopplar), **`test_note`** (≤ 2000,
+  testarens senaste återkoppling), **`tested_at`**, autodate explicit
+  (§ 28.5). Speglad i `setup-via-api.mjs` (def + `patchCollection` för
+  befintliga instanser + `FORCE_CREATE_RULES`) och asserterad i
+  `verify-baseline.mjs` (must-exist, `MUST_BE_STAFF_OR_OBSERVER`,
+  `REQUIRED_APP_FIELDS` för testarfälten, `REQUIRED_SELECT_VALUES` för
+  statusarna).
 - **Bara egna aktiverade sidor.** Dropdownen över sidor visar enbart de
   sidor som är aktiverade på den inloggades egen profil (§ 36.3): varje
   modul-kopplat område bär `module` i `FEEDBACK_AREAS`, och
@@ -8405,29 +8519,43 @@ klienten och rullas tillbaka vid fel.
   (`FEEDBACK_AUTHOR_ROLES`: admin/incubator_lead/coach/mentor; observer
   läser); redigera = författaren tills kortet är klart, eller ledningen;
   radera = ledningen, eller författaren för ett eget ännu obesvarat kort;
-  svara/klarmarkera/återöppna = ledningen (`FEEDBACK_RESPONDER_ROLES`).
+  svara/flytta/peka ut testare/klarmarkera/återöppna = ledningen
+  (`FEEDBACK_RESPONDER_ROLES`); återkoppla på ett test = den utpekade
+  testaren eller ledningen, bara i Väntar återkoppling (`canTestFeedback`).
   Enforce:as i server-actionen (PB:s createRule är roll-lös per § 21.3;
-  update/delete = `author` eller ledning med `:each ?=`). Tenant + author
-  stämplas server-side. Skrivning via användartoken med superuser-fallback
-  BARA vid PB v0.23.4:s tysta regel-nekande (400/403/404), efter verifierad
-  roll + tenant.
-- **Status följer svaret:** ett svar sätter `answered` (ett redan klart kort
-  förblir `done`); klarmarkering sätter `done` + `done_by/at`; återöppning
-  går tillbaka till `answered` om ett svar finns, annars `open`.
+  update = `author`, `tester` eller ledning med `:each ?=` — fältgränsen,
+  att testaren bara skriver återkopplingen, ligger i koden; delete =
+  `author` eller ledning). Testaren valideras mot Movexum-personalen i
+  tenanten (`assertStaffInTenant`) — aldrig ett id från klienten rakt in.
+  Tenant + author stämplas server-side. Skrivning via användartoken med
+  superuser-fallback BARA vid PB v0.23.4:s tysta regel-nekande
+  (400/403/404), efter verifierad roll + tenant.
+- **Status:** svar på ett öppet kort ⇒ `in_progress`, annars oförändrad;
+  klarmarkering sätter `done` + `done_by/at`; återkoppling "fungerar" ⇒
+  `done` (av testaren), "fungerar inte" ⇒ `in_progress` + `test_note`;
+  återöppning går tillbaka till `in_progress` om någon jobbat på kortet
+  (svar eller återkoppling finns), annars `open`.
 - **Sortering** (`compareFeedbackItems`): öppna först (buggar och frågor före
-  ändringar/nya funktioner), sedan besvarade, sist klara — nyast först inom
-  varje grupp. Läsvägen paginerar upp till 2 000 och visar kapning som
+  ändringar/nya funktioner), sedan påbörjade, sedan väntar återkoppling,
+  sist klara — nyast först inom varje grupp. Läsvägen paginerar upp till 2 000 och visar kapning som
   banner (§ 33.4-principen); ett läsfel visas som banner, aldrig som "tom
   backlog".
 - **Audit (ISO 27001 A.8.15):** varje mutation loggas i `agent_actions`
-  (PII-fritt: rubrik/typ/område/status; beskrivning och svar bara som
-  längd; radering som `update` + `deleted`, § 30.6) och mappas i
-  `feed/agent-log.ts` → syns i Bolagsnytt/`/aktivitet` med länk
-  `/onskemal#kort-<id>`.
-- **GDPR § 5:** kort och svar är verksamhetsfritext från personalen —
-  personnummer-saneras på skrivvägen (§ 15.6), UI:t uppmanar att inte skriva
-  personuppgifter. `author`/`answered_by`/`done_by` visas som visningsnamn,
-  aldrig e-post. Rättslig grund: berättigat intresse (förbättring av det
+  (PII-fritt: rubrik/typ/område/status, `has_tester`/`test_result`;
+  beskrivning, svar och återkoppling bara som längd; radering som `update`
+  + `deleted`, § 30.6) och mappas i `feed/agent-log.ts` ("Påbörjat",
+  "Väntar återkoppling", "Testare utpekad", "Testat och klart" …) → syns i
+  Bolagsnytt/`/aktivitet` med länk `/onskemal#kort-<id>`.
+- **Notiser (§ 50):** `feedback_started` (författaren när kortet påbörjas),
+  `feedback_answered` (svar), `feedback_test` (testaren när hen ska testa —
+  även vid byte av testare), `feedback_tested` (ledningen + den som svarade
+  när testaren återkopplat; grupperas), `feedback_done` (författaren och
+  testaren när kortet blir klart). Alla best-effort.
+- **GDPR § 5:** kort, svar och återkoppling är verksamhetsfritext från
+  personalen — personnummer-saneras på skrivvägen (§ 15.6), UI:t uppmanar
+  att inte skriva personuppgifter. `author`/`answered_by`/`done_by`/`tester`
+  visas som visningsnamn, aldrig e-post; `tester` är en intern
+  användarrelation (når aldrig AI-kontexten — `users` är denylistad). Rättslig grund: berättigat intresse (förbättring av det
   interna verktyget). `cascadeDelete` på tenant; användarrelationer nollas
   vid radering (kortet lever vidare som "Borttagen användare").
 - **AI:** `feedback_items` är inte denylistad — chatten kan läsa backloggen
@@ -8435,7 +8563,8 @@ klienten och rullas tillbaka vid fel.
   inget skrivverktyg. Riskklass (EU AI Act): n/a — ingen AI-inferens.
 - **§ 21-isolering:** list/view staff/observer-only; en ren `startup_member`
   ser varken modulen (inte i `MEMBER_RAIL`) eller kollektionen.
-- **Migrationer** 1700000176–177 är nya, oföränderliga filnummer.
+- **Migrationer** 1700000176–177 och 1700000208 är nya, oföränderliga
+  filnummer.
 - **Sidmenyn är låst av test (2026-10).** Modulen försvann ur railen när
   två grenar ändrade samma `System`-rad i `RAIL_GROUPS` och sammanslagningen
   tog den andra versionen — sidan fanns kvar på `/onskemal` (och all data i
@@ -8576,7 +8705,8 @@ det.
 | `agreement_signed` | Alla parter har signerat | Avsändare, utpekad signatär och (om bolaget signerade) medlemmarna |
 | `contact_request`/`contact_decision` | Kontaktboken (§ 45.3) | Ägare / frågare |
 | `support_check_*` | Stödcheckar (§ 46) | Coacher/ledning resp. bolaget |
-| `feedback_answered`/`feedback_done` | Ledningen svarar/klarmarkerar (§ 49) | Kortets författare |
+| `feedback_answered`/`feedback_started`/`feedback_done` | Ledningen svarar/påbörjar/klarmarkerar (§ 49) | Kortets författare (och testaren vid klart) |
+| `feedback_test`/`feedback_tested` | Kortet skickas för test / testaren återkopplar (§ 49) | Testaren resp. ledningen + den som svarade |
 | `screening_request` (obligatorisk) | Controllern skickar begäran om komplettering (§ 51.6) | Vald coach resp. bolagets medlemmar |
 | `screening_answered` | Coachen/bolaget besvarar punkter (§ 51.6) | Den som skickade förfrågan |
 | `due_soon` | (reserverad — påminnelse-ticken, nästa steg) | Ägare/tilldelade |
@@ -10563,6 +10693,27 @@ kodkarta: `docs/integrations/impact-navigator.md`.
   per bolag renderar `ImpactSideNav` originalets meny i `lib/impact/shell.tsx`
   (inga flikar). Landningssidan visar bara bolag i Impact Navigator —
   befintliga bolagskort väljs under "Skapa nytt bolag".
+  **Grön zon (2026-11).** Hela modulen (topbar + vy) bär aurora-gradienten i
+  Movexums gröna toner i stället för den blå/lila: `lib/app-zone.ts` (ren,
+  enhetstestad) mappar `/impactnavigator…` → zonen `impact`, `MainColumn`
+  (klient, ersätter den nakna `.mx-main-col`-diven i `ProtoShell`) sätter
+  `data-zone` redan vid server-renderingen och `prototype.css` byter
+  `--mx-app-gradient` per zon — samma komposition, andra toner, så det känns
+  som samma system men en hållbarhetsdel. Sidomenyn: brand-block i grön
+  gradient, aktiv post Movexum grön med vit text, hover pastell grön. En ny
+  zon = en rad i `ZONE_PREFIXES` + ett CSS-block; aldrig en egen bakgrund i
+  sidan.
+  **Brödsmulor utan record-id (2026-11).** Topbaren visade
+  `Impact Navigator / omip77vgymfj3hu / vasentlighet`. `lib/crumbs.ts` (ren,
+  enhetstestad) bygger nu smulorna ur tre lager — modulregistret, fasta
+  sökvägar (`STATIC_ROUTE_LABELS`: "Nytt bolag", "Jämförelser", plus
+  Inställningar-sektionerna) och etiketter som SIDAN registrerat via
+  `<CrumbLabels labels={{ '/impactnavigator/<id>': bolagsnamn, …sidrubriker }}>`
+  (`lib/crumb-labels.ts`, klientminne + `useSyncExternalStore`). Ett segment
+  som ser ut som ett PocketBase-id visas aldrig rått — platshållare "…" tills
+  etiketten finns. Andra detaljsidor (bolagskort, uppdrag …) kan använda samma
+  komponent; etiketterna är visningsnamn sidan redan renderar, ingen ny
+  dataväg.
 - **Ytor:** `/impactnavigator` (Alla bolag: sök på namn/bransch/resa,
   filter på fas och övergripande bedömning, kort med status/fas/impactnivå,
   Öppna → dashboard eller väsentlighet, Radera för ledning),
