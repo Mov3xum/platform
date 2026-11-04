@@ -5,6 +5,8 @@ import { hasRole } from '@/lib/rbac';
 import { Chip } from '@/components/proto';
 import { PageShell } from '@/components/PageShell';
 import { RailSection, RailItem, RailStat, RailNote } from '@/components/PageRail';
+import { loadTenantActivity } from '@/lib/user-activity/data.server';
+import { activityStatus } from '@platform/shared';
 import { getBudgetStatus } from '@/lib/ai/budget.server';
 import { getInfraHealth, healthStateLabel, type HealthState } from '@/lib/health';
 import { loadTeamCapSetting } from '@/lib/team/competence-tags.server';
@@ -38,16 +40,26 @@ export default async function InstallningarPage() {
   let userCount = 0;
   let memberCount = 0;
   let unverifiedCount = 0;
+  // Användaraktivitet (§ 57): hur många som aldrig loggat in — onboarding-signal.
+  let neverLoggedInCount = 0;
+  let activityKnown = false;
   try {
-    const res = await pb.collection('users').getList<{ roles?: unknown; verified?: boolean }>(1, 500, {
-      filter: tenantFilter,
-      fields: 'id,roles,verified'
-    });
+    const [res, activity] = await Promise.all([
+      pb.collection('users').getList<{ id: string; roles?: unknown; verified?: boolean }>(1, 500, {
+        filter: tenantFilter,
+        fields: 'id,roles,verified'
+      }),
+      loadTenantActivity(pb, user.tenant)
+    ]);
     userCount = res.totalItems;
+    activityKnown = !activity.unavailable;
+    const now = new Date();
     for (const u of res.items) {
       const roles = Array.isArray(u.roles) ? (u.roles as string[]) : [];
       if (roles.includes('startup_member')) memberCount += 1;
       if (u.verified === false) unverifiedCount += 1;
+      const stats = activity.byUser.get(u.id);
+      if (activityKnown && (!stats || activityStatus(stats, now) === 'never')) neverLoggedInCount += 1;
     }
   } catch (error) {
     console.error('[installningar] failed to count users', { tenant: user.tenant, error });
@@ -123,10 +135,19 @@ export default async function InstallningarPage() {
       stat: `${userCount} användare`,
       hint: `${memberCount} bolagsmedlem${memberCount === 1 ? '' : 'mar'} · ${userCount - memberCount} personal & övriga · moduler per person`,
       status:
-        unverifiedCount > 0 ? (
-          <Chip variant="yellow" mono>
-            {unverifiedCount} ej verifierad{unverifiedCount === 1 ? '' : 'e'}
-          </Chip>
+        unverifiedCount > 0 || (activityKnown && neverLoggedInCount > 0) ? (
+          <span className="flex flex-wrap gap-1.5">
+            {unverifiedCount > 0 && (
+              <Chip variant="yellow" mono>
+                {unverifiedCount} ej verifierad{unverifiedCount === 1 ? '' : 'e'}
+              </Chip>
+            )}
+            {activityKnown && neverLoggedInCount > 0 && (
+              <Chip variant="yellow" mono>
+                {neverLoggedInCount} aldrig inloggad{neverLoggedInCount === 1 ? '' : 'e'}
+              </Chip>
+            )}
+          </span>
         ) : undefined
     },
     organisation: {

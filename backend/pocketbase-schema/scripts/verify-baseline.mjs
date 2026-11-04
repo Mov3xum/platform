@@ -180,6 +180,8 @@ async function verifyCollectionsExist() {
     'sustainability_update_events',
     'sustainability_documents',
     'sustainability_ai_jobs',
+    // Användaraktivitet (§ 57, migration 1700000209) — stöd för att hjälpa användare igång.
+    'user_activity',
     // Studenter & talang (§ 54, migration 1700000201).
     'talent_needs',
     'student_profiles',
@@ -636,7 +638,9 @@ function verifyImmutableCollections(collections) {
 // `@request.auth.id = user` och får aldrig öppnas för staff/tenant.
 // Studentprofiler och intressen (§ 54) skapas bara av servern: studenten har
 // ingen användarsession, och ett intresse får aldrig förfalskas av ett bolag.
-const MUST_BE_SERVER_CREATE_ONLY = ['notifications', 'student_profiles', 'talent_interests'];
+// Användaraktivitet (§ 57, migration 1700000209): bara servern skriver raderna
+// (en användare ska inte kunna PATCH:a sin egen eller någon annans aktivitet).
+const MUST_BE_SERVER_CREATE_ONLY = ['notifications', 'student_profiles', 'talent_interests', 'user_activity'];
 const MUST_BE_OWNER_ONLY = ['notifications', 'notification_preferences'];
 
 function verifyNotificationRules(collections) {
@@ -675,6 +679,36 @@ function verifyNotificationRules(collections) {
     }
   }
   ok('Notiser: bara servern skapar, bara ägaren läser, update fältlåst (§ 50)');
+}
+
+// Användaraktivitet (§ 57, migration 1700000209): skrivs bara av servern och
+// läses bara av ledningen i tenanten eller personen själv — aldrig av övrig
+// personal, observatörer eller bolagsmedlemmar (det är stöd för introduktion,
+// inte ett prestationsmått).
+function verifyUserActivityRules(collections) {
+  const col = collections.get('user_activity');
+  if (!col) return;
+  for (const ruleName of ['updateRule', 'deleteRule']) {
+    if (col[ruleName] !== null && col[ruleName] !== undefined) {
+      fail(`user_activity.${ruleName} måste vara null (bara servern skriver), är \`${String(col[ruleName])}\`.`);
+    }
+  }
+  for (const ruleName of ['listRule', 'viewRule']) {
+    const rule = col[ruleName];
+    if (typeof rule !== 'string' || !rule.includes('@request.auth.id = user')) {
+      fail(`user_activity.${ruleName} måste låta personen läsa sin egen rad (\`@request.auth.id = user\`), är \`${String(rule)}\`.`);
+      continue;
+    }
+    for (const r of ['coach', 'mentor', 'observer', 'startup_member', 'partner']) {
+      if (rule.includes(`"${r}"`)) {
+        fail(`user_activity.${ruleName} får bara öppnas för ledningen (admin/incubator_lead), inte \`${r}\`: \`${rule}\`.`);
+      }
+    }
+    if (!rule.includes('"incubator_lead"') || !rule.includes('@request.auth.tenant = tenant')) {
+      fail(`user_activity.${ruleName} ska låta ledningen i samma tenant läsa: \`${rule}\`.`);
+    }
+  }
+  ok('Användaraktivitet: bara servern skriver, ledningen i tenanten eller ägaren läser (§ 57)');
 }
 
 function verifyStartupMemberIsolation(collections) {
@@ -749,7 +783,8 @@ const AI_DENYLIST = new Set([
   'org_knowledge', 'org_knowledge_chunks', 'agent_memory',
   'notifications', 'notification_preferences', 'rate_limits', 'app_locks',
   'student_profiles', 'talent_interests',
-  'sustainability_documents', 'sustainability_ai_jobs'
+  'sustainability_documents', 'sustainability_ai_jobs',
+  'user_activity'
 ]);
 
 // PII-stavningar som substring-maskern INTE redan fångar. Förankrade till `_`
@@ -908,6 +943,7 @@ function verifyRlsAndRbac(collections) {
   verifyStartupMemberIsolation(collections);
   verifyImmutableCollections(collections);
   verifyNotificationRules(collections);
+  verifyUserActivityRules(collections);
   verifySuperuserOnlyCollections(collections);
   verifyCompassWriteRulesScoped(collections);
 

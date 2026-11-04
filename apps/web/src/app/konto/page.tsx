@@ -12,6 +12,9 @@ import { ProfileForm, PasswordForm } from './AccountForms';
 import { groupNotificationKindsByCategory, notificationKindsForRoles } from '@platform/shared';
 import { loadNotificationPreferences } from '@/lib/notifications/preferences.server';
 import { NotificationPreferencesForm } from '@/components/notifications/NotificationPreferencesForm';
+import { loadMyActivity } from '@/lib/user-activity/data.server';
+import { ActivityOverview } from '@/components/user-activity/ActivityOverview';
+import { toggleableModulesForRoles } from '@/lib/users/validate';
 
 export const metadata: Metadata = {
   title: 'Mitt konto · Movexum'
@@ -44,10 +47,17 @@ export default async function KontoPage() {
   const showCompetence =
     hasRole(user.roles, TEAM_ROLES) || canAccessModuleForUser(user.roles, 'min_profil', user.enabledModules);
   const pb = await getServerPb();
-  const [competence, notificationPrefs] = await Promise.all([
+  const [competence, notificationPrefs, myActivity] = await Promise.all([
     showCompetence ? loadMyCompetenceProfile(pb, user) : Promise.resolve(null),
-    loadNotificationPreferences(pb, user.id)
+    loadNotificationPreferences(pb, user.id),
+    loadMyActivity(pb, user.id)
   ]);
+  // Din aktivitet (§ 57): samma uppgifter som ledningen ser under Inställningar →
+  // Användare — transparens (GDPR art. 13/15). `now` som ISO för hydreringen.
+  const activityNow = new Date().toISOString();
+  const myEnabledModuleIds = toggleableModulesForRoles(user.roles)
+    .map((m) => m.id)
+    .filter((id) => user.enabledModules.includes(id));
   // Notisinställningar (§ 50): typerna byggs ur katalogen, filtrerat på rollerna.
   const notificationGroups = groupNotificationKindsByCategory(notificationKindsForRoles(user.roles));
 
@@ -155,6 +165,20 @@ export default async function KontoPage() {
             </section>
           </div>
         </div>
+
+        <section id="aktivitet" aria-labelledby="aktivitet-rubrik" className="scroll-mt-6">
+          <div className="rounded-3xl border border-default bg-surface p-6 shadow-sm shadow-movexum-svart/5">
+            <h2 id="aktivitet-rubrik" className="font-heading text-xl font-semibold text-foreground">
+              Din aktivitet
+            </h2>
+            <p className="mt-1 mb-4 text-[13px] text-foreground-muted">
+              När du senast loggade in och vilka sidor du använder. Uppgifterna är per sida i sidmenyn — aldrig per
+              bolag eller post — och ses bara av dig och inkubatorledningen, som stöd för att hjälpa nya användare
+              igång. De används inte för att följa upp arbetsinsats.
+            </p>
+            <ActivityOverview stats={myActivity} now={activityNow} enabledModuleIds={myEnabledModuleIds} self />
+          </div>
+        </section>
 
         <section id="notiser" aria-labelledby="notiser-rubrik" className="scroll-mt-6">
           <div className="mb-4 border-t border-default pt-6">

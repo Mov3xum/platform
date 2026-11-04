@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { clientIpFromHeaders } from '@/lib/client-ip';
 import { sanitizeAppPath } from '@/lib/relative-redirect';
+import { recordLogin } from '@/lib/user-activity/record.server';
 import PocketBase from 'pocketbase';
 import { AUTH_COOKIE } from '@/lib/auth.server';
 import { getServerPbUrl } from '@/lib/pb-url';
@@ -134,6 +135,10 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     // browser cookie limit, which silently drops the cookie and creates a
     // login → /dashboard → /login redirect loop with no error.
     const m = pb.authStore.model as Record<string, unknown> | null;
+    // Användaraktivitet (§ 57): senaste inloggning — best-effort, blockerar aldrig.
+    if (m && typeof m.id === 'string' && typeof m.tenant === 'string') {
+      void recordLogin(m.id, m.tenant);
+    }
     const expandTenant =
       (m?.expand as { tenant?: { id: string; name: string; slug: string } } | undefined)?.tenant;
     const compactModel = m

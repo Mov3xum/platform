@@ -1525,6 +1525,39 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && @request.auth.id = user`
 });
 
+// Migration 1700000209: user_activity — användaraktivitet (CLAUDE.md § 57).
+// En rad per användare: inloggningar, senast aktiv och aggregat per MODUL
+// (aldrig sökvägar/poster, ingen IP/user agent). Skrivs BARA av servern
+// (create/update/delete = null, som notifications); läses av ledningen i
+// tenanten (`:each ?=`) eller personen själv (skalär ägarcheck). AI-denylistad.
+await ensureCollection({
+  id: 'user_activity_collection',
+  name: 'user_activity',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'user', type: 'relation', required: true, collectionId: usersId, cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'first_login_at', type: 'date', required: false },
+    { name: 'last_login_at', type: 'date', required: false },
+    { name: 'login_count', type: 'number', required: false, min: 0, onlyInt: true },
+    { name: 'last_seen_at', type: 'date', required: false },
+    { name: 'last_module', type: 'text', required: false, max: 40 },
+    { name: 'modules', type: 'json', required: false, maxSize: 30000 },
+    { name: 'active_days', type: 'json', required: false, maxSize: 4000 }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_user_activity_user ON user_activity (user)',
+    'CREATE INDEX idx_user_activity_tenant_seen ON user_activity (tenant, last_seen_at)'
+  ],
+  listRule: `${ANY_AUTH} && ((${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}) || @request.auth.id = user)`,
+  viewRule: `${ANY_AUTH} && ((${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}) || @request.auth.id = user)`,
+  createRule: null,
+  updateRule: null,
+  deleteRule: null
+});
+
 // Migration 1700000024: strategies — strategiska planer per bolag.
 await ensureCollection({
   id: 'strategies_collection',
