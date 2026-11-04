@@ -8364,15 +8364,39 @@ upp **kort** med det de saknar, det som krånglar eller det de undrar över.
 Varje kort har en **typ** (bugg / ny funktion / ändring / fråga), ett
 **område** (vilken sida i plattformen det gäller — dropdown, t.ex.
 "Rapportering") och en beskrivning. **Ledningen** (admin/incubator_lead)
-**svarar** på kortet och **klarmarkerar** när det är gjort; ett klart kort kan
-återöppnas. Filter på status/typ/sida/"bara mina" + fritextsök. Korten visas
-som **lista** eller **kanban-tavla** (Öppen · Besvarad · Klar) — valet sparas
-per webbläsare (`localStorage` `movexum-feedback-view`, bekvämlighet).
-Ledningen drar kort mellan kolumnerna (HTML5-DnD, samma mönster som
-`TaskKanban` § 15.7; på mobil en "Flytta till"-select); kolumnen Besvarad
-kräver att ett svar redan finns (`setFeedbackStatusAction` avvisar flytten
-med tydligt fel — kolumnen är ingen fri hink). Flytten är optimistisk i
-klienten och rullas tillbaka vid fel.
+**svarar** på kortet och driver det genom flödet.
+
+**Flödet (2026-11, migration 1700000208):** Öppen → **Påbörjad** → **Väntar
+återkoppling** → Klar. **Ledningen** (admin/incubator_lead) **svarar**,
+**påbörjar**, **skickar för test** och **klarmarkerar**; ett klart kort kan
+återöppnas. "Skicka för test" pekar ut en **testare** — som standard **den
+som lade upp kortet** (`defaultFeedbackTester`; valfri annan kollega ur
+Movexum-personalen) — flyttar kortet till Väntar återkoppling och
+notifierar testaren (`feedback_test`, § 50). Testaren (eller ledningen)
+**återkopplar** i systemet: *Fungerar* ⇒ Klar (klarmarkerad av testaren),
+*Fungerar inte* + obligatorisk not ⇒ tillbaka till Påbörjad
+(`submitFeedbackTestAction`, `statusAfterFeedbackTest`); ledningen får
+notisen `feedback_tested`. Ett svar på ett ännu öppet kort flyttar det till
+Påbörjad (`feedback_started` till författaren); i övrigt ändrar ett svar
+inte statusen. Dra-och-släpp till Väntar återkoppling utan testare pekar ut
+författaren (`testerAfterStatusChange`); till Klar/Öppen/Påbörjad rör inte
+testaren. Det gamla värdet `answered` ("Besvarad") ligger kvar i schemat,
+backfillas till `in_progress` av migrationen och tolkas så av läsvägen
+(`normalizeFeedbackStatus`) — ett schema utan migrationen får ett fel som
+namnger den (`withSchemaHint`), aldrig en tyst no-op.
+
+**Sidan (full bredd på desktop):** ett **flödesband** med fyra steg + "Alla"
+(antal per steg, klick = statusfilter), en verktygsrad (typ, sida, "Mina
+kort" = författare ELLER testare via `isMyFeedback`, "Att testa" = kort som
+väntar på MIN återkoppling, sök, vyväxling) och korten som **tavla**
+(default; fyra kolumner på bred skärm, dra-och-släpp för ledningen — samma
+mönster som `TaskKanban` § 15.7; på mobil en "Flytta till"-select) eller
+**radlista** som fälls ut per rad till hela kortet. Valet sparas per
+webbläsare (`localStorage` `movexum-feedback-view`, bekvämlighet). En notis
+med `#kort-<id>` öppnar raden och scrollar dit. Flytten är optimistisk i
+klienten och rullas tillbaka vid fel. Testarväljaren får Movexum-personalen
+som id + visningsnamn (`listStaffUsers`, aldrig e-post) och bara när den
+inloggade är ledning.
 
 | Fil | Syfte |
 |-----|-------|
@@ -8391,10 +8415,16 @@ klienten och rullas tillbaka vid fel.
   `area` (**text**, ≤ 40 — nyckel ur `FEEDBACK_AREAS`; medvetet inte select så
   en ny sida kan läggas till i listan utan migration; valideringen ligger i
   koden), `status` (select — MÅSTE spegla `FEEDBACK_STATUSES`: `open |
-  answered | done`), `answer` (≤ 5000), `answered_by`/`answered_at`,
-  `done_by`/`done_at`, autodate explicit (§ 28.5). Speglad i
-  `setup-via-api.mjs` (def + `FORCE_CREATE_RULES`) och asserterad i
-  `verify-baseline.mjs` (must-exist + `MUST_BE_STAFF_OR_OBSERVER`).
+  in_progress | awaiting_feedback | done`; `answered` kvar i schemat för
+  äldre rader, migration **1700000208**), `answer` (≤ 5000),
+  `answered_by`/`answered_at`, `done_by`/`done_at`, **`tester`** (→ users,
+  ingen cascade — vem som testar/återkopplar), **`test_note`** (≤ 2000,
+  testarens senaste återkoppling), **`tested_at`**, autodate explicit
+  (§ 28.5). Speglad i `setup-via-api.mjs` (def + `patchCollection` för
+  befintliga instanser + `FORCE_CREATE_RULES`) och asserterad i
+  `verify-baseline.mjs` (must-exist, `MUST_BE_STAFF_OR_OBSERVER`,
+  `REQUIRED_APP_FIELDS` för testarfälten, `REQUIRED_SELECT_VALUES` för
+  statusarna).
 - **Bara egna aktiverade sidor.** Dropdownen över sidor visar enbart de
   sidor som är aktiverade på den inloggades egen profil (§ 36.3): varje
   modul-kopplat område bär `module` i `FEEDBACK_AREAS`, och
@@ -8409,29 +8439,43 @@ klienten och rullas tillbaka vid fel.
   (`FEEDBACK_AUTHOR_ROLES`: admin/incubator_lead/coach/mentor; observer
   läser); redigera = författaren tills kortet är klart, eller ledningen;
   radera = ledningen, eller författaren för ett eget ännu obesvarat kort;
-  svara/klarmarkera/återöppna = ledningen (`FEEDBACK_RESPONDER_ROLES`).
+  svara/flytta/peka ut testare/klarmarkera/återöppna = ledningen
+  (`FEEDBACK_RESPONDER_ROLES`); återkoppla på ett test = den utpekade
+  testaren eller ledningen, bara i Väntar återkoppling (`canTestFeedback`).
   Enforce:as i server-actionen (PB:s createRule är roll-lös per § 21.3;
-  update/delete = `author` eller ledning med `:each ?=`). Tenant + author
-  stämplas server-side. Skrivning via användartoken med superuser-fallback
-  BARA vid PB v0.23.4:s tysta regel-nekande (400/403/404), efter verifierad
-  roll + tenant.
-- **Status följer svaret:** ett svar sätter `answered` (ett redan klart kort
-  förblir `done`); klarmarkering sätter `done` + `done_by/at`; återöppning
-  går tillbaka till `answered` om ett svar finns, annars `open`.
+  update = `author`, `tester` eller ledning med `:each ?=` — fältgränsen,
+  att testaren bara skriver återkopplingen, ligger i koden; delete =
+  `author` eller ledning). Testaren valideras mot Movexum-personalen i
+  tenanten (`assertStaffInTenant`) — aldrig ett id från klienten rakt in.
+  Tenant + author stämplas server-side. Skrivning via användartoken med
+  superuser-fallback BARA vid PB v0.23.4:s tysta regel-nekande
+  (400/403/404), efter verifierad roll + tenant.
+- **Status:** svar på ett öppet kort ⇒ `in_progress`, annars oförändrad;
+  klarmarkering sätter `done` + `done_by/at`; återkoppling "fungerar" ⇒
+  `done` (av testaren), "fungerar inte" ⇒ `in_progress` + `test_note`;
+  återöppning går tillbaka till `in_progress` om någon jobbat på kortet
+  (svar eller återkoppling finns), annars `open`.
 - **Sortering** (`compareFeedbackItems`): öppna först (buggar och frågor före
-  ändringar/nya funktioner), sedan besvarade, sist klara — nyast först inom
-  varje grupp. Läsvägen paginerar upp till 2 000 och visar kapning som
+  ändringar/nya funktioner), sedan påbörjade, sedan väntar återkoppling,
+  sist klara — nyast först inom varje grupp. Läsvägen paginerar upp till 2 000 och visar kapning som
   banner (§ 33.4-principen); ett läsfel visas som banner, aldrig som "tom
   backlog".
 - **Audit (ISO 27001 A.8.15):** varje mutation loggas i `agent_actions`
-  (PII-fritt: rubrik/typ/område/status; beskrivning och svar bara som
-  längd; radering som `update` + `deleted`, § 30.6) och mappas i
-  `feed/agent-log.ts` → syns i Bolagsnytt/`/aktivitet` med länk
-  `/onskemal#kort-<id>`.
-- **GDPR § 5:** kort och svar är verksamhetsfritext från personalen —
-  personnummer-saneras på skrivvägen (§ 15.6), UI:t uppmanar att inte skriva
-  personuppgifter. `author`/`answered_by`/`done_by` visas som visningsnamn,
-  aldrig e-post. Rättslig grund: berättigat intresse (förbättring av det
+  (PII-fritt: rubrik/typ/område/status, `has_tester`/`test_result`;
+  beskrivning, svar och återkoppling bara som längd; radering som `update`
+  + `deleted`, § 30.6) och mappas i `feed/agent-log.ts` ("Påbörjat",
+  "Väntar återkoppling", "Testare utpekad", "Testat och klart" …) → syns i
+  Bolagsnytt/`/aktivitet` med länk `/onskemal#kort-<id>`.
+- **Notiser (§ 50):** `feedback_started` (författaren när kortet påbörjas),
+  `feedback_answered` (svar), `feedback_test` (testaren när hen ska testa —
+  även vid byte av testare), `feedback_tested` (ledningen + den som svarade
+  när testaren återkopplat; grupperas), `feedback_done` (författaren och
+  testaren när kortet blir klart). Alla best-effort.
+- **GDPR § 5:** kort, svar och återkoppling är verksamhetsfritext från
+  personalen — personnummer-saneras på skrivvägen (§ 15.6), UI:t uppmanar
+  att inte skriva personuppgifter. `author`/`answered_by`/`done_by`/`tester`
+  visas som visningsnamn, aldrig e-post; `tester` är en intern
+  användarrelation (når aldrig AI-kontexten — `users` är denylistad). Rättslig grund: berättigat intresse (förbättring av det
   interna verktyget). `cascadeDelete` på tenant; användarrelationer nollas
   vid radering (kortet lever vidare som "Borttagen användare").
 - **AI:** `feedback_items` är inte denylistad — chatten kan läsa backloggen
@@ -8439,7 +8483,8 @@ klienten och rullas tillbaka vid fel.
   inget skrivverktyg. Riskklass (EU AI Act): n/a — ingen AI-inferens.
 - **§ 21-isolering:** list/view staff/observer-only; en ren `startup_member`
   ser varken modulen (inte i `MEMBER_RAIL`) eller kollektionen.
-- **Migrationer** 1700000176–177 är nya, oföränderliga filnummer.
+- **Migrationer** 1700000176–177 och 1700000208 är nya, oföränderliga
+  filnummer.
 - **Sidmenyn är låst av test (2026-10).** Modulen försvann ur railen när
   två grenar ändrade samma `System`-rad i `RAIL_GROUPS` och sammanslagningen
   tog den andra versionen — sidan fanns kvar på `/onskemal` (och all data i
@@ -8580,7 +8625,8 @@ det.
 | `agreement_signed` | Alla parter har signerat | Avsändare, utpekad signatär och (om bolaget signerade) medlemmarna |
 | `contact_request`/`contact_decision` | Kontaktboken (§ 45.3) | Ägare / frågare |
 | `support_check_*` | Stödcheckar (§ 46) | Coacher/ledning resp. bolaget |
-| `feedback_answered`/`feedback_done` | Ledningen svarar/klarmarkerar (§ 49) | Kortets författare |
+| `feedback_answered`/`feedback_started`/`feedback_done` | Ledningen svarar/påbörjar/klarmarkerar (§ 49) | Kortets författare (och testaren vid klart) |
+| `feedback_test`/`feedback_tested` | Kortet skickas för test / testaren återkopplar (§ 49) | Testaren resp. ledningen + den som svarade |
 | `screening_request` (obligatorisk) | Controllern skickar begäran om komplettering (§ 51.6) | Vald coach resp. bolagets medlemmar |
 | `screening_answered` | Coachen/bolaget besvarar punkter (§ 51.6) | Den som skickade förfrågan |
 | `due_soon` | (reserverad — påminnelse-ticken, nästa steg) | Ägare/tilldelade |

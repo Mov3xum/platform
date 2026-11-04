@@ -9,16 +9,23 @@ import { describePbError, pbStatus } from '@/lib/pb-error';
 import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 import { FEEDBACK_ITEMS, getFeedbackItem, type FeedbackItem } from '@/lib/feedback/data';
 import { feedbackAreasForUser } from '@/lib/feedback/areas';
+import { listStaffUsers } from '@/lib/contacts/data';
 import { notify } from '@/lib/notifications-server';
 import {
+  FEEDBACK_STATUS_LABELS,
   canCreateFeedback,
   canDeleteFeedback,
   canEditFeedback,
   canRespondToFeedback,
+  canTestFeedback,
   feedbackAreaLabel,
   isFeedbackStatus,
+  statusAfterFeedbackTest,
+  testerAfterStatusChange,
   validateFeedbackAnswer,
-  validateFeedbackInput
+  validateFeedbackInput,
+  validateFeedbackTest,
+  type FeedbackStatus
 } from '@platform/shared';
 
 /**
@@ -26,8 +33,10 @@ import {
  *
  * RBAC: lägga upp kort = Movexum-personal (`FEEDBACK_AUTHOR_ROLES`);
  * redigera = författaren (tills kortet är klart) eller ledningen; svara,
- * klarmarkera och återöppna = ledningen (`FEEDBACK_RESPONDER_ROLES`,
- * admin/incubator_lead). Rollen enforce:as HÄR (PB:s createRule är roll-lös
+ * flytta i flödet (Öppen → Påbörjad → Väntar återkoppling → Klar), peka ut
+ * testare och återöppna = ledningen (`FEEDBACK_RESPONDER_ROLES`,
+ * admin/incubator_lead); återkoppla på ett test = den utpekade testaren
+ * eller ledningen (`canTestFeedback`). Rollen enforce:as HÄR (PB:s createRule är roll-lös
  * per § 21.3); tenant + author stämplas alltid server-side från den
  * inloggade — aldrig från klienten. Skrivningar går via användarens token
  * med superuser-fallback ENBART vid PB v0.23.4:s tysta regel-nekande
@@ -91,6 +100,18 @@ async function write<T>(pb: PocketBase, run: (client: PocketBase) => Promise<T>,
 
 function isErr(v: unknown): v is { error: string } {
   return typeof v === 'object' && v !== null && 'error' in v && typeof (v as { error: unknown }).error === 'string';
+}
+
+/**
+ * Schema-drift (§ 24.4): en instans utan migration 1700000208 avvisar de nya
+ * statusvärdena med 400 "Invalid value" på `status` — säg vilken migration
+ * som saknas i stället för PB:s generiska fel.
+ */
+function withSchemaHint<T>(res: T | { error: string }): T | { error: string } {
+  if (isErr(res) && /status/i.test(res.error)) {
+    return { error: `${res.error} Saknas statusen i schemat: kör migration 1700000208 (fyrstegsflödet) eller "Sync PocketBase".` };
+  }
+  return res;
 }
 
 /** Läser kortet med användarens token, superuser-fallback vid RLS-miss; tenant verifieras i koden. */
@@ -230,37 +251,62 @@ export async function deleteFeedbackAction(id: string): Promise<FeedbackActionSt
   return { ok: true, id };
 }
 
-// ─── Svara / klarmarkera / återöppna (ledningen) ───────────────────────────
+// ─── Svara / flytta / testa (ledningen + testaren) ─────────────────────────
 
 async function requireResponder(): Promise<{ user: SessionUser; pb: PocketBase } | { error: string }> {
   const ctx = await requireSession();
   if ('error' in ctx) return ctx;
   if (!canRespondToFeedback(ctx.user.roles)) {
-    return { error: 'Bara admin/incubator lead kan svara på och klarmarkera kort.' };
+    return { error: 'Bara admin/incubator lead kan svara på, flytta och klarmarkera kort.' };
   }
   return ctx;
 }
 
-/** Notis till kortets författare (§ 50). Best-effort. */
-async function notifyFeedbackAuthor(
+type FeedbackNotificationKind =
+  | 'feedback_answered'
+  | 'feedback_done'
+  | 'feedback_started'
+  | 'feedback_test'
+  | 'feedback_tested';
+
+/** Notis (§ 50). Best-effort; den som utförde handlingen får aldrig sin egen notis (notify dedupar). */
+async function notifyFeedback(
   pb: PocketBase,
   user: SessionUser,
   item: FeedbackItem,
-  kind: 'feedback_answered' | 'feedback_done',
+  kind: FeedbackNotificationKind,
+  recipients: Array<string | null | undefined>,
   snippet?: string
 ): Promise<void> {
-  const author = typeof item.author === 'string' ? item.author : '';
-  if (!author) return;
+  const ids = Array.from(new Set(recipients.filter((r): r is string => typeof r === 'string' && r.length > 0)));
+  if (ids.length === 0) return;
   await notify(pb, {
     tenant: user.tenant,
-    recipients: [author],
+    recipients: ids,
     kind,
     actorId: user.id,
     entity: { type: 'feedback_items', id: item.id },
-    payload: { title: item.title || 'Ditt önskemål', snippet, href: `/onskemal#kort-${item.id}` }
+    payload: { title: item.title || 'Ett kort under Önskemål & buggar', snippet, href: `/onskemal#kort-${item.id}` }
   }).catch(() => undefined);
 }
 
+/** Admin/incubator_lead i tenanten — mottagare av testarens återkoppling. */
+async function leadRecipients(pb: PocketBase, tenant: string): Promise<string[]> {
+  const staff = await listStaffUsers(pb, tenant);
+  return staff.filter((u) => u.roles.includes('admin') || u.roles.includes('incubator_lead')).map((u) => u.id);
+}
+
+/** Testaren måste vara Movexum-personal i tenanten (aldrig ett id från klienten rakt in). */
+async function assertStaffInTenant(pb: PocketBase, tenant: string, userId: string): Promise<boolean> {
+  if (!/^[a-zA-Z0-9_-]{6,64}$/.test(userId)) return false;
+  const staff = await listStaffUsers(pb, tenant);
+  return staff.some((u) => u.id === userId);
+}
+
+/**
+ * Svar/kommentar från ledningen. Ändrar inte flödet — utom att ett ännu
+ * inte påbörjat kort blir Påbörjat (svaret visar att någon tagit tag i det).
+ */
 export async function answerFeedbackAction(id: string, answer: unknown): Promise<FeedbackActionState> {
   const ctx = await requireResponder();
   if ('error' in ctx) return { error: ctx.error };
@@ -272,14 +318,14 @@ export async function answerFeedbackAction(id: string, answer: unknown): Promise
   if (!v.ok) return { error: v.error };
 
   const now = new Date().toISOString();
+  const nextStatus: FeedbackStatus = existing.status === 'open' ? 'in_progress' : existing.status;
   const payload: Record<string, unknown> = {
     answer: sanitizePersonnummer(v.value),
     answered_by: user.id,
     answered_at: now,
-    // Ett klart kort förblir klart när svaret bara förtydligas.
-    status: existing.status === 'done' ? 'done' : 'answered'
+    status: nextStatus
   };
-  const res = await write(pb, (c) => c.collection(FEEDBACK_ITEMS).update(id, payload), 'Kunde inte spara svaret.');
+  const res = withSchemaHint(await write(pb, (c) => c.collection(FEEDBACK_ITEMS).update(id, payload), 'Kunde inte spara svaret.'));
   if (isErr(res)) return res;
 
   await logAgentAction(pb, {
@@ -289,19 +335,26 @@ export async function answerFeedbackAction(id: string, answer: unknown): Promise
     record_id: id,
     field: 'answer',
     before_value: { status: existing.status, had_answer: Boolean(existing.answer) },
-    after_value: { ...auditSummary({ ...existing, status: String(payload.status) as FeedbackItem['status'] }), answer_length: v.value.length }
+    after_value: { ...auditSummary({ ...existing, status: nextStatus }), answer_length: v.value.length }
   });
-  await notifyFeedbackAuthor(pb, user, existing, 'feedback_answered', v.value);
+  await notifyFeedback(pb, user, existing, 'feedback_answered', [existing.author], v.value);
   revalidate();
   return { ok: true, id };
 }
 
 /**
- * Flytta ett kort till en kolumn på tavlan (ledningen). `done` sätter
- * `done_by/at`; `answered` kräver att ett svar redan finns (kolumnen är
- * "Besvarad", inte en fri hink); `open` återöppnar och nollar klar-fälten.
+ * Flytta ett kort i flödet (ledningen): Öppen → Påbörjad → Väntar
+ * återkoppling → Klar, eller tillbaka. `awaiting_feedback` pekar ut
+ * författaren som testare när ingen valts (`testerAfterStatusChange`) och
+ * notifierar testaren; `done` sätter `done_by/at`; `open`/`in_progress`
+ * nollar klar-fälten. Ett valfritt `testerId` (från "Skicka för test") sätter
+ * testaren i samma skrivning.
  */
-export async function setFeedbackStatusAction(id: string, status: unknown): Promise<FeedbackActionState> {
+export async function setFeedbackStatusAction(
+  id: string,
+  status: unknown,
+  testerId?: string | null
+): Promise<FeedbackActionState> {
   const ctx = await requireResponder();
   if ('error' in ctx) return { error: ctx.error };
   const { user, pb } = ctx;
@@ -309,16 +362,22 @@ export async function setFeedbackStatusAction(id: string, status: unknown): Prom
 
   const existing = await loadItem(pb, user, id);
   if (!existing) return { error: 'Kortet hittades inte.' };
-  if (status === existing.status) return { ok: true, id };
-  if (status === 'answered' && !existing.answer) {
-    return { error: 'Svara på kortet först — kolumnen Besvarad kräver ett svar.' };
-  }
 
+  let tester = testerAfterStatusChange(existing, status);
+  if (typeof testerId === 'string' && testerId) {
+    if (!(await assertStaffInTenant(pb, user.tenant, testerId))) {
+      return { error: 'Testaren måste vara Movexum-personal i din organisation.' };
+    }
+    tester = testerId;
+  }
+  if (status === existing.status && tester === existing.tester) return { ok: true, id };
+
+  const now = new Date().toISOString();
   const payload: Record<string, unknown> =
     status === 'done'
-      ? { status: 'done', done_by: user.id, done_at: new Date().toISOString() }
-      : { status, done_by: '', done_at: '' };
-  const res = await write(pb, (c) => c.collection(FEEDBACK_ITEMS).update(id, payload), 'Kunde inte ändra status.');
+      ? { status, done_by: user.id, done_at: now, tester: tester ?? '' }
+      : { status, done_by: '', done_at: '', tester: tester ?? '' };
+  const res = withSchemaHint(await write(pb, (c) => c.collection(FEEDBACK_ITEMS).update(id, payload), 'Kunde inte ändra status.'));
   if (isErr(res)) return res;
 
   await logAgentAction(pb, {
@@ -327,20 +386,115 @@ export async function setFeedbackStatusAction(id: string, status: unknown): Prom
     collection: FEEDBACK_ITEMS,
     record_id: id,
     field: 'status',
-    before_value: { status: existing.status },
-    after_value: auditSummary({ ...existing, status })
+    before_value: { status: existing.status, had_tester: Boolean(existing.tester) },
+    after_value: { ...auditSummary({ ...existing, status }), has_tester: Boolean(tester) }
   });
-  if (status === 'done') await notifyFeedbackAuthor(pb, user, existing, 'feedback_done');
+
+  if (status !== existing.status) {
+    if (status === 'done') await notifyFeedback(pb, user, existing, 'feedback_done', [existing.author, existing.tester]);
+    else if (status === 'in_progress' && existing.status === 'open') {
+      await notifyFeedback(pb, user, existing, 'feedback_started', [existing.author]);
+    } else if (status === 'awaiting_feedback') {
+      await notifyFeedback(pb, user, existing, 'feedback_test', [tester], existing.answer ?? undefined);
+    }
+  } else if (status === 'awaiting_feedback' && tester && tester !== existing.tester) {
+    // Bytt testare medan kortet väntar — den nya ska få veta.
+    await notifyFeedback(pb, user, existing, 'feedback_test', [tester], existing.answer ?? undefined);
+  }
   revalidate();
   return { ok: true, id };
 }
 
-/** Klarmarkera / återöppna (knapparna på kortet). Återöppning ⇒ `answered` om svar finns, annars `open`. */
+/** Peka ut (eller ta bort) testare utan att röra statusen (ledningen). */
+export async function setFeedbackTesterAction(id: string, testerId: string | null): Promise<FeedbackActionState> {
+  const ctx = await requireResponder();
+  if ('error' in ctx) return { error: ctx.error };
+  const { user, pb } = ctx;
+  const existing = await loadItem(pb, user, id);
+  if (!existing) return { error: 'Kortet hittades inte.' };
+  const tester = typeof testerId === 'string' && testerId ? testerId : null;
+  if (tester && !(await assertStaffInTenant(pb, user.tenant, tester))) {
+    return { error: 'Testaren måste vara Movexum-personal i din organisation.' };
+  }
+  if (tester === existing.tester) return { ok: true, id };
+
+  const res = await write(pb, (c) => c.collection(FEEDBACK_ITEMS).update(id, { tester: tester ?? '' }), 'Kunde inte spara testaren.');
+  if (isErr(res)) return res;
+  await logAgentAction(pb, {
+    actor: actorOf(user),
+    action_type: 'update',
+    collection: FEEDBACK_ITEMS,
+    record_id: id,
+    field: 'tester',
+    before_value: { had_tester: Boolean(existing.tester) },
+    after_value: { ...auditSummary(existing), has_tester: Boolean(tester) }
+  });
+  if (tester && existing.status === 'awaiting_feedback') {
+    await notifyFeedback(pb, user, existing, 'feedback_test', [tester], existing.answer ?? undefined);
+  }
+  revalidate();
+  return { ok: true, id };
+}
+
+/**
+ * Testarens återkoppling när kortet väntar på återkoppling: "fungerar" ⇒
+ * Klar (klarmarkerad av testaren), "fungerar inte" ⇒ tillbaka till Påbörjad
+ * med noten så ledningen ser vad som återstår. Ledningen får återkoppla
+ * själv (de kan testa). Behörigheten är `canTestFeedback` — koden är
+ * gränsen; PB:s updateRule släpper igenom testaren (migration 1700000208).
+ */
+export async function submitFeedbackTestAction(id: string, input: Record<string, unknown>): Promise<FeedbackActionState> {
+  const ctx = await requireSession();
+  if ('error' in ctx) return { error: ctx.error };
+  const { user, pb } = ctx;
+
+  const existing = await loadItem(pb, user, id);
+  if (!existing) return { error: 'Kortet hittades inte.' };
+  if (!canTestFeedback({ id: user.id, roles: user.roles }, existing)) {
+    return {
+      error:
+        existing.status === 'awaiting_feedback'
+          ? 'Bara den utpekade testaren eller ledningen kan återkoppla på kortet.'
+          : `Kortet väntar inte på återkoppling (status: ${FEEDBACK_STATUS_LABELS[existing.status]}).`
+    };
+  }
+  const v = validateFeedbackTest(input);
+  if (!v.ok) return { error: v.error };
+
+  const now = new Date().toISOString();
+  const nextStatus = statusAfterFeedbackTest(v.value.result);
+  const noteText = v.value.result === 'ok' ? (v.value.note ? `Fungerar. ${v.value.note}` : 'Fungerar.') : v.value.note;
+  const payload: Record<string, unknown> = {
+    status: nextStatus,
+    test_note: sanitizePersonnummer(noteText),
+    tested_at: now,
+    ...(nextStatus === 'done' ? { done_by: user.id, done_at: now } : { done_by: '', done_at: '' })
+  };
+  const res = withSchemaHint(await write(pb, (c) => c.collection(FEEDBACK_ITEMS).update(id, payload), 'Kunde inte spara återkopplingen.'));
+  if (isErr(res)) return res;
+
+  await logAgentAction(pb, {
+    actor: actorOf(user),
+    action_type: 'update',
+    collection: FEEDBACK_ITEMS,
+    record_id: id,
+    field: 'test_note',
+    before_value: { status: existing.status },
+    after_value: { ...auditSummary({ ...existing, status: nextStatus }), test_result: v.value.result, test_note_length: noteText.length }
+  });
+  const leads = await leadRecipients(pb, user.tenant);
+  await notifyFeedback(pb, user, existing, 'feedback_tested', [...leads, existing.answeredBy], noteText);
+  if (nextStatus === 'done') await notifyFeedback(pb, user, existing, 'feedback_done', [existing.author]);
+  revalidate();
+  return { ok: true, id };
+}
+
+/** Klarmarkera / återöppna (knapparna på kortet). Återöppning ⇒ Påbörjad om någon jobbat på det, annars Öppen. */
 export async function setFeedbackDoneAction(id: string, done: boolean): Promise<FeedbackActionState> {
   if (done) return setFeedbackStatusAction(id, 'done');
   const ctx = await requireResponder();
   if ('error' in ctx) return { error: ctx.error };
   const existing = await loadItem(ctx.pb, ctx.user, id);
   if (!existing) return { error: 'Kortet hittades inte.' };
-  return setFeedbackStatusAction(id, existing.answer ? 'answered' : 'open');
+  return setFeedbackStatusAction(id, existing.answer || existing.testNote ? 'in_progress' : 'open');
 }
