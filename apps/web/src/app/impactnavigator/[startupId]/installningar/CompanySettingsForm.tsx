@@ -66,7 +66,7 @@ export function CompanySettingsForm({
             <input name="industry" defaultValue={company.industry} maxLength={160} required disabled={!canManage} className={`${inputClass} mt-1.5`} />
           </label>
           <label className={labelClass}>
-            Fas
+            Movexumfas
             <select name="phase" defaultValue={company.phase} disabled={!canManage} className={`${inputClass} mt-1.5`}>
               {ALL_PHASES.map((p) => (
                 <option key={p} value={p}>

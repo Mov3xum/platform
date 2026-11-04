@@ -10524,10 +10524,27 @@ kodkarta: `docs/integrations/impact-navigator.md`.
   rendering av den senaste färdiga slutanalysen i originalets avsnittsordning
   med Movexums brand (pdf-lib, Sora/Nunito); AI-disclaimern står i omslag,
   sidfot och "Om rapporten".
+- **Lease, tidsgräns, mockläge (2026-11, porterat från originalet):**
+  medan ett steg körs bär versionens `input_hash` ett analys-lease
+  (`packages/shared/src/impact-lease.ts`); en andra begäran får
+  `analysis-running` och sidorna visar "pågår" i stället för knappar; ett
+  lease äldre än tidsgränsen + 60 s (minst 330 s) återtas och pågående
+  jobb markeras `failed` — ett avbrutet steg låser aldrig en version för
+  gott. Efter ett lyckat steg bär `input_hash` SHA-256 av underlaget. Varje
+  steg har 240 s tidsgräns och högst 2 omförsök (env `IMPACT_<STEG>_TIMEOUT_MS`,
+  `IMPACT_<STEG>_MAX_RETRIES`), och utfallet blir originalets felkoder och
+  svenska texter per yta (`lib/impact/messages.ts`); väsentlighets- och
+  gapsidan visar dessutom senaste misslyckade körningens orsak. **Mockläge**
+  (`packages/shared/src/impact-mock.ts` = originalets MockAIService):
+  `IMPACT_AI_MOCK_MODE=true`, eller automatiskt utan `MISTRAL_API_KEY` när
+  `NODE_ENV` inte är `production` (lokal dev/test); `model_name = 'mock'`
+  syns alltid. "Ta bort" i
+  uppladdningsytan raderar dokumentet på servern (det matar aldrig analysen
+  i smyg), och formuläret spärras medan en uppladdning pågår.
 - **Underlag:** route handler `/api/impactnavigator/documents` (§ 18.2-
   mönstret: staff-only, rate-limit, mime/storlek, textextraktion via
   kunskapsbasens pipe med personnummer-sanering, superuser-fallback bara vid
-  PB v0.23.4:s tysta regel-nekande). Filproxy
+  PB v0.23.4:s tysta regel-nekande; PB:s fältfel svaras i klartext). Filproxy
   `/api/impactnavigator/documents/[id]/file` (protected, tenant-scopad).
   Importerade dokument har text men ingen fil (originalen låg i Vercel Blob).
 - **RLS (§ 21.3):** list/view staff/observer; create pinnar tenant +
@@ -10566,5 +10583,7 @@ kodkarta: `docs/integrations/impact-navigator.md`.
   individer; människa granskar). GDPR § 5: bolagsdata; fritext saneras; UI
   varnar för personuppgifter; `cascadeDelete` tenant → startup → analys.
   Ingen DPIA ännu — skrivs före produktion om dokument med personuppgifter
-  väntas. Inte byggt: chatt-verktyg mot analyserna, PDF-export, SSO/extern
-  domän (medvetet — modulen lever på app.movexum.se som allt annat).
+  väntas. Inte byggt: chatt-verktyg mot analyserna, SSO/extern domän
+  (medvetet — modulen lever på app.movexum.se som allt annat). Hela flödet
+  är verifierat end-to-end mot PocketBase 0.23.4 lokalt med mockläget;
+  runbook + felsökning: `docs/integrations/impact-navigator.md` § 3.1–3.2.

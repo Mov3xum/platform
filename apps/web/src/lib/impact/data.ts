@@ -98,6 +98,7 @@ interface AssessmentRow {
   information_quality_score?: number;
   model_name?: string;
   prompt_version?: string;
+  input_hash?: string;
   previous_assessment?: string;
   created_by?: string;
   completed_at?: string;
@@ -120,6 +121,8 @@ export interface ImpactAssessment {
   informationQualityScore: number | null;
   modelName: string;
   promptVersion: string;
+  /** Hash av AI-underlaget — eller ett pågående analys-lease (`analysis-lease:…`, § 56). */
+  inputHash: string;
   previousAssessment: string | null;
   createdBy: string | null;
   createdByName: string | null;
@@ -147,6 +150,7 @@ export function rowToAssessment(row: AssessmentRow): ImpactAssessment {
     updateDelta: present(row.update_delta) ? normalizeImpactUpdateDelta(row.update_delta) : null,
     informationQualityScore: score,
     modelName: row.model_name ?? '',
+    inputHash: row.input_hash ?? '',
     promptVersion: row.prompt_version ?? '',
     previousAssessment: row.previous_assessment || null,
     createdBy: row.created_by || null,

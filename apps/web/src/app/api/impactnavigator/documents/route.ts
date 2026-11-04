@@ -4,6 +4,7 @@ import { getCurrentUser, getServerPb } from '@/lib/auth.server';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import { extractKnowledgeFromFile, KnowledgeError } from '@/lib/ai/knowledge';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
+import { describePbError } from '@/lib/pb-error';
 import { logAgentAction } from '@/lib/core/write';
 import { DOCUMENTS, getAssessment, getGapQuestion, getImpactCompany } from '@/lib/impact/data';
 import { canManageImpact, isImpactUploadStage } from '@platform/shared';
@@ -131,19 +132,22 @@ export async function POST(request: Request): Promise<Response> {
     rec = await pb.collection(DOCUMENTS).create<{ id: string }>(fd);
   } catch (err) {
     const status = (err as { status?: number }).status;
+    const fieldKeys = Object.keys((err as { response?: { data?: Record<string, unknown> } }).response?.data ?? {});
     const su = status === 400 || status === 403 || status === 404 ? await getSuperuserPb() : { ok: false as const };
     if (!su.ok) {
-      console.error('[impactnavigator/documents] upload failed', { tenantId: user.tenant, userId: user.id, status });
+      // PII-fritt: status + fältNYCKLAR (aldrig värden/filnamn).
+      console.error('[impactnavigator/documents] upload failed', { tenantId: user.tenant, userId: user.id, status, fieldKeys, superuser: su.ok ? 'ok' : (su as { reason?: string }).reason ?? 'unavailable' });
       return NextResponse.json(
-        { error: status === 404 ? 'Kollektionen sustainability_documents saknas — kör migration 1700000206.' : 'Kunde inte spara dokumentet.' },
+        { error: status === 404 ? 'Kollektionen sustainability_documents saknas — kör migration 1700000206 (eller Sync PocketBase).' : describePbError(err, 'Kunde inte spara dokumentet.') },
         { status: 500 }
       );
     }
     try {
       rec = await su.pb.collection(DOCUMENTS).create<{ id: string }>(fd);
     } catch (err2) {
-      console.error('[impactnavigator/documents] upload failed (superuser)', { tenantId: user.tenant, status: (err2 as { status?: number }).status });
-      return NextResponse.json({ error: 'Kunde inte spara dokumentet.' }, { status: 500 });
+      const status2 = (err2 as { status?: number }).status;
+      console.error('[impactnavigator/documents] upload failed (superuser)', { tenantId: user.tenant, status: status2, fieldKeys: Object.keys((err2 as { response?: { data?: Record<string, unknown> } }).response?.data ?? {}) });
+      return NextResponse.json({ error: describePbError(err2, 'Kunde inte spara dokumentet.') }, { status: 500 });
     }
   }
 

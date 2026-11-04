@@ -192,7 +192,8 @@ export function NewImpactCompanyForm({ startups, preselectedStartup }: { startup
             id="company-files-title"
             icon="file-text"
             title="Befintligt underlag"
-            text="Ladda upp det ni har – verktyget markerar vad som fortfarande är osäkert. Filformat: PDF, DOCX, PPTX, XLSX, CSV eller TXT. Max 25 MB per fil."
+            text="Ladda upp det ni har – verktyget markerar vad som fortfarande är osäkert."
+            note="Filformat: PDF, DOCX, PPTX, XLSX, CSV eller TXT. Max 25 MB per fil."
           />
           <div className="mb-2 flex items-center justify-between gap-3">
             <p className="text-sm font-medium text-foreground">Ifylld idébeskrivning</p>
@@ -241,7 +242,7 @@ export function NewImpactCompanyForm({ startups, preselectedStartup }: { startup
   );
 }
 
-function SectionHeading({ id, icon, title, text }: { id: string; icon: string; title: string; text: string }) {
+function SectionHeading({ id, icon, title, text, note }: { id: string; icon: string; title: string; text: string; note?: string }) {
   return (
     <div className="mb-4 flex items-center gap-3 border-b border-default pb-4">
       <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-movexum-pastell-gron text-movexum-gron dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron">
@@ -252,6 +253,7 @@ function SectionHeading({ id, icon, title, text }: { id: string; icon: string; t
           {title}
         </h3>
         <p className="text-sm text-foreground-muted">{text}</p>
+        {note ? <p className="mt-1 text-xs text-foreground-subtle">{note}</p> : null}
       </div>
     </div>
   );

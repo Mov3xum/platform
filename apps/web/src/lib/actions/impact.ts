@@ -10,7 +10,9 @@ import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 import { escapeHtml } from '@/lib/safe-html';
 import { logAiUsage } from '@/lib/ai/usage';
 import { AiBudgetExceededError, assertWithinAiBudget } from '@/lib/ai/budget.server';
-import { runImpactFinal, runImpactMateriality, runImpactSufficiency, runImpactUpdate, type ImpactAiOutcome } from '@/lib/ai/impact-analysis';
+import { getImpactStepConfig, runImpactFinal, runImpactMateriality, runImpactSufficiency, runImpactUpdate, type ImpactAiOutcome } from '@/lib/ai/impact-analysis';
+import { impactErrorMessage, impactFailureCode, impactFailureMessage } from '@/lib/impact/messages';
+import { createHash } from 'node:crypto';
 import {
   AI_JOBS,
   ASSESSMENTS,
@@ -54,7 +56,7 @@ import {
   type ImpactReviewPromotion,
   type ImpactSufficiency
 } from '@platform/shared';
-import { ALL_PHASES, type StartupPhase } from '@platform/shared';
+import { ALL_PHASES, IMPACT_LEASE_GRACE_MS, createImpactLease, isImpactLease, isStaleImpactLease, type ImpactLeaseStep, type StartupPhase } from '@platform/shared';
 
 /**
  * Impact Navigator (CLAUDE.md § 56) — server actions, porterade från
@@ -254,6 +256,67 @@ async function checkBudget(pb: PocketBase, tenant: string): Promise<string | nul
   }
 }
 
+// ─── Analys-lease (originalets lease.ts + claim/reclaim/release) ────────────
+
+/** SHA-256 av AI-underlaget — skrivs till `input_hash` när steget lyckats (som originalet). */
+function hashInput(input: unknown): string {
+  return createHash('sha256').update(JSON.stringify(input) ?? 'null').digest('hex');
+}
+
+const RECLAIM_ERROR = 'Körningen återtogs efter att analysens tidsgräns passerat.';
+const LEASE_JOB_TYPE: Record<ImpactLeaseStep, ImpactJobType> = { materiality: 'materiality', sufficiency: 'sufficiency', final: 'final_analysis', update: 'update_analysis' };
+
+/** Markera pågående jobb för steget som misslyckade (leaset återtogs). */
+async function failRunningJobs(pb: PocketBase, tenant: string, assessmentId: string, step: ImpactLeaseStep, message = RECLAIM_ERROR): Promise<void> {
+  try {
+    const rows = await pb.collection(AI_JOBS).getFullList<{ id: string }>({
+      filter: pb.filter('tenant = {:t} && assessment = {:a} && job_type = {:j} && status = "running"', { t: tenant, a: assessmentId, j: LEASE_JOB_TYPE[step] }),
+      fields: 'id'
+    });
+    for (const r of rows) await write(pb, (c) => c.collection(AI_JOBS).update(r.id, { status: 'failed', error: message, completed_at: nowPb() }), 'job');
+  } catch (err) {
+    console.warn('[impact] could not mark running jobs failed', { step, status: pbStatus(err) });
+  }
+}
+
+/**
+ * Ta leaset för ett steg: ett aktivt (ej stale) lease ⇒ `analysis-running`;
+ * ett stale lease återtas (status → `retryStatus`, pågående jobb → failed).
+ * Leaset skrivs till `input_hash` och läses tillbaka — PB saknar villkorad
+ * uppdatering, så återläsningen är kontrollen mot en samtidig begäran.
+ */
+async function claimLease(
+  pb: PocketBase,
+  user: SessionUser,
+  a: ImpactAssessment,
+  step: ImpactLeaseStep,
+  opts: { expectedStatus: ImpactAssessmentStatus; retryStatus: ImpactAssessmentStatus; claimStatus?: ImpactAssessmentStatus; surface: 'materiality' | 'analysis' | 'update' }
+): Promise<{ lease: string } | { error: string }> {
+  const running = impactErrorMessage('analysis-running', opts.surface);
+  const current = a.inputHash;
+  if (isImpactLease(current)) {
+    if (!isImpactLease(current, step) || !isStaleImpactLease(current, step, getImpactStepConfig(step).timeoutMs)) return { error: running };
+    const reclaimed = await write(pb, (c) => c.collection(ASSESSMENTS).update(a.id, { status: opts.retryStatus, input_hash: '' }), 'status');
+    if (isErr(reclaimed)) return { error: running };
+    await failRunningJobs(pb, user.tenant, a.id, step);
+  }
+  const lease = createImpactLease(step);
+  const claimed = await write(pb, (c) => c.collection(ASSESSMENTS).update(a.id, { input_hash: lease, ...(opts.claimStatus ? { status: opts.claimStatus } : {}) }), 'status');
+  if (isErr(claimed)) return claimed;
+  const check = await getAssessment(pb, user.tenant, a.id);
+  if (!check || check.inputHash !== lease || check.status !== (opts.claimStatus ?? opts.expectedStatus)) return { error: running };
+  return { lease };
+}
+
+/** Släpp leaset efter ett misslyckat steg (bara om det fortfarande är vårt). */
+async function releaseLease(pb: PocketBase, user: SessionUser, a: ImpactAssessment, lease: string, retryStatus?: ImpactAssessmentStatus): Promise<void> {
+  const check = await getAssessment(pb, user.tenant, a.id);
+  if (!check || check.inputHash !== lease) return;
+  const res = await write(pb, (c) => c.collection(ASSESSMENTS).update(a.id, { input_hash: '', ...(retryStatus ? { status: retryStatus } : {}) }), 'status');
+  if (isErr(res)) console.warn('[impact] lease not released', { assessment: a.id });
+  if (retryStatus) await setCompanyStatus(pb, a.startup, retryStatus);
+}
+
 // ─── Steg 1: Skapa bolag + första analysversionen ───────────────────────────
 
 /**
@@ -289,7 +352,7 @@ export async function createImpactCompanyAction(input: Record<string, unknown>):
     const industry = clean(input.industry, 160);
     const phase = String(input.phase ?? '');
     if (!name || !industry) return { error: 'Fyll i bolagsnamn och bransch.' };
-    if (!(ALL_PHASES as readonly string[]).includes(phase)) return { error: 'Välj en giltig fas.' };
+    if (!(ALL_PHASES as readonly string[]).includes(phase)) return { error: 'Välj en giltig Movexumfas.' };
     const created = await write(
       pb,
       (c) =>
@@ -360,15 +423,22 @@ export async function runMaterialityAction(startupId: string, assessmentId: stri
     documents: docs.map(asSource),
     referenceMaterialityAreas: IMPACT_FRAMEWORK_AREAS.map((area) => ({ code: area.code, name: area.name, category: area.category }))
   });
+  const claim = await claimLease(pb, user, a, 'materiality', { expectedStatus: 'materiality_pending', retryStatus: 'materiality_pending', surface: 'materiality' });
+  if (isErr(claim)) return claim;
   const jobId = await createJob(pb, user, a, 'materiality');
   const outcome = await runImpactMateriality(aiInput);
   await finishJob(pb, user, jobId, outcome);
-  if (!outcome.result) return { error: outcome.error ?? 'AI-analysen misslyckades.' };
+  if (!outcome.result) {
+    await releaseLease(pb, user, a, claim.lease);
+    revalidate(startupId);
+    return { error: impactFailureMessage(outcome.errorKind, 'materiality') };
+  }
 
   const err = await setAssessmentStatus(pb, a, 'materiality_review', {
     materiality: outcome.result,
     model_name: outcome.model,
-    prompt_version: outcome.promptVersion
+    prompt_version: outcome.promptVersion,
+    input_hash: hashInput(aiInput)
   });
   if (err) return err;
   await logAgentAction(pb, {
@@ -385,7 +455,7 @@ export async function runMaterialityAction(startupId: string, assessmentId: stri
 
 // ─── Steg 2 → 3: Godkänn väsentligheten och kör informationsgapanalysen ────
 
-async function persistSufficiency(pb: PocketBase, user: SessionUser, company: ImpactCompany, a: ImpactAssessment, result: ImpactSufficiency, model: string, promptVersion: string): Promise<{ error: string } | { created: number }> {
+async function persistSufficiency(pb: PocketBase, user: SessionUser, company: ImpactCompany, a: ImpactAssessment, result: ImpactSufficiency, model: string, promptVersion: string, inputHash: string): Promise<{ error: string } | { created: number }> {
   // Originalet raderar versionens frågor och skapar om dem från resultatet.
   const existing = await listGapQuestions(pb, user.tenant, [a.id]);
   for (const q of existing.items) {
@@ -415,7 +485,8 @@ async function persistSufficiency(pb: PocketBase, user: SessionUser, company: Im
     sufficiency: result,
     information_quality_score: result.overallInformationQuality,
     model_name: model,
-    prompt_version: promptVersion
+    prompt_version: promptVersion,
+    input_hash: inputHash
   });
   if (err) return err;
   await logAgentAction(pb, {
@@ -483,15 +554,19 @@ export async function approveMaterialityAction(startupId: string, assessmentId: 
   });
 
   // Direkt vidare till informationsgapanalysen (originalets approveMaterialityAction).
-  const refreshed = { ...a, status: 'info_pending' as const, materiality: updated };
+  const refreshed: ImpactAssessment = { ...a, status: 'info_pending', materiality: updated, inputHash: '' };
+  const claim = await claimLease(pb, user, refreshed, 'sufficiency', { expectedStatus: 'info_pending', retryStatus: 'info_pending', surface: 'analysis' });
+  if (isErr(claim)) return { ok: true, error: claim.error, next: `/impactnavigator/${startupId}/analys?error=analysis-running` };
+  const sufficiencyInput = buildImpactSufficiencyAIInput({ phase: impactPhaseFor(company.phase), materiality: updated });
   const jobId = await createJob(pb, user, refreshed, 'sufficiency');
-  const outcome = await runImpactSufficiency(buildImpactSufficiencyAIInput({ phase: impactPhaseFor(company.phase), materiality: updated }));
+  const outcome = await runImpactSufficiency(sufficiencyInput);
   await finishJob(pb, user, jobId, outcome);
   revalidate(startupId);
   if (!outcome.result) {
-    return { ok: true, error: outcome.error ?? 'Informationsgapanalysen misslyckades. Väsentligheten är sparad — kör analysen igen från nästa steg.', next: `/impactnavigator/${startupId}/analys` };
+    await releaseLease(pb, user, refreshed, claim.lease);
+    return { ok: true, error: impactFailureMessage(outcome.errorKind, 'analysis'), next: `/impactnavigator/${startupId}/analys?error=${impactFailureCode(outcome.errorKind)}` };
   }
-  const persisted = await persistSufficiency(pb, user, company, refreshed, outcome.result, outcome.model, outcome.promptVersion);
+  const persisted = await persistSufficiency(pb, user, company, refreshed, outcome.result, outcome.model, outcome.promptVersion, hashInput(sufficiencyInput));
   if (isErr(persisted)) return persisted;
   revalidate(startupId);
   return { ok: true, next: `/impactnavigator/${startupId}/analys#gap` };
@@ -518,13 +593,18 @@ export async function runSufficiencyAction(startupId: string, assessmentId: stri
   const newDocs = docs.filter(isNew);
   const known = docs.filter((d) => !isNew(d) && d.text).map((d) => d.text);
 
+  const claim = await claimLease(pb, user, a, 'sufficiency', { expectedStatus: 'info_pending', retryStatus: 'info_pending', surface: 'analysis' });
+  if (isErr(claim)) return claim;
+  const sufficiencyInput = buildImpactSufficiencyAIInput({ phase: impactPhaseFor(company.phase), materiality: a.materiality, newDocuments: newDocs.map(asSource), knownEvidenceTexts: known });
   const jobId = await createJob(pb, user, a, 'sufficiency');
-  const outcome = await runImpactSufficiency(
-    buildImpactSufficiencyAIInput({ phase: impactPhaseFor(company.phase), materiality: a.materiality, newDocuments: newDocs.map(asSource), knownEvidenceTexts: known })
-  );
+  const outcome = await runImpactSufficiency(sufficiencyInput);
   await finishJob(pb, user, jobId, outcome);
-  if (!outcome.result) return { error: outcome.error ?? 'Informationsgapanalysen misslyckades.' };
-  const persisted = await persistSufficiency(pb, user, company, a, outcome.result, outcome.model, outcome.promptVersion);
+  if (!outcome.result) {
+    await releaseLease(pb, user, a, claim.lease);
+    revalidate(startupId);
+    return { error: impactFailureMessage(outcome.errorKind, 'analysis') };
+  }
+  const persisted = await persistSufficiency(pb, user, company, a, outcome.result, outcome.model, outcome.promptVersion, hashInput(sufficiencyInput));
   if (isErr(persisted)) return persisted;
   revalidate(startupId);
   return { ok: true, next: `/impactnavigator/${startupId}/analys#gap` };
@@ -583,16 +663,21 @@ export async function finalizeAnalysisAction(startupId: string, assessmentId: st
     const r = gapResponses[i];
     return r.status === 'open' && !r.answerText;
   });
-  if (unusable) {
-    return { error: 'Ingen läsbar text kunde hämtas från de uppladdade dokumenten. Kontrollera filerna eller komplettera frågorna med text och försök igen.' };
+  if (unusable) return { error: impactErrorMessage('gap-document-empty', 'analysis') };
+
+  // Originalet: en pågående slutanalys (lease 'final' som inte är stale) får inte startas om.
+  if (a.status === 'final_pending' && isImpactLease(a.inputHash, 'final') && !isStaleImpactLease(a.inputHash, 'final', getImpactStepConfig('final').timeoutMs)) {
+    return { error: impactErrorMessage('analysis-running', 'analysis') };
   }
 
   for (const [i, q] of questions.entries()) {
     const r = gapResponses[i];
     await write(pb, (c) => c.collection(GAP_QUESTIONS).update(q.id, { answer_text: r.answerText ?? '', status: r.status }), 'svar');
   }
-  const statusErr = await setAssessmentStatus(pb, a, 'final_pending');
-  if (statusErr) return statusErr;
+  const claim = await claimLease(pb, user, a, 'final', { expectedStatus: a.status, retryStatus: 'needs_more_info', claimStatus: 'final_pending', surface: 'analysis' });
+  if (isErr(claim)) return claim;
+  await setCompanyStatus(pb, startupId, 'final_pending');
+  const pendingAssessment: ImpactAssessment = { ...a, status: 'final_pending', inputHash: claim.lease };
 
   const aiInput = buildImpactFinalAnalysisAIInput({
     companyName: company.name,
@@ -603,19 +688,20 @@ export async function finalizeAnalysisAction(startupId: string, assessmentId: st
     gapResponses,
     knownEvidenceTexts: docs.filter((d) => d.stage !== 'gap_response' && d.text).map((d) => d.text)
   });
-  const jobId = await createJob(pb, user, a, 'final_analysis');
+  const jobId = await createJob(pb, user, pendingAssessment, 'final_analysis');
   const outcome = await runImpactFinal(aiInput);
   await finishJob(pb, user, jobId, outcome);
   if (!outcome.result) {
-    await setAssessmentStatus(pb, a, 'needs_more_info');
+    await releaseLease(pb, user, pendingAssessment, claim.lease, 'needs_more_info');
     revalidate(startupId);
-    return { error: outcome.error ?? 'Slutanalysen misslyckades. Dina uppgifter är sparade och du kan försöka igen.' };
+    return { error: impactFailureMessage(outcome.errorKind, 'analysis') };
   }
-  const err = await setAssessmentStatus(pb, a, 'complete', {
+  const err = await setAssessmentStatus(pb, pendingAssessment, 'complete', {
     dashboard: outcome.result,
     information_quality_score: a.sufficiency.overallInformationQuality,
     model_name: outcome.model,
     prompt_version: outcome.promptVersion,
+    input_hash: hashInput(aiInput),
     completed_at: nowPb()
   });
   if (err) return err;
@@ -633,8 +719,6 @@ export async function finalizeAnalysisAction(startupId: string, assessmentId: st
 
 // ─── Uppdatera bolag (ny analysversion) ─────────────────────────────────────
 
-const UPDATE_STALE_MS = 6 * 60 * 1000;
-
 export async function updateCompanyAction(startupId: string, input: Record<string, unknown>): Promise<ImpactActionState> {
   const ctx = await requireManager();
   if ('error' in ctx) return { error: ctx.error };
@@ -644,7 +728,7 @@ export async function updateCompanyAction(startupId: string, input: Record<strin
   if (!company) return { error: 'Bolaget hittades inte.' };
   const narrative = clean(input.narrative, 20000);
   const documentIds = idList(input.documentIds);
-  if (!narrative && documentIds.length === 0) return { error: 'Beskriv vad som har hänt sedan sist eller ladda upp minst ett nytt dokument.' };
+  if (!narrative && documentIds.length === 0) return { error: impactErrorMessage('update-empty', 'update') };
   const budget = await checkBudget(pb, user.tenant);
   if (budget) return { error: budget };
 
@@ -652,14 +736,21 @@ export async function updateCompanyAction(startupId: string, input: Record<strin
   const previous = latestCompleteAssessment(all);
   if (!previous?.dashboard || !previous.materiality) return { error: 'Det finns ingen färdig slutanalys att uppdatera — skapa först dashboarden.', next: `/impactnavigator/${startupId}/analys` };
   const latest = [...all].sort((x, y) => y.version - x.version)[0];
+  const updateTimeoutMs = getImpactStepConfig('update').timeoutMs;
   if (latest && latest.id !== previous.id && latest.status !== 'failed') {
+    // Originalet: en pågående uppdatering är stale enligt sitt lease, annars enligt skapandetiden + tidsgräns + 60 s.
     const started = Date.parse(latest.createdAt.replace(' ', 'T')) || 0;
-    const stale = latest.status === 'final_pending' && Date.now() - started > UPDATE_STALE_MS;
-    if (!stale) return { error: 'En annan uppdatering av bolaget pågår redan. Vänta tills den är klar och försök sedan igen.' };
-    await write(pb, (c) => c.collection(ASSESSMENTS).update(latest.id, { status: 'failed' }), 'status');
+    const stale =
+      latest.status === 'final_pending' &&
+      (isImpactLease(latest.inputHash, 'update') ? isStaleImpactLease(latest.inputHash, 'update', updateTimeoutMs) : Date.now() - started > updateTimeoutMs + IMPACT_LEASE_GRACE_MS);
+    if (!stale) return { error: impactErrorMessage('update-concurrent', 'update') };
+    const reclaimed = await write(pb, (c) => c.collection(ASSESSMENTS).update(latest.id, { status: 'failed', input_hash: '' }), 'status');
+    if (isErr(reclaimed)) return { error: impactErrorMessage('update-concurrent', 'update') };
+    await failRunningJobs(pb, user.tenant, latest.id, 'update', 'Körningen återtogs efter att uppdateringsversionens tidsgräns passerat.');
   }
 
   const nextVersion = all.reduce((m, x) => Math.max(m, x.version), 0) + 1;
+  const lease = createImpactLease('update');
   const created = await write(
     pb,
     (c) =>
@@ -673,11 +764,15 @@ export async function updateCompanyAction(startupId: string, input: Record<strin
         materiality: previous.materiality,
         sufficiency: previous.sufficiency,
         previous_assessment: previous.id,
+        input_hash: lease,
         created_by: user.id
       }),
     'Kunde inte skapa uppdateringen.'
   );
-  if (isErr(created)) return created;
+  if (isErr(created)) {
+    // Unikt index (startup, version): en annan uppdatering hann skapa versionen.
+    return { error: /unik|unique|version/i.test(created.error) ? impactErrorMessage('update-version-conflict', 'update') : created.error };
+  }
   const event = await write(
     pb,
     (c) => c.collection(UPDATE_EVENTS).create<{ id: string }>({ tenant: user.tenant, startup: startupId, assessment: created.id, created_by: user.id, narrative }),
@@ -707,22 +802,22 @@ export async function updateCompanyAction(startupId: string, input: Record<strin
     documents: newDocs.map(asSource),
     knownEvidenceTexts: known
   });
-  const a: ImpactAssessment = { ...previous, id: created.id, version: nextVersion, type: 'update', status: 'final_pending', previousAssessment: previous.id };
+  const a: ImpactAssessment = { ...previous, id: created.id, version: nextVersion, type: 'update', status: 'final_pending', previousAssessment: previous.id, inputHash: lease };
   if (!aiInput.newEvidence.narrative && aiInput.newEvidence.documents.length === 0) {
-    await write(pb, (c) => c.collection(ASSESSMENTS).update(created.id, { status: 'failed' }), 'status');
+    await write(pb, (c) => c.collection(ASSESSMENTS).update(created.id, { status: 'failed', input_hash: '' }), 'status');
     await setCompanyStatus(pb, startupId, 'complete');
     revalidate(startupId);
-    return { error: 'Ingen läsbar text kunde hämtas från de nya dokumenten. Kontrollera filerna eller lägg till en kort beskrivning och försök igen.' };
+    return { error: impactErrorMessage('update-document-empty', 'update') };
   }
 
   const jobId = await createJob(pb, user, a, 'update_analysis');
   const outcome = await runImpactUpdate(aiInput, previous.informationQualityScore);
   await finishJob(pb, user, jobId, outcome);
   if (!outcome.result) {
-    await write(pb, (c) => c.collection(ASSESSMENTS).update(created.id, { status: 'failed' }), 'status');
+    await write(pb, (c) => c.collection(ASSESSMENTS).update(created.id, { status: 'failed', input_hash: '' }), 'status');
     await setCompanyStatus(pb, startupId, 'complete');
     revalidate(startupId);
-    return { error: `${outcome.error ?? 'Uppdateringsanalysen misslyckades.'} Den tidigare analysversionen är oförändrad.` };
+    return { error: impactFailureMessage(outcome.errorKind, 'update') };
   }
   const err = await setAssessmentStatus(pb, a, 'complete', {
     dashboard: outcome.result.updatedDashboard,
@@ -730,6 +825,7 @@ export async function updateCompanyAction(startupId: string, input: Record<strin
     information_quality_score: previous.informationQualityScore,
     model_name: outcome.model,
     prompt_version: outcome.promptVersion,
+    input_hash: hashInput(aiInput),
     completed_at: nowPb()
   });
   if (err) return err;
@@ -757,6 +853,7 @@ export async function updateCompanyDetailsAction(startupId: string, input: Recor
   if (!company) return { error: 'Bolaget hittades inte.' };
   const payload: Record<string, unknown> = {};
   if ('name' in input || 'industry' in input) {
+    if (String(input.name ?? '').trim().length > 120 || String(input.industry ?? '').trim().length > 160) return { error: 'Bolagsnamnet eller branschen är för lång.' };
     const name = clean(input.name, 120);
     const industry = clean(input.industry, 160);
     if (!name || !industry) return { error: 'Fyll i både bolagsnamn och bransch.' };
@@ -765,7 +862,7 @@ export async function updateCompanyDetailsAction(startupId: string, input: Recor
   }
   if ('phase' in input) {
     const phase = String(input.phase ?? '');
-    if (!(ALL_PHASES as readonly string[]).includes(phase)) return { error: 'Välj en giltig fas.' };
+    if (!(ALL_PHASES as readonly string[]).includes(phase)) return { error: 'Välj en giltig Movexumfas.' };
     payload.phase = phase;
   }
   if ('journeyText' in input) payload.sustainability_journey_text = clean(input.journeyText, 20000);

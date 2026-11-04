@@ -59,7 +59,7 @@ export function MaterialityReviewForm({
         setError(res.error);
         return;
       }
-      if (res.error) setError(res.error);
+      // Ett fel med `next` bär felkoden i adressen (originalets ?error=…) — sidan visar meddelandet.
       router.push(res.next ?? `/impactnavigator/${startupId}/analys`);
       router.refresh();
     });
