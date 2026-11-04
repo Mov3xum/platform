@@ -75,6 +75,10 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   'sustainability_documents',
   'sustainability_ai_jobs',
   'notification_preferences',
+  // Användaraktivitet (§ 57, migration 1700000209): när/hur ofta en person
+  // använder plattformen är stöd för introduktion — aldrig underlag för en
+  // modell och aldrig profilering av medarbetare.
+  'user_activity',
   // Tenant-bred kunskapsbas (1700000118–119, § 26). Innehållet (uppladdat
   // verksamhetsmaterial + dess embeddings) når AI ENBART via det kurerade
   // `search_knowledge`-verktyget — aldrig via det generiska query_collection.

@@ -6,6 +6,7 @@ import { resolveUserModules, type Role } from '@platform/shared';
 import { assignableRolesFor } from '@/lib/users/validate';
 import { requireSettingsUser, SettingsSectionPage } from '../shared';
 import { UsersAdmin, type ManagedUser } from './UsersAdmin';
+import { loadTenantActivity } from '@/lib/user-activity/data.server';
 import type { StartupOption } from './UserForm';
 
 export const dynamic = 'force-dynamic';
@@ -53,6 +54,9 @@ export default async function AnvandarePage() {
   // tillbaka på användarens token (RLS) om superuser saknas.
   const su = await getSuperuserPb();
   const listPb = su.ok ? su.pb : pb;
+  // Användaraktivitet (§ 57): läses med ledningens egen token (RLS), fail-soft.
+  const activity = await loadTenantActivity(pb, user.tenant);
+  const now = new Date().toISOString();
   let users: ManagedUser[] = [];
   try {
     const res = await listPb.collection('users').getList<MemberRow>(1, 500, {
@@ -78,7 +82,8 @@ export default async function AnvandarePage() {
           stored: m.enabled_modules,
           legacyDisabled: m.disabled_modules
         }),
-        createdAt: m.created ?? ''
+        createdAt: m.created ?? '',
+        activity: activity.byUser.get(m.id) ?? null
       };
     });
   } catch (error) {
@@ -89,7 +94,7 @@ export default async function AnvandarePage() {
     <SettingsSectionPage
       slug="anvandare"
       roles={user.roles}
-      intro="Alla konton i din organisation. Öppna en användare för att ändra roller, koppla bolag, välja vilka moduler som visas i personens sidofält, sätta nytt lösenord eller radera kontot. Bolagsmedlemmar ser bara sitt eget bolags data."
+      intro="Alla konton i din organisation. Öppna en användare för att se hur hen använder plattformen (senaste inloggning, mest använda sidor, det som aldrig öppnats), ändra roller, koppla bolag, välja vilka moduler som visas i personens sidofält, sätta nytt lösenord eller radera kontot. Bolagsmedlemmar ser bara sitt eget bolags data."
     >
       <UsersAdmin
         users={users}
@@ -97,6 +102,8 @@ export default async function AnvandarePage() {
         assignableRoles={assignableRoles}
         actorId={user.id}
         isAdmin={isAdmin}
+        now={now}
+        activityUnavailable={activity.unavailable}
       />
     </SettingsSectionPage>
   );
