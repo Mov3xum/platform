@@ -778,11 +778,36 @@ function mapRow(
       }
       if (field === 'status') {
         const status = str(after.status);
+        const statusTitle =
+          status === 'done'
+            ? `Klart: "${title}"`
+            : status === 'awaiting_feedback'
+              ? `Väntar återkoppling: "${title}"`
+              : status === 'in_progress'
+                ? `Påbörjat: "${title}"`
+                : `Återöppnat: "${title}"`;
         return {
-          title: status === 'done' ? `Klart: "${title}"` : `Återöppnat: "${title}"`,
+          title: statusTitle,
           detail: areaLabel || undefined,
           href,
-          icon: status === 'done' ? 'check' : 'help'
+          icon: status === 'done' ? 'check' : status === 'awaiting_feedback' ? 'eye' : status === 'in_progress' ? 'bolt' : 'help'
+        };
+      }
+      if (field === 'tester') {
+        return {
+          title: after.has_tester === true ? `Testare utpekad: "${title}"` : `Testare borttagen: "${title}"`,
+          detail: areaLabel || undefined,
+          href,
+          icon: 'user'
+        };
+      }
+      if (field === 'test_note') {
+        const result = str(after.test_result);
+        return {
+          title: result === 'ok' ? `Testat och klart: "${title}"` : `Testat — fungerar inte än: "${title}"`,
+          detail: areaLabel || undefined,
+          href,
+          icon: result === 'ok' ? 'check' : 'alert'
         };
       }
       return { title: `${kindLabel} ${changedVerb}: "${title}"`, detail: areaLabel || undefined, href, icon: 'pencil' };

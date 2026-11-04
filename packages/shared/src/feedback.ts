@@ -1,7 +1,9 @@
 // Önskemål & buggar (CLAUDE.md § 49) — intern backlog där användarna i
 // systemet lägger upp kort med frågor, buggar, önskemål om nya funktioner och
 // ändringar, kopplade till den del av plattformen de rör. Ledningen
-// (admin/incubator_lead) svarar och klarmarkerar.
+// (admin/incubator_lead) svarar, flyttar kortet genom flödet
+// Öppen → Påbörjad → Väntar återkoppling → Klar och kan be den som lade upp
+// kortet (eller en annan kollega) att TESTA att det blev rätt.
 //
 // Ren, React-/server-fri domänlogik (enhetstestad i feedback.test.ts) som
 // delas av UI, server actions och skrivvägen — så validering och behörighet
@@ -30,18 +32,40 @@ export const FEEDBACK_KIND_DESCRIPTIONS: Record<FeedbackKind, string> = {
 };
 
 /**
- * Status. `open` = väntar på svar, `answered` = besvarad (kan behöva
- * åtgärd), `done` = klarmarkerad. MÅSTE spegla select-värdena i migration
- * 1700000176.
+ * Status — kortets plats i flödet:
+ *   `open`              = Öppen: inte påbörjad än, väntar på ledningen.
+ *   `in_progress`       = Påbörjad: ledningen jobbar på det.
+ *   `awaiting_feedback` = Väntar återkoppling: åtgärdat, någon (testaren)
+ *                         ska pröva att det fungerar och återkoppla.
+ *   `done`              = Klar.
+ * MÅSTE spegla select-värdena i migration 1700000176 + 1700000208. Det
+ * äldre värdet `answered` (migration 1700000176) ligger kvar i schemat så
+ * befintliga rader aldrig blir ogiltiga; läsvägen tolkar det som
+ * `in_progress` (`normalizeFeedbackStatus`) och migrationen backfillar.
  */
-export const FEEDBACK_STATUSES = ['open', 'answered', 'done'] as const;
+export const FEEDBACK_STATUSES = ['open', 'in_progress', 'awaiting_feedback', 'done'] as const;
 export type FeedbackStatus = (typeof FEEDBACK_STATUSES)[number];
 
 export const FEEDBACK_STATUS_LABELS: Record<FeedbackStatus, string> = {
   open: 'Öppen',
-  answered: 'Besvarad',
+  in_progress: 'Påbörjad',
+  awaiting_feedback: 'Väntar återkoppling',
   done: 'Klar'
 };
+
+/** Kolumnens undertext på tavlan. */
+export const FEEDBACK_STATUS_HINTS: Record<FeedbackStatus, string> = {
+  open: 'Inte påbörjad än',
+  in_progress: 'Ledningen jobbar på det',
+  awaiting_feedback: 'Testaren prövar och återkopplar',
+  done: 'Klart och bekräftat'
+};
+
+/** Äldre lagrat värde (före migration 1700000208) → nuvarande status. */
+export function normalizeFeedbackStatus(value: unknown): FeedbackStatus {
+  if (value === 'answered') return 'in_progress';
+  return isFeedbackStatus(value) ? value : 'open';
+}
 
 /**
  * Vilken del av plattformen kortet rör. Fast lista (samma mönster som
@@ -171,6 +195,49 @@ export function canDeleteFeedback(
   return Boolean(item.author) && item.author === user.id && item.status === 'open' && !item.answer;
 }
 
+/**
+ * Testa: den utpekade testaren återkopplar ("fungerar" / "fungerar inte")
+ * när kortet väntar på återkoppling. Ledningen får alltid återkoppla (de
+ * kan också testa själva). Ingen testare ⇒ bara ledningen.
+ */
+export function canTestFeedback(
+  user: { id: string; roles: readonly Role[] | undefined },
+  item: { tester: string | null; status: FeedbackStatus }
+): boolean {
+  if (item.status !== 'awaiting_feedback') return false;
+  if (canRespondToFeedback(user.roles)) return true;
+  return Boolean(item.tester) && item.tester === user.id;
+}
+
+/** Kortet är "mitt" när jag skrev det eller är utpekad testare. */
+export function isMyFeedback(item: { author: string | null; tester: string | null }, userId: string): boolean {
+  return item.author === userId || item.tester === userId;
+}
+
+/**
+ * Vem som ska testa när kortet flyttas till "Väntar återkoppling" utan att
+ * en testare valts: den som lade upp kortet (hen vet vad som förväntades).
+ * Saknas författaren (raderad användare) förblir testaren tom — då
+ * återkopplar ledningen själv.
+ */
+export function defaultFeedbackTester(item: { author: string | null; tester: string | null }): string | null {
+  return item.tester ?? item.author ?? null;
+}
+
+/**
+ * Vad ett statusbyte innebär för testarfälten: att lämna "Väntar
+ * återkoppling" nollar inget (historiken av vem som testade står kvar via
+ * `test_note`/`tested_at`), men att gå TILL det utan testare pekar ut
+ * författaren. Ren så UI och action räknar lika.
+ */
+export function testerAfterStatusChange(
+  item: { author: string | null; tester: string | null },
+  next: FeedbackStatus
+): string | null {
+  if (next === 'awaiting_feedback') return defaultFeedbackTester(item);
+  return item.tester;
+}
+
 // ─── Validering ─────────────────────────────────────────────────────────────
 
 export const FEEDBACK_TITLE_MAX = 160;
@@ -221,6 +288,41 @@ export function validateFeedbackAnswer(input: unknown): FeedbackAnswerValidation
   return { ok: true, value: answer };
 }
 
+export const FEEDBACK_TEST_NOTE_MAX = 2000;
+
+export type FeedbackTestResult = 'ok' | 'fail';
+
+export interface FeedbackTestInput {
+  result: FeedbackTestResult;
+  note: string;
+}
+
+export type FeedbackTestValidation = { ok: true; value: FeedbackTestInput } | { ok: false; error: string };
+
+/**
+ * Testarens återkoppling: "fungerar" (noten valfri) eller "fungerar inte"
+ * (noten krävs — ledningen måste veta vad som fortfarande är fel).
+ */
+export function validateFeedbackTest(input: Record<string, unknown>): FeedbackTestValidation {
+  const result = input.result;
+  if (result !== 'ok' && result !== 'fail') {
+    return { ok: false, error: 'Ange om det fungerar eller inte.' };
+  }
+  const note = cleanText(input.note);
+  if (result === 'fail' && !note) {
+    return { ok: false, error: 'Beskriv vad som fortfarande inte fungerar.' };
+  }
+  if (note.length > FEEDBACK_TEST_NOTE_MAX) {
+    return { ok: false, error: `Återkopplingen får vara högst ${FEEDBACK_TEST_NOTE_MAX} tecken.` };
+  }
+  return { ok: true, value: { result, note } };
+}
+
+/** Status efter testarens återkoppling: fungerar ⇒ klar, annars tillbaka till påbörjad. */
+export function statusAfterFeedbackTest(result: FeedbackTestResult): FeedbackStatus {
+  return result === 'ok' ? 'done' : 'in_progress';
+}
+
 // ─── Sortering & räkning ────────────────────────────────────────────────────
 
 export interface FeedbackSortable {
@@ -229,12 +331,13 @@ export interface FeedbackSortable {
   created?: string;
 }
 
-const STATUS_ORDER: Record<FeedbackStatus, number> = { open: 0, answered: 1, done: 2 };
+const STATUS_ORDER: Record<FeedbackStatus, number> = { open: 0, in_progress: 1, awaiting_feedback: 2, done: 3 };
 const KIND_ORDER: Record<FeedbackKind, number> = { bug: 0, question: 1, change: 2, feature: 3 };
 
 /**
  * Backlog-ordning: öppna först (buggar och frågor före ändringar/nya
- * funktioner), sedan besvarade, sist klara — nyast först inom varje grupp.
+ * funktioner), sedan påbörjade, sedan de som väntar på återkoppling, sist
+ * klara — nyast först inom varje grupp.
  */
 export function compareFeedbackItems(a: FeedbackSortable, b: FeedbackSortable): number {
   const s = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
@@ -249,7 +352,7 @@ export function compareFeedbackItems(a: FeedbackSortable, b: FeedbackSortable): 
 export function countFeedbackByStatus<T extends { status: FeedbackStatus }>(
   items: readonly T[]
 ): Record<FeedbackStatus, number> {
-  const out: Record<FeedbackStatus, number> = { open: 0, answered: 0, done: 0 };
+  const out: Record<FeedbackStatus, number> = { open: 0, in_progress: 0, awaiting_feedback: 0, done: 0 };
   for (const it of items) out[it.status] += 1;
   return out;
 }

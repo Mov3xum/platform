@@ -1133,6 +1133,9 @@ async function verifyHealthEndpoint() {
  * obligatoriskt i schemat → varje create svarar 400.
  */
 const REQUIRED_APP_FIELDS = [
+  // Önskemål & buggar (§ 49, migration 1700000208): testare + återkoppling —
+  // utan fälten "pekas testaren ut" tyst bort och återkopplingen försvinner.
+  { collection: 'feedback_items', fields: ['tester', 'test_note', 'tested_at'] },
   // Årshjul (§ 30): day = migration 1700000138, tags/responsible = 1700000139.
   // day = 1700000138, tags/responsible = 1700000139, end_* = 1700000141.
   { collection: 'annual_wheel_items', fields: ['day', 'tags', 'responsible', 'end_month', 'end_day'] },
@@ -1251,7 +1254,9 @@ const REQUIRED_SELECT_VALUES = [
   { collection: 'goals', field: 'focus_area', values: ['projekt'], migration: '1700000198' },
   { collection: 'goal_status_entries', field: 'status', values: ['risk'], migration: '1700000198' },
   { collection: 'event_signups', field: 'stage', values: ['invited', 'declined'], migration: '1700000197' },
-  { collection: 'event_signups', field: 'stage', values: ['waitlist'], migration: '1700000203' }
+  { collection: 'event_signups', field: 'stage', values: ['waitlist'], migration: '1700000203' },
+  // Önskemål & buggar (§ 49, migration 1700000208): fyrstegsflödet.
+  { collection: 'feedback_items', field: 'status', values: ['in_progress', 'awaiting_feedback'], migration: '1700000208' }
 ];
 
 const MUST_NOT_BE_REQUIRED = [
