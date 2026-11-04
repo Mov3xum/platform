@@ -32,7 +32,9 @@ import {
   isSurveyModule,
   normalizeCompassPurpose,
   normalizeSurveySubjectKind,
-  type CompassPurpose
+  type CompassPurpose,
+  COMPASS_START_PAGE_BODY_MAX,
+  COMPASS_START_PAGE_TITLE_MAX
 } from '@platform/shared';
 
 /**
@@ -652,6 +654,8 @@ export type CompassModuleWritableField =
   | 'success_message'
   | 'target_audience'
   | 'consent_note'
+  | 'start_page_title'
+  | 'start_page_body'
   | 'flow_type'
   | 'layout'
   | 'is_active'
@@ -739,6 +743,20 @@ export async function updateCompassModuleField(
         );
       }
       value = normalized;
+      break;
+    }
+    case 'start_page_title': {
+      const r = validateOptionalText(params.value, params.field, COMPASS_START_PAGE_TITLE_MAX);
+      if (!r.ok) return fail('INVALID_VALUE', r.error);
+      value = r.value;
+      break;
+    }
+    case 'start_page_body': {
+      // Startsidan (§ 23.11) är längre fritext än övriga modulfält — stycken,
+      // punktlistor och mellanrubriker tolkas av parseCompassStartPageBlocks.
+      const r = validateOptionalText(params.value, params.field, COMPASS_START_PAGE_BODY_MAX);
+      if (!r.ok) return fail('INVALID_VALUE', r.error);
+      value = r.value;
       break;
     }
     default: {

@@ -2731,7 +2731,11 @@ await ensureCollection({
     // spegla COMPASS_PURPOSES / SURVEY_SUBJECT_KINDS i compass-survey.ts.
     { name: 'purpose', type: 'select', required: false, maxSelect: 1, values: ['intake', 'survey'] },
     { name: 'subject_kind', type: 'select', required: false, maxSelect: 1, values: ['none', 'startup', 'event', 'partner', 'staff'] },
-    { name: 'anonymous', type: 'bool', required: false }
+    { name: 'anonymous', type: 'bool', required: false },
+    // Migration 1700000208 (§ 23.11): startsida i flödet (beskrivning + syfte
+    // innan första frågan). Tom text ⇒ ingen startsida.
+    { name: 'start_page_title', type: 'text', required: false, max: 200 },
+    { name: 'start_page_body', type: 'text', required: false, max: 6000 }
   ],
   indexes: [
     'CREATE UNIQUE INDEX idx_compass_modules_tenant_slug ON compass_modules (tenant, slug)',

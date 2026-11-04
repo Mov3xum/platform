@@ -4107,6 +4107,50 @@ alls och en avbruten chatt såg ut som en slutförd.
 
 ---
 
+### 23.11 Startsida i flödet & ingen "Startupkompassen"-text mot besökaren (2026-11)
+
+**Behov (inflödesansvarig).** (1) Ordet "Startupkompassen" gick inte att få
+bort från idébeskrivningsmodulen: migration 1700000108 seedade modulerna med
+`hero_eyebrow = 'STARTUPKOMPASSEN'`, och den publika sidan föll dessutom
+tillbaka på samma ord när fältet tömdes i admin — så det kom tillbaka hur
+man än gjorde. Produktnamnet är internt; besökaren ska se avsändaren
+(logotypen), inte vårt verktygsnamn. (2) Idébäraren fick ingen chans att
+läsa vad modulen är till för och vad Movexum vill ha ut av svaren innan
+första frågan dök upp.
+
+- **Ingen eyebrow när fältet är tomt.** `PublicModuleLayout` visar BARA
+  personalens egen text ("Liten text ovanför rubriken", steg 2); tomt ⇒
+  ingen eyebrow. Brickan i brand-panelen (mallar utan uppladdad bild) och
+  webbläsarens fliktitel bär eyebrow-texten, annars tenantens namn — aldrig
+  "Startupkompassen". Migration **1700000208** nollställer det seedade
+  värdet (bara rader vars värde är exakt "STARTUPKOMPASSEN", skiftläges-
+  okänsligt; en egen eyebrow lämnas orörd). Produktnamnet finns kvar i
+  admin, sidmenyn och koden — det är BESÖKARYTAN som är ren.
+- **Startsida inne i flödet** — `compass_modules.start_page_title` (≤ 200)
+  + `start_page_body` (≤ 6000), migration 1700000208, speglat i
+  `setup-via-api.mjs` (compass är annars migration-only, § 23.4/§ 23.7-
+  precedensen). Skrivs i modul-admin steg 2 ("Startsida innan frågorna")
+  eller via chattens `update_compass_module_field`. Tom text ⇒ ingen
+  startsida (exakt som förut; en instans utan migrationen ändrar inget).
+  `PublicModuleRunner` visar sidan INUTI kortet före första frågan/chatten:
+  rubrik (standard "Innan du börjar"), texten som stycken/punktlistor/
+  mellanrubriker och EN startknapp. Finns en samtyckestext (steg 4) ligger
+  den på SAMMA sida under texten med knappen "Jag förstår, starta" — aldrig
+  två grindar efter varandra. Tolkningen är ren och enhetstestad i
+  `packages/shared/src/compass-start-page.ts` (`parseCompassStartPageBlocks`:
+  tomrad = nytt stycke, `- `/`* `/`1.` = punkt, `## ` = mellanrubrik;
+  renderas som React-element, aldrig HTML). Schema-drift (§ 24.4): sparas
+  en startsida mot ett schema utan fältet svarar `updateModuleAction` med
+  ett tydligt fel som namnger migrationen.
+- **Ingen ny dataväg, ingen PII:** publik marknads-/instruktionstext (admin
+  uppmanar att inte skriva personuppgifter), whitelistad i `toPublicModule`
+  eftersom den renderas mot kund. Lead-garantin (§ 23.6), samtycket
+  (GDPR art. 7) och genomförandestatusen (§ 23.10 — `useFlowProgress`
+  startar först vid första steget efter startsidan) är oförändrade.
+  Riskklass n/a.
+
+---
+
 ## 24. AI-sorterat filarkiv — ämnes-/bolagsmappar (/filer)
 
 ### 24.1 Översikt
