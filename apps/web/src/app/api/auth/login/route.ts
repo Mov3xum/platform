@@ -6,6 +6,7 @@ import { describeLoginInfraError, probePocketBase, probeSummary } from '@/lib/pb
 import { checkRateLimit, clearFailures, recordFailure } from '@/lib/rate-limit';
 import { clientIpFromRequest } from '@/lib/client-ip';
 import { sanitizeAppPath } from '@/lib/relative-redirect';
+import { recordLogin } from '@/lib/user-activity/record.server';
 
 type PbError = {
   status?: number;
@@ -119,6 +120,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   await Promise.all([clearFailures(accountKey), clearFailures(ipKey), clearFailures(emailOnlyKey)]);
 
   const model = pb.authStore.model as Record<string, unknown> | null;
+  // Användaraktivitet (§ 57): senaste inloggning — best-effort, blockerar aldrig.
+  if (model && typeof model.id === 'string' && typeof model.tenant === 'string') {
+    void recordLogin(model.id, model.tenant);
+  }
   const expandTenant =
     (model?.expand as { tenant?: { id: string; name: string; slug: string } } | undefined)?.tenant;
 

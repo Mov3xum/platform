@@ -46,9 +46,16 @@ export function PublicModuleLayout({ module, questions, branding, nextModule, su
   const isChat = module.flow_type === 'chat';
 
   const title = module.welcome_title || module.name;
-  const eyebrow = module.hero_eyebrow || 'STARTUPKOMPASSEN';
+  // Eyebrow = BARA personalens egen text ("Liten text ovanför rubriken").
+  // Tidigare föll sidan tillbaka på "STARTUPKOMPASSEN" när fältet var tomt,
+  // så ordet gick inte att ta bort från en modul i admin (2026-11). Tomt ⇒
+  // ingen eyebrow; logotypen i sidhuvudet bär avsändaren.
+  const eyebrow = (module.hero_eyebrow || '').trim();
   // Undvik dubblerad rubrik när eyebrow råkar vara identisk med titeln.
-  const showEyebrow = eyebrow.trim().toLowerCase() !== (title || '').trim().toLowerCase();
+  const showEyebrow = Boolean(eyebrow) && eyebrow.toLowerCase() !== (title || '').trim().toLowerCase();
+  // Brickan i brand-panelen (mallar utan uppladdad bild): eyebrow, annars
+  // avsändarens namn, annars bara flödesordet.
+  const visualTag = eyebrow || branding.name || '';
   // Ingressen är BARA `welcome_body` (steg 2 i editorn). `description` är
   // modulens INTERNA beskrivning ("Visas bara för er — inte för besökaren")
   // och får aldrig renderas mot kund.
@@ -115,7 +122,7 @@ export function PublicModuleLayout({ module, questions, branding, nextModule, su
         <path d="M200 40 L214 186 L360 200 L214 214 L200 360 L186 214 L40 200 L186 186 Z" className="mx-compass-needle" />
       </svg>
       <div className="mx-compass-visual-tag">
-        <span>{eyebrow}</span>
+        {visualTag && <span>{visualTag}</span>}
         <span>{FLOW_WORD[module.flow_type]}</span>
       </div>
     </div>

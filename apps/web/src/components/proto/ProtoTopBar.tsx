@@ -2,45 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useMemo } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 import { coreModules } from '@platform/shared';
 import { SETTINGS_ROUTE_LABELS } from '@/lib/settings-sections';
+import { STATIC_ROUTE_LABELS, buildCrumbs } from '@/lib/crumbs';
+import { getCrumbLabels, getServerCrumbLabels, subscribeCrumbLabels } from '@/lib/crumb-labels';
 import { RailReopenButton } from './MobileRail';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { ThemeToggle } from '@/components/ThemeToggle';
-
-function buildCrumbs(pathname: string): { label: string; href: string; now: boolean }[] {
-  if (pathname === '/' || pathname === '/hem') {
-    return [{ label: 'Översikt', href: '/hem', now: true }];
-  }
-  const seg = pathname.split('/').filter(Boolean);
-  const crumbs: { label: string; href: string; now: boolean }[] = [
-    { label: 'Översikt', href: '/hem', now: false }
-  ];
-  // first segment = module. Moduler vars route flyttat in under Inställningar
-  // (t.ex. integrationer → /installningar/integrationer) matchas på id så
-  // detaljsidorna under den gamla adressen behåller sin riktiga titel.
-  const mod =
-    coreModules.find((m) => m.route === '/' + seg[0]) ??
-    coreModules.find((m) => m.id === seg[0]);
-  if (mod) {
-    crumbs.push({ label: mod.title, href: mod.route, now: seg.length === 1 });
-  } else {
-    crumbs.push({ label: seg[0], href: '/' + seg[0], now: seg.length === 1 });
-  }
-  // further segments: känd undersida (t.ex. Inställningar-sektion) får sin
-  // riktiga titel, övriga visas som avhumaniserade segment.
-  for (let i = 1; i < seg.length; i++) {
-    const href = '/' + seg.slice(0, i + 1).join('/');
-    const known = SETTINGS_ROUTE_LABELS[href] ?? coreModules.find((m) => m.route === href)?.title;
-    crumbs.push({
-      label: known ?? decodeURIComponent(seg[i]).replace(/[-_]/g, ' '),
-      href,
-      now: i === seg.length - 1
-    });
-  }
-  return crumbs;
-}
 
 export function ProtoTopBar({
   unseenNotifications = 0,
@@ -50,7 +19,13 @@ export function ProtoTopBar({
   notificationsHref?: string | null;
 } = {}) {
   const pathname = usePathname();
-  const crumbs = useMemo(() => buildCrumbs(pathname), [pathname]);
+  // Sidornas registrerade etiketter (bolagsnamn för ett id, sidans rubrik för
+  // en slug) — utan dem visas aldrig ett rått record-id (lib/crumbs.ts).
+  const labels = useSyncExternalStore(subscribeCrumbLabels, getCrumbLabels, getServerCrumbLabels);
+  const crumbs = useMemo(
+    () => buildCrumbs(pathname, { modules: coreModules, routeLabels: { ...STATIC_ROUTE_LABELS, ...SETTINGS_ROUTE_LABELS }, labels }),
+    [pathname, labels]
+  );
 
   return (
     <div className="mx-topbar">

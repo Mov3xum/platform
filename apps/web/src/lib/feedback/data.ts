@@ -3,7 +3,7 @@ import type PocketBase from 'pocketbase';
 import {
   compareFeedbackItems,
   isFeedbackKind,
-  isFeedbackStatus,
+  normalizeFeedbackStatus,
   type FeedbackKind,
   type FeedbackStatus
 } from '@platform/shared';
@@ -38,12 +38,16 @@ interface FeedbackRow {
   answered_at?: string;
   done_by?: string;
   done_at?: string;
+  tester?: string;
+  test_note?: string;
+  tested_at?: string;
   created?: string;
   updated?: string;
   expand?: {
     author?: UserRef;
     answered_by?: UserRef;
     done_by?: UserRef;
+    tester?: UserRef;
   };
 }
 
@@ -65,6 +69,12 @@ export interface FeedbackItem {
   doneBy: string | null;
   doneByName: string | null;
   doneAt: string | null;
+  /** Vem som ska testa/återkoppla (migration 1700000208). */
+  tester: string | null;
+  testerName: string | null;
+  /** Testarens senaste återkoppling (fritext, personnummer-sanerad). */
+  testNote: string | null;
+  testedAt: string | null;
   created: string;
   updated: string;
 }
@@ -87,7 +97,8 @@ export function rowToFeedbackItem(row: FeedbackRow): FeedbackItem {
     description: String(row.description ?? ''),
     kind: isFeedbackKind(row.kind) ? row.kind : 'question',
     area: String(row.area ?? 'annat'),
-    status: isFeedbackStatus(row.status) ? row.status : 'open',
+    // Äldre `answered` (före 1700000208) läses som påbörjad.
+    status: normalizeFeedbackStatus(row.status),
     answer: row.answer ? String(row.answer) : null,
     answeredBy: row.answered_by ? String(row.answered_by) : null,
     answeredByName: nameOf(row.expand?.answered_by),
@@ -95,6 +106,10 @@ export function rowToFeedbackItem(row: FeedbackRow): FeedbackItem {
     doneBy: row.done_by ? String(row.done_by) : null,
     doneByName: nameOf(row.expand?.done_by),
     doneAt: row.done_at ? String(row.done_at) : null,
+    tester: row.tester ? String(row.tester) : null,
+    testerName: nameOf(row.expand?.tester),
+    testNote: row.test_note ? String(row.test_note) : null,
+    testedAt: row.tested_at ? String(row.tested_at) : null,
     created: String(row.created ?? ''),
     updated: String(row.updated ?? '')
   };
@@ -114,7 +129,7 @@ export async function listFeedbackItems(pb: PocketBase, tenant: string): Promise
   const run = (sort: string | undefined) =>
     pb.collection(FEEDBACK_ITEMS).getList<FeedbackRow>(1, MAX_ITEMS, {
       filter: pb.filter('tenant = {:tenant}', { tenant }),
-      expand: 'author,answered_by,done_by',
+      expand: 'author,answered_by,done_by,tester',
       ...(sort ? { sort } : {})
     });
   try {
@@ -146,7 +161,7 @@ export async function getFeedbackItem(pb: PocketBase, tenant: string, id: string
   try {
     const row = await pb
       .collection(FEEDBACK_ITEMS)
-      .getOne<FeedbackRow>(id, { expand: 'author,answered_by,done_by' });
+      .getOne<FeedbackRow>(id, { expand: 'author,answered_by,done_by,tester' });
     const item = rowToFeedbackItem(row);
     return item.tenant === tenant ? item : null;
   } catch {

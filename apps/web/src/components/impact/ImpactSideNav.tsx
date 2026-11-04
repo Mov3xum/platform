@@ -25,9 +25,10 @@ const PAGES: ReadonlyArray<{ id: ImpactPage; label: string; icon: IconName }> = 
 
 /**
  * Originalets sidomeny per bolag (Alla bolag → Dashboard … Anteckningar +
- * Jämförelser), i Movexums gröna accent. Aktiv post = pastell grön med
- * inåtvänd ring, precis som i originalet. Ren navigation — RBAC ligger i
- * sidorna och RLS (§ 21).
+ * Jämförelser), i Movexums gröna accent. Aktiv post = Movexum grön med vit
+ * text (ljusgrön i dark mode), hover = pastell grön — menyn bär samma gröna
+ * ton som zonens gradient (§ 56). Ren navigation — RBAC ligger i sidorna och
+ * RLS (§ 21).
  */
 export function ImpactSideNav({ startupId }: { startupId: string }) {
   const pathname = usePathname();
@@ -47,11 +48,11 @@ export function ImpactSideNav({ startupId }: { startupId: string }) {
             aria-current={active ? 'page' : undefined}
             className={`flex shrink-0 items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-medium transition ${
               active
-                ? 'bg-movexum-pastell-gron text-movexum-morkgron shadow-[inset_0_0_0_1px] shadow-movexum-gron/15 dark:bg-movexum-morkgron/40 dark:text-movexum-pastell-gron dark:shadow-movexum-ljusgron/20'
-                : 'text-foreground-muted hover:bg-canvas-muted hover:text-foreground'
+                ? 'bg-movexum-gron text-movexum-vit shadow-sm shadow-movexum-gron/30 dark:bg-movexum-ljusgron dark:text-movexum-morkgron'
+                : 'text-foreground-muted hover:bg-movexum-pastell-gron hover:text-movexum-morkgron dark:hover:bg-movexum-morkgron/40 dark:hover:text-movexum-pastell-gron'
             }`}
           >
-            <Icon name={item.icon} size={16} className={active ? 'text-movexum-gron dark:text-movexum-ljusgron' : 'text-foreground-subtle'} />
+            <Icon name={item.icon} size={16} className={active ? 'text-movexum-vit/90 dark:text-movexum-morkgron' : 'text-movexum-gron/70 dark:text-movexum-ljusgron/70'} />
             <span className="whitespace-nowrap">{item.label}</span>
           </Link>
         );

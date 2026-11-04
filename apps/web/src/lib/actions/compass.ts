@@ -31,7 +31,9 @@ import {
   validateWorkshopMediaFile,
   type StartupPhase,
   normalizeCompassPurpose,
-  normalizeSurveySubjectKind
+  normalizeSurveySubjectKind,
+  COMPASS_START_PAGE_BODY_MAX,
+  COMPASS_START_PAGE_TITLE_MAX
 } from '@platform/shared';
 
 const STAFF_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor'] as const;
@@ -755,6 +757,13 @@ async function applyModuleUpdate(
     hero_eyebrow: String(formData.get('hero_eyebrow') || '').trim().slice(0, 120),
     welcome_title: String(formData.get('welcome_title') || '').trim().slice(0, 200),
     welcome_body: String(formData.get('welcome_body') || '').trim().slice(0, 4000),
+    // Startsida i flödet (§ 23.11) — beskrivning + syfte innan första frågan.
+    start_page_title: String(formData.get('start_page_title') || '')
+      .trim()
+      .slice(0, COMPASS_START_PAGE_TITLE_MAX),
+    start_page_body: String(formData.get('start_page_body') || '')
+      .trim()
+      .slice(0, COMPASS_START_PAGE_BODY_MAX),
     chat_persona: String(formData.get('chat_persona') || '').trim().slice(0, 4000),
     max_exchanges: Number.isFinite(maxExchanges) && maxExchanges >= 0 ? Math.min(maxExchanges, 100) : 0,
     // Steg 4: "Skapa lead i Startupkompassen när modulen slutförs" — en
@@ -973,6 +982,11 @@ async function applyModuleUpdate(
   ) {
     throw new Error(
       'Övriga fält sparades, men mallen kunde inte sparas: fältet layout saknas i databasen (PocketBase-migration 1700000154 är inte applicerad).'
+    );
+  }
+  if (patch.start_page_body && saved && !('start_page_body' in saved)) {
+    throw new Error(
+      'Övriga fält sparades, men startsidan kunde inte sparas: fältet start_page_body saknas i databasen (PocketBase-migration 1700000208 är inte applicerad).'
     );
   }
 

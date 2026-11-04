@@ -1946,3 +1946,5 @@ export interface OrgKnowledgeChunk {
 }
 export * from './kth-irl';
 export * from './excellence-irl';
+
+export * from './user-activity';

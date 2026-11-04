@@ -8444,15 +8444,39 @@ upp **kort** med det de saknar, det som krånglar eller det de undrar över.
 Varje kort har en **typ** (bugg / ny funktion / ändring / fråga), ett
 **område** (vilken sida i plattformen det gäller — dropdown, t.ex.
 "Rapportering") och en beskrivning. **Ledningen** (admin/incubator_lead)
-**svarar** på kortet och **klarmarkerar** när det är gjort; ett klart kort kan
-återöppnas. Filter på status/typ/sida/"bara mina" + fritextsök. Korten visas
-som **lista** eller **kanban-tavla** (Öppen · Besvarad · Klar) — valet sparas
-per webbläsare (`localStorage` `movexum-feedback-view`, bekvämlighet).
-Ledningen drar kort mellan kolumnerna (HTML5-DnD, samma mönster som
-`TaskKanban` § 15.7; på mobil en "Flytta till"-select); kolumnen Besvarad
-kräver att ett svar redan finns (`setFeedbackStatusAction` avvisar flytten
-med tydligt fel — kolumnen är ingen fri hink). Flytten är optimistisk i
-klienten och rullas tillbaka vid fel.
+**svarar** på kortet och driver det genom flödet.
+
+**Flödet (2026-11, migration 1700000208):** Öppen → **Påbörjad** → **Väntar
+återkoppling** → Klar. **Ledningen** (admin/incubator_lead) **svarar**,
+**påbörjar**, **skickar för test** och **klarmarkerar**; ett klart kort kan
+återöppnas. "Skicka för test" pekar ut en **testare** — som standard **den
+som lade upp kortet** (`defaultFeedbackTester`; valfri annan kollega ur
+Movexum-personalen) — flyttar kortet till Väntar återkoppling och
+notifierar testaren (`feedback_test`, § 50). Testaren (eller ledningen)
+**återkopplar** i systemet: *Fungerar* ⇒ Klar (klarmarkerad av testaren),
+*Fungerar inte* + obligatorisk not ⇒ tillbaka till Påbörjad
+(`submitFeedbackTestAction`, `statusAfterFeedbackTest`); ledningen får
+notisen `feedback_tested`. Ett svar på ett ännu öppet kort flyttar det till
+Påbörjad (`feedback_started` till författaren); i övrigt ändrar ett svar
+inte statusen. Dra-och-släpp till Väntar återkoppling utan testare pekar ut
+författaren (`testerAfterStatusChange`); till Klar/Öppen/Påbörjad rör inte
+testaren. Det gamla värdet `answered` ("Besvarad") ligger kvar i schemat,
+backfillas till `in_progress` av migrationen och tolkas så av läsvägen
+(`normalizeFeedbackStatus`) — ett schema utan migrationen får ett fel som
+namnger den (`withSchemaHint`), aldrig en tyst no-op.
+
+**Sidan (full bredd på desktop):** ett **flödesband** med fyra steg + "Alla"
+(antal per steg, klick = statusfilter), en verktygsrad (typ, sida, "Mina
+kort" = författare ELLER testare via `isMyFeedback`, "Att testa" = kort som
+väntar på MIN återkoppling, sök, vyväxling) och korten som **tavla**
+(default; fyra kolumner på bred skärm, dra-och-släpp för ledningen — samma
+mönster som `TaskKanban` § 15.7; på mobil en "Flytta till"-select) eller
+**radlista** som fälls ut per rad till hela kortet. Valet sparas per
+webbläsare (`localStorage` `movexum-feedback-view`, bekvämlighet). En notis
+med `#kort-<id>` öppnar raden och scrollar dit. Flytten är optimistisk i
+klienten och rullas tillbaka vid fel. Testarväljaren får Movexum-personalen
+som id + visningsnamn (`listStaffUsers`, aldrig e-post) och bara när den
+inloggade är ledning.
 
 | Fil | Syfte |
 |-----|-------|
@@ -8471,10 +8495,16 @@ klienten och rullas tillbaka vid fel.
   `area` (**text**, ≤ 40 — nyckel ur `FEEDBACK_AREAS`; medvetet inte select så
   en ny sida kan läggas till i listan utan migration; valideringen ligger i
   koden), `status` (select — MÅSTE spegla `FEEDBACK_STATUSES`: `open |
-  answered | done`), `answer` (≤ 5000), `answered_by`/`answered_at`,
-  `done_by`/`done_at`, autodate explicit (§ 28.5). Speglad i
-  `setup-via-api.mjs` (def + `FORCE_CREATE_RULES`) och asserterad i
-  `verify-baseline.mjs` (must-exist + `MUST_BE_STAFF_OR_OBSERVER`).
+  in_progress | awaiting_feedback | done`; `answered` kvar i schemat för
+  äldre rader, migration **1700000208**), `answer` (≤ 5000),
+  `answered_by`/`answered_at`, `done_by`/`done_at`, **`tester`** (→ users,
+  ingen cascade — vem som testar/återkopplar), **`test_note`** (≤ 2000,
+  testarens senaste återkoppling), **`tested_at`**, autodate explicit
+  (§ 28.5). Speglad i `setup-via-api.mjs` (def + `patchCollection` för
+  befintliga instanser + `FORCE_CREATE_RULES`) och asserterad i
+  `verify-baseline.mjs` (must-exist, `MUST_BE_STAFF_OR_OBSERVER`,
+  `REQUIRED_APP_FIELDS` för testarfälten, `REQUIRED_SELECT_VALUES` för
+  statusarna).
 - **Bara egna aktiverade sidor.** Dropdownen över sidor visar enbart de
   sidor som är aktiverade på den inloggades egen profil (§ 36.3): varje
   modul-kopplat område bär `module` i `FEEDBACK_AREAS`, och
@@ -8489,29 +8519,43 @@ klienten och rullas tillbaka vid fel.
   (`FEEDBACK_AUTHOR_ROLES`: admin/incubator_lead/coach/mentor; observer
   läser); redigera = författaren tills kortet är klart, eller ledningen;
   radera = ledningen, eller författaren för ett eget ännu obesvarat kort;
-  svara/klarmarkera/återöppna = ledningen (`FEEDBACK_RESPONDER_ROLES`).
+  svara/flytta/peka ut testare/klarmarkera/återöppna = ledningen
+  (`FEEDBACK_RESPONDER_ROLES`); återkoppla på ett test = den utpekade
+  testaren eller ledningen, bara i Väntar återkoppling (`canTestFeedback`).
   Enforce:as i server-actionen (PB:s createRule är roll-lös per § 21.3;
-  update/delete = `author` eller ledning med `:each ?=`). Tenant + author
-  stämplas server-side. Skrivning via användartoken med superuser-fallback
-  BARA vid PB v0.23.4:s tysta regel-nekande (400/403/404), efter verifierad
-  roll + tenant.
-- **Status följer svaret:** ett svar sätter `answered` (ett redan klart kort
-  förblir `done`); klarmarkering sätter `done` + `done_by/at`; återöppning
-  går tillbaka till `answered` om ett svar finns, annars `open`.
+  update = `author`, `tester` eller ledning med `:each ?=` — fältgränsen,
+  att testaren bara skriver återkopplingen, ligger i koden; delete =
+  `author` eller ledning). Testaren valideras mot Movexum-personalen i
+  tenanten (`assertStaffInTenant`) — aldrig ett id från klienten rakt in.
+  Tenant + author stämplas server-side. Skrivning via användartoken med
+  superuser-fallback BARA vid PB v0.23.4:s tysta regel-nekande
+  (400/403/404), efter verifierad roll + tenant.
+- **Status:** svar på ett öppet kort ⇒ `in_progress`, annars oförändrad;
+  klarmarkering sätter `done` + `done_by/at`; återkoppling "fungerar" ⇒
+  `done` (av testaren), "fungerar inte" ⇒ `in_progress` + `test_note`;
+  återöppning går tillbaka till `in_progress` om någon jobbat på kortet
+  (svar eller återkoppling finns), annars `open`.
 - **Sortering** (`compareFeedbackItems`): öppna först (buggar och frågor före
-  ändringar/nya funktioner), sedan besvarade, sist klara — nyast först inom
-  varje grupp. Läsvägen paginerar upp till 2 000 och visar kapning som
+  ändringar/nya funktioner), sedan påbörjade, sedan väntar återkoppling,
+  sist klara — nyast först inom varje grupp. Läsvägen paginerar upp till 2 000 och visar kapning som
   banner (§ 33.4-principen); ett läsfel visas som banner, aldrig som "tom
   backlog".
 - **Audit (ISO 27001 A.8.15):** varje mutation loggas i `agent_actions`
-  (PII-fritt: rubrik/typ/område/status; beskrivning och svar bara som
-  längd; radering som `update` + `deleted`, § 30.6) och mappas i
-  `feed/agent-log.ts` → syns i Bolagsnytt/`/aktivitet` med länk
-  `/onskemal#kort-<id>`.
-- **GDPR § 5:** kort och svar är verksamhetsfritext från personalen —
-  personnummer-saneras på skrivvägen (§ 15.6), UI:t uppmanar att inte skriva
-  personuppgifter. `author`/`answered_by`/`done_by` visas som visningsnamn,
-  aldrig e-post. Rättslig grund: berättigat intresse (förbättring av det
+  (PII-fritt: rubrik/typ/område/status, `has_tester`/`test_result`;
+  beskrivning, svar och återkoppling bara som längd; radering som `update`
+  + `deleted`, § 30.6) och mappas i `feed/agent-log.ts` ("Påbörjat",
+  "Väntar återkoppling", "Testare utpekad", "Testat och klart" …) → syns i
+  Bolagsnytt/`/aktivitet` med länk `/onskemal#kort-<id>`.
+- **Notiser (§ 50):** `feedback_started` (författaren när kortet påbörjas),
+  `feedback_answered` (svar), `feedback_test` (testaren när hen ska testa —
+  även vid byte av testare), `feedback_tested` (ledningen + den som svarade
+  när testaren återkopplat; grupperas), `feedback_done` (författaren och
+  testaren när kortet blir klart). Alla best-effort.
+- **GDPR § 5:** kort, svar och återkoppling är verksamhetsfritext från
+  personalen — personnummer-saneras på skrivvägen (§ 15.6), UI:t uppmanar
+  att inte skriva personuppgifter. `author`/`answered_by`/`done_by`/`tester`
+  visas som visningsnamn, aldrig e-post; `tester` är en intern
+  användarrelation (når aldrig AI-kontexten — `users` är denylistad). Rättslig grund: berättigat intresse (förbättring av det
   interna verktyget). `cascadeDelete` på tenant; användarrelationer nollas
   vid radering (kortet lever vidare som "Borttagen användare").
 - **AI:** `feedback_items` är inte denylistad — chatten kan läsa backloggen
@@ -8519,7 +8563,8 @@ klienten och rullas tillbaka vid fel.
   inget skrivverktyg. Riskklass (EU AI Act): n/a — ingen AI-inferens.
 - **§ 21-isolering:** list/view staff/observer-only; en ren `startup_member`
   ser varken modulen (inte i `MEMBER_RAIL`) eller kollektionen.
-- **Migrationer** 1700000176–177 är nya, oföränderliga filnummer.
+- **Migrationer** 1700000176–177 och 1700000208 är nya, oföränderliga
+  filnummer.
 - **Sidmenyn är låst av test (2026-10).** Modulen försvann ur railen när
   två grenar ändrade samma `System`-rad i `RAIL_GROUPS` och sammanslagningen
   tog den andra versionen — sidan fanns kvar på `/onskemal` (och all data i
@@ -8660,7 +8705,8 @@ det.
 | `agreement_signed` | Alla parter har signerat | Avsändare, utpekad signatär och (om bolaget signerade) medlemmarna |
 | `contact_request`/`contact_decision` | Kontaktboken (§ 45.3) | Ägare / frågare |
 | `support_check_*` | Stödcheckar (§ 46) | Coacher/ledning resp. bolaget |
-| `feedback_answered`/`feedback_done` | Ledningen svarar/klarmarkerar (§ 49) | Kortets författare |
+| `feedback_answered`/`feedback_started`/`feedback_done` | Ledningen svarar/påbörjar/klarmarkerar (§ 49) | Kortets författare (och testaren vid klart) |
+| `feedback_test`/`feedback_tested` | Kortet skickas för test / testaren återkopplar (§ 49) | Testaren resp. ledningen + den som svarade |
 | `screening_request` (obligatorisk) | Controllern skickar begäran om komplettering (§ 51.6) | Vald coach resp. bolagets medlemmar |
 | `screening_answered` | Coachen/bolaget besvarar punkter (§ 51.6) | Den som skickade förfrågan |
 | `due_soon` | (reserverad — påminnelse-ticken, nästa steg) | Ägare/tilldelade |
@@ -10630,6 +10676,27 @@ kodkarta: `docs/integrations/impact-navigator.md`.
   per bolag renderar `ImpactSideNav` originalets meny i `lib/impact/shell.tsx`
   (inga flikar). Landningssidan visar bara bolag i Impact Navigator —
   befintliga bolagskort väljs under "Skapa nytt bolag".
+  **Grön zon (2026-11).** Hela modulen (topbar + vy) bär aurora-gradienten i
+  Movexums gröna toner i stället för den blå/lila: `lib/app-zone.ts` (ren,
+  enhetstestad) mappar `/impactnavigator…` → zonen `impact`, `MainColumn`
+  (klient, ersätter den nakna `.mx-main-col`-diven i `ProtoShell`) sätter
+  `data-zone` redan vid server-renderingen och `prototype.css` byter
+  `--mx-app-gradient` per zon — samma komposition, andra toner, så det känns
+  som samma system men en hållbarhetsdel. Sidomenyn: brand-block i grön
+  gradient, aktiv post Movexum grön med vit text, hover pastell grön. En ny
+  zon = en rad i `ZONE_PREFIXES` + ett CSS-block; aldrig en egen bakgrund i
+  sidan.
+  **Brödsmulor utan record-id (2026-11).** Topbaren visade
+  `Impact Navigator / omip77vgymfj3hu / vasentlighet`. `lib/crumbs.ts` (ren,
+  enhetstestad) bygger nu smulorna ur tre lager — modulregistret, fasta
+  sökvägar (`STATIC_ROUTE_LABELS`: "Nytt bolag", "Jämförelser", plus
+  Inställningar-sektionerna) och etiketter som SIDAN registrerat via
+  `<CrumbLabels labels={{ '/impactnavigator/<id>': bolagsnamn, …sidrubriker }}>`
+  (`lib/crumb-labels.ts`, klientminne + `useSyncExternalStore`). Ett segment
+  som ser ut som ett PocketBase-id visas aldrig rått — platshållare "…" tills
+  etiketten finns. Andra detaljsidor (bolagskort, uppdrag …) kan använda samma
+  komponent; etiketterna är visningsnamn sidan redan renderar, ingen ny
+  dataväg.
 - **Ytor:** `/impactnavigator` (Alla bolag: sök på namn/bransch/resa,
   filter på fas och övergripande bedömning, kort med status/fas/impactnivå,
   Öppna → dashboard eller väsentlighet, Radera för ledning),
@@ -10652,3 +10719,92 @@ kodkarta: `docs/integrations/impact-navigator.md`.
   Ingen DPIA ännu — skrivs före produktion om dokument med personuppgifter
   väntas. Inte byggt: chatt-verktyg mot analyserna, PDF-export, SSO/extern
   domän (medvetet — modulen lever på app.movexum.se som allt annat).
+
+---
+
+## 57. Användaraktivitet — hjälp nya användare igång (2026-11)
+
+### 57.1 Översikt
+
+Inställningar → **Användare** visar per konto hur personen använder
+plattformen: **senast inloggad**, antal inloggningar, **senast aktiv** (och
+på vilken sida), aktiva dagar de senaste 30 dagarna (dagsremsa), **mest
+använda sidor** (staplar per modul) och — det viktigaste för introduktionen
+— **sidor som ligger i personens sidmeny men aldrig öppnats**. Listan har
+filtren **Aldrig inloggad · Vilande · Aktiva** och varje rad bär en status
+("Aktiv för 2 h sedan" / "Vilande · för 6 veckor sedan" / "Aldrig
+inloggad"); hubben (`/installningar`) visar "N aldrig inloggade" på
+Användare-kortet. Personen ser **samma uppgifter om sig själv** under Mitt
+konto → **Din aktivitet** (`/konto#aktivitet`).
+
+**Syfte och gräns (bindande).** Underlaget finns för att hjälpa användare
+igång och se var en genomgång gör mest nytta. Det är **inte ett
+prestationsmått** och får inte användas för uppföljning av enskilda
+medarbetares arbetsinsats (samma princip som belastningen i § 29.7). Bygg
+aldrig: per-sida-/per-post-loggar, tidsmätning per session, IP/user agent,
+"vem tittade på vilket bolag", eller export/rankning av personal.
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/user-activity.ts` (+ `.test.ts`) | REN modul: `moduleIdForPath` (längsta route vinner, alias slås ihop), `applyVisit`/`applyLogin` (returnerar ny post, rensar gamla modulrader + dagar utanför fönstret), `activityStatus` (never/active/dormant), `activeDaysWithin`, `topModules`, `neverOpenedModules`, `formatRelativeTime`, tolerant `normalizeUserActivity` |
+| `backend/pocketbase-schema/migrations/1700000209_create_user_activity.js` | Collection `user_activity` |
+| `apps/web/src/lib/user-activity/record.server.ts` | ENDA skrivvägen: `recordLogin`, `recordVisit` (superuser EFTER verifierad session; serialiserat per användare; throttle per modul `VISIT_THROTTLE_MS` = 60 s; best-effort) |
+| `apps/web/src/lib/user-activity/data.server.ts` | `loadTenantActivity` (ledningen, RLS; superuser bara vid tyst regel-nekande § 21.3) + `loadMyActivity` |
+| `apps/web/src/app/api/activity/visit/route.ts` | Beacon-route: session ur `getCurrentUser`, modul-id valideras mot `coreModules`, rate-limit 120/5 min per användare (bara räknade besök belastar) |
+| `apps/web/src/components/proto/ActivityBeacon.tsx` | Klient i `ProtoShell`: POST:ar modul-id (aldrig sökväg) när sidmenyns modul byts; samma modul igen först efter 5 min; `keepalive`, svaret ignoreras |
+| `apps/web/src/components/user-activity/ActivityOverview.tsx` | Delad vy (`ActivityOverview`, `ActivityStatusChip`) för Användare och Mitt konto |
+| `apps/web/src/app/api/auth/login/route.ts`, `lib/actions/auth.ts` | `recordLogin` efter lyckad `authWithPassword` (fire-and-forget) |
+
+### 57.2 Datamodell — `user_activity` (migration 1700000209)
+
+En rad per användare (unikt index på `user`): `tenant`/`user` (cascade),
+`first_login_at`, `last_login_at`, `login_count`, `last_seen_at`,
+`last_module` (modul-id), `modules` (json `{ [modulId]: { visits, first_at,
+last_at } }`), `active_days` (json, svenska kalenderdatum). Fälten ligger
+**inte** på `users`: `users.viewRule` är tenant-bred (alla skulle se
+varandras aktivitet) och fältlåset 1700000174 hade behövt utökas.
+
+- **Dataminimering (GDPR § 5):** aggregat per MODUL (sida i sidmenyn) —
+  aldrig sökväg, post, bolag, IP, user agent eller innehåll. `active_days`
+  rullande 90 dagar (`ACTIVE_DAYS_WINDOW`), modulrader utan besök på 365
+  dagar (`MODULE_STAT_RETENTION_DAYS`) rensas vid nästa skrivning. Ett
+  "besök" är ett per modul och throttle-fönster, inte en sidvisning.
+  Raden kaskadraderas med kontot (art. 17).
+- **Rättslig grund:** berättigat intresse (introduktion och stöd till
+  användare av ett internt verktyg). **Transparens (art. 13/15):** Mitt
+  konto visar personens egen rad med syfte och vem som ser den.
+- **RLS (§ 21.3):** create/update/delete = **null** (bara servern — en
+  användare ska inte kunna PATCH:a sin egen eller någon annans aktivitet);
+  list/view = ledningen i samma tenant (admin/incubator_lead, `:each ?=`)
+  ELLER personen själv (skalär `@request.auth.id = user`). Coach, mentor,
+  observer och bolagsmedlemmar ser aldrig andras aktivitet.
+  `verify-baseline.mjs` asserterar det (`verifyUserActivityRules`,
+  `MUST_BE_SERVER_CREATE_ONLY`, must-exist); speglat i `setup-via-api.mjs`.
+- **AI:** `user_activity` är **denylistad** (`lib/ai/redaction.ts` +
+  `AI_DENYLIST`) — när/hur ofta någon använder plattformen når aldrig en
+  modell. Riskklass (EU AI Act): n/a — ingen inferens, ingen profilering.
+
+### 57.3 Flöde och robusthet
+
+- **Inloggning:** båda inloggningsvägarna anropar `recordLogin` efter
+  lyckad autentisering; ett fel där påverkar aldrig inloggningen.
+- **Besök:** `ActivityBeacon` i skalet (alla inloggade, även bolagsmedlemmar)
+  mappar `pathname` → modul-id med `moduleIdForPath(pathname, coreModules)`
+  (`/installningar/anvandare` ⇒ `anvandare`, `/toolbox` ⇒ `agenter`;
+  `/konto`, `/login` ⇒ inget). Servern litar bara på sessionen och på att
+  id:t finns i modulregistret. Personen kan i teorin skicka extra besök på
+  sin EGEN rad — det är statistik om en själv, inte audit.
+- **Skrivningar** serialiseras per användare i processen och ett
+  `validation_not_unique` vid parallell create blir en update; två
+  containrar kan räkna ett extra besök — ofarligt. Saknas superuser eller
+  kollektionen (migrationen inte körd) loggas det en gång PII-fritt och
+  Inställningar visar en gul banner ("kör migration 1700000209"); allt
+  annat fungerar som förut.
+- **Relativa tider** räknas mot serverns klocka som skickas som ISO-prop
+  (`now`) så hydreringen inte skiljer sig. "Vilande" = ingen aktivitet på
+  `DORMANT_AFTER_DAYS` = 30 dagar; senast sedd väger tyngre än senaste
+  inloggning (sessionen lever 14 dagar).
+- **Inte byggt (medvetet):** påminnelsemejl till den som aldrig loggat in,
+  export, veckorapport till ledningen, per-bolag-vy för bolagsmedlemmars
+  aktivitet — lägg till först om behovet visar sig, och omprova § 57.1:s
+  gräns innan dess.

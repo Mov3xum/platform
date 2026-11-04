@@ -16,6 +16,10 @@ export const dynamic = 'force-dynamic';
 // generateMetadata OCH sidan behöver modulen — dela EN resolvning per request
 // (React cache) i stället för två superuser-uppslag per sidvisning.
 const resolveOnce = cache((slug: string) => resolvePublicModule(slug));
+// Tenantens namn/logotyp — delas likaså mellan metadata och sida.
+const brandingOnce = cache((pb: Parameters<typeof getPublicTenantBranding>[0], tenant: string) =>
+  getPublicTenantBranding(pb, tenant)
+);
 
 export async function generateMetadata({
   params
@@ -24,10 +28,15 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   const resolved = await resolveOnce(slug);
-  if (!resolved) return { title: 'Startupkompassen' };
+  if (!resolved) return { title: 'Sidan finns inte' };
   const m = resolved.module;
+  // Fliktiteln bär avsändaren (modulens egen eyebrow, annars tenantens
+  // namn) — inte produktnamnet "Startupkompassen" (2026-11).
+  const branding = await brandingOnce(resolved.pb, resolved.tenant);
+  const sender = (m.hero_eyebrow || '').trim() || branding.name || '';
+  const pageTitle = m.welcome_title || m.name;
   return {
-    title: `${m.welcome_title || m.name} · Startupkompassen`,
+    title: sender ? `${pageTitle} · ${sender}` : pageTitle,
     // Bara den publika ingressen — `description` är INTERN (§ 23.7).
     description: m.welcome_body || undefined,
     robots: { index: false } // publika intag-länkar indexeras inte
@@ -59,7 +68,7 @@ export default async function PublicModulePage({
     module.flow_type === 'chat'
       ? Promise.resolve([])
       : getPublicModuleQuestions(pb, module.id),
-    getPublicTenantBranding(pb, tenant),
+    brandingOnce(pb, tenant),
     getNextModuleLink(pb, module)
   ]);
 
