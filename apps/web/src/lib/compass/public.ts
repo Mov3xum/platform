@@ -2,7 +2,7 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { getPublicPbUrl } from '@/lib/pb-url';
-import { sortCompassQuestions } from '@platform/shared';
+import { contactSectionForModule, sortCompassQuestions, type ContactSectionConfig } from '@platform/shared';
 import { moduleWantsLead } from './lead-capture';
 import type { CompassModule, CompassQuestion, NextModuleLink } from './types';
 
@@ -64,11 +64,17 @@ export type PublicCompassModule = Pick<
    * eller andra interna fält.
    */
   collects_lead: boolean;
+  /**
+   * Avsnittet "Dina uppgifter" (§ 23.11) — normaliserad konfiguration
+   * (lagrad eller legacy). Ren modulkonfiguration, ingen PII.
+   */
+  contact_section: ContactSectionConfig;
 };
 
 export function toPublicModule(m: CompassModule): PublicCompassModule {
   return {
     collects_lead: moduleWantsLead(m),
+    contact_section: contactSectionForModule(m),
     id: m.id,
     slug: m.slug,
     public_slug: m.public_slug,

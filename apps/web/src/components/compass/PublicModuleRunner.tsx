@@ -107,9 +107,7 @@ export function PublicModuleRunner({ module, questions, nextModule, subject }: P
                 ? {
                     apiBase: PUBLIC_API_BASE,
                     questions,
-                    requireEmail: module.require_email,
-                    requirePhone: module.require_phone,
-                    requireOrganization: module.require_organization,
+                    contactSection: module.contact_section,
                     successMessage: module.success_message
                   }
                 : undefined
@@ -131,9 +129,7 @@ export function PublicModuleRunner({ module, questions, nextModule, subject }: P
         questions={questions}
         apiBase={PUBLIC_API_BASE}
         consent
-        requireEmail={module.require_email}
-        requirePhone={module.require_phone}
-        requireOrganization={module.require_organization}
+        contactSection={module.contact_section}
         successMessage={module.success_message}
         nextModule={nextModule}
         subject={subject}
@@ -148,6 +144,7 @@ export function PublicModuleRunner({ module, questions, nextModule, subject }: P
       questions={questions}
       apiBase={PUBLIC_API_BASE}
       consent
+      contactSection={module.contact_section}
       successMessage={module.success_message}
       redirectUrl={module.redirect_url}
       nextModule={nextModule}

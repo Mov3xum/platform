@@ -1,18 +1,19 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
+import { cleanContactValues, type ContactSectionConfig } from '@platform/shared';
 import type { Attribution, CompassQuestion } from '@/lib/compass/types';
 import { closingQuestions, missingClosingField } from '@/lib/compass/completion';
 import { QuestionInput } from './QuestionInput';
 import { ContactPreferencePicker } from './ContactPreferencePicker';
+import { ContactSection } from './ContactSection';
 
 export interface ChatClosingConfig {
   /** Endpoint-bas för publika flöden (`/api/public/m`). */
   apiBase: string;
   questions: CompassQuestion[];
-  requireEmail?: boolean;
-  requirePhone?: boolean;
-  requireOrganization?: boolean;
+  /** Avsnittet "Dina uppgifter" (§ 23.11) — modulens konfiguration. */
+  contactSection: ContactSectionConfig;
   successMessage?: string;
 }
 
@@ -44,18 +45,20 @@ export function ChatClosingForm({ config, moduleSlug, sessionToken, consent, att
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
   const [contact, setContact] = useState<Record<string, string>>({});
   const [contactPreference, setContactPreference] = useState('');
-  const [sendSummary, setSendSummary] = useState(true);
+  // Mejlad sammanfattning kräver en adress — erbjuds bara när e-postfältet visas.
+  const emailVisible = config.contactSection.email !== 'hidden';
+  const [sendSummary, setSendSummary] = useState(emailVisible);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const requirements = {
-    requireEmail: config.requireEmail,
-    requirePhone: config.requirePhone,
-    requireOrganization: config.requireOrganization
-  };
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    const missing = missingClosingField({ questions: config.questions, answers, contact, requirements });
+    const missing = missingClosingField({
+      questions: config.questions,
+      answers,
+      contact: cleanContactValues(contact, config.contactSection),
+      config: config.contactSection
+    });
     if (missing) {
       setError(missing);
       return;
@@ -100,19 +103,6 @@ export function ChatClosingForm({ config, moduleSlug, sessionToken, consent, att
     }
   }
 
-  const field = (key: string, label: string, required: boolean, type = 'text') => (
-    <label className="mx-label" key={key}>
-      {label} {required && '*'}
-      <input
-        type={type}
-        className="mx-input"
-        style={{ marginTop: 4 }}
-        value={contact[key] || ''}
-        onChange={(e) => setContact((c) => ({ ...c, [key]: e.target.value }))}
-      />
-    </label>
-  );
-
   return (
     <form onSubmit={onSubmit} className="mx-chat-closing" style={{ display: 'grid', gap: 14 }}>
       <div>
@@ -146,18 +136,21 @@ export function ChatClosingForm({ config, moduleSlug, sessionToken, consent, att
         </div>
       ))}
 
-      {field('name', 'Namn', false)}
-      {field('email', 'E-post', Boolean(config.requireEmail), 'email')}
-      {(config.requirePhone || contact.phone) && field('phone', 'Telefon', Boolean(config.requirePhone), 'tel')}
-      {(config.requireOrganization || contact.organization) &&
-        field('organization', 'Organisation', Boolean(config.requireOrganization))}
+      <ContactSection
+        config={config.contactSection}
+        values={contact}
+        heading={false}
+        onChange={(key, value) => setContact((c) => ({ ...c, [key]: value }))}
+      />
 
       <ContactPreferencePicker value={contactPreference} onChange={setContactPreference} />
 
-      <label className="mx-flex mx-items-c mx-gap-2 mx-t-13" style={{ cursor: 'pointer' }}>
-        <input type="checkbox" checked={sendSummary} onChange={(e) => setSendSummary(e.target.checked)} />
-        <span>Skicka sammanfattningen av samtalet till min e-post</span>
-      </label>
+      {emailVisible && (
+        <label className="mx-flex mx-items-c mx-gap-2 mx-t-13" style={{ cursor: 'pointer' }}>
+          <input type="checkbox" checked={sendSummary} onChange={(e) => setSendSummary(e.target.checked)} />
+          <span>Skicka sammanfattningen av samtalet till min e-post</span>
+        </label>
+      )}
 
       {error && (
         <div

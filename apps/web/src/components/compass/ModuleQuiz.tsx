@@ -1,10 +1,17 @@
 'use client';
 
 import { useMemo, useState, type FormEvent } from 'react';
+import {
+  cleanContactValues,
+  hasContactSection,
+  missingContactField,
+  type ContactSectionConfig
+} from '@platform/shared';
 import type { CompassQuestion, ResultBucket, NextModuleLink } from '@/lib/compass/types';
 import { QuestionInput, readAttribution } from './QuestionInput';
 import { NextModuleCta } from './NextModuleCta';
 import { ContactPreferencePicker } from './ContactPreferencePicker';
+import { ContactSection } from './ContactSection';
 import { useFlowProgress } from './useFlowProgress';
 import { resolveNextQuestionIndex } from '@/lib/compass/question-flow';
 
@@ -14,9 +21,8 @@ interface Props {
   /** Default = inloggad admin-preview. Publika sidan skickar /api/public/m. */
   apiBase?: string;
   consent?: boolean;
-  requireEmail?: boolean;
-  requirePhone?: boolean;
-  requireOrganization?: boolean;
+  /** Avsnittet "Dina uppgifter" (§ 23.11) — modulens konfiguration. */
+  contactSection: ContactSectionConfig;
   successMessage?: string;
   /** Kedjad nästa modul (migration 1700000124). */
   nextModule?: NextModuleLink | null;
@@ -39,9 +45,7 @@ export function ModuleQuiz({
   questions,
   apiBase = '/api/inflode/m',
   consent,
-  requireEmail,
-  requirePhone,
-  requireOrganization,
+  contactSection,
   successMessage,
   nextModule,
   subject,
@@ -67,10 +71,12 @@ export function ModuleQuiz({
   });
 
   const total = questions.length;
-  const wantsContact = requireEmail || requirePhone || requireOrganization;
-  // Sista steget är ett (valfritt) kontaktsteg.
+  // Sista steget är avsnittet "Dina uppgifter" (§ 23.11) — bara när modulen
+  // har minst ett synligt fält; annars skickas svaren in direkt efter sista
+  // frågan.
+  const hasContact = hasContactSection(contactSection);
   const lastStep = total; // index `total` = kontaktsteget
-  const onContactStep = step === lastStep;
+  const onContactStep = hasContact && step === lastStep;
   const progress = total === 0 ? 0 : Math.round((100 * Math.min(step, total)) / total);
 
   if (total === 0) {
@@ -233,23 +239,20 @@ export function ModuleQuiz({
       }
       setError(null);
       const nextStep = resolveNextQuestionIndex(questions, step, value);
+      progressTracker.report(answers, step + 1, total);
+      if (nextStep >= total && !hasContact) {
+        await finish();
+        return;
+      }
       setTrail((t) => [...t, step]);
       setStep(nextStep >= total ? total : nextStep);
-      progressTracker.report(answers, step + 1, total);
       return;
     }
 
-    // Kontaktsteg — validera obligatoriska kontaktfält.
-    if (requireEmail && !contact.email) {
-      setError('E-post krävs.');
-      return;
-    }
-    if (requirePhone && !contact.phone) {
-      setError('Telefon krävs.');
-      return;
-    }
-    if (requireOrganization && !contact.organization) {
-      setError('Organisation krävs.');
+    // Kontaktsteg — samma validering som server-side (klienten är aldrig gränsen).
+    const missing = missingContactField(cleanContactValues(contact, contactSection), contactSection);
+    if (missing) {
+      setError(missing);
       return;
     }
     setError(null);
@@ -270,55 +273,11 @@ export function ModuleQuiz({
 
       {onContactStep ? (
         <div style={{ display: 'grid', gap: 12 }}>
-          <div className="mx-qprompt">
-            {wantsContact ? 'Lämna dina uppgifter' : 'Vill du att vi hör av oss? (frivilligt)'}
-          </div>
-          <p className="mx-muted mx-t-12">
-            Vi hanterar dina uppgifter inom EU och delar dem aldrig vidare. Lämna tomt om du vill se
-            resultatet anonymt.
-          </p>
-          <label className="mx-label">
-            Namn
-            <input
-              className="mx-input"
-              style={{ marginTop: 4 }}
-              value={contact.name || ''}
-              onChange={(e) => setContact((c) => ({ ...c, name: e.target.value }))}
-            />
-          </label>
-          <label className="mx-label">
-            E-post {requireEmail && '*'}
-            <input
-              type="email"
-              className="mx-input"
-              style={{ marginTop: 4 }}
-              value={contact.email || ''}
-              onChange={(e) => setContact((c) => ({ ...c, email: e.target.value }))}
-            />
-          </label>
-          {requirePhone && (
-            <label className="mx-label">
-              Telefon *
-              <input
-                type="tel"
-                className="mx-input"
-                style={{ marginTop: 4 }}
-                value={contact.phone || ''}
-                onChange={(e) => setContact((c) => ({ ...c, phone: e.target.value }))}
-              />
-            </label>
-          )}
-          {requireOrganization && (
-            <label className="mx-label">
-              Organisation *
-              <input
-                className="mx-input"
-                style={{ marginTop: 4 }}
-                value={contact.organization || ''}
-                onChange={(e) => setContact((c) => ({ ...c, organization: e.target.value }))}
-              />
-            </label>
-          )}
+          <ContactSection
+            config={contactSection}
+            values={contact}
+            onChange={(key, value) => setContact((c) => ({ ...c, [key]: value }))}
+          />
           <ContactPreferencePicker value={contactPreference} onChange={setContactPreference} />
         </div>
       ) : (

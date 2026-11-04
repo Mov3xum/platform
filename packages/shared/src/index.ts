@@ -1815,7 +1815,7 @@ export * from './voice';
 export * from './chat-attachments';
 export * from './compass-authoring';
 export * from './compass-layout';
-export * from './compass-start-page';
+export * from './compass-contact';
 export * from './login-branding';
 // ─── Mötesläge i chatten (ren möteslogik, enhetstestad, § 34) ────────────────
 export * from './meeting';

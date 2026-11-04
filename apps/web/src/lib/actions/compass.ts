@@ -23,7 +23,10 @@ import {
 } from '@/lib/compass/types';
 import {
   ALL_PHASES,
+  CONTACT_SECTION_DEFAULT,
   DEFAULT_COMPASS_LAYOUT,
+  contactSectionFromForm,
+  legacyRequirementsFromSection,
   normalizeCompassLayout,
   validateWorkshopMediaFile,
   type StartupPhase,
@@ -571,6 +574,10 @@ export async function createModuleAction(formData: FormData) {
         // en ENKÄT (§ 43) gör det aldrig.
         purpose,
         create_lead: purpose !== 'survey',
+        // Avsnittet "Dina uppgifter" (§ 23.11): nya intag-moduler får hela
+        // avsnittet som standard; en enkät samlar inga kontaktuppgifter.
+        contact_fields: purpose === 'survey' ? null : CONTACT_SECTION_DEFAULT,
+        require_email: purpose !== 'survey',
         sort_order: 999
       })
     );
@@ -759,9 +766,6 @@ async function applyModuleUpdate(
       .slice(0, COMPASS_START_PAGE_BODY_MAX),
     chat_persona: String(formData.get('chat_persona') || '').trim().slice(0, 4000),
     max_exchanges: Number.isFinite(maxExchanges) && maxExchanges >= 0 ? Math.min(maxExchanges, 100) : 0,
-    require_email: formData.get('require_email') === 'on',
-    require_phone: formData.get('require_phone') === 'on',
-    require_organization: formData.get('require_organization') === 'on',
     // Steg 4: "Skapa lead i Startupkompassen när modulen slutförs" — en
     // ENKÄT (§ 43) skapar aldrig lead oavsett kryssruta.
     create_lead: wantedPurpose === 'survey' ? false : formData.get('create_lead') === 'on',
@@ -769,6 +773,20 @@ async function applyModuleUpdate(
     is_active: formData.get('is_active') === 'on',
     public_url_enabled: formData.get('public_url_enabled') === 'on'
   };
+
+  // Avsnittet "Dina uppgifter" (§ 23.11, migration 1700000208). Bara när
+  // formuläret skickar fälten (äldre formulär lämnar konfigurationen orörd);
+  // normaliseras alltid (okänt läge ⇒ dolt, kön aldrig obligatoriskt). De tre
+  // äldre booleanerna härleds ur avsnittet så äldre ytor/instanser ser samma
+  // krav.
+  const sendsContactSection = formData.has('contact_email') || formData.has('contact_name');
+  const wantedContact = sendsContactSection
+    ? contactSectionFromForm((name) => formData.get(name))
+    : null;
+  if (wantedContact) {
+    patch.contact_fields = wantedContact;
+    Object.assign(patch, legacyRequirementsFromSection(wantedContact));
+  }
 
   // Mall för den publika sidan (§ 23.7). Normaliseras alltid (okänt ⇒ classic)
   // — klienten är aldrig säkerhetsgränsen. Bara satt när formuläret skickar
@@ -949,6 +967,11 @@ async function applyModuleUpdate(
   if (wantedPurpose === 'survey' && saved && !('purpose' in saved)) {
     throw new Error(
       'Övriga fält sparades, men syftet "enkät" kunde inte sparas: fältet purpose saknas i databasen (PocketBase-migration 1700000160 är inte applicerad).'
+    );
+  }
+  if (wantedContact && saved && !('contact_fields' in saved)) {
+    throw new Error(
+      'Övriga fält sparades, men avsnittet "Dina uppgifter" kunde inte sparas: fältet contact_fields saknas i databasen (PocketBase-migration 1700000208 är inte applicerad).'
     );
   }
   if (

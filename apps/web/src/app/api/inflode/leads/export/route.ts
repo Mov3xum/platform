@@ -1,3 +1,4 @@
+import { contactValueLabel } from '@platform/shared';
 import { getCurrentUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import {
@@ -27,6 +28,10 @@ const COLUMNS: { header: string; value: (l: Lead) => string | number | undefined
   { header: 'E-post', value: (l) => l.email },
   { header: 'Telefon', value: (l) => l.phone },
   { header: 'Organisation', value: (l) => l.organization },
+  // Avsnittet "Dina uppgifter" (§ 23.11). Kön på grundare (art. 9-klass) och
+  // övriga teammedlemmar (tredjeparts-PII) exporteras MEDVETET inte per lead.
+  { header: 'Kommun', value: (l) => contactValueLabel('kommun', l.kommun) },
+  { header: 'Kontaktväg', value: (l) => contactValueLabel('referral_channel', l.referral_channel) },
   { header: 'Status', value: (l) => LEAD_STATUS_LABEL[l.status] ?? l.status },
   { header: 'AI-poäng', value: (l) => l.score },
   { header: 'Källa', value: (l) => l.source_key },

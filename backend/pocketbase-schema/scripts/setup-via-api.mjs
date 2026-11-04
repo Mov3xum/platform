@@ -2631,7 +2631,14 @@ await ensureCollection({
     { name: 'quiz_result_bucket', type: 'text', required: false, max: 60 },
     { name: 'quiz_score', type: 'number', required: false, min: 0 },
     // Genomförandestatus (migration 1700000192, § 23.10). Saknat = slutförd.
-    { name: 'completion', type: 'select', required: false, maxSelect: 1, values: ['in_progress', 'completed', 'abandoned'] }
+    { name: 'completion', type: 'select', required: false, maxSelect: 1, values: ['in_progress', 'completed', 'abandoned'] },
+    // Avsnittet "Dina uppgifter" (migration 1700000208, § 23.11). founder_gender
+    // = art. 9-klass (fältmaskas för AI); kommun/referral_channel = nycklar ur
+    // packages/shared/src/compass-contact.ts (text, validerade i koden).
+    { name: 'founder_gender', type: 'select', required: false, maxSelect: 1, values: ['kvinna', 'man', 'mixat_team', 'vill_inte_ange'] },
+    { name: 'team_members', type: 'text', required: false, max: 2000 },
+    { name: 'kommun', type: 'text', required: false, max: 80 },
+    { name: 'referral_channel', type: 'text', required: false, max: 60 }
   ],
   indexes: [
     'CREATE INDEX idx_compass_leads_tenant_status ON compass_leads (tenant, status)',
@@ -2765,10 +2772,9 @@ await ensureCollection({
     { name: 'purpose', type: 'select', required: false, maxSelect: 1, values: ['intake', 'survey'] },
     { name: 'subject_kind', type: 'select', required: false, maxSelect: 1, values: ['none', 'startup', 'event', 'partner', 'staff'] },
     { name: 'anonymous', type: 'bool', required: false },
-    // Migration 1700000208 (§ 23.11): startsida i flödet (beskrivning + syfte
-    // innan första frågan). Tom text ⇒ ingen startsida.
-    { name: 'start_page_title', type: 'text', required: false, max: 200 },
-    { name: 'start_page_body', type: 'text', required: false, max: 6000 }
+    // Avsnittet "Dina uppgifter" (migration 1700000208, § 23.11): läge per
+    // kontaktfält (hidden/optional/required). Saknat ⇒ legacy-booleanerna.
+    { name: 'contact_fields', type: 'json', required: false, maxSize: 4000 }
   ],
   indexes: [
     'CREATE UNIQUE INDEX idx_compass_modules_tenant_slug ON compass_modules (tenant, slug)',

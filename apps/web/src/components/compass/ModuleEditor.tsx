@@ -13,7 +13,12 @@ import { COMPASS_LAYOUT_META, normalizeCompassLayout,
   SURVEY_SUBJECT_KINDS,
   SURVEY_SUBJECT_KIND_LABELS,
   normalizeCompassPurpose,
-  type CompassPurpose
+  type CompassPurpose,
+  CONTACT_FIELD_KEYS,
+  CONTACT_FIELD_META,
+  CONTACT_FIELD_MODES,
+  CONTACT_FIELD_MODE_LABEL,
+  contactSectionForModule
 } from '@platform/shared';
 import type { CompassLayout } from '@platform/shared';
 import type { CompassModule, CompassQuestion, FlowType } from '@/lib/compass/types';
@@ -78,6 +83,8 @@ export function ModuleEditor({
   const [purpose, setPurpose] = useState<CompassPurpose>(normalizeCompassPurpose(mod.purpose));
   const [layout, setLayout] = useState<CompassLayout>(() => normalizeCompassLayout(mod.layout));
   const layoutMeta = COMPASS_LAYOUT_META[layout];
+  // Avsnittet "Dina uppgifter" (§ 23.11) — lagrad konfiguration eller legacy.
+  const contactSection = contactSectionForModule(mod);
   const [isPending, startTransition] = useTransition();
   const [pendingIntent, setPendingIntent] = useState<string | null>(null);
   const isPublished = Boolean(mod.is_active && mod.public_url_enabled);
@@ -542,29 +549,58 @@ export function ModuleEditor({
             </label>
 
             <div className="mx-label">
-              Obligatoriska uppgifter från besökaren
-              <div className="mx-flex mx-items-c mx-gap-3 mx-wrap" style={{ marginTop: 6 }}>
-                <label className="mx-flex mx-items-c mx-gap-2 mx-t-13" style={{ cursor: 'pointer' }}>
-                  <input type="checkbox" name="require_email" defaultChecked={!!mod.require_email} />
-                  <span>E-post</span>
-                </label>
-                <label className="mx-flex mx-items-c mx-gap-2 mx-t-13" style={{ cursor: 'pointer' }}>
-                  <input type="checkbox" name="require_phone" defaultChecked={!!mod.require_phone} />
-                  <span>Telefon</span>
-                </label>
-                <label className="mx-flex mx-items-c mx-gap-2 mx-t-13" style={{ cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    name="require_organization"
-                    defaultChecked={!!mod.require_organization}
-                  />
-                  <span>Organisation</span>
-                </label>
-              </div>
+              Dina uppgifter — avsnittet sist i flödet
+              <span className="mx-t-xs mx-muted" style={{ display: 'block', marginTop: 4, fontWeight: 400 }}>
+                Välj vilka uppgifter besökaren fyller i efter frågorna och vilka som är
+                obligatoriska. Gäller alla flödestyper: i AI-chatten som avslutssteg efter samtalet
+                (med sammanfattning som PDF/e-post), i formulär och quiz som sista steg.
+              </span>
+              <table style={{ marginTop: 8, width: '100%', borderCollapse: 'collapse' }}>
+                <tbody>
+                  {CONTACT_FIELD_KEYS.map((key) => {
+                    const meta = CONTACT_FIELD_META[key];
+                    const current = contactSection[key];
+                    return (
+                      <tr key={key}>
+                        <td style={{ padding: '6px 8px 6px 0', verticalAlign: 'top' }}>
+                          <span className="mx-t-13 mx-fw-6">{meta.label}</span>
+                          {key === 'founder_gender' && (
+                            <span className="mx-t-xs mx-muted" style={{ display: 'block', fontWeight: 400 }}>
+                              Kvinna / Man / Mixat team / Vill inte ange. Kan vara obligatoriskt —
+                              besökaren kan alltid välja &quot;Vill inte ange&quot;. Används bara för
+                              Vinnovas statistik, aldrig i bedömningen.
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: '6px 0', whiteSpace: 'nowrap' }}>
+                          {CONTACT_FIELD_MODES.filter((m) => !(meta.neverRequired && m === 'required')).map(
+                            (mode) => (
+                              <label
+                                key={mode}
+                                className="mx-t-12"
+                                style={{ marginRight: 12, cursor: 'pointer', fontWeight: 400 }}
+                              >
+                                <input
+                                  type="radio"
+                                  name={`contact_${key}`}
+                                  value={mode}
+                                  defaultChecked={current === mode}
+                                  style={{ marginRight: 4 }}
+                                />
+                                {CONTACT_FIELD_MODE_LABEL[mode]}
+                              </label>
+                            )
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
               <span className="mx-t-xs mx-muted" style={{ display: 'block', marginTop: 6 }}>
-                Gäller alla flödestyper. I AI-chatten ställs de obligatoriska frågorna och
-                kontaktfälten i ett avslutssteg efter samtalet — besökaren måste fylla i dem innan
-                leadet skickas in, och kan få en sammanfattning som PDF eller per e-post.
+                Kön, kommun och kontaktväg är fasta val. Övriga teammedlemmar är en fritextruta
+                (namn + e-post). Kön på grundare och teammedlemmar når aldrig AI-analysen och
+                exporteras inte per lead.
               </span>
             </div>
 

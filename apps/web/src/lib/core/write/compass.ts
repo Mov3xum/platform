@@ -33,8 +33,7 @@ import {
   normalizeCompassPurpose,
   normalizeSurveySubjectKind,
   type CompassPurpose,
-  COMPASS_START_PAGE_BODY_MAX,
-  COMPASS_START_PAGE_TITLE_MAX
+  CONTACT_SECTION_DEFAULT
 } from '@platform/shared';
 
 /**
@@ -252,6 +251,10 @@ export async function createCompassModule(
     // Slutförd körning skapar lead (steg 4-valet, migration 1700000125) —
     // aldrig för en enkät (§ 43).
     create_lead: purpose !== 'survey',
+    // Avsnittet "Dina uppgifter" (§ 23.11): hela avsnittet som standard för
+    // intag-moduler; en enkät samlar inga kontaktuppgifter.
+    contact_fields: purpose === 'survey' ? null : CONTACT_SECTION_DEFAULT,
+    require_email: purpose !== 'survey',
     purpose,
     subject_kind: subjectKind,
     anonymous: purpose === 'survey' ? anonymousV.value : false,

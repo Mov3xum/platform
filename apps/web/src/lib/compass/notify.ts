@@ -1,4 +1,5 @@
 import 'server-only';
+import { contactValueLabel } from '@platform/shared';
 import { sendInflowNotification } from '@/lib/email';
 import {
   CONTACT_PREFERENCE_LABEL,
@@ -56,6 +57,11 @@ export async function notifyNewInflow(module: CompassModule, lead: Lead): Promis
       contactPreference: lead.contact_preference
         ? CONTACT_PREFERENCE_LABEL[lead.contact_preference]
         : undefined,
+      // Avsnittet "Dina uppgifter" (§ 23.11). Kön på grundare mejlas aldrig
+      // (art. 9-klass — bara i lead-vyn för behörig personal).
+      kommun: contactValueLabel('kommun', lead.kommun),
+      referralChannel: contactValueLabel('referral_channel', lead.referral_channel),
+      teamMembers: lead.team_members,
       aiSummary: lead.ai_summary,
       leadUrl
     });
