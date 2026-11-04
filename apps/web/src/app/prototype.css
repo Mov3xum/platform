@@ -432,6 +432,31 @@ html.dark {
   min-width: 0;
 }
 
+/* Zoner (lib/app-zone.ts, satt som data-zone av MainColumn): samma aurora-
+   komposition som ovan men i andra toner, så en modul känns som "samma
+   system, egen del". Impact Navigator (§ 56) = hållbarhetsdelen i Movexums
+   gröna toner — grön #4a7d4a, ljusgrön #88b48b, mörkgrön #1d3a1f, med den
+   varma gula pärlemor-hörnan kvar. Topbar och vy ärver den automatiskt. */
+.mx-main-col[data-zone="impact"] {
+  --mx-app-gradient:
+    linear-gradient(135deg, rgba(74, 125, 74, 0.16) 0%, rgba(136, 180, 139, 0.14) 34%, rgba(29, 58, 31, 0.08) 60%, rgba(255, 255, 255, 0) 88%),
+    radial-gradient(46% 44% at 96% 70%, rgba(240, 210, 46, 0.07), rgba(0, 0, 0, 0) 62%),
+    radial-gradient(50% 48% at 60% 112%, rgba(74, 125, 74, 0.11), rgba(0, 0, 0, 0) 62%),
+    radial-gradient(42% 44% at 6% 92%, rgba(136, 180, 139, 0.18), rgba(0, 0, 0, 0) 62%),
+    radial-gradient(40% 40% at 14% 8%, rgba(136, 180, 139, 0.13), rgba(0, 0, 0, 0) 60%),
+    var(--mx-canvas);
+}
+
+html.dark .mx-main-col[data-zone="impact"] {
+  --mx-app-gradient:
+    linear-gradient(135deg, rgba(74, 125, 74, 0.20) 0%, rgba(136, 180, 139, 0.12) 34%, rgba(29, 58, 31, 0.16) 60%, rgba(0, 0, 0, 0) 88%),
+    radial-gradient(46% 44% at 96% 70%, rgba(240, 210, 46, 0.06), rgba(0, 0, 0, 0) 62%),
+    radial-gradient(50% 48% at 60% 112%, rgba(74, 125, 74, 0.14), rgba(0, 0, 0, 0) 62%),
+    radial-gradient(42% 44% at 6% 92%, rgba(136, 180, 139, 0.12), rgba(0, 0, 0, 0) 62%),
+    radial-gradient(40% 40% at 14% 8%, rgba(29, 58, 31, 0.22), rgba(0, 0, 0, 0) 60%),
+    var(--mx-canvas);
+}
+
 /* Sökvägsrad mot bakgrunden — ingen egen yta, ingen blur, ingen vit remsa. */
 .mx-topbar {
   display: flex;
