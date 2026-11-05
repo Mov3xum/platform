@@ -1430,7 +1430,7 @@ export interface ModuleGroup {
 
 export const RAIL_GROUPS: ModuleGroup[] = [
   { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'mal', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
-  { label: 'Portfölj', modules: ['startups', 'kontakter', 'talang', 'de_minimis', 'bedomning_excellens', 'impactnavigator', 'checkar', 'projekt', 'upphandlingar', 'investerare'] },
+  { label: 'Portfölj', modules: ['startups', 'kontakter', 'talang', 'de_minimis', 'bedomning_excellens', 'impactnavigator', 'exportlab', 'checkar', 'projekt', 'upphandlingar', 'investerare'] },
   { label: 'Innehåll', modules: ['education', 'rapporter'] },
   { label: 'System', modules: ['agenter', 'kunskapsbas', 'onskemal', 'installningar', 'min_profil'] }
 ];
@@ -1668,6 +1668,14 @@ export const coreModules: ModuleDefinition[] = [
     route: '/impactnavigator'
   },
   {
+    id: 'exportlab',
+    title: 'Export Lab',
+    description:
+      'AI-stödd internationaliseringsanalys per bolag (CLAUDE.md § 58): exportprofil och marknadsurval (Uppsala, Born Global, CAGE), informationsgap, en första exportplan med inträdesform, regelverk, kulturell spelbok och affärsförutsättningar per marknad — kopplad till bolagets KTH IRL. Beslutsstöd för coachen — människan granskar marknaderna och planen.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/exportlab'
+  },
+  {
     id: 'onskemal',
     title: 'Önskemål & buggar',
     description:
@@ -1902,6 +1910,12 @@ export * from './impact-prompts';
 export * from './impact-inputs';
 export * from './impact-mock';
 export * from './impact-lease';
+export * from './analysis-lease';
+export * from './export-lab';
+export * from './export-lab-prompts';
+export * from './export-lab-inputs';
+export * from './export-lab-mock';
+export * from './compass-start-page';
 export * from './talent';
 export * from './agent-memory';
 export * from './funding';

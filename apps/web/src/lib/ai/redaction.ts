@@ -74,6 +74,10 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   // Analyserna själva (sustainability_assessments m.fl.) är läsbara via RLS.
   'sustainability_documents',
   'sustainability_ai_jobs',
+  // Export Lab (§ 58, migration 1700000210): samma klass — dokumenttext och rå
+  // modellutdata. Exportprofiler/planer (export_assessments m.fl.) är läsbara.
+  'export_documents',
+  'export_ai_jobs',
   'notification_preferences',
   // Användaraktivitet (§ 57, migration 1700000209): när/hur ofta en person
   // använder plattformen är stöd för introduktion — aldrig underlag för en

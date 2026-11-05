@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import type { ImpactGapStatus } from '@platform/shared';
-import { FileDropInput, type UploadedImpactDocument } from './FileDropInput';
+import { FileDropInput, type ImpactUploadTarget, type UploadedImpactDocument } from './FileDropInput';
 import { hintClass, inputClass } from './ui';
 
 /**
@@ -18,7 +18,8 @@ export function GapResponseFields({
   assessmentId,
   answerText,
   initialStatus,
-  disabled
+  disabled,
+  upload
 }: {
   questionId: string;
   startupId: string;
@@ -26,6 +27,8 @@ export function GapResponseFields({
   answerText: string;
   initialStatus: ImpactGapStatus;
   disabled: boolean;
+  /** Export Lab (§ 58) skickar sin egen route-handler + raderingsaction; utan = Impact Navigator. */
+  upload?: Pick<ImpactUploadTarget, 'endpoint' | 'deleteDocument'>;
 }) {
   const [status, setStatus] = useState<ImpactGapStatus>(answerText.trim() ? 'answered' : initialStatus);
   const [docs, setDocs] = useState<UploadedImpactDocument[]>([]);
@@ -56,7 +59,7 @@ export function GapResponseFields({
               title="Kompletterande filer"
               description="Valfritt: bifoga dokument som stöd för svaret."
               multiple
-              target={{ startupId, assessmentId, gapQuestionId: questionId, stage: 'gap_response' }}
+              target={{ startupId, assessmentId, gapQuestionId: questionId, stage: 'gap_response', ...upload }}
               onUploaded={(next) => {
                 setDocs(next);
                 if (next.length) setStatus('answered');

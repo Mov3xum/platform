@@ -33,7 +33,9 @@ import {
   normalizeCompassPurpose,
   normalizeSurveySubjectKind,
   type CompassPurpose,
-  CONTACT_SECTION_DEFAULT
+  CONTACT_SECTION_DEFAULT,
+  COMPASS_START_PAGE_TITLE_MAX,
+  COMPASS_START_PAGE_BODY_MAX
 } from '@platform/shared';
 
 /**

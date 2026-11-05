@@ -748,6 +748,35 @@ function mapRow(
       if (after.deleted === true) return { title: 'Impact Navigator: underlag borttaget', href, icon: 'trash' };
       return { title: `Impact Navigator: underlag uppladdat för ${str(after.startup_name) || 'bolaget'}`, href, icon: 'upload' };
     }
+    // Export Lab (§ 58) — internationaliseringsanalys per bolag.
+    case 'export_assessments': {
+      const name = str(after.startup_name) || 'bolaget';
+      const version = str(after.version);
+      const startupId = str(after.startup);
+      const href = startupId ? `/exportlab/${startupId}` : '/exportlab';
+      const vLabel = version ? ` (version ${version})` : '';
+      if (after.deleted === true) return { title: `Export Lab: analysen för ${name} togs bort`, href: '/exportlab', icon: 'trash' };
+      if (action === 'create') return { title: `Export Lab: ny exportanalys startad för ${name}${vLabel}`, href, icon: 'compass' };
+      const field = str(row.field);
+      if (field === 'profile') return { title: `Export Lab: exportprofil klar för ${name}${vLabel}`, detail: 'Marknaderna väntar på granskning', href, icon: 'compass' };
+      if (field === 'markets_confirmed') return { title: `Export Lab: marknaderna bekräftade för ${name}${vLabel}`, href, icon: 'check' };
+      if (field === 'sufficiency') {
+        const q = Number(after.questions);
+        return { title: `Export Lab: underlaget prövat för ${name}${vLabel}`, detail: q > 0 ? `${q} kompletteringsfrågor` : undefined, href, icon: 'compass' };
+      }
+      if (field === 'plan') return { title: `Export Lab: ${after.update === true ? 'uppdaterad exportplan' : 'exportplan klar'} för ${name}${vLabel}`, detail: str(after.readiness) || undefined, href, icon: 'sparkle' };
+      return { title: `Export Lab: analysen för ${name} ${changedVerb}`, href, icon: 'compass' };
+    }
+    case 'export_update_events': {
+      const startupId = str(after.startup);
+      return { title: `Export Lab: uppdatering inlämnad för ${str(after.startup_name) || 'bolaget'}`, detail: str(after.version) ? `Version ${str(after.version)}` : undefined, href: startupId ? `/exportlab/${startupId}` : '/exportlab', icon: 'rotate-ccw' };
+    }
+    case 'export_documents': {
+      const startupId = str(after.startup);
+      const href = startupId ? `/exportlab/${startupId}` : '/exportlab';
+      if (after.deleted === true) return { title: 'Export Lab: underlag borttaget', href, icon: 'trash' };
+      return { title: `Export Lab: underlag uppladdat för ${str(after.startup_name) || 'bolaget'}`, href, icon: 'upload' };
+    }
     // Önskemål & buggar (§ 49) — intern backlog.
     case 'feedback_items': {
       const title = str(after.title) || 'utan rubrik';

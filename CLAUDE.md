@@ -1012,6 +1012,7 @@ omsättning.
 | `create_procurement` / `create_procurement_calloff` / `update_procurement_calloff` (chatt-verktyg, § 39.4) | n/a | Deterministiska mutationer via det delade skrivlagret; uppföljningsregler expanderas utan inferens |
 | `create_funding_project` / `create_support_check_type` / `create_support_check_application` (chatt-verktyg, § 46) | n/a | Deterministiska utkast via skrivlagret (checktyp inaktiv, ansökan `draft`); inskick, bedömning, finansiering och beslut är agent-nekade |
 | Impact Navigator (`lib/ai/impact-analysis.ts`, § 56) | begränsad | Hållbarhetsanalys av BOLAG (väsentlighet, tillräcklighet, slutanalys, uppdatering) via Mistral; människan startar varje steg, granskar väsentligheten och slutanalysen; ingen autopublicering |
+| Export Lab (`lib/ai/export-analysis.ts`, § 58) | begränsad | Internationaliseringsanalys av BOLAG (exportprofil & marknadsurval, informationsgap, exportplan, uppdatering) via Mistral, byggd på namngivna forskningsramverk och bolagets KTH IRL; människan startar varje steg, granskar marknaderna och planen; ingen autopublicering; regelverk/tull/kultur ska verifieras |
 | `edu_irl_levels` | minimal | Generellt utbildningsmaterial |
 | `template_pitch_deck` | n/a | Statisk mall, ingen AI-inferens |
 
@@ -10738,3 +10739,105 @@ kodkarta: `docs/integrations/impact-navigator.md`.
   (medvetet — modulen lever på app.movexum.se som allt annat). Hela flödet
   är verifierat end-to-end mot PocketBase 0.23.4 lokalt med mockläget;
   runbook + felsökning: `docs/integrations/impact-navigator.md` § 3.1–3.2.
+
+---
+
+## 58. Export Lab — AI-stödd internationaliseringsanalys per bolag (2026-11)
+
+`/exportlab` (modul `exportlab`, "Portfölj"-railen; staff driver, observer
+läser) ger varje bolag **en plan för hur de ska jobba internationellt med sin
+innovation och en första exportplan** — anpassad till bolagets framdrift
+(KTH IRL, § 52.2) och grundad i beprövade modeller för internationalisering.
+Byggd som en syster till Impact Navigator (§ 56): samma fyrstegsflöde,
+samma lease/mock/robusthet, samma RLS- och auditmönster, men egen
+domänmodell, egna promptar och Movexums BLÅ toner (zon `export`,
+`lib/app-zone.ts`). Forskningsgrund + kodkarta: `docs/ai/export-lab.md`.
+
+- **Forskningsramverken är namngivna i koden och i prompten**
+  (`EXPORT_FRAMEWORKS` i `packages/shared/src/export-lab.ts`): Uppsala-
+  modellen (Johanson & Vahlne 1977/2009), Born Global/INV (Oviatt & McDougall;
+  Knight & Cavusgil), CAGE-distans (Ghemawat), Hofstedes kulturdimensioner +
+  Meyers Culture Map, inträdesform (Root; Anderson & Gatignon; Dunning OLI),
+  marknadsurval i tre steg (Cavusgil), effectuation (Sarasvathy), exportmognad
+  (Cavusgil & Nevin; Business Sweden/EEN) och KTH IRL. Modellen resonerar MED
+  dem och får aldrig hitta på egna; listan visas för personalen under "Så
+  funkar det" på `/exportlab`.
+- **Flödet (människa-i-loopen, art. 14):** (1) `/exportlab/ny` — bolag (helst
+  ett befintligt bolagskort, då följer IRL med), innovations- och
+  ambitionsbeskrivning, önskade marknader, underlag → **exportprofil**
+  (`profile`: bolagsbild, internationaliseringsväg `GRADUAL`/`BORN_GLOBAL`/
+  `NETWORK_LED`/`DIGITAL_FIRST`, exportmognad `EXPLORE`→`SCALE`, sex
+  mognadsdimensioner `OFFER/MARKET/BUSINESS/TEAM/FINANCE/COMPLIANCE` med
+  IRL-koppling, 2–5 kandidatmarknader med CAGE-bedömning, regelverksnycklar
+  ur `EXPORT_REGULATORY_DOMAINS`); (2) `/marknader` — personalen sätter
+  prioritet per marknad (Första/Nästa/Senare/Utesluten + kommentar), lyfter
+  övervägda marknader, lägger till egen (`applyExportMarketReview`, varje
+  ändring → `export_market_reviews`) och godkänner → **informationsgap**
+  (`sufficiency`: en fråga per marknad/dimension); (3) `/analys` — svar/
+  bilagor → **exportplan** (`plan`: internationell strategi med ordning
+  mellan marknaderna, marknadsplaner med inträdesform, regelverkskrav,
+  kulturell spelbok (Hofstede/Meyer jämfört med Sverige), affärs-
+  förutsättningar, en 12-månadersplan i faser med åtgärder märkta med IRL-
+  axel, budget/stöd/KPI:er, IRL-gap, risker, frågor till coachsamtalet);
+  (4) `/plan` + "Uppdatera planen" (ny version med delta) + PDF
+  (`/api/exportlab/<id>/rapport`, `lib/export-lab/report-pdf.ts`).
+- **IRL-kopplingen är deterministisk och EN källa:** `loadExportIrl`
+  (`lib/export-lab/irl.server.ts`) läser bolagskortets gällande KTH-bedömning
+  (`loadLatestIrlReading`, § 51.11-principen) och skriver aldrig.
+  `EXPORT_IRL_GATES` (CRL ≥ 5, TRL ≥ 6, BRL ≥ 5, TMRL ≥ 4, FRL ≥ 4, IPRL ≥ 4)
+  är Movexums coachande riktvärden inför en första pilotexport — inte spärrar
+  — och `suggestExportReadinessFromIrl` ger modellen och personalen samma
+  ledtråd (visas i `IrlGatesCard`). IRL-profilen vid körningen sparas som
+  `export_assessments.irl_snapshot` (transparens art. 13); en nyare bedömning
+  flaggas i vyn.
+- **Datamodell (migration 1700000210, speglad i `setup-via-api.mjs`,
+  asserterad i `verify-baseline.mjs`):** `startups.export_ambition_text`/
+  `export_desired_markets`/`export_status`/`export_assigned_to`;
+  `export_assessments` (unik startup+version, `profile`/`sufficiency`/`plan`/
+  `update_delta`/`irl_snapshot`, self-relation `previous_assessment`),
+  `export_gap_questions` (`target_code` = MKT-kod eller dimension),
+  `export_market_reviews`, `export_update_events`, `export_documents`
+  (protected fil + sanerad text), `export_ai_jobs`. Enum-värden MÅSTE spegla
+  `export-lab.ts` (låst av `export-lab.test.ts`). Migration **1700000211**
+  backfillar modulen i sparade sidmenyer (§ 36.3). Lease-formatet delas via
+  den generiska `analysis-lease.ts`.
+- **AI (`lib/ai/export-analysis.ts`):** fyra isolerade Mistral-körningar
+  (large → medium, temp 0,2, JSON-läge, `max_tokens` 12 000) med
+  systemprompten ur `export-lab-prompts.ts` (`EXPORT_PROMPT_VERSION`
+  `2026-11-05-v1+mistral`), underlaget ur `export-lab-inputs.ts` (återanvänder
+  Impact Navigators dokumentevidens: dedupe + 60 000 tecken). Svaren tvingas
+  in i typerna av de rena normaliserarna (`normalizeExportProfile/
+  Sufficiency/Plan/UpdateAnalysis`) — modellen skriver aldrig till databasen;
+  okända regelverksnycklar/marknadskoder/nivåer kastas eller får fallback.
+  Tokens loggas i `ai_usage_events` (surface `intl`), månadstaket prövas
+  (§ 9.6), varje körning bokförs i `export_ai_jobs`. Mockläge
+  (`EXPORT_LAB_AI_MOCK_MODE=true`, eller automatiskt utan `MISTRAL_API_KEY`
+  utanför produktion); tidsgräns/omförsök per steg via
+  `EXPORT_LAB_<STEG>_TIMEOUT_MS`/`_MAX_RETRIES`.
+- **RLS (§ 21.3):** list/view staff/observer på alla sex kollektionerna;
+  create pinnar tenant + skapare (§ 21.8); update Movexum-personal; delete
+  ledning. Bolagsmedlemmar har ingen yta. `export_documents` + `export_ai_jobs`
+  **denylistade för AI-chatten** (`redaction.ts`); profiler/planer/frågor är
+  läsbara under RLS + fältmaskning.
+- **GDPR § 5 / riskklass:** bolagsdata, ingen individbedömning; all fritext
+  personnummer-saneras på skrivvägen; audit i `agent_actions` bär bolagsnamn,
+  version, status, antal marknader/frågor — aldrig underlag. Kulturella
+  beskrivningar är generaliseringar på landsnivå som prompten kräver
+  respektfulla och knutna till affärspraktik. Riskklass **begränsad**
+  (beslutsstöd om bolag, människan granskar varje steg); modulen är inte
+  juridisk, tull- eller skatterådgivning (`EXPORT_DISCLAIMER` i vy, PDF och
+  prompt). Ingen DPIA krävs utöver § 56-precedensen så länge inga dokument med
+  personuppgifter laddas upp (UI varnar).
+- **Delade komponenter:** `FileDropInput`, `GapResponseFields` och
+  `AiSubmitButton` i `components/impact/` tar nu `endpoint`/`deleteDocument`
+  resp. `tone="blue"` så Export Lab återanvänder dem utan divergerande kopior;
+  modulens egna delar bor i `components/exportlab/` och
+  `app/exportlab/**`. Bolagskortet → Utveckling & IRL har sektionen
+  "Export Lab — internationalisering" (`StartupExportSection`). Feeden
+  mappar `export_assessments`/`export_update_events`/`export_documents`
+  (`feed/agent-log.ts`).
+- **Inte byggt:** chatt-verktyg mot exportplanerna, automatisk marknadsdata
+  (tullsatser, Hofstede-poäng) från externa källor, koppling till
+  uppföljningsmotorn (§ 40) för planens åtgärder. Trösklarna i
+  `EXPORT_IRL_GATES` är en arbetshypotes att justera när Movexum samlat
+  erfarenhet.

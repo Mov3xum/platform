@@ -35,7 +35,8 @@ export const ID_PLACEHOLDER = '…';
 /** Fasta undersidor som inte är moduler eller Inställningar-sektioner. */
 export const STATIC_ROUTE_LABELS: Readonly<Record<string, string>> = {
   '/impactnavigator/ny': 'Nytt bolag',
-  '/impactnavigator/jamfor': 'Jämförelser'
+  '/impactnavigator/jamfor': 'Jämförelser',
+  '/exportlab/ny': 'Starta exportanalys'
 };
 
 function humanize(segment: string): string {

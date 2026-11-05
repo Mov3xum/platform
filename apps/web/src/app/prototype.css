@@ -457,6 +457,28 @@ html.dark .mx-main-col[data-zone="impact"] {
     var(--mx-canvas);
 }
 
+/* Export Lab (§ 58) = internationaliseringsdelen i Movexums blå toner —
+   djupblå #005470, Movexum blå #00a8de, mörkblå #002c40 — samma komposition. */
+.mx-main-col[data-zone="export"] {
+  --mx-app-gradient:
+    linear-gradient(135deg, rgba(0, 84, 112, 0.14) 0%, rgba(0, 168, 222, 0.12) 34%, rgba(0, 44, 64, 0.08) 60%, rgba(255, 255, 255, 0) 88%),
+    radial-gradient(46% 44% at 96% 70%, rgba(240, 210, 46, 0.06), rgba(0, 0, 0, 0) 62%),
+    radial-gradient(50% 48% at 60% 112%, rgba(0, 84, 112, 0.10), rgba(0, 0, 0, 0) 62%),
+    radial-gradient(42% 44% at 6% 92%, rgba(0, 168, 222, 0.16), rgba(0, 0, 0, 0) 62%),
+    radial-gradient(40% 40% at 14% 8%, rgba(0, 168, 222, 0.11), rgba(0, 0, 0, 0) 60%),
+    var(--mx-canvas);
+}
+
+html.dark .mx-main-col[data-zone="export"] {
+  --mx-app-gradient:
+    linear-gradient(135deg, rgba(0, 84, 112, 0.22) 0%, rgba(0, 168, 222, 0.10) 34%, rgba(0, 44, 64, 0.18) 60%, rgba(0, 0, 0, 0) 88%),
+    radial-gradient(46% 44% at 96% 70%, rgba(240, 210, 46, 0.05), rgba(0, 0, 0, 0) 62%),
+    radial-gradient(50% 48% at 60% 112%, rgba(0, 84, 112, 0.14), rgba(0, 0, 0, 0) 62%),
+    radial-gradient(42% 44% at 6% 92%, rgba(0, 168, 222, 0.10), rgba(0, 0, 0, 0) 62%),
+    radial-gradient(40% 40% at 14% 8%, rgba(0, 44, 64, 0.24), rgba(0, 0, 0, 0) 60%),
+    var(--mx-canvas);
+}
+
 /* Sökvägsrad mot bakgrunden — ingen egen yta, ingen blur, ingen vit remsa. */
 .mx-topbar {
   display: flex;
