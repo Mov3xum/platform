@@ -47,6 +47,8 @@ test('denylist håller ute auth-, credential- och privat-innehåll-kollektioner'
     'talent_interests', // intresseanmälningar med meddelanden (§54)
     'sustainability_documents', // text ur uppladdade dokument i Hållbarhetsanalysen (§56)
     'sustainability_ai_jobs', // rå modellutdata från Hållbarhetsanalysen (§56)
+    'export_documents', // text ur uppladdade dokument i Export Lab (§58)
+    'export_ai_jobs', // rå modellutdata från Export Lab (§58)
     'agent_memory' // tvärsessions-minne (§16.4)
   ]) {
     assert.equal(isDeniedCollection(name), true, `${name} ska vara denylistad`);
@@ -62,6 +64,8 @@ test('domändata är LÄSBAR (låstes upp 2026-06; skyddas av RLS + fältmasknin
     'startup_financials',
     'sustainability_assessments',
     'sustainability_gap_questions',
+    'export_assessments',
+    'export_gap_questions',
     // C — tidigare denylistat, nu läsbart med fältmaskning
     'contacts',
     'compass_leads',

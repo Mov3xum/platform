@@ -4941,6 +4941,160 @@ await ensureCollection({
   ...SUST_RULES(SUST_CREATE_TENANT)
 });
 
+// Migration 1700000210 (§ 58): Export Lab — internationaliseringsanalysen per
+// bolag. Samma mönster som Impact Navigator: list/view staff/observer;
+// create pinnad (tenant + skapare, eller bara tenant); update Movexum-
+// personal; delete ledning. `export_documents` + `export_ai_jobs` är
+// denylistade för AI. Enum-värden MÅSTE spegla packages/shared/src/export-lab.ts.
+await ensureCollection({
+  id: 'export_assessments_collection',
+  name: 'export_assessments',
+  type: 'base',
+  fields: [
+    ...SUST_AUTODATE,
+    SUST_REL('tenant', 'tenants', true, true),
+    SUST_REL('startup', 'startups', true, true),
+    { name: 'version', type: 'number', required: true, min: 1, onlyInt: true },
+    { name: 'type', type: 'select', required: true, maxSelect: 1, values: ['initial', 'update'] },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['profile_pending', 'market_review', 'info_pending', 'needs_more_info', 'plan_pending', 'complete', 'failed'] },
+    { name: 'framework_version', type: 'text', required: true, min: 1, max: 60 },
+    { name: 'profile', type: 'json', required: false, maxSize: 300000 },
+    { name: 'sufficiency', type: 'json', required: false, maxSize: 200000 },
+    { name: 'plan', type: 'json', required: false, maxSize: 500000 },
+    { name: 'update_delta', type: 'json', required: false, maxSize: 200000 },
+    { name: 'irl_snapshot', type: 'json', required: false, maxSize: 20000 },
+    { name: 'information_quality_score', type: 'number', required: false, min: 0, max: 100, onlyInt: true },
+    { name: 'model_name', type: 'text', required: false, max: 80 },
+    { name: 'prompt_version', type: 'text', required: false, max: 60 },
+    { name: 'input_hash', type: 'text', required: false, max: 128 },
+    SUST_USER('created_by'),
+    { name: 'completed_at', type: 'date', required: false }
+  ],
+  indexes: [
+    'CREATE UNIQUE INDEX idx_export_assessments_startup_version ON export_assessments (startup, version)',
+    'CREATE INDEX idx_export_assessments_tenant_startup ON export_assessments (tenant, startup)'
+  ],
+  ...SUST_RULES(SUST_CREATE_PINNED('created_by'))
+});
+await patchCollection('export_assessments', [SUST_REL('previous_assessment', 'export_assessments')]);
+
+await ensureCollection({
+  id: 'export_gap_questions_collection',
+  name: 'export_gap_questions',
+  type: 'base',
+  fields: [
+    ...SUST_AUTODATE,
+    SUST_REL('tenant', 'tenants', true, true),
+    SUST_REL('assessment', 'export_assessments', true, true),
+    { name: 'target_code', type: 'text', required: true, min: 1, max: 40 },
+    { name: 'question', type: 'text', required: true, min: 1, max: 2000 },
+    { name: 'missing_information', type: 'text', required: false, max: 2000 },
+    { name: 'severity', type: 'select', required: true, maxSelect: 1, values: ['required', 'recommended'] },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['open', 'answered', 'not_available'] },
+    { name: 'answer_text', type: 'text', required: false, max: 10000 }
+  ],
+  indexes: ['CREATE INDEX idx_export_gap_questions_assessment ON export_gap_questions (assessment)'],
+  ...SUST_RULES(SUST_CREATE_TENANT)
+});
+
+await ensureCollection({
+  id: 'export_market_reviews_collection',
+  name: 'export_market_reviews',
+  type: 'base',
+  fields: [
+    ...SUST_AUTODATE,
+    SUST_REL('tenant', 'tenants', true, true),
+    SUST_REL('assessment', 'export_assessments', true, true),
+    { name: 'market_code', type: 'text', required: true, min: 1, max: 40 },
+    { name: 'country', type: 'text', required: false, max: 120 },
+    { name: 'original_priority', type: 'text', required: true, min: 1, max: 40 },
+    { name: 'new_priority', type: 'text', required: true, min: 1, max: 40 },
+    { name: 'comment', type: 'text', required: false, max: 5000 },
+    SUST_USER('created_by')
+  ],
+  indexes: ['CREATE INDEX idx_export_market_reviews_assessment ON export_market_reviews (assessment)'],
+  ...SUST_RULES(SUST_CREATE_PINNED('created_by'))
+});
+
+await ensureCollection({
+  id: 'export_update_events_collection',
+  name: 'export_update_events',
+  type: 'base',
+  fields: [
+    ...SUST_AUTODATE,
+    SUST_REL('tenant', 'tenants', true, true),
+    SUST_REL('startup', 'startups', true, true),
+    SUST_REL('assessment', 'export_assessments'),
+    SUST_USER('created_by'),
+    { name: 'narrative', type: 'text', required: false, max: 20000 }
+  ],
+  indexes: ['CREATE INDEX idx_export_update_events_startup ON export_update_events (startup)'],
+  ...SUST_RULES(SUST_CREATE_PINNED('created_by'))
+});
+
+await ensureCollection({
+  id: 'export_documents_collection',
+  name: 'export_documents',
+  type: 'base',
+  fields: [
+    ...SUST_AUTODATE,
+    SUST_REL('tenant', 'tenants', true, true),
+    SUST_REL('startup', 'startups', true, true),
+    SUST_REL('assessment', 'export_assessments'),
+    SUST_REL('update_event', 'export_update_events'),
+    SUST_REL('gap_question', 'export_gap_questions'),
+    SUST_USER('uploaded_by'),
+    { name: 'upload_stage', type: 'select', required: true, maxSelect: 1, values: ['innovation_description', 'full_information', 'gap_response', 'update'] },
+    { name: 'original_name', type: 'text', required: true, min: 1, max: 300 },
+    { name: 'mime', type: 'text', required: false, max: 150 },
+    { name: 'size_bytes', type: 'number', required: false, min: 0, onlyInt: true },
+    {
+      name: 'file',
+      type: 'file',
+      required: false,
+      maxSelect: 1,
+      maxSize: 26214400,
+      mimeTypes: [
+        'application/pdf',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'text/plain',
+        'text/markdown',
+        'text/csv'
+      ],
+      protected: true
+    },
+    { name: 'extracted_text', type: 'text', required: false, max: 300000 },
+    { name: 'extraction_status', type: 'select', required: false, maxSelect: 1, values: ['pending', 'complete', 'failed'] },
+    { name: 'extraction_warning', type: 'text', required: false, max: 500 }
+  ],
+  indexes: ['CREATE INDEX idx_export_documents_startup ON export_documents (startup)', 'CREATE INDEX idx_export_documents_assessment ON export_documents (assessment)'],
+  ...SUST_RULES(SUST_CREATE_PINNED('uploaded_by'))
+});
+
+await ensureCollection({
+  id: 'export_ai_jobs_collection',
+  name: 'export_ai_jobs',
+  type: 'base',
+  fields: [
+    ...SUST_AUTODATE,
+    SUST_REL('tenant', 'tenants', true, true),
+    SUST_REL('startup', 'startups', true, true),
+    SUST_REL('assessment', 'export_assessments'),
+    { name: 'job_type', type: 'select', required: true, maxSelect: 1, values: ['profile', 'sufficiency', 'plan', 'update_plan'] },
+    { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['pending', 'running', 'complete', 'failed'] },
+    { name: 'input_hash', type: 'text', required: false, max: 128 },
+    { name: 'model_name', type: 'text', required: false, max: 80 },
+    { name: 'prompt_version', type: 'text', required: false, max: 60 },
+    { name: 'output', type: 'json', required: false, maxSize: 500000 },
+    { name: 'error', type: 'text', required: false, max: 2000 },
+    { name: 'completed_at', type: 'date', required: false }
+  ],
+  indexes: ['CREATE INDEX idx_export_ai_jobs_startup ON export_ai_jobs (startup)', 'CREATE INDEX idx_export_ai_jobs_assessment ON export_ai_jobs (assessment)'],
+  ...SUST_RULES(SUST_CREATE_TENANT)
+});
+
 // Migration 1700000201 (§ 54): Studenter & talang — behov (talent_needs),
 // studentprofiler (student_profiles) och intressen (talent_interests).
 // Behov + intressen medlem-scopade på startup; studentprofiler staff/observer-
@@ -6010,6 +6164,11 @@ await patchCollection('startups', [
   { name: 'sustainability_journey_text', type: 'text', required: false, max: 20000 },
   { name: 'sustainability_status', type: 'select', required: false, maxSelect: 1, values: ['draft', 'materiality_review', 'info_collection', 'needs_more_info', 'analyzed'] },
   { name: 'sustainability_assigned_to', type: 'relation', required: false, collectionId: 'users', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+  // Från 1700000210 (§ 58): Export Lab-fälten på bolaget.
+  { name: 'export_ambition_text', type: 'text', required: false, max: 20000 },
+  { name: 'export_desired_markets', type: 'text', required: false, max: 1000 },
+  { name: 'export_status', type: 'select', required: false, maxSelect: 1, values: ['draft', 'market_review', 'info_collection', 'needs_more_info', 'planned'] },
+  { name: 'export_assigned_to', type: 'relation', required: false, collectionId: 'users', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
   // Från 1700000058
   { name: 'org_nr', type: 'text', required: false, max: 12 },
   { name: 'kommun', type: 'text', required: false, max: 100 },
@@ -6260,6 +6419,13 @@ const FORCE_CREATE_RULES = {
   sustainability_update_events: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
   sustainability_documents: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.uploaded_by = @request.auth.id`,
   sustainability_ai_jobs: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant`,
+  // Export Lab (§ 58, migration 1700000210).
+  export_assessments: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  export_gap_questions: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant`,
+  export_market_reviews: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  export_update_events: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  export_documents: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.uploaded_by = @request.auth.id`,
+  export_ai_jobs: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant`,
   // Stödcheckar & finansieringsprojekt (§ 46, migrationer 1700000161–167) —
   // roll-/medlemskontroll i skrivlagret och route-handlers.
   funding_projects: `${ANY_AUTH} && @request.auth.tenant != ""`,

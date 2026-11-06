@@ -15,6 +15,7 @@ export const MODULE_ICONS: Record<string, string> = {
   de_minimis: 'shield',
   bedomning_excellens: 'star',
   impactnavigator: 'globe',
+  exportlab: 'compass',
   talang: 'cap',
   checkar: 'check',
   projekt: 'graph',

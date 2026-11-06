@@ -11,5 +11,8 @@ test('Impact Navigator är den gröna zonen — rot och undersidor', () => {
 test('övriga sidor har ingen zon — inte ens en sökväg som bara börjar likadant', () => {
   assert.equal(appZoneForPath('/hem'), null);
   assert.equal(appZoneForPath('/impactnavigatorx'), null);
+  assert.equal(appZoneForPath('/exportlab'), 'export');
+  assert.equal(appZoneForPath('/exportlab/omip77vgymfj3hu/plan'), 'export');
+  assert.equal(appZoneForPath('/exportlabx'), null);
   assert.equal(appZoneForPath('/startups/abc'), null);
 });

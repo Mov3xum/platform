@@ -22,8 +22,14 @@ export interface ImpactUploadTarget {
   startupId: string;
   assessmentId?: string;
   gapQuestionId?: string;
-  stage: 'idea_description' | 'full_information' | 'gap_response' | 'update';
+  stage: 'idea_description' | 'full_information' | 'gap_response' | 'update' | 'innovation_description';
+  /** Route-handlern filen postas till (default Impact Navigator; Export Lab § 58 skickar sin egen). */
+  endpoint?: string;
+  /** Raderar dokumentet på servern när användaren tar bort det (default Impact Navigators action). */
+  deleteDocument?: (startupId: string, documentId: string) => Promise<{ error?: string }>;
 }
+
+const DEFAULT_ENDPOINT = '/api/impactnavigator/documents';
 
 /** Laddar upp EN fil till route-handlern (§ 18.2) och returnerar dokumentraden. */
 export async function uploadImpactDocument(file: File, target: ImpactUploadTarget): Promise<UploadedImpactDocument> {
@@ -33,7 +39,7 @@ export async function uploadImpactDocument(file: File, target: ImpactUploadTarge
   fd.append('stage', target.stage);
   if (target.assessmentId) fd.append('assessment_id', target.assessmentId);
   if (target.gapQuestionId) fd.append('gap_question_id', target.gapQuestionId);
-  const res = await fetch('/api/impactnavigator/documents', { method: 'POST', body: fd, credentials: 'same-origin' });
+  const res = await fetch(target.endpoint ?? DEFAULT_ENDPOINT, { method: 'POST', body: fd, credentials: 'same-origin' });
   const body = (await res.json().catch(() => ({}))) as { id?: string; name?: string; hasText?: boolean; warning?: string; error?: string };
   if (!res.ok || !body.id) throw new Error(body.error || `Uppladdningen misslyckades (HTTP ${res.status}).`);
   return { id: body.id, name: body.name || file.name, hasText: Boolean(body.hasText), warning: body.warning };
@@ -155,7 +161,7 @@ export function FileDropInput({
       onUploaded?.(next);
       if (required && next.length === 0) setValidity('Välj en fil.');
       if (doc) {
-        const res = await deleteImpactDocumentAction(target.startupId, doc.id);
+        const res = await (target.deleteDocument ?? deleteImpactDocumentAction)(target.startupId, doc.id);
         if (res.error) setError(`${doc.name}: ${res.error}`);
       }
     } else {

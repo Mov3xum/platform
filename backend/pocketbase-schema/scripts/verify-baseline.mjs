@@ -180,6 +180,13 @@ async function verifyCollectionsExist() {
     'sustainability_update_events',
     'sustainability_documents',
     'sustainability_ai_jobs',
+    // Export Lab (§ 58, migration 1700000210) — internationaliseringsanalysen per bolag.
+    'export_assessments',
+    'export_gap_questions',
+    'export_market_reviews',
+    'export_update_events',
+    'export_documents',
+    'export_ai_jobs',
     // Användaraktivitet (§ 57, migration 1700000209) — stöd för att hjälpa användare igång.
     'user_activity',
     // Studenter & talang (§ 54, migration 1700000201).
@@ -536,6 +543,15 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   'sustainability_update_events',
   'sustainability_documents',
   'sustainability_ai_jobs',
+  // Export Lab (§ 58, migration 1700000210): personalverktyg utan
+  // bolagsmedlemsyta — exportprofiler, planer, frågor, dokumenttext och
+  // AI-körningar är internt underlag → staff/observer-only.
+  'export_assessments',
+  'export_gap_questions',
+  'export_market_reviews',
+  'export_update_events',
+  'export_documents',
+  'export_ai_jobs',
   // Studentprofiler (§ 54, migration 1700000201): privatpersoners uppgifter —
   // bolaget ser dem BARA anonymiserat via kod, aldrig via RLS.
   'student_profiles',
@@ -784,6 +800,7 @@ const AI_DENYLIST = new Set([
   'notifications', 'notification_preferences', 'rate_limits', 'app_locks',
   'student_profiles', 'talent_interests',
   'sustainability_documents', 'sustainability_ai_jobs',
+  'export_documents', 'export_ai_jobs',
   'user_activity'
 ]);
 
@@ -1224,6 +1241,10 @@ const REQUIRED_APP_FIELDS = [
   // bolagets resa/status/ansvarig tyst bort och importen avbryts.
   { collection: 'startups', fields: ['sustainability_journey_text', 'sustainability_status', 'sustainability_assigned_to'] },
   { collection: 'sustainability_assessments', fields: ['external_id', 'source_created_at', 'previous_assessment', 'dashboard'] },
+  // Export Lab (§ 58, migration 1700000210): utan fälten "sparas" bolagets
+  // ambition/status/ansvarig tyst bort och planen kan inte lagras.
+  { collection: 'startups', fields: ['export_ambition_text', 'export_desired_markets', 'export_status', 'export_assigned_to'] },
+  { collection: 'export_assessments', fields: ['previous_assessment', 'profile', 'plan', 'irl_snapshot'] },
   // KTH IRL på bolagskortet (migration 1700000193): utan fälten "sparas"
   // teknik/IPR/finansiering tyst bort och radarn ritas med tre tomma axlar.
   { collection: 'startup_readiness_assessments', fields: ['trl', 'iprl', 'frl', 'axis_notes'] },

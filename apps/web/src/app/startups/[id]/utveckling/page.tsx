@@ -5,6 +5,7 @@ import { StartupWorkCards } from '@/components/StartupWorkCards';
 import { StartupPhaseHistoryList, type PhaseHistoryItem } from '@/components/StartupPhaseHistoryList';
 import { IrlWorkspace } from '@/components/irl/IrlWorkspace';
 import { StartupImpactSection } from '@/components/impact/StartupImpactSection';
+import { StartupExportSection } from '@/components/exportlab/StartupExportSection';
 import { loadIrlAssessments } from '@/lib/irl/data.server';
 import {
   milestoneCategoryLabels,
@@ -143,6 +144,16 @@ export default async function StartupDevelopmentPage({ params }: { params: Promi
           description="AI-stödd väsentlighets- och slutanalys av bolagets hållbarhetsläge (CLAUDE.md § 56). Genererat av AI – verifiera innan delning."
         >
           <StartupImpactSection pb={pb} tenantId={user.tenant} startupId={id} sustainabilityStatus={(startup as { sustainability_status?: string }).sustainability_status} />
+        </Section>
+      ) : null}
+
+      {flags.isStaffOrObserver ? (
+        <Section
+          id="exportlab"
+          title="Export Lab — internationalisering"
+          description="AI-stödd exportprofil, marknadsurval och första exportplan kopplad till bolagets IRL (CLAUDE.md § 58). Genererat av AI – verifiera innan delning."
+        >
+          <StartupExportSection pb={pb} tenantId={user.tenant} startupId={id} exportStatus={(startup as { export_status?: string }).export_status} />
         </Section>
       ) : null}
 

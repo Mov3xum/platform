@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Icon } from '@/components/proto/Icon';
 import { btnPrimary, noticeError, noticeWarn } from './ui';
+import { btnPrimary as btnPrimaryBlue } from '@/components/exportlab/ui';
 
 const CLIENT_ANALYSIS_TIMEOUT_MS = 305_000;
 const SLOW_ANALYSIS_NOTICE_SECONDS = 180;
@@ -32,7 +33,8 @@ export function AiSubmitButton({
   disabled,
   className,
   type = 'submit',
-  onClick
+  onClick,
+  tone = 'green'
 }: {
   idleLabel: string;
   pendingLabel?: string;
@@ -45,6 +47,8 @@ export function AiSubmitButton({
   className?: string;
   type?: 'submit' | 'button';
   onClick?: () => void;
+  /** Modulens accent: grön (Impact Navigator) eller blå (Export Lab, § 58). */
+  tone?: 'green' | 'blue';
 }) {
   const [timedOut, setTimedOut] = useState(false);
 
@@ -59,11 +63,11 @@ export function AiSubmitButton({
 
   return (
     <>
-      <button type={type} onClick={onClick} disabled={showPending || disabled} aria-busy={showPending} className={`${btnPrimary} ${className ?? ''}`}>
+      <button type={type} onClick={onClick} disabled={showPending || disabled} aria-busy={showPending} className={`${tone === 'blue' ? btnPrimaryBlue : btnPrimary} ${className ?? ''}`}>
         <Icon name={showPending ? 'hourglass' : 'send'} size={15} />
         {showPending ? pendingLabel : idleLabel}
       </button>
-      {showPending ? <AiAnalysisOverlay title={pendingTitle} description={pendingDescription} steps={pendingSteps} fallbackHref={fallbackHref} /> : null}
+      {showPending ? <AiAnalysisOverlay title={pendingTitle} description={pendingDescription} steps={pendingSteps} fallbackHref={fallbackHref} tone={tone} /> : null}
       {timedOut && pending ? (
         <div role="alert" className={`mt-3 max-w-xl ${noticeError}`}>
           <p className="font-medium">Analysen fick inget svar inom fem minuter.</p>
@@ -84,7 +88,7 @@ export function AiSubmitButton({
   );
 }
 
-function AiAnalysisOverlay({ title, description, steps, fallbackHref }: { title: string; description: string; steps: readonly [string, string, string]; fallbackHref?: string }) {
+function AiAnalysisOverlay({ title, description, steps, fallbackHref, tone }: { title: string; description: string; steps: readonly [string, string, string]; fallbackHref?: string; tone: 'green' | 'blue' }) {
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
     const timer = window.setInterval(() => setElapsed((c) => c + 1), 1000);
@@ -96,8 +100,8 @@ function AiAnalysisOverlay({ title, description, steps, fallbackHref }: { title:
     <div className="fixed inset-0 z-50 grid place-items-center bg-movexum-svart/30 p-4 backdrop-blur-sm" role="status" aria-live="polite">
       <div className="w-full max-w-lg rounded-2xl border border-default bg-surface p-6 shadow-lg shadow-movexum-svart/10">
         <div className="flex items-start gap-4">
-          <div className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-movexum-gron text-movexum-vit dark:bg-movexum-ljusgron dark:text-movexum-morkgron">
-            <span className="absolute h-14 w-14 animate-ping rounded-xl bg-movexum-gron/30" />
+          <div className={`relative flex h-14 w-14 shrink-0 items-center justify-center rounded-xl ${tone === 'blue' ? 'bg-movexum-djupbla text-movexum-vit dark:bg-movexum-bla dark:text-movexum-morkbla' : 'bg-movexum-gron text-movexum-vit dark:bg-movexum-ljusgron dark:text-movexum-morkgron'}`}>
+            <span className={`absolute h-14 w-14 animate-ping rounded-xl ${tone === 'blue' ? 'bg-movexum-bla/30' : 'bg-movexum-gron/30'}`} />
             <Icon name="search" size={26} />
           </div>
           <div>
@@ -109,7 +113,7 @@ function AiAnalysisOverlay({ title, description, steps, fallbackHref }: { title:
         <div className="mt-6 space-y-3">
           {steps.map((label, i) => (
             <div key={label} className="flex items-center gap-3 rounded-xl border border-default bg-canvas-subtle px-3 py-2">
-              <span className={`h-2.5 w-2.5 animate-pulse rounded-full bg-movexum-gron ${i === 1 ? 'delay-150' : i === 2 ? 'delay-300' : ''}`} />
+              <span className={`h-2.5 w-2.5 animate-pulse rounded-full ${tone === 'blue' ? 'bg-movexum-bla' : 'bg-movexum-gron'} ${i === 1 ? 'delay-150' : i === 2 ? 'delay-300' : ''}`} />
               <span className="text-sm text-foreground">{label}</span>
             </div>
           ))}
