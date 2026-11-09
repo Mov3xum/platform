@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
-import { listForTenant } from '@/lib/pb.server';
+import { listAllForTenant } from '@/lib/pb.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
 import { listAssignableResourcesForTenant } from '@/lib/assignments/collaboration';
 import {
@@ -12,6 +12,8 @@ import { listAnnualWheelCategories } from '@/lib/annual-wheel/categories';
 import { ensureAnnualWheelSchema, unrepairableDriftMessage } from '@/lib/annual-wheel/schema-repair';
 import { PageShell } from '@/components/PageShell';
 import { AnnualWheelView } from './AnnualWheelView';
+import { listActivityIndicatorOptions } from '@/lib/goals/activities';
+import { loadMissionsByActivity } from '@/lib/missions/activities.server';
 import type { AnnualWheelItem, Role } from '@platform/shared';
 
 export const dynamic = 'force-dynamic';
@@ -35,6 +37,10 @@ interface WheelRow {
   category?: string;
   responsible?: string;
   notes?: string;
+  goal_indicators?: string[];
+  planned_participants?: number;
+  outcome_verdict?: string;
+  completed_at?: string;
   created_by?: string;
   created?: string;
   updated?: string;
@@ -52,7 +58,7 @@ export default async function ArshjulPage({
   searchParams?: Promise<{ item?: string }>;
 }) {
   const user = await requireUser();
-  // Djuplänk från Hemmaplans kalender (`?item=<id>`) — bara formatvalidering
+  // Djuplänk från Översiktens kalender (`?item=<id>`) — bara formatvalidering
   // här; posten slås upp i klienten mot den redan RLS-filtrerade listan.
   const { item: rawItem } = (await searchParams) ?? {};
   const openItemId = typeof rawItem === 'string' && /^[a-zA-Z0-9_-]{1,40}$/.test(rawItem) ? rawItem : null;
@@ -78,14 +84,26 @@ export default async function ArshjulPage({
   }
 
   const pb = await getServerPb();
+  // ALLA poster, paginerat (inte en sida om 500 — då försvann nya poster tyst
+  // så fort tenanten passerat 500 rader). Ett läsfel visas som banner i
+  // stället för ett tomt hjul: "0 aktiviteter" fick tidigare betyda både
+  // "inga" och "kunde inte läsa", vilket är omöjligt att felsöka.
+  let readNotice: string | null = null;
   const [res, categories] = await Promise.all([
-    listForTenant<WheelRow>('annual_wheel_items', {
-      sort: 'year,month',
-      perPage: 500
-    }).catch(() => ({ items: [] as WheelRow[] })),
+    listAllForTenant<WheelRow>('annual_wheel_items', { sort: 'year,month,id' }).catch((err: unknown) => {
+      const status = (err as { status?: number })?.status;
+      readNotice =
+        'Aktiviteterna kunde inte läsas från databasen' +
+        (status ? ` (HTTP ${status})` : '') +
+        ' — hjulet visar därför ingenting just nu. Ladda om sidan; kvarstår felet, be en administratör kontrollera annual_wheel_items (migrationer/behörighetsregler).';
+      return { items: [] as WheelRow[], total: 0, complete: true };
+    }),
     // Dynamiska kategorier per tenant (§ 30) — fail-soft till defaults.
     listAnnualWheelCategories(pb, user.tenant)
   ]);
+  if (!res.complete) {
+    readNotice = `Visar ${res.items.length} av ${res.total} aktiviteter — listan är kapad. Arkivera eller radera gamla år så att allt kan visas.`;
+  }
 
   const fallbackCategory = categories[0]?.id ?? 'gemensamt';
 
@@ -116,11 +134,36 @@ export default async function ArshjulPage({
     // kategori behåller sin nyckel — vyn visar den då rått med neutral färg.
     category: typeof r.category === 'string' && r.category ? r.category : fallbackCategory,
     notes: r.notes || undefined,
+    goal_indicators: Array.isArray(r.goal_indicators) ? r.goal_indicators : [],
+    planned_participants: r.planned_participants && r.planned_participants > 0 ? r.planned_participants : null,
+    outcome_verdict: r.outcome_verdict || null,
+    completed_at: r.completed_at || undefined,
     created_by: r.created_by,
     created: r.created,
     updated: r.updated
   }));
 
+
+  // Mål & genomförande (§ 53.4): indikatorer att koppla till och event som
+  // genomför posterna. Fail-soft — utan migrationerna blir båda tomma.
+  const [goalOptions, teamsByItem, linkedEvents] = await Promise.all([
+    listActivityIndicatorOptions(pb, user.tenant),
+    // Team som arbetar med posterna (§ 29.8) — visas i dialogen, fail-soft.
+    loadMissionsByActivity(pb, user.tenant, 'annual_wheel'),
+    pb
+      .collection('incubator_events')
+      .getFullList<{ id: string; name?: string; wheel_item?: string }>({
+        filter: pb.filter('tenant = {:t} && wheel_item != ""', { t: user.tenant }),
+        fields: 'id,name,wheel_item',
+        batch: 500
+      })
+      .catch(() => [])
+  ]);
+  const eventsByItem: Record<string, { id: string; name: string }[]> = {};
+  for (const e of linkedEvents) {
+    if (!e.wheel_item) continue;
+    (eventsByItem[e.wheel_item] ??= []).push({ id: e.id, name: e.name || 'Event' });
+  }
 
   return (
     <PageShell
@@ -138,7 +181,11 @@ export default async function ArshjulPage({
         people={people}
         canManageCategories={canManageCategories}
         schemaNotice={schemaNotice}
+        readNotice={readNotice}
         openItemId={openItemId}
+        goalOptions={goalOptions}
+        eventsByItem={eventsByItem}
+        teamsByItem={teamsByItem}
       />
     </PageShell>
   );

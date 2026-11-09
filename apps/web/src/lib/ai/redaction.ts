@@ -53,18 +53,82 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   'tenant_integrations', // AES-256-GCM-krypterade credentials
   'user_app_integrations',
   'user_mistral_connectors',
+  // Delat skalningstillstånd (§ 21.8, migration 1700000184): rate-limiterns
+  // räknare (hashade e-post-/IP-nycklar) och distribuerade lås. Superuser-
+  // only systemdata utan värde för modellen — får aldrig nå query_collection.
+  'rate_limits',
+  'app_locks',
   // B. Strikt privat ägaren-bara-innehåll (att exponera bryter § 21-isoleringen).
   'chat_threads', // privat konversationsinnehåll (1700000083)
   'user_files', // personliga filer, strikt ägaren-bara (1700000085)
   'user_file_chunks', // RAG-index för personliga filer (1700000121, § 27) — owner-only, nås bara via search_my_files
   'deep_jobs', // intern orkestrering (1700000084)
   'meeting_transcripts', // råa mötestranskript, strikt ägaren-bara (1700000142, § 34)
+  // Notiser + notisinställningar (§ 50): strikt ägaren-bara. Autonoma körningar
+  // kör superuser och släpper rader på tenant — utan denylistningen kunde en
+  // schemalagd agent läsa ALLA användares notiser i tenanten.
+  'notifications',
+  // Impact Navigator (§ 56, migration 1700000206): text ur uppladdade
+  // tredjepartsdokument och rå modellutdata är fritext som kan bära namn på
+  // kontaktpersoner — fältmaskning per fältnamn räcker inte (§ 39.3-precedens).
+  // Analyserna själva (sustainability_assessments m.fl.) är läsbara via RLS.
+  'sustainability_documents',
+  'sustainability_ai_jobs',
+  // Export Lab (§ 58, migration 1700000210): samma klass — dokumenttext och rå
+  // modellutdata. Exportprofiler/planer (export_assessments m.fl.) är läsbara.
+  'export_documents',
+  'export_ai_jobs',
+  'notification_preferences',
+  // Användaraktivitet (§ 57, migration 1700000209): när/hur ofta en person
+  // använder plattformen är stöd för introduktion — aldrig underlag för en
+  // modell och aldrig profilering av medarbetare.
+  'user_activity',
   // Tenant-bred kunskapsbas (1700000118–119, § 26). Innehållet (uppladdat
   // verksamhetsmaterial + dess embeddings) når AI ENBART via det kurerade
   // `search_knowledge`-verktyget — aldrig via det generiska query_collection.
   // Embedding-vektorerna är dessutom ointressanta/bullriga för en LLM att läsa rått.
+  // Enkätsvar (§ 39): fritextsvar går inte att fältmaska → aldrig via generiska
+  // query_collection. Staff når dem i /inflode/utvardering (RLS, aggregerat).
+  'survey_responses',
   'org_knowledge',
   'org_knowledge_chunks',
+  // Uppladdat upphandlingsunderlag (1700000153, § 39.3): `extracted_text`/
+  // `analysis` är fritext ur tredjepartsdokument (kan innehålla kontakt-
+  // personer i löptext som fältmaskning per fältNAMN inte fångar). Når AI
+  // enbart via den isolerade utläsningen vid uppladdning — aldrig rått.
+  'procurement_documents',
+  // Stödcheckar (§ 46): `activities[].participants` är personnamn (PII) och
+  // utlåtanden/beslut är fritext om bolaget — når AI bara via den kurerade
+  // sammanfattningen, aldrig rått. Bilagor och revisioner (signeringsbevis) likaså.
+  'support_check_applications',
+  'support_check_revisions',
+  'support_check_comments',
+  'support_check_documents',
+  // Råa enkätsvar per respondent (§ 43): anonyma personalenkäter får aldrig
+  // läsas rad för rad av modellen — målstyrningen får bara det k-anonyma
+  // aggregatet via /mal. (Fältet var oanvänt före enkätmotorn.)
+  'compass_responses',
+  // Bedömning excellens (§ 51.6): körningar (sammanfattning kan bära grundar-
+  // uppgifter via etiketter) och kompletteringsförfrågningar (svar med
+  // grundarnamn/andel/engagemang + fri text) — når AI aldrig rått.
+  'startup_screenings',
+  'screening_requests',
+  // Ärenden i Bedömning excellens (§ 51.10): underlag + manuella svar per bolag.
+  'screening_cases',
+  // Deltagarlistor och e-postkampanjer (§ 53.5, § 55): deltagarrader bär
+  // e-post och gästens kost/allergi (kan vara art. 9), mottagarrader bär
+  // hashade adresser och leveransstatus, spärrlistan maskade adresser,
+  // händelseloggen leverantörsdata — inget av det ska nå modellen rått.
+  // Kampanjerna själva (`email_campaigns`: text, ämne, status) är läsbara.
+  'event_signups',
+  'email_campaign_recipients',
+  'email_suppressions',
+  'email_events',
+  // Studenter & talang (§ 54): studentprofiler (namn, e-post, fritext om en
+  // privatperson) och intresseanmälningar (meddelanden). Behoven
+  // (`talent_needs`) är bolagens egna annonser och förblir läsbara.
+  'student_profiles',
+  'talent_interests',
   'agent_memory' // agentens tvärsessions-scratchpad (1700000079)
 ]);
 
@@ -97,7 +161,14 @@ export const PII_FIELD_PATTERNS: readonly string[] = [
   // Utskrivet org-nr (de_minimis_unit_orgnr.organisationsnummer) — fångas inte
   // av `org_nr`-substringen. För enskild firma motsvarar det personnummer.
   'organisationsnummer',
-  'ip_hash'
+  'ip_hash',
+  // Bedömning excellens (§ 51.4): manuella svar med grundarnas namn/andel/
+  // engagemang och fri motiveringstext — når aldrig modellen.
+  'screening_facts',
+  // Startupkompassen (§ 23.11): övriga teammedlemmars namn + e-post i fritext
+  // (compass_leads.team_members) — tredjeparts-PII, fältmaskas som helhet.
+  // Kön på grundare (compass_leads.founder_gender) fångas av `gender` ovan.
+  'team_members'
 ];
 
 /** Är kollektionen helt utestängd från agentens query-verktyg? */
@@ -125,11 +196,32 @@ export function maskRecord(
   record: Record<string, unknown>,
   collection: { maskedFields: readonly string[] }
 ): Record<string, unknown> {
-  if (collection.maskedFields.length === 0) return record;
+  const hasExpand = record.expand !== undefined && record.expand !== null;
+  if (collection.maskedFields.length === 0 && !hasExpand) return record;
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(record)) {
     if (collection.maskedFields.includes(k)) continue;
-    out[k] = v;
+    // `expand` bär ANDRA kollektioners poster (t.ex. users → e-post). Deras
+    // maskning kan inte slås upp här, så PII-fält strippas namnbaserat och
+    // rekursivt — annars är expand en bakväg förbi fältmaskningen.
+    out[k] = k === 'expand' ? maskExpanded(v) : v;
+  }
+  return out;
+}
+
+function isPiiFieldName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return PII_FIELD_PATTERNS.some((p) => lower.includes(p));
+}
+
+/** Rekursiv, namnbaserad PII-strippning av expanderade relationer. */
+export function maskExpanded(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(maskExpanded);
+  if (!value || typeof value !== 'object') return value;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (isPiiFieldName(k)) continue;
+    out[k] = v && typeof v === 'object' ? maskExpanded(v) : v;
   }
   return out;
 }

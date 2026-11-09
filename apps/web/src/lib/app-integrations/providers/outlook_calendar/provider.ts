@@ -29,7 +29,7 @@ export const outlookCalendarProvider: OAuthProvider = {
     slug: 'outlook_calendar',
     title: 'Microsoft Outlook Calendar',
     blurb:
-      'Koppla din Outlook-kalender för att se kommande möten direkt i Min översikt. Read-only ' +
+      'Koppla din Outlook-kalender för att se kommande möten direkt i Mina uppgifter. Read-only ' +
       'via Microsoft Graph — vi skriver aldrig nya händelser.',
     residency: 'EU (Microsoft Graph, hem-tenantens region)',
     riskClass: 'begränsad',

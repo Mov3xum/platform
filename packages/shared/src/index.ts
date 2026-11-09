@@ -1,6 +1,7 @@
 import type { EducationDocumentKind } from './education-documents';
 import type { FileTopic, FileTopicStatus } from './file-topics';
 import type { MeetingRequestRef } from './meeting';
+import type { ChatMessageAttachment } from './chat-attachments';
 
 export type Role =
   | 'admin'
@@ -153,7 +154,7 @@ export type ServiceActivityKind = 'incubation' | 'verification' | 'admin';
 
 export type ServiceCostType = 'verification' | 'external_service' | 'other';
 
-/** En av KTH:s fyra readiness-axlar (IRL 1–9). */
+/** Vinnovas fyra readiness-axlar (IRL 1–9). KTH:s sex axlar: se kth-irl.ts. */
 export type ReadinessAxis = 'crl' | 'tmrl' | 'brl' | 'srl';
 
 export interface ServiceTimeEntry {
@@ -203,6 +204,12 @@ export interface StartupReadinessAssessment {
   tmrl?: number;
   brl?: number;
   srl?: number;
+  /** KTH IRL — teknik, IPR, finansiering (migration 1700000193). */
+  trl?: number;
+  iprl?: number;
+  frl?: number;
+  /** Motivering per KTH-axel (`IrlAxisNotes`, personnummer-sanerad). */
+  axis_notes?: Record<string, string> | null;
   /** Datum då målgruppskriterier senast kontrollerades. */
   criteria_checked_at?: string;
   assessed_by?: string;
@@ -355,6 +362,29 @@ export interface AgentActivityStep {
   ok?: boolean; // utfall (sätts när steget är klart)
 }
 
+// Kvitto på en SKRIVNING agenten utförde (eller försökte utföra) under en
+// turn. Byggs DETERMINISTISKT server-side av verktygsresultatet — aldrig av
+// modellens text — och persisteras på assistant-meddelandet. UI:t renderar
+// "Utfört i systemet" så att användaren ser det faktiska utfallet även om
+// modellen formulerar sig fel (§ 33.4). PII-fritt: verktygsetikett, utfall,
+// skrivlagrets felmeddelande, post-id:n och en intern länk.
+export interface AgentActionReceipt {
+  tool: string;
+  label: string;
+  /** true = skrivlagret bekräftade skrivningen. false = INGET sparades. */
+  ok: boolean;
+  /** Skrivlagrets fel när ok=false (cappat). */
+  error?: string;
+  /** Kort beskrivning av vad som skrevs, t.ex. "Bokslut · 1 post · april 2026". */
+  summary?: string;
+  /** Varning vid delvis lyckat (t.ex. schema-drift eller misslyckad återläsning). */
+  warning?: string;
+  /** Intern länk för att kontrollera resultatet (t.ex. /arshjul?item=<id>). */
+  href?: string;
+  /** Skapade/ändrade post-id:n. */
+  record_ids?: string[];
+}
+
 // Godkännandefråga från agenten (verktyget `request_approval`): agenten vill
 // utföra en KRITISK åtgärd och väntar på användarens beslut. UI:t renderar en
 // Godkänn/Avbryt-knapp på assistant-meddelandet; beslutet skickas som nästa
@@ -379,6 +409,10 @@ export interface ToolRunMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
   attachments?: ToolRunAttachmentRef[];
+  // Bilagor som användaren laddade upp direkt i chatten (/chatt, user-turn).
+  // Extraherad text sparas (sanerad, inom tråd-budget) så senare turer kan
+  // läsa filen igen — se `chat-attachments.ts`.
+  chat_attachments?: ChatMessageAttachment[];
   // Webbkällor som agenten hämtade via `web_search` för detta (assistant-)turn.
   sources?: WebSearchSourceRef[];
   // Agent-genererade dokument knutna till detta (assistant-)turn.
@@ -387,6 +421,9 @@ export interface ToolRunMessage {
   visuals?: InlineVisualRef[];
   // Verktygssteg agenten utförde för detta (assistant-)turn.
   steps?: AgentActivityStep[];
+  // Deterministiska kvitton på SKRIVNINGAR i detta (assistant-)turn — sanningen
+  // om vad som faktiskt sparades, oberoende av modellens text (§ 33.4).
+  actions?: AgentActionReceipt[];
   // Godkännandefråga (assistant): agenten väntar på Godkänn/Avbryt innan en
   // kritisk åtgärd utförs. Renderas som knappar när meddelandet är senast.
   approval_request?: ApprovalRequestRef;
@@ -397,6 +434,9 @@ export interface ToolRunMessage {
   model?: string; // modell som producerade detta turn (assistant)
   tokens_in?: number;
   tokens_out?: number;
+  // Antal modellanrop i turen (1 + ett per verktygssteg). Förklarar varför
+  // tokens_in är mångfalt större än svaret (§ 9.6/§ 28). Saknas på äldre turer.
+  api_calls?: number;
   cost_usd?: number;
   at: string; // ISO
   error?: string;
@@ -1112,6 +1152,12 @@ export interface Mission {
   description?: string;
   stages_json: MissionStage[];
   artifacts_json: MissionArtifact[];
+  /** Hashtags teamet sattes ihop för (§ 29.7, migration 1700000179) — meriter ur avslutade team. */
+  needed_tags?: string[];
+  /** Årshjulsposter teamet arbetar med (§ 29.8, migration 1700000212) — målen härleds ur dem. */
+  wheel_items?: string[];
+  /** Event teamet arbetar med (§ 29.8, migration 1700000212). */
+  events?: string[];
   accent?: string;
   created: string;
   updated: string;
@@ -1160,13 +1206,8 @@ export interface MissionComment {
   };
 }
 
-export type NotificationKind =
-  | 'comment'
-  | 'mention'
-  | 'assigned'
-  | 'status_change'
-  | 'stage_advance'
-  | 'due_soon';
+// NotificationKind, LEGACY_NOTIFICATION_KINDS och katalogen bor i
+// ./notifications (CLAUDE.md § 50).
 
 export interface NotificationPayload {
   title: string;
@@ -1178,12 +1219,24 @@ export interface Notification {
   id: string;
   tenant: string;
   user: string;
-  kind: NotificationKind;
+  /** En `NotificationKind` — text sedan migration 1700000186 (äldre data kan
+   *  bära okända värden; använd `notificationMeta`). */
+  kind: NotificationKind | string;
   mission?: string;
   actor?: string;
   comment?: string;
   payload_json: NotificationPayload;
   read_at?: string;
+  // Migration 1700000186 (§ 50) — saknas på en instans utan migrationen.
+  category?: string;
+  priority?: string;
+  entity_type?: string;
+  entity_id?: string;
+  group_key?: string;
+  count?: number;
+  seen_at?: string;
+  latest_at?: string;
+  dedupe_key?: string;
   created: string;
   updated: string;
   expand?: {
@@ -1262,11 +1315,30 @@ export interface IncubatorEvent {
   attended_count?: number;
   leads_count?: number;
   admitted_count?: number;
+  /** Årshjulsaktiviteten eventet genomför (migration 1700000194, § 53). */
+  wheel_item?: string;
+  /** Mål som drivs av aktiviteter (migration 1700000196, § 53.4). */
+  goal_indicators?: string[];
+  planned_participants?: number;
+  completed_at?: string;
+  outcome_verdict?: string;
+  /** Svarssidans inställningar (migration 1700000203, § 55.11): gästfrågor, maxantal, påminnelser. */
+  rsvp_settings?: unknown;
+  reminder_unanswered_sent_at?: string;
+  reminder_confirmed_sent_at?: string;
   created: string;
   updated: string;
 }
 
-export type EventSignupStage = 'signup' | 'attended' | 'meeting' | 'application' | 'admitted';
+export type EventSignupStage =
+  | 'invited'
+  | 'declined'
+  | 'waitlist'
+  | 'signup'
+  | 'attended'
+  | 'meeting'
+  | 'application'
+  | 'admitted';
 
 export interface EventSignup {
   id: string;
@@ -1278,6 +1350,19 @@ export interface EventSignup {
   stage: EventSignupStage;
   startup?: string;
   notes?: string;
+  /** Kontakt i kontaktboken (§ 15.2) — mottagare av en inbjudan (§ 53.5). */
+  contact?: string;
+  invited_at?: string;
+  invite_sent_at?: string;
+  invite_opened_at?: string;
+  responded_at?: string;
+  /** Gästens svar på svarssidan (migration 1700000203, § 55.11). */
+  plus_ones?: number;
+  diet?: string;
+  custom_answer?: string;
+  checked_in_at?: string;
+  /** Kampanjen inbjudan skickades från (§ 55). */
+  campaign?: string;
   created: string;
   updated: string;
   expand?: {
@@ -1348,11 +1433,40 @@ export interface ModuleGroup {
 }
 
 export const RAIL_GROUPS: ModuleGroup[] = [
-  { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'pagaende', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
-  { label: 'Portfölj', modules: ['kompassen', 'startups', 'de_minimis', 'investerare', 'events', 'community'] },
-  { label: 'Innehåll', modules: ['education', 'rapporter'] },
-  { label: 'System', modules: ['agenter', 'kunskapsbas', 'insights', 'integrationer', 'installningar', 'min_profil'] }
+  { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'mal', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
+  { label: 'Portfölj', modules: ['startups', 'kontakter', 'talang', 'de_minimis', 'bedomning_excellens', 'impactnavigator', 'exportlab', 'checkar', 'projekt', 'upphandlingar', 'investerare'] },
+  { label: 'Innehåll', modules: ['education', 'howspace', 'rapporter'] },
+  { label: 'System', modules: ['agenter', 'kunskapsbas', 'onskemal', 'installningar', 'min_profil'] }
 ];
+
+/**
+ * Moduler som bor som flikar under **Marknadsverktyg** (`/inflode`) i stället
+ * för som egna poster i sidmenyn: själva marknadsverktyget (Dashboard, Analys,
+ * Leads, Startupkompassen, Inbjudningar, Utvärdering) samt Events och
+ * Community. Varje modul behåller sin egen behörighet — railens post
+ * "Marknadsverktyg" visas för den som når NÅGON av dem och leder till den
+ * första den når (`marketingToolsEntry`). En ren bolagsmedlem når fortfarande
+ * Community via sin egen rail (`MEMBER_RAIL`).
+ */
+export const MARKETING_TOOL_MODULES = ['inflode', 'events', 'community'] as const;
+
+/** Prefixet som alla Marknadsverktygets sidor ligger under. */
+export const MARKETING_TOOLS_PATH = '/inflode';
+
+/**
+ * Railens post för Marknadsverktyg: vart den leder (första modulen användaren
+ * når) eller `null` när ingen av modulerna är tillgänglig.
+ */
+export function marketingToolsEntry(
+  canAccess: (moduleId: string) => boolean
+): { moduleId: string; href: string } | null {
+  for (const id of MARKETING_TOOL_MODULES) {
+    if (!canAccess(id)) continue;
+    const mod = coreModules.find((m) => m.id === id);
+    if (mod) return { moduleId: id, href: mod.route };
+  }
+  return null;
+}
 
 /**
  * Dedikerad navigation för en *ren* `startup_member` (CLAUDE.md § 21bis/§ 22).
@@ -1384,7 +1498,7 @@ export function isPureStartupMember(roles: Role[] | undefined): boolean {
 export const coreModules: ModuleDefinition[] = [
   {
     id: 'hem',
-    title: 'Hemmaplan',
+    title: 'Översikt',
     description:
       'Organisationens startsida — anslagstavla med nyheter, info och instruktioner, bolagsnytt, omvärldsbevakning och veckans agenda.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
@@ -1415,17 +1529,18 @@ export const coreModules: ModuleDefinition[] = [
   },
   {
     id: 'inkorg',
-    title: 'Min översikt',
-    description: 'Allt som är ditt på ett ställe — uppgifter, aktiviteter, möten och events att planera och följa upp.',
+    title: 'Mina uppgifter',
+    description: 'Allt som är ditt på ett ställe — uppgifter, aktiviteter, möten, events och notiser att planera och följa upp.',
     rolesAllowed: ALL_ROLES,
     route: '/inkorg'
   },
   {
-    id: 'pagaende',
-    title: 'Pågående',
-    description: 'Allt som pågår med bolagen — workshops, utbildningar och aktiviteter, samlat per bolag så hela Movexum ser läget.',
+    id: 'mal',
+    title: 'Måluppföljning',
+    description:
+      'Verksamhetsplanens mål per fokusområde med indikatorer, måltal och kvartalsstatus — beräknade ur data eller manuellt bedömda. Ersätter måluppföljningen i slides.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
-    route: '/pagaende'
+    route: '/mal'
   },
   {
     id: 'arshjul',
@@ -1444,8 +1559,9 @@ export const coreModules: ModuleDefinition[] = [
   },
   {
     id: 'uppdrag',
-    title: 'Projekt & uppdrag',
-    description: 'Skapa och samarbeta på projekt och uppdrag — bjud in roller, kommentera och följ flöden.',
+    title: 'Tvärfunktionella team',
+    description:
+      'Sätt upp tvärfunktionella team runt ett uppdrag eller projekt. AI:n föreslår Movexum-kollegor utifrån de kompetenstaggar de angett under Min profil; bjud in roller, kommentera och följ flöden.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'partner', 'startup_member', 'observer'],
     route: '/uppdrag'
   },
@@ -1458,8 +1574,8 @@ export const coreModules: ModuleDefinition[] = [
   },
   {
     id: 'inflode',
-    title: 'Startupkompassen',
-    description: 'Hjärtat i inkubatorns inflöde — fånga, kvalificera och konvertera leads. Bygg quiz, formulär och AI-chattar (Mistral) och deploya dem på egna publika URL:er med QR-koder. Hanteras av admin, coach och incubator_lead.',
+    title: 'Marknadsverktyg',
+    description: 'Inkubatorns marknads- och uppföljningsverktyg — fånga, kvalificera och konvertera leads med Startupkompassen (quiz, formulär och AI-chattar på publika URL:er med QR-koder), planera Events och bjud in under Inbjudningar, följ upp med digitala enkäter i Utvärdering och vårda nätverket i Community. Hanteras av admin, coach och incubator_lead.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach'],
     route: '/inflode'
   },
@@ -1479,6 +1595,54 @@ export const coreModules: ModuleDefinition[] = [
     route: '/de-minimis'
   },
   {
+    id: 'upphandlingar',
+    title: 'Upphandlingar',
+    description:
+      'Upphandlingar och excellens-insatser för bolagen — ladda upp underlaget, följ avrop, milstolpar och slutrapporter enligt uppföljningsregler, och utvärdera leverantören.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/upphandlingar'
+  },
+  {
+    id: 'bedomning_excellens',
+    title: 'Bedömning excellens',
+    description:
+      'Förscreening av ett bolag mot art. 22 GBER / de minimis och Vinnovas målgrupp — hämtar grunddata, bokslut och ägarbild från Roaring (valfritt org-nr eller portföljbolag) och visar JA/NEJ/OKÄNT per kriterium med vad som saknas. Underlag för controllern, inget beslut.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach'],
+    route: '/bedomning-excellens'
+  },
+  {
+    id: 'checkar',
+    title: 'Stödcheckar',
+    description:
+      'Digitala stödcheckar (excellens, resa, AI-verktyg …) som bolagen ansöker om: digital ansökningsmall med signering, bedömning med kompletteringar, finansiering per projekt/arbetspaket och automatisk de minimis-/kapitalbokföring vid beslut.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer', 'startup_member'],
+    route: '/checkar'
+  },
+  {
+    id: 'projekt',
+    title: 'Projekt',
+    description:
+      'Projekt och arbetspaket som stöd tas ur (Vinnova Excellens, TVV, EoI …) med budget, upparbetning och kassabok över beviljade checkar.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/projekt'
+  },
+  {
+    id: 'talang',
+    title: 'Studenter & talang',
+    description:
+      'Matchning mellan studenter och bolag: bolagen publicerar behov (exjobb, praktik, deltid, anställning, projekt), studenter registrerar profil på en publik sida, Movexum granskar och mäklar. Deterministisk matchning på hashtags — ingen AI bedömer studenter.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/talang'
+  },
+  {
+    id: 'kontakter',
+    title: 'Kontaktbok',
+    description:
+      'Movexums gemensamma kontaktbok — externa kontakter med interna ägare. Be ägaren om bekräftelse att använda en kontakt för ett syfte och dela den med ett bolag via systemet. Lägg in manuellt, importera eller via chatten.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/kontakter'
+  },
+  {
     id: 'investerare',
     title: 'Investerarrelationer',
     description: 'Deal flow + investerarkort med fokus, ticket size och historik.',
@@ -1490,14 +1654,38 @@ export const coreModules: ModuleDefinition[] = [
     title: 'Events',
     description: 'Eventflöde, trattanalys och ROI per event.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'observer'],
-    route: '/events'
+    route: '/inflode/events'
   },
   {
     id: 'community',
     title: 'Community',
     description: 'Alumni, mentorer och nätverk runt portföljen.',
     rolesAllowed: ALL_ROLES,
-    route: '/community'
+    route: '/inflode/community'
+  },
+  {
+    id: 'impactnavigator',
+    title: 'Impact Navigator',
+    description:
+      'AI-stödd hållbarhetsanalys per bolag (CLAUDE.md § 56): väsentliga ESG-aspekter, kompletteringsfrågor, slutanalys med risker, möjligheter och greenwashing-risker, samt versionerade uppdateringar. Beslutsstöd för coachen — människan granskar väsentligheten och slutanalysen.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/impactnavigator'
+  },
+  {
+    id: 'exportlab',
+    title: 'Export Lab',
+    description:
+      'AI-stödd internationaliseringsanalys per bolag (CLAUDE.md § 58): exportprofil och marknadsurval (Uppsala, Born Global, CAGE), informationsgap, en första exportplan med inträdesform, regelverk, kulturell spelbok och affärsförutsättningar per marknad — kopplad till bolagets KTH IRL. Beslutsstöd för coachen — människan granskar marknaderna och planen.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/exportlab'
+  },
+  {
+    id: 'onskemal',
+    title: 'Önskemål & buggar',
+    description:
+      'Intern backlog: lägg upp kort med buggar, önskemål om nya funktioner, ändringar och frågor per del av plattformen. Ledningen svarar och klarmarkerar.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/onskemal'
   },
   {
     id: 'education',
@@ -1505,6 +1693,17 @@ export const coreModules: ModuleDefinition[] = [
     description: 'Spår per Sprint X-axel: finansiering, hållbarhet, internationalisering, team.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'startup_member'],
     route: '/education'
+  },
+  {
+    // Howspace (CLAUDE.md § 59) — Movexums workspaces i Howspace samlade på
+    // en sida med ett klick in i rätt workspace (SSO mot Howspace). Läser
+    // det integrationen synkat (integration_records, staff/observer-RLS).
+    id: 'howspace',
+    title: 'Howspace',
+    description:
+      'Era workspaces i Howspace (program, workshops, kohort-lärande) med deltagarstatistik och direktlänkar. Inloggningen sker med SSO direkt mot Howspace.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/howspace'
   },
   {
     id: 'rapporter',
@@ -1530,18 +1729,24 @@ export const coreModules: ModuleDefinition[] = [
   },
   {
     id: 'insights',
-    title: 'Usage insights',
+    // Bor sedan 2026-09 under Inställningar → AI-analys (ingen egen rail-post;
+    // id:t finns kvar för sparade enabled_modules-listor).
+    title: 'AI-analys',
     description:
-      'Spåra hur AI och plattformen används i din organisation — identifiera värdedrivare och adoption per modul.',
+      'Hur AI:n används i din organisation — körningar, tokens, kostnad, kvalitetsfeedback och miljöpåverkan.',
     rolesAllowed: ['admin', 'incubator_lead'],
-    route: '/insights'
+    route: '/installningar/ai-analys'
   },
   {
+    // Bor sedan 2026-09 under Inställningar → Integrationer (ingen egen
+    // rail-post; id:t finns kvar för sparade enabled_modules-listor och
+    // för coach/medlem, som når sina personliga integrationer på
+    // /integrationer — sidan redirectar admin/incubator_lead till fliken).
     id: 'integrationer',
     title: 'Integrationer',
     description: 'Anslut externa tjänster och bygg din organisations unika digitala miljö.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'startup_member'],
-    route: '/integrationer'
+    route: '/installningar/integrationer'
   },
   {
     // Användaradministrationen bor under Inställningar (sektion "Användare");
@@ -1611,6 +1816,10 @@ export * from './onboarding';
 export * from './education-documents';
 // ─── De minimis-modul (ren beräkningslogik, enhetstestad) ────────────────────
 export * from './de-minimis';
+export * from './excellence-screening';
+export * from './excellence-facts';
+export * from './excellence-requests';
+export * from './excellence-history';
 // ─── Årshjul (ren domän-/geometrilogik, enhetstestad) ────────────────────────
 export * from './annual-wheel';
 export * from './agreements';
@@ -1620,10 +1829,17 @@ export * from './compass-quiz';
 export * from './file-topics';
 // ─── Kompetenstaxonomi (tvärfunktionella team, ren logik, enhetstestad) ──────
 export * from './competences';
+export * from './competence-tags';
+export * from './survey';
+export * from './survey-starters';
 // ─── AI-miljöpåverkan (tokens → CO₂e/vatten, ren logik, enhetstestad) ────────
 export * from './ai-impact';
 export * from './voice';
+export * from './chat-attachments';
 export * from './compass-authoring';
+export * from './compass-layout';
+export * from './compass-contact';
+export * from './login-branding';
 // ─── Mötesläge i chatten (ren möteslogik, enhetstestad, § 34) ────────────────
 export * from './meeting';
 export * from './meeting-segmenter';
@@ -1655,8 +1871,73 @@ export function resolveUserModules(input: {
   return resolveEnabledModules({ ...input, allowedForRoles: allowedModuleIdsForRoles(input.roles) });
 }
 export * from './event-time';
+export * from './event-participants';
+export * from './event-invitations';
+export * from './event-rsvp';
+export * from './email-campaigns';
+export * from './email-render';
+export * from './email-media';
+export * from './email-suppression-import';
 export * from './org-posts';
 export * from './home';
+export * from './followup-rules';
+export * from './metrics';
+export * from './goals';
+export * from './goal-activities';
+export * from './mission-activities';
+export * from './goals-import';
+export {
+  SURVEY_TEMPLATES as COMPASS_SURVEY_TEMPLATES,
+  aggregateSurvey as aggregateCompassSurvey
+} from './compass-survey';
+export type { SurveyTemplate as CompassSurveyTemplate } from './compass-survey';
+export {
+  COMPASS_PURPOSES,
+  COMPASS_PURPOSE_LABELS,
+  normalizeCompassPurpose,
+  isSurveyModule,
+  SURVEY_SUBJECT_KINDS,
+  SURVEY_SUBJECT_KIND_LABELS,
+  normalizeSurveySubjectKind,
+  isValidSurveySubjectId,
+  SURVEY_SUBJECT_PARAM,
+  SURVEY_SCALE_MIN,
+  SURVEY_SCALE_MAX,
+  SURVEY_TEXT_MAX,
+  validateSurveyAnswer,
+  findSurveyTemplate,
+  satisfiedShare
+} from './compass-survey';
+export type {
+  CompassPurpose,
+  SurveySubjectKind,
+  SurveyTemplateQuestion,
+  SurveyAnswerRow,
+  SurveyQuestionLike,
+  SurveyQuestionAggregate,
+  SurveyAggregate
+} from './compass-survey';
+export * from './procurement';
+export * from './contacts';
+export * from './contact-groups';
+export * from './feedback';
+export * from './impact-navigator';
+export * from './impact-prompts';
+export * from './impact-inputs';
+export * from './impact-mock';
+export * from './impact-lease';
+export * from './analysis-lease';
+export * from './export-lab';
+export * from './export-lab-prompts';
+export * from './export-lab-inputs';
+export * from './export-lab-mock';
+export * from './compass-start-page';
+export * from './talent';
+export * from './agent-memory';
+export * from './funding';
+export * from './support-checks';
+export * from './notifications';
+import type { NotificationKind } from './notifications';
 
 // ─── Tenant-bred kunskapsbas (migrationer 1700000118–119, § 26) ──────────────
 /** En uppladdad kunskapsbas-fil (tenant-bred, EJ per-agent som tool_knowledge). */
@@ -1695,3 +1976,8 @@ export interface OrgKnowledgeChunk {
   created: string;
   updated: string;
 }
+export * from './kth-irl';
+export * from './excellence-irl';
+
+export * from './user-activity';
+export * from './howspace';

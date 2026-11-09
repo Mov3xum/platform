@@ -2,6 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import { headers } from 'next/headers';
+import { clientIpFromHeaders } from '@/lib/client-ip';
 import { revalidatePath } from 'next/cache';
 import PocketBase from 'pocketbase';
 import { getServerPb, requireUser } from '@/lib/auth.server';
@@ -9,6 +10,7 @@ import { getServerPbUrl } from '@/lib/pb-url';
 import { hasRole } from '@/lib/rbac';
 import { recordActivity } from '@/lib/actions/record-activity';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+import { notify, notifyStartupMembers } from '@/lib/notifications-server';
 import {
   AGREEMENT_PARTY_LABELS,
   SIGNATURE_INTENT_TEXT,
@@ -124,7 +126,10 @@ export async function signAgreementAction(
   if (party === 'movexum' && !isStaff) {
     return { error: 'Endast Movexum-personal kan signera för Movexum.' };
   }
-  if (party === 'company' && !isLinkedMember && !isStaff) {
+  // Bolagsparten fylls BARA av en länkad bolagsmedlem — aldrig av Movexum-
+  // personal (ett coach-/mentorkonto i bolagets slot bryter bevismodellen,
+  // eIDAS art. 26: avtalet blev "signed" utan bolagets signatär).
+  if (party === 'company' && !(isLinkedMember && hasRole(user.roles, ['startup_member']))) {
     return { error: 'Endast bolagets medlemmar kan signera för bolaget.' };
   }
 
@@ -159,8 +164,7 @@ export async function signAgreementAction(
 
   // Audit-metadata (dataminimerad: ip lagras bara som SHA-256-hash).
   const h = await headers();
-  const xff = h.get('x-forwarded-for');
-  const ip = (xff ? xff.split(',')[0]!.trim() : h.get('x-real-ip')) || 'unknown';
+  const ip = clientIpFromHeaders((n) => h.get(n));
   const userAgent = (h.get('user-agent') || '').slice(0, 300);
   const now = new Date().toISOString();
 
@@ -254,6 +258,32 @@ export async function signAgreementAction(
     title: `${AGREEMENT_PARTY_LABELS[party]} signerade avtal: ${agreement.title}`,
     meta: fullySigned ? 'fullt signerat' : 'väntar på motpart'
   });
+
+  // Notiser (§ 50). Fullt signerat → avsändaren, utpekad signatär och bolaget.
+  // Bolaget signerade först → Movexum-sidan får "avtal att signera".
+  const agreementRow = agreement as unknown as { assigned_by?: string; assigned_to?: string };
+  const movexumSide = [agreementRow.assigned_to, agreementRow.assigned_by].filter(
+    (id): id is string => typeof id === 'string' && id.length > 0
+  );
+  const notifyBase = {
+    tenant: user.tenant,
+    actorId: user.id,
+    entity: { type: 'agreements', id: agreementId },
+    payload: { title: String(agreement.title || 'Avtal'), snippet: startupName, href: `/startups/${startupId}/dokument#agreements` }
+  };
+  if (fullySigned) {
+    await notify(pb, { ...notifyBase, recipients: movexumSide, kind: 'agreement_signed' }).catch(() => undefined);
+    if (needCompany) {
+      await notifyStartupMembers(pb, { ...notifyBase, startupId, kind: 'agreement_signed' }).catch(() => undefined);
+    }
+  } else if (party === 'company' && needMovexum && !movexumSigned) {
+    await notify(pb, {
+      ...notifyBase,
+      recipients: movexumSide.slice(0, 1),
+      kind: 'agreement_to_sign',
+      payload: { ...notifyBase.payload, snippet: `${startupName} har signerat — väntar på Movexum` }
+    }).catch(() => undefined);
+  }
 
   revalidatePath(`/startups/${startupId}`);
   revalidatePath('/aktivitet');

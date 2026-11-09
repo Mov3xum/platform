@@ -9,11 +9,14 @@ interface Props {
   label: string;
   icon: string;
   count?: number;
+  /** Markera posten aktiv på hela prefixet (t.ex. Marknadsverktyg → /inflode). */
+  activePrefix?: string;
 }
 
-export function ModuleNavItem({ href, label, icon, count }: Props) {
+export function ModuleNavItem({ href, label, icon, count, activePrefix }: Props) {
   const pathname = usePathname();
-  const active = pathname === href || pathname.startsWith(href + '/');
+  const base = activePrefix ?? href;
+  const active = pathname === base || pathname.startsWith(base + '/');
 
   return (
     <Link href={href} className={`mx-rail-item${active ? ' active' : ''}`}>

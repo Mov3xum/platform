@@ -6,7 +6,7 @@ import { TimeAgo } from './TimeAgo';
 import type { OmvarldItem } from '@platform/shared';
 
 /**
- * Omvärldsbevakningen på Hemmaplan (CLAUDE.md § 37.4) — klientdelen, satt
+ * Omvärldsbevakningen på Översikt (CLAUDE.md § 37.4) — klientdelen, satt
  * som SAMMA vertikala tidslinje som Bolagsnytt (hårlinje + prickar, eyebrow
  * med källa och tid) så att interna och externa nyheter läses som två listor
  * i samma språk i sidospalten. Servern har redan hämtat, sanerat och slagit

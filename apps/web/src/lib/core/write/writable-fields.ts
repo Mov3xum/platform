@@ -39,6 +39,19 @@ const EVENT_MANAGE: Role[] = ['admin', 'incubator_lead', 'coach'];
 // Schemaläggning av AI-agenter är admin/incubator_lead (§ 12.2).
 const SCHEDULE_MANAGE: Role[] = ['admin', 'incubator_lead'];
 
+function activityGoalFields(roles: Role[]): Record<string, FieldPolicy> {
+  const human = (reason: string): FieldPolicy => ({
+    user: { kind: 'roles', roles },
+    agent: { kind: 'deny', reason }
+  });
+  return {
+    goal_indicators: human('Kopplingen till mål görs av en människa (verksamhetsplanen).'),
+    planned_participants: human('Planen sätts av en människa.'),
+    completed_at: human('En aktivitet markeras genomförd av en människa.'),
+    outcome_verdict: human('Utfallet sätts av en människa.')
+  };
+}
+
 const POLICIES: Record<string, Record<string, FieldPolicy>> = {
   startups: {
     next_step: {
@@ -71,6 +84,12 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
     tags: {
       user: { kind: 'roles', roles: STAFF_AND_COACH },
       agent: { kind: 'deny', reason: 'Taggar ändras inte av agent i MVP.' }
+    },
+    // Bedömning excellens (§ 51.4): controllerns manuella svar — bär grundar-
+    // namn/engagemang och fri motiveringstext; bara människor i modulens krets.
+    screening_facts: {
+      user: { kind: 'roles', roles: STAFF_AND_COACH },
+      agent: { kind: 'deny', reason: 'Manuella bedömningssvar lämnas av controllern i Bedömning excellens, inte av agenten.' }
     }
   },
   activities: {
@@ -85,6 +104,12 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
     status: {
       user: { kind: 'any-role' },
       agent: { kind: 'allow' }
+    },
+    // Förfallodatum redigeras i "Mina uppgifter" (§ 40). Agentens verktygsyta
+    // (`update_activity_field`: title/description/status) är oförändrad.
+    due_date: {
+      user: { kind: 'any-role' },
+      agent: { kind: 'deny', reason: 'Förfallodatum på aktiviteter sätts av en människa i UI:t.' }
     }
   },
   // Årshjul (§ 30). Hela aktiviteten är icke-PII verksamhetsplanering, så
@@ -106,7 +131,28 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
       agent: { kind: 'deny', reason: 'Ansvarig sätts av en människa i årshjulet.' }
     },
     notes: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
-    year: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } }
+    year: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    // Mål som drivs av aktiviteter (§ 53.4). Kopplingen, planen och utfallet
+    // flyttar verksamhetsplanens siffror — ett mänskligt beslut i UI:t.
+    ...activityGoalFields(STAFF_FULL)
+  },
+  // Event (§ 53.4): samma koppling/plan/utfall som årshjulsposterna, för
+  // eventansvariga (createRule-kretsen). Agenten skapar event men rör inte målen.
+  incubator_events: activityGoalFields(EVENT_MANAGE),
+  // Team → aktiviteter (§ 29.8): vilka årshjulsposter/event ett
+  // tvärfunktionellt team arbetar med. Målen härleds ur aktiviteterna (§ 53.4)
+  // och är därmed verksamhetsplanens siffror — kopplingen görs av en människa
+  // på teamkortet (dessutom krävs ledning eller teamets lead, prövas i
+  // skrivlagret). Agenten skapar uppdrag som utkast men rör inte kopplingen.
+  missions: {
+    wheel_items: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Teamets aktiviteter kopplas av en människa på teamkortet.' }
+    },
+    events: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Teamets aktiviteter kopplas av en människa på teamkortet.' }
+    }
   },
   // Startupkompassens intag-moduler (§ 23, § 31). Ren modulkonfiguration —
   // ingen besökardata, ingen PII. Publiceringsfälten (`is_active`,
@@ -119,7 +165,13 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
     success_message: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
     target_audience: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
     consent_note: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    // Startsida i flödet (§ 23.11): beskrivning + syfte innan första frågan.
+    start_page_title: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    start_page_body: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
     flow_type: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    // Mall för den publika sidan (§ 23.7) — ren presentation, normaliseras
+    // (okänt ⇒ classic) i skrivlagret.
+    layout: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
     is_active: {
       user: { kind: 'roles', roles: COMPASS_MANAGE },
       agent: { kind: 'deny', reason: 'Publicering av en modul görs av en människa i modul-admin.' }
@@ -143,6 +195,162 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
   tasks: {
     status: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } }
   },
+  // ── Stödcheckar & finansieringsprojekt (§ 46) ─────────────────────────────
+  // Ledningen (admin/incubator_lead) äger projekt, checktyper och regler;
+  // agenten får skapa UTKAST (checktyp inaktiv, ansökan i status draft) men
+  // aldrig publicera en checktyp (`active`), skriva bedömningens spelregler
+  // (`criteria`) eller röra statusar, utlåtanden, finansiering och beslut.
+  funding_projects: {
+    title: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    kind: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    status: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    funder: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    diarienummer: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    description: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    budget_sek: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    starts_at: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    ends_at: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    default_state_aid_basis: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    default_stodgivare: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    responsible: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Ansvarig sätts av en människa i /projekt.' } },
+  },
+  funding_work_packages: {
+    code: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    title: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    description: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    budget_sek: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    starts_at: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    ends_at: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    sort_order: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+  },
+  support_check_types: {
+    title: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    kind: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    description: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    active: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'En checktyp öppnas för ansökningar av en människa i /checkar/typer — agenten skapar den som inaktivt utkast.' } },
+    max_amount_sek: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    funding_project: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    default_work_package: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    default_state_aid_basis: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    requires_workshop: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    min_irl_level: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    requires_final_report: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    report_due_days: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    changes_due_days: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    is_excellence_activity: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    criteria: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Bedömningskriterierna är bedömningens spelregler och sätts av en människa i /checkar/typer (standardkriterierna används tills dess).' } },
+    opens_at: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    closes_at: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    sort_order: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+  },
+  support_check_applications: {
+    title: { user: { kind: 'any-role' }, agent: { kind: 'allow' } },
+    activities: { user: { kind: 'any-role' }, agent: { kind: 'allow' } },
+    requested_amount_sek: { user: { kind: 'any-role' }, agent: { kind: 'allow' } },
+    activity_end_date: { user: { kind: 'any-role' }, agent: { kind: 'allow' } },
+    applicant_note: { user: { kind: 'any-role' }, agent: { kind: 'allow' } },
+    status: { user: { kind: 'any-role' }, agent: { kind: 'deny', reason: 'Statusövergångar görs av människor: bolaget skickar in/signerar, staff bedömer, ledningen beslutar.' } },
+    coach_statement: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Coachutlåtandet skrivs av coachen i /checkar (agenten kan föreslå ett utkast i text).' } },
+    controller_statement: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Controllerutlåtandet skrivs av controllern i /checkar.' } },
+    assessment_scores: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Bedömningspoängen sätts av granskaren i /checkar.' } },
+    changes_request_note: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Komplettering begärs av granskaren i /checkar.' } },
+    funding_project: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Finansieringen (projekt/arbetspaket/statsstödsgrund) är ett ekonomiskt beslut som en människa tar i /checkar.' } },
+    funding_work_package: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Finansieringen sätts av en människa i /checkar.' } },
+    state_aid_basis: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Statsstödsgrunden sätts av en människa i /checkar.' } },
+    funding_note: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Finansieringen sätts av en människa i /checkar.' } },
+    approved_amount_sek: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Beviljat belopp beslutas av en människa i /checkar.' } },
+    decision_note: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Beslutet fattas av beslutsgruppen i /checkar.' } },
+    paid_at: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Utbetalning registreras av en människa i /checkar.' } },
+    paid_amount_sek: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Utbetalning registreras av en människa i /checkar.' } },
+    paid_note: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Utbetalning registreras av en människa i /checkar.' } },
+    final_report_received_at: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Slutrapport bockas av i /checkar.' } },
+  },
+  support_check_comments: {
+    body: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Kompletteringspunkter skrivs av granskaren i /checkar.' } },
+    resolved_at: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Punkter bockas av i /checkar.' } }
+  },
+  support_check_rules: {
+    name: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /checkar/regler.' } },
+    active: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /checkar/regler.' } }
+  },
+  // Upphandlingar (§ 39). Intern inköps-/avtalsdata utan PII — agenten får
+  // uppdatera sakfälten (status, datum, belopp) å den inloggades vägnar.
+  // Utvärderingskriterier, avtalskoppling och ansvarig är mänskliga beslut
+  // (kriterierna är utvärderingens spelregler; ansvarig kräver användar-id).
+  procurements: {
+    title: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    supplier: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    procedure: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    diarienummer: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    description: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    status: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    tender_deadline: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    contract_start: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    contract_end: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    extension_option_months: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    estimated_value_sek: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    estimated_calloffs: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    is_excellence_activity: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    notes: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    evaluation_criteria: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Utvärderingskriterier sätts av en människa på upphandlingen.' }
+    },
+    agreement: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Avtalskopplingen väljs av en människa på upphandlingen.' }
+    },
+    responsible: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Ansvarig sätts av en människa på upphandlingen.' }
+    }
+  },
+  // Avrop per bolag. Milstolpar godkänns ("godkänn milstolpe 1 för Fixkod")
+  // och slutrapport bockas av via chatten — datumet är den inloggades
+  // uttryckliga beslut. Själva UTVÄRDERINGEN (poäng + omdöme) är ett
+  // mänskligt omdöme om leverantören och görs i UI:t.
+  procurement_calloffs: {
+    title: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    status: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    started_at: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    ends_at: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    milestone_1_due: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    milestone_1_approved_at: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    milestone_2_due: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    milestone_2_approved_at: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    final_report_received_at: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    amount_sek: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    movexum_share_pct: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    state_aid_relevant: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    is_excellence_activity: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    notes: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    startup: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Bolaget på ett avrop byts av en människa i UI:t.' }
+    },
+    evaluation_scores: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Utvärderingen av leverantören poängsätts av en människa i UI:t.' }
+    },
+    evaluation_summary: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Utvärderingens omdöme skrivs av en människa i UI:t.' }
+    }
+  },
+  // Uppföljningsregler är styrning (vad systemet gör automatiskt) — sätts av
+  // admin/incubator_lead i UI:t, aldrig av agenten.
+  procurement_rules: {
+    name: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /upphandlingar/regler.' } },
+    scope: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /upphandlingar/regler.' } },
+    anchor: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /upphandlingar/regler.' } },
+    offset_days: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /upphandlingar/regler.' } },
+    repeat: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /upphandlingar/regler.' } },
+    condition: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /upphandlingar/regler.' } },
+    applies_to: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /upphandlingar/regler.' } },
+    task_title: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /upphandlingar/regler.' } },
+    task_kind: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /upphandlingar/regler.' } },
+    active: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /upphandlingar/regler.' } }
+  },
   // Workshops (§ 18). Agenten får förbereda innehåll i ett UTKAST; att
   // publicera och tilldela bolag är mänskliga beslut.
   workshops: {
@@ -156,6 +364,62 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
     active: {
       user: { kind: 'roles', roles: STAFF_FULL },
       agent: { kind: 'deny', reason: 'Aktivering av en workshop görs av en människa i /education.' }
+    }
+  },
+  // Marknadsverktyget → Utvärdering (§ 47): digitala enkäter. Agenten får
+  // bygga innehållet (namn, texter, frågor) som OPUBLICERAD enkät; att
+  // publicera (/u/<slug> börjar ta emot svar) och skicka ut till deltagare
+  // är mänskliga beslut i byggaren. Samma krets som `MANAGE_ROLES` i
+  // lib/actions/surveys.ts.
+  surveys: {
+    name: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    kind: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    description: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    welcome_title: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    welcome_body: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    thank_you_message: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    questions: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    link_kind: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    link_id: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    is_active: {
+      user: { kind: 'roles', roles: COMPASS_MANAGE },
+      agent: { kind: 'deny', reason: 'Publicering av en enkät görs av en människa i /inflode/utvardering.' }
+    },
+    send_at: {
+      user: { kind: 'roles', roles: COMPASS_MANAGE },
+      agent: { kind: 'deny', reason: 'Utskick till deltagare schemaläggs av en människa i /inflode/utvardering (§ 47.5).' }
+    }
+  },
+  // Kontaktboken (§ 45). Verksamhetsfälten får agenten uppdatera; direkt-PII
+  // (e-post/telefon) skrivs av en människa i UI:t (agenten kan inte verifiera
+  // uppgifterna och ska inte gissa), `gender` är GDPR art. 9 (agent-nekad,
+  // § 9.3) och `owners` kräver användar-id:n agenten inte kan slå upp
+  // (`users` denylistad).
+  contacts: {
+    first_name: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    last_name: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    organization: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    primary_role: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    category: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    kommun: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    skills: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    info: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    email: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Kontaktuppgifter (e-post) ändras av en människa i kontaktboken.' }
+    },
+    phone: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Kontaktuppgifter (telefon) ändras av en människa i kontaktboken.' }
+    },
+    owners: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Kontaktägare sätts av en människa i kontaktboken.' }
+    },
+    gender: {
+      // GDPR art. 9 — bara admin/incubator_lead/coach (§ 45.7), inte mentor.
+      user: { kind: 'roles', roles: ['admin', 'incubator_lead', 'coach'] },
+      agent: { kind: 'deny', reason: 'Kön (GDPR art. 9) registreras aldrig av agenten.' }
     }
   },
   // dashboardens inlägg (§ 37). Alla fält får ändras av författar-kretsen; agenten
@@ -175,7 +439,72 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
       user: { kind: 'roles', roles: STAFF_FULL },
       agent: { kind: 'deny', reason: 'Media på inlägg laddas upp av en människa på startsidan.' }
     }
-  }
+  },
+  // ── Målstyrning & verksamhetsplan (§ 42) ─────────────────────────────────
+  // Verksamhetsår, mål och indikatorer ägs av ledningen (VP-beslut); status
+  // rapporteras av hela staben. Måltal (`target`) och metriknyckel sätts
+  // ALDRIG av agenten — den föreslår i text, människan beslutar.
+  goal_periods: {
+    status: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Verksamhetsårets status (utkast/aktiv/avslutad) ändras av en människa i /mal.' } },
+    title: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    year: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Årtalet på ett verksamhetsår ändras av en människa i /mal.' } }
+  },
+  // `goals`: rollpolicyn är hela staben eftersom PERSONLIGA mål ägs av en
+  // enskild medarbetare; skrivlagret (`canManageGoal`/`canCreateGoalOfKind`
+  // i @platform/shared) avgör att övergripande mål bara rörs av ledningen
+  // och personliga bara av ägaren eller ledningen.
+  goals: {
+    title: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    description: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    focus_area: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    owner_team: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    kind: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    // Agenten kan inte slå upp användar-id:n (`users` denylistad § 9.3); ett
+    // personligt mål via chatten blir alltid den inloggades eget (skrivlagret
+    // sätter ägaren), aldrig någon annans.
+    owner_user: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Ägaren av ett personligt mål väljs av en människa i /mal — via chatten blir målet ditt eget.' } },
+    // OKR-struktur (§ 42.5, migration 1700000198).
+    level: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    parent_goal: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    subteam: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    responsible: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Ansvarig väljs av en människa i /mal — agenten kan inte slå upp användare.' } }
+  },
+  goal_indicators: {
+    label: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    source: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    metric_key: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    target: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Måltal beslutas av ledningen i /mal — agenten föreslår i text.' } },
+    target_text: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'deny', reason: 'Målvärden beslutas av ledningen i /mal — agenten föreslår i text.' } },
+    unit: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } },
+    direction: { user: { kind: 'roles', roles: SCHEDULE_MANAGE }, agent: { kind: 'allow' } }
+  },
+  goal_status_entries: {
+    status: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    comment: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'allow' } },
+    // Manuellt värde = mänsklig bedömning; beräknade värden hämtar skrivlagret själv ur registret.
+    value: { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Uppmätta värden anges av en människa (eller räknas ur data) — inte av agenten.' } }
+  },
+  // Studenter & talang (§ 54): bolagets annons mot studenter. Bolaget (länkad
+  // medlem) och staff redigerar texten; publicering/granskning är staff-fält
+  // (`reviewTalentNeed`). Agenten nekad (privatpersoner i andra änden).
+  talent_needs: Object.fromEntries(
+    [
+      'title', 'kind', 'description', 'tags', 'scope', 'starts_at', 'ends_at', 'compensation',
+      'compensation_note', 'location', 'work_mode', 'supervisor', 'deadline', 'anonymous', 'status'
+    ].map((f) => [f, { user: { kind: 'any-role' }, agent: { kind: 'deny', reason: 'Behov mot studenter redigeras av en människa.' } }])
+  ) as Record<string, FieldPolicy>,
+  talent_interests: Object.fromEntries(
+    ['status', 'company_note', 'outcome', 'outcome_note'].map((f) => [
+      f,
+      { user: { kind: 'any-role' }, agent: { kind: 'deny', reason: 'Matchningar med studenter hanteras av en människa.' } }
+    ])
+  ) as Record<string, FieldPolicy>,
+  student_profiles: Object.fromEntries(
+    ['status', 'searchable'].map((f) => [
+      f,
+      { user: { kind: 'roles', roles: STAFF_FULL }, agent: { kind: 'deny', reason: 'Studentprofiler hanteras av Movexum-personal.' } }
+    ])
+  ) as Record<string, FieldPolicy>
 };
 
 /** Vilka collections som har create-stöd via det delade lagret. */
@@ -187,7 +516,133 @@ const CREATE_POLICIES: Record<
     user: { kind: 'any-role' },
     agent: { kind: 'allow' }
   },
+  // Inbjudningar till event (§ 53.5): rader i deltagarlistan med en
+  // svarstoken. Mejl till externa personer är ett mänskligt beslut — agenten
+  // bjuder aldrig in (samma princip som enkätutskicket, § 47.5).
+  event_signups: {
+    user: { kind: 'roles', roles: EVENT_MANAGE },
+    agent: { kind: 'deny', reason: 'Inbjudningar skickas av en människa under Marknadsverktyg → Inbjudningar.' }
+  },
+  // Kontaktboken (§ 45) — hela staff-kretsen lägger in kontakter och skickar
+  // förfrågningar; agenten ärver rollen. Ägare/kön får agenten aldrig sätta
+  // (fältpolicyn ovan); GDPR-samtycke krävs i skrivlagret.
+  contacts: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'allow' }
+  },
+  contact_requests: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'allow' }
+  },
+  // E-postkampanjer (§ 55): marknadsteamet (admin/incubator_lead/coach)
+  // bygger, schemalägger och skickar. Mejl till externa personer är ett
+  // mänskligt beslut — agenten har inga verktyg här (människa-i-loopen).
+  email_campaigns: {
+    user: { kind: 'roles', roles: EVENT_MANAGE },
+    agent: { kind: 'deny', reason: 'E-postkampanjer skapas och skickas av en människa under Marknadsverktyg → Kampanjer.' }
+  },
+  // Spärrlistan (§ 55.1): manuella spärrar och import läggs av Movexum-
+  // personal; webhooken skriver via superusern.
+  email_suppressions: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'deny', reason: 'Spärrlistan hanteras av en människa under Inställningar → E-post.' }
+  },
+  // Egna grupper i kontaktboken (§ 45.8) — personalen skapar, döper om och
+  // tar bort grupper och sätter medlemmar. Agenten har inget verktyg.
+  contact_groups: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'deny', reason: 'Grupper i kontaktboken hanteras av en människa under Kontaktbok → Grupper.' }
+  },
+  // Studenter & talang (§ 54). Behov skapas av bolaget (länkad medlem — verifieras
+  // i skrivlagret) eller staff; intressen av bolaget/Movexum (förslag till en
+  // student) — studentens egna skrivningar går via den publika routen utan
+  // actor. Agenten har inga verktyg här (privatpersoner, art. 14).
+  talent_needs: {
+    user: { kind: 'any-role' },
+    agent: { kind: 'deny', reason: 'Behov mot studenter skapas av bolaget eller Movexum i UI:t.' }
+  },
+  talent_interests: {
+    user: { kind: 'any-role' },
+    agent: { kind: 'deny', reason: 'Förslag till studenter skickas av en människa i Studenter & talang.' }
+  },
+  student_profiles: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'deny', reason: 'Studentprofiler hanteras av studenten själv eller Movexum-personal.' }
+  },
+  // Bedömning excellens (§ 51.6) — begäran om komplettering skickas av
+  // controllern (admin/incubator_lead/coach, finkontroll i skrivlagret);
+  // agenten har inget verktyg (människa-i-loopen).
+  screening_requests: {
+    user: { kind: 'roles', roles: STAFF_AND_COACH },
+    agent: { kind: 'deny', reason: 'Begäran om komplettering skickas av controllern i Bedömning excellens.' }
+  },
+  // KTH IRL på bolagskortet — en ny bedömning per tillfälle, av Movexum-
+  // personalen (speglar kollektionens update-/deleteRule). Människans omdöme.
+  startup_readiness_assessments: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'deny', reason: 'IRL-bedömningen görs av coachen på bolagskortet, inte av agenten.' }
+  },
+  // Upphandlingar & avrop (§ 39) — registreras av staff; agenten ärver rollen.
+  procurements: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'allow' }
+  },
+  procurement_calloffs: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'allow' }
+  },
+  procurement_rules: {
+    user: { kind: 'roles', roles: SCHEDULE_MANAGE },
+    agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /upphandlingar/regler.' }
+  },
   annual_wheel_items: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'allow' }
+  },
+  // Stödcheckar & finansieringsprojekt (§ 46). Projekt/arbetspaket/checktyper
+  // = ledning (admin/incubator_lead). Ansökningar skapas av bolagsmedlem
+  // (länkat bolag verifieras i skrivlagret) eller staff; agenten får skapa
+  // ett UTKAST å ett bolags vägnar men aldrig skicka in/signera (mänsklig
+  // firmatecknare, eIDAS). Kommentarer = staff; regler = ledning.
+  funding_projects: {
+    user: { kind: 'roles', roles: SCHEDULE_MANAGE },
+    agent: { kind: 'allow' }
+  },
+  funding_work_packages: {
+    user: { kind: 'roles', roles: SCHEDULE_MANAGE },
+    agent: { kind: 'allow' }
+  },
+  support_check_types: {
+    user: { kind: 'roles', roles: SCHEDULE_MANAGE },
+    agent: { kind: 'allow' }
+  },
+  support_check_applications: {
+    user: { kind: 'any-role' },
+    agent: { kind: 'allow' }
+  },
+  support_check_comments: {
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'deny', reason: 'Kompletteringspunkter skrivs av granskaren i /checkar.' }
+  },
+  support_check_rules: {
+    user: { kind: 'roles', roles: SCHEDULE_MANAGE },
+    agent: { kind: 'deny', reason: 'Uppföljningsregler sätts av en människa i /checkar/regler.' }
+  },
+  // Målstyrning (§ 42): år/mål/indikatorer = ledning; kvartalsstatus = staben.
+  goal_periods: {
+    user: { kind: 'roles', roles: SCHEDULE_MANAGE },
+    agent: { kind: 'deny', reason: 'Ett verksamhetsår skapas av en människa i /mal.' }
+  },
+  goals: {
+    // Staben skapar personliga mål; övergripande kräver ledning (skrivlagret).
+    user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'allow' }
+  },
+  goal_indicators: {
+    user: { kind: 'roles', roles: SCHEDULE_MANAGE },
+    agent: { kind: 'allow' }
+  },
+  goal_status_entries: {
     user: { kind: 'roles', roles: STAFF_FULL },
     agent: { kind: 'allow' }
   },
@@ -201,6 +656,11 @@ const CREATE_POLICIES: Record<
   },
   workshops: {
     user: { kind: 'roles', roles: STAFF_FULL },
+    agent: { kind: 'allow' }
+  },
+  // Enkäter under Marknadsverktyget → Utvärdering (§ 47) skapas OPUBLICERADE.
+  surveys: {
+    user: { kind: 'roles', roles: COMPASS_MANAGE },
     agent: { kind: 'allow' }
   },
   // ── Utökad chatt-skrivyta (§ 33) ─────────────────────────────────────────

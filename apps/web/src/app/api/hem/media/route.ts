@@ -43,10 +43,10 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: 'Bara Movexum-personal kan ladda upp till anslagstavlan.' }, { status: 403 });
   }
   const rateKey = `org-post-media:${user.id}`;
-  if (checkRateLimit(rateKey, UPLOADS_PER_WINDOW).blocked) {
+  if ((await checkRateLimit(rateKey, UPLOADS_PER_WINDOW)).blocked) {
     return NextResponse.json({ error: 'För många uppladdningar — vänta en stund.' }, { status: 429 });
   }
-  recordFailure(rateKey, RATE_WINDOW_MS); // räknar varje uppladdningsförsök i fönstret
+  await recordFailure(rateKey, RATE_WINDOW_MS); // räknar varje uppladdningsförsök i fönstret
 
   let form: FormData;
   try {

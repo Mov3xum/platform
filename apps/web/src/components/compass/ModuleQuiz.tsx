@@ -1,10 +1,18 @@
 'use client';
 
 import { useMemo, useState, type FormEvent } from 'react';
+import {
+  cleanContactValues,
+  hasContactSection,
+  missingContactField,
+  type ContactSectionConfig
+} from '@platform/shared';
 import type { CompassQuestion, ResultBucket, NextModuleLink } from '@/lib/compass/types';
 import { QuestionInput, readAttribution } from './QuestionInput';
 import { NextModuleCta } from './NextModuleCta';
 import { ContactPreferencePicker } from './ContactPreferencePicker';
+import { ContactSection } from './ContactSection';
+import { useFlowProgress } from './useFlowProgress';
 import { resolveNextQuestionIndex } from '@/lib/compass/question-flow';
 
 interface Props {
@@ -13,16 +21,15 @@ interface Props {
   /** Default = inloggad admin-preview. Publika sidan skickar /api/public/m. */
   apiBase?: string;
   consent?: boolean;
-  requireEmail?: boolean;
-  requirePhone?: boolean;
-  requireOrganization?: boolean;
+  /** Avsnittet "Dina uppgifter" (§ 23.11) — modulens konfiguration. */
+  contactSection: ContactSectionConfig;
   successMessage?: string;
-  /** Modulens visningsnamn — används i det nedladdningsbara resultatet. */
-  moduleName?: string;
-  /** Tenantens namn — visas i det nedladdningsbara resultatet. */
-  brandName?: string;
   /** Kedjad nästa modul (migration 1700000124). */
   nextModule?: NextModuleLink | null;
+  /** Enkätsubjekt ur `?om=<id>` (§ 43) — skickas med, valideras server-side. */
+  subject?: string | null;
+  /** Bokför pågående/avbrutet flöde (§ 23.10) — bara publika flöden. */
+  trackProgress?: boolean;
 }
 
 interface QuizResult {
@@ -38,13 +45,11 @@ export function ModuleQuiz({
   questions,
   apiBase = '/api/inflode/m',
   consent,
-  requireEmail,
-  requirePhone,
-  requireOrganization,
+  contactSection,
   successMessage,
-  moduleName,
-  brandName,
-  nextModule
+  nextModule,
+  subject,
+  trackProgress
 }: Props) {
   const [step, setStep] = useState(0);
   // Besökta steg (för "Tillbaka") — hopplogik (next_key) kan skippa frågor,
@@ -58,12 +63,20 @@ export function ModuleQuiz({
   const [result, setResult] = useState<QuizResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const attribution = useMemo(readAttribution, []);
+  const progressTracker = useFlowProgress({
+    endpointBase: trackProgress ? apiBase : undefined,
+    moduleSlug,
+    consent,
+    attribution
+  });
 
   const total = questions.length;
-  const wantsContact = requireEmail || requirePhone || requireOrganization;
-  // Sista steget är ett (valfritt) kontaktsteg.
+  // Sista steget är avsnittet "Dina uppgifter" (§ 23.11) — bara när modulen
+  // har minst ett synligt fält; annars skickas svaren in direkt efter sista
+  // frågan.
+  const hasContact = hasContactSection(contactSection);
   const lastStep = total; // index `total` = kontaktsteget
-  const onContactStep = step === lastStep;
+  const onContactStep = hasContact && step === lastStep;
   const progress = total === 0 ? 0 : Math.round((100 * Math.min(step, total)) / total);
 
   if (total === 0) {
@@ -145,8 +158,7 @@ export function ModuleQuiz({
 
   // Laddar ner resultatprofilen som en brandad PDF (Sora/Nunito) i stället för
   // ett HTML-dokument som öppnas i webbläsaren. Rendringen sker server-side
-  // (pdf-lib, EU-suveränt) — vi skickar bara den profil besökaren redan ser,
-  // ingen ny dataväg.
+  // (pdf-lib, EU-suveränt) ur modulens lagrade profil — ingen ny dataväg.
   async function downloadResult() {
     if (!result || downloading) return;
     const b = result.bucket;
@@ -156,14 +168,9 @@ export function ModuleQuiz({
       const res = await fetch('/api/public/result-pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: b?.title || 'Tack för dina svar!',
-          body: b?.body,
-          tips: b?.tips,
-          moduleName: moduleName,
-          brandName: brandName,
-          accent: '#002c40'
-        })
+        // Bara modul + resultatprofil — servern hämtar texterna ur modulens
+        // lagrade result_buckets (klientens text renderas aldrig i PDF:en).
+        body: JSON.stringify({ slug: moduleSlug, bucketKey: b?.key ?? '' })
       });
       if (!res.ok) throw new Error(`Servern svarade ${res.status}`);
       const blob = await res.blob();
@@ -201,13 +208,16 @@ export function ModuleQuiz({
           contact,
           attribution,
           consent,
-          contact_preference: contactPreference || undefined
+          contact_preference: contactPreference || undefined,
+          subject: subject || undefined,
+          sessionToken: trackProgress ? progressTracker.sessionToken : undefined
         })
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(data.error || `Servern svarade ${res.status}`);
       }
+      progressTracker.markDone();
       const data = (await res.json()) as QuizResult;
       setResult({ bucket: data.bucket ?? null, score: data.score ?? 0 });
     } catch (err) {
@@ -229,22 +239,20 @@ export function ModuleQuiz({
       }
       setError(null);
       const nextStep = resolveNextQuestionIndex(questions, step, value);
+      progressTracker.report(answers, step + 1, total);
+      if (nextStep >= total && !hasContact) {
+        await finish();
+        return;
+      }
       setTrail((t) => [...t, step]);
       setStep(nextStep >= total ? total : nextStep);
       return;
     }
 
-    // Kontaktsteg — validera obligatoriska kontaktfält.
-    if (requireEmail && !contact.email) {
-      setError('E-post krävs.');
-      return;
-    }
-    if (requirePhone && !contact.phone) {
-      setError('Telefon krävs.');
-      return;
-    }
-    if (requireOrganization && !contact.organization) {
-      setError('Organisation krävs.');
+    // Kontaktsteg — samma validering som server-side (klienten är aldrig gränsen).
+    const missing = missingContactField(cleanContactValues(contact, contactSection), contactSection);
+    if (missing) {
+      setError(missing);
       return;
     }
     setError(null);
@@ -259,70 +267,24 @@ export function ModuleQuiz({
         <span className="mx-grow" />
         <span>{progress}%</span>
       </div>
-      <div style={{ height: 4, borderRadius: 99, background: 'var(--mx-line-soft)', overflow: 'hidden' }}>
-        <div style={{ height: '100%', width: `${progress}%`, background: '#002c40', transition: 'width 200ms ease' }} />
+      <div className="mx-qprogress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
+        <i style={{ width: `${progress}%` }} />
       </div>
 
       {onContactStep ? (
         <div style={{ display: 'grid', gap: 12 }}>
-          <div className="mx-disp" style={{ fontSize: 22, fontWeight: 600, lineHeight: 1.3 }}>
-            {wantsContact ? 'Lämna dina uppgifter' : 'Vill du att vi hör av oss? (frivilligt)'}
-          </div>
-          <p className="mx-muted mx-t-12">
-            Vi hanterar dina uppgifter inom EU och delar dem aldrig vidare. Lämna tomt om du vill se
-            resultatet anonymt.
-          </p>
-          <label className="mx-label">
-            Namn
-            <input
-              className="mx-input"
-              style={{ marginTop: 4 }}
-              value={contact.name || ''}
-              onChange={(e) => setContact((c) => ({ ...c, name: e.target.value }))}
-            />
-          </label>
-          <label className="mx-label">
-            E-post {requireEmail && '*'}
-            <input
-              type="email"
-              className="mx-input"
-              style={{ marginTop: 4 }}
-              value={contact.email || ''}
-              onChange={(e) => setContact((c) => ({ ...c, email: e.target.value }))}
-            />
-          </label>
-          {requirePhone && (
-            <label className="mx-label">
-              Telefon *
-              <input
-                type="tel"
-                className="mx-input"
-                style={{ marginTop: 4 }}
-                value={contact.phone || ''}
-                onChange={(e) => setContact((c) => ({ ...c, phone: e.target.value }))}
-              />
-            </label>
-          )}
-          {requireOrganization && (
-            <label className="mx-label">
-              Organisation *
-              <input
-                className="mx-input"
-                style={{ marginTop: 4 }}
-                value={contact.organization || ''}
-                onChange={(e) => setContact((c) => ({ ...c, organization: e.target.value }))}
-              />
-            </label>
-          )}
+          <ContactSection
+            config={contactSection}
+            values={contact}
+            onChange={(key, value) => setContact((c) => ({ ...c, [key]: value }))}
+          />
           <ContactPreferencePicker value={contactPreference} onChange={setContactPreference} />
         </div>
       ) : (
         <div>
-          <div className="mx-disp" style={{ fontSize: 22, fontWeight: 600, lineHeight: 1.3 }}>
-            {questions[step]?.prompt}
-          </div>
+          <div className="mx-qprompt">{questions[step]?.prompt}</div>
           {questions[step]?.help_text && (
-            <div className="mx-t-12 mx-muted" style={{ marginTop: 8 }}>
+            <div className="mx-t-13 mx-muted" style={{ marginTop: 8, lineHeight: 1.5 }}>
               {questions[step]?.help_text}
             </div>
           )}

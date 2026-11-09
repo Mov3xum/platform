@@ -2,9 +2,16 @@
 // Hjälper de andra modul-filerna att hålla sig till PocketBase-schemat
 // från migration 1700000039 + 1700000049 + 1700000108.
 
-import type { ResultBucket } from '@platform/shared';
+import type {
+  CompassLayout,
+  CompassPurpose,
+  ContactSectionConfig,
+  FounderGender,
+  ResultBucket,
+  SurveySubjectKind
+} from '@platform/shared';
 
-export type { ResultBucket };
+export type { CompassLayout, ResultBucket };
 
 export type LeadStatus =
   | 'new'
@@ -125,6 +132,21 @@ export interface Lead {
   ai_summary?: string;
   /** Besökarens kontaktpreferens (migration 1700000125). */
   contact_preference?: ContactPreference;
+  /**
+   * Avsnittet "Dina uppgifter" (migration 1700000208, § 23.11). Nycklar ur
+   * `@platform/shared` compass-contact.ts; `founder_gender` är art. 9-klass
+   * (fältmaskad för AI, aldrig i export), `team_members` är tredjeparts-PII.
+   */
+  founder_gender?: FounderGender;
+  team_members?: string;
+  kommun?: string;
+  referral_channel?: string;
+  /**
+   * Vad besökaren gjorde (migration 1700000192, § 23.10): pågående, slutförd
+   * eller avbruten. Saknat = slutförd. Skilt från `status` (personalens
+   * pipeline).
+   */
+  completion?: import('./completion').LeadCompletion;
   // Quiz-resultat (Startupkompassen)
   quiz_result_bucket?: string;
   quiz_score?: number;
@@ -152,6 +174,9 @@ export interface Conversation {
   lead?: string;
   module_slug?: string;
   session_token?: string;
+  /** Enkätens subjekt (migration 1700000160, § 43). */
+  subject_kind?: SurveySubjectKind;
+  subject_id?: string;
   extracted_data?: Record<string, unknown>;
   status?: 'active' | 'completed' | 'abandoned';
   created: string;
@@ -176,6 +201,12 @@ export interface CompassModule {
   name: string;
   description?: string;
   flow_type: FlowType;
+  /** Intag (lead) eller enkät (svar utan lead) — saknat = intake (migration 1700000160, § 43). */
+  purpose?: CompassPurpose;
+  /** Vad en enkät handlar om: bolag/event/partner/personal. */
+  subject_kind?: SurveySubjectKind;
+  /** Anonym enkät: ingen session, ingen ip-hash, inget lead; aggregat vid ≥ 5 svar. */
+  anonymous?: boolean;
   system_prompt?: string;
   consent_note?: string;
   is_active?: boolean;
@@ -191,19 +222,42 @@ export interface CompassModule {
   theme_color?: string;
   intro_message?: string;
   // Startupkompassen — branded publik sida + quiz (migration 1700000108)
+  /**
+   * Liten text ovanför rubriken på den publika sidan. Tom ⇒ ingen eyebrow
+   * (sedan 2026-11; tidigare föll sidan tillbaka på "STARTUPKOMPASSEN").
+   */
   hero_eyebrow?: string;
   welcome_title?: string;
   welcome_body?: string;
+  /**
+   * Startsida INUTI flödet (migration 1700000208, § 23.11): rubrik + text
+   * med beskrivning och syfte som besökaren läser innan första frågan/
+   * chatten. Tom text ⇒ ingen startsida.
+   */
+  start_page_title?: string;
+  start_page_body?: string;
   /** Omslagsbild (filnamn på compass_modules.hero_image, migration 1700000122). */
   hero_image?: string;
   /** Omslagsvideo (filnamn på compass_modules.hero_video, migration 1700000141). */
   hero_video?: string;
+  /**
+   * Mall för hela den publika sidan (migration 1700000154, § 23.7):
+   * classic | split_left | split_right | cover | panel | minimal. Saknat/okänt
+   * värde ⇒ `classic` via `normalizeCompassLayout` (bakåtkompatibelt).
+   */
+  layout?: CompassLayout | string;
   chat_persona?: string;
   /** Max antal AI-utbyten i chat-flödet (0 = obegränsat). */
   max_exchanges?: number;
   require_email?: boolean;
   require_phone?: boolean;
   require_organization?: boolean;
+  /**
+   * Avsnittet "Dina uppgifter" (migration 1700000208, § 23.11): läge per
+   * kontaktfält. Saknat ⇒ legacy-konfigurationen ur require_*-booleanerna
+   * (`contactSectionForModule`). Lagras som json — läs aldrig rått.
+   */
+  contact_fields?: Partial<ContactSectionConfig> | string | null;
   /**
    * Mottagaradresser (komma-/radseparerade) dit nya inflöden mejlas via Resend.
    * Tom → fallback på env MOVEXUM_INFLOW_EMAIL (migration 1700000110).
@@ -254,6 +308,8 @@ export interface CompassQuestion {
   }[];
   required?: boolean;
   sort_order?: number;
+  /** Autodate (migration 1700000126) — tiebreak i `sortCompassQuestions`. */
+  created?: string;
 }
 
 /** Kedjad nästa-modul-länk (migration 1700000124) — visas efter slutfört flöde. */

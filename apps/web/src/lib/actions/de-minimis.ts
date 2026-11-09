@@ -3,10 +3,11 @@
 import { revalidatePath } from 'next/cache';
 import PocketBase from 'pocketbase';
 import { getServerPb, getCurrentUser } from '@/lib/auth.server';
+import { hasRole } from '@/lib/rbac';
 import { getServerPbUrl } from '@/lib/pb-url';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { escFilter } from '@/lib/pb-filter';
-import { canManageStartupDeMinimis, loadRegelverk } from '@/lib/de-minimis/data';
+import { DE_MINIMIS_STAFF_ROLES, canManageStartupDeMinimis, loadRegelverk } from '@/lib/de-minimis/data';
 import {
   kanBevilja,
   parseDateOnly,
@@ -166,6 +167,10 @@ export async function renameUnitAction(
 export async function deleteUnitAction(unitId: string): Promise<DeMinimisActionState> {
   const user = await getCurrentUser();
   if (!user) return { error: 'Ej inloggad.' };
+  // Radering är staff-only (2026-09-30): en bolagsmedlem kunde annars ta bort
+  // stöd som staff registrerat (inkl. poster från beviljade stödcheckar) och
+  // därmed sänka underlaget för takkontrollen (`kanBevilja`).
+  if (!hasRole(user.roles, DE_MINIMIS_STAFF_ROLES)) return { error: 'Endast Movexum-personal kan ta bort poster.' };
 
   const pb = await getServerPb();
   let unit: DeMinimisUnit;
@@ -246,6 +251,10 @@ export async function addUnitOrgnrAction(
 export async function removeUnitOrgnrAction(orgnrId: string): Promise<DeMinimisActionState> {
   const user = await getCurrentUser();
   if (!user) return { error: 'Ej inloggad.' };
+  // Radering är staff-only (2026-09-30): en bolagsmedlem kunde annars ta bort
+  // stöd som staff registrerat (inkl. poster från beviljade stödcheckar) och
+  // därmed sänka underlaget för takkontrollen (`kanBevilja`).
+  if (!hasRole(user.roles, DE_MINIMIS_STAFF_ROLES)) return { error: 'Endast Movexum-personal kan ta bort poster.' };
 
   const pb = await getServerPb();
   let row: { tenant: string; unit: string };
@@ -523,6 +532,10 @@ export async function addStodAction(formData: FormData): Promise<DeMinimisAction
 export async function deleteStodAction(stodId: string): Promise<DeMinimisActionState> {
   const user = await getCurrentUser();
   if (!user) return { error: 'Ej inloggad.' };
+  // Radering är staff-only (2026-09-30): en bolagsmedlem kunde annars ta bort
+  // stöd som staff registrerat (inkl. poster från beviljade stödcheckar) och
+  // därmed sänka underlaget för takkontrollen (`kanBevilja`).
+  if (!hasRole(user.roles, DE_MINIMIS_STAFF_ROLES)) return { error: 'Endast Movexum-personal kan ta bort poster.' };
 
   const pb = await getServerPb();
   let row: DeMinimisStod;

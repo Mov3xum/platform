@@ -45,6 +45,17 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     roles: STAFF_ADMIN
   },
   {
+    id: 'kompetenser',
+    slug: 'kompetenser',
+    href: '/installningar/kompetenser',
+    title: 'Kompetenser',
+    description:
+      'Tvärfunktionella team: max antal team per person, hashtag-vokabulären (godkänn förslag), täckning per kompetens, gap och inaktuella profiler.',
+    icon: 'star',
+    group: 'access',
+    roles: STAFF_ADMIN
+  },
+  {
     id: 'organisation',
     slug: 'organisation',
     href: '/installningar/organisation',
@@ -55,12 +66,24 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     roles: STAFF_ADMIN
   },
   {
-    id: 'ai-kostnad',
-    slug: 'ai-kostnad',
-    href: '/installningar/ai-kostnad',
-    title: 'AI-kostnadstak',
-    description: 'Månadstak för AI-kostnad och förbrukning hittills.',
-    icon: 'bolt',
+    id: 'integrationer',
+    slug: 'integrationer',
+    href: '/installningar/integrationer',
+    title: 'Integrationer',
+    description:
+      'Anslut externa tjänster för organisationen — bolagsregister (Roaring, Bolagsverket), marknadsföring, lärande och AI-connectors.',
+    icon: 'link',
+    group: 'access',
+    roles: STAFF_ADMIN
+  },
+  {
+    id: 'ai-analys',
+    slug: 'ai-analys',
+    href: '/installningar/ai-analys',
+    title: 'AI-analys',
+    description:
+      'Kostnadstak per månad, användning (körningar, tokens, kostnad, kvalitetsfeedback) och miljöpåverkan.',
+    icon: 'graph',
     group: 'ai',
     roles: STAFF_ADMIN
   },
@@ -75,11 +98,22 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     roles: STAFF_ADMIN
   },
   {
+    id: 'e-post',
+    slug: 'e-post',
+    href: '/installningar/e-post',
+    title: 'E-post & leverans',
+    description:
+      'Leveransbarhet för utskick: avsändardomän (SPF/DKIM/DMARC), webhook, spärrlista (studsar, klagomål, avregistreringar) och Mailchimp-import.',
+    icon: 'send',
+    group: 'access',
+    roles: STAFF_ADMIN
+  },
+  {
     id: 'utseende',
     slug: 'utseende',
     href: '/installningar/utseende',
     title: 'Logotyp & varumärke',
-    description: 'Din organisations logotyp för light och dark mode.',
+    description: 'Logotyp för light/dark mode och inloggningssidans mall, färg, bild och video.',
     icon: 'image',
     group: 'brand',
     roles: STAFF_ADMIN

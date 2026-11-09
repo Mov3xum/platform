@@ -1,10 +1,23 @@
 /*
- * Movexum-logotyp.
+ * Movexum-logotyp (CLAUDE.md § 2.1).
  *
  * Renderar wordmark "movexum" som inline HTML-text med Sora Variable,
  * eller en anpassad tenant-logotyp om logoLightUrl/logoDarkUrl är satta.
  * Self-hosted fonten laddas via fonts.css, vilket garanterar korrekt
  * rendering oavsett kontext.
+ *
+ * Varianter:
+ *   - `auto` (default): följer dark mode via `.dark`-klassen på <html> —
+ *     svart wordmark/`logoLightUrl` på ljus yta, vit wordmark/`logoDarkUrl`
+ *     på mörk. Använd denna överallt där ytan följer temat (rail, header).
+ *   - `light` / `dark`: tvingar läget — BARA för ytor som alltid är ljusa
+ *     respektive mörka oavsett tema (t.ex. en mörk bildpanel på login).
+ *   - `flex`: `currentColor`.
+ *
+ * Varje läge visar sin EGEN tenant-logotyp om den finns, annars Movexum-
+ * wordmarken i rätt färg. Vi lånar aldrig det andra lägets bild: en vit
+ * dark-mode-logotyp på vit canvas (eller tvärtom) blir osynlig, medan
+ * wordmarken alltid syns.
  */
 
 import Link from 'next/link';
@@ -19,6 +32,11 @@ type LogoProps = {
   logoLightUrl?: string;
   logoDarkUrl?: string;
 };
+
+// Neutrala wordmark-färger ur grafiska profilen (§ 2.2) — fasta hex, inte
+// semantiska tokens, eftersom varianten själv avgör ytan.
+const WORDMARK_ON_LIGHT = '#121212';
+const WORDMARK_ON_DARK = '#f2f2f2';
 
 export function Logo({
   href = '/',
@@ -41,7 +59,7 @@ export function Logo({
     display: 'block',
     userSelect: 'none',
     // Reserve horizontal space so layout stays stable if font hasn't loaded
-    minWidth: width ? `${width}px` : undefined,
+    minWidth: width ? `${width}px` : undefined
   };
 
   const imgStyle: React.CSSProperties = {
@@ -49,12 +67,23 @@ export function Logo({
     maxWidth: `${width}px`,
     maxHeight: `${height}px`,
     objectFit: 'contain',
-    display: 'block',
+    display: 'block'
   };
 
-  // Precompute per-variant image sources to avoid non-null assertions in JSX
-  const lightSrc = logoLightUrl || logoDarkUrl || '';
-  const darkSrc = logoDarkUrl || logoLightUrl || '';
+  const renderMode = (mode: 'light' | 'dark') => {
+    const src = mode === 'light' ? logoLightUrl : logoDarkUrl;
+    if (src) {
+      return (
+        <Image src={src} alt="Logotyp" width={width} height={height} style={imgStyle} unoptimized />
+      );
+    }
+    return (
+      <span style={{ ...baseStyle, color: mode === 'light' ? WORDMARK_ON_LIGHT : WORDMARK_ON_DARK }}>
+        movexum
+      </span>
+    );
+  };
+
   const flexSrc = logoLightUrl || logoDarkUrl || '';
 
   return (
@@ -66,77 +95,20 @@ export function Logo({
     >
       {variant === 'auto' ? (
         <>
-          {/* Light mode */}
-          <span className="block dark:hidden">
-            {logoLightUrl ? (
-              <Image
-                src={logoLightUrl}
-                alt="Logotyp"
-                width={width}
-                height={height}
-                style={imgStyle}
-                unoptimized
-              />
-            ) : (
-              <span style={{ ...baseStyle, color: '#121212' }}>movexum</span>
-            )}
-          </span>
-          {/* Dark mode */}
-          <span className="hidden dark:block">
-            {darkSrc ? (
-              <Image
-                src={darkSrc}
-                alt="Logotyp"
-                width={width}
-                height={height}
-                style={imgStyle}
-                unoptimized
-              />
-            ) : (
-              <span style={{ ...baseStyle, color: '#f2f2f2' }}>movexum</span>
-            )}
-          </span>
+          {/* Ljust läge — döljs av `.dark` på <html> */}
+          <span className="block dark:hidden">{renderMode('light')}</span>
+          {/* Mörkt läge */}
+          <span className="hidden dark:block">{renderMode('dark')}</span>
         </>
       ) : variant === 'light' ? (
-        lightSrc ? (
-          <Image
-            src={lightSrc}
-            alt="Logotyp"
-            width={width}
-            height={height}
-            style={imgStyle}
-            unoptimized
-          />
-        ) : (
-          <span style={{ ...baseStyle, color: '#121212' }}>movexum</span>
-        )
+        renderMode('light')
       ) : variant === 'dark' ? (
-        darkSrc ? (
-          <Image
-            src={darkSrc}
-            alt="Logotyp"
-            width={width}
-            height={height}
-            style={imgStyle}
-            unoptimized
-          />
-        ) : (
-          <span style={{ ...baseStyle, color: '#f2f2f2' }}>movexum</span>
-        )
+        renderMode('dark')
+      ) : flexSrc ? (
+        /* flex — tenant-logotyp om någon finns, annars currentColor-wordmark */
+        <Image src={flexSrc} alt="Logotyp" width={width} height={height} style={imgStyle} unoptimized />
       ) : (
-        /* flex — currentColor */
-        flexSrc ? (
-          <Image
-            src={flexSrc}
-            alt="Logotyp"
-            width={width}
-            height={height}
-            style={imgStyle}
-            unoptimized
-          />
-        ) : (
-          <span style={{ ...baseStyle, color: 'currentColor' }}>movexum</span>
-        )
+        <span style={{ ...baseStyle, color: 'currentColor' }}>movexum</span>
       )}
     </Link>
   );

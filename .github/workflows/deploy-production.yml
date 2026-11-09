@@ -2,12 +2,13 @@ name: Deploy to Coolify Production
 
 # Produktionsgrenen är `production` (default-grenen är `staging`; `main` är
 # en historisk gren som inte längre tas emot mergar — se CLAUDE.md § 10.3
-# A.8.32 om change management). Triggas på push till `production`.
+# A.8.32 om change management). Triggas på push till `production` eller manuellt.
 on:
   push:
     branches:
       - production
       - main
+  workflow_dispatch:
 
 jobs:
   build-image:
@@ -39,78 +40,16 @@ jobs:
       - name: Typecheck
         run: yarn typecheck
 
+      # Delat, testat skript — se .github/scripts/coolify-deploy.sh.
       - name: Deploy to Coolify production
         env:
           COOLIFY_BASE_URL: ${{ secrets.COOLIFY_BASE_URL }}
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
           COOLIFY_APP_UUID: ${{ secrets.COOLIFY_APP_UUID_PRODUCTION || secrets.COOLIFY_PROJECT_ID_PRODUCTION }}
           COOLIFY_DEPLOY_WEBHOOK: ${{ secrets.COOLIFY_DEPLOY_WEBHOOK_PRODUCTION }}
-        run: |
-          set -euo pipefail
-
-          if [ -n "${COOLIFY_DEPLOY_WEBHOOK:-}" ]; then
-            echo "Using Coolify deploy webhook"
-            curl --fail-with-body -sS -X POST \
-              -H "Authorization: Bearer $COOLIFY_TOKEN" \
-              -H "Accept: application/json" \
-              "$COOLIFY_DEPLOY_WEBHOOK"
-            exit 0
-          fi
-
-          if [ -z "${COOLIFY_APP_UUID:-}" ]; then
-            echo "Missing Coolify app UUID. Set COOLIFY_APP_UUID_PRODUCTION (or legacy COOLIFY_PROJECT_ID_PRODUCTION) in GitHub Secrets."
-            exit 1
-          fi
-
-          encoded_identifier=$(node -e "process.stdout.write(encodeURIComponent(process.argv[1]))" "$COOLIFY_APP_UUID")
-          deploy_param="uuid"
-          if [[ "$COOLIFY_APP_UUID" == *:* ]]; then
-            deploy_param="tag"
-          fi
-
-          deploy_v4="$COOLIFY_BASE_URL/api/v1/deploy?$deploy_param=$encoded_identifier&force=false"
-          deploy_v1="$COOLIFY_BASE_URL/api/v1/applications/$COOLIFY_APP_UUID/start?force=false"
-
-          try_deploy() {
-            local endpoint="$1"
-            echo "Trying Coolify endpoint: $endpoint"
-
-            local http_code
-            http_code=$(curl -sS -X POST \
-              -H "Authorization: Bearer $COOLIFY_TOKEN" \
-              -H "Accept: application/json" \
-              -o /tmp/coolify-response.json \
-              -w "%{http_code}" \
-              "$endpoint")
-
-            if [ "$http_code" = "404" ]; then
-              return 2
-            fi
-
-            if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
-              cat /tmp/coolify-response.json
-              return 0
-            fi
-
-            echo "Coolify deploy failed with HTTP $http_code"
-            cat /tmp/coolify-response.json
-            return 1
-          }
-
-          if try_deploy "$deploy_v4"; then
-            exit 0
-          elif [ $? -eq 2 ]; then
-            echo "Endpoint not found, trying legacy path..."
-          else
-            exit 1
-          fi
-
-          if try_deploy "$deploy_v1"; then
-            exit 0
-          fi
-
-          echo "Both Coolify deploy endpoints returned 404. Verify COOLIFY_BASE_URL and that COOLIFY_APP_UUID_PRODUCTION contains the Coolify app UUID."
-          exit 1
+          COOLIFY_TARGET_LABEL: production
+          COOLIFY_UUID_SECRET_NAME: COOLIFY_APP_UUID_PRODUCTION
+        run: bash .github/scripts/coolify-deploy.sh
 
       - name: Bootstrap PocketBase schema for production
         env:

@@ -1,6 +1,7 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+import { notifyStartupMembers } from '@/lib/notifications-server';
 import { escFilter } from '@/lib/pb-filter';
 import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 import { canCreateRecord } from './writable-fields';
@@ -156,6 +157,20 @@ export async function assignWorkshop(
     }
   });
 
+  // Notis till bolagets medlemmar (§ 50) — samma som UI-flödet. Best-effort.
+  await notifyStartupMembers(pb, {
+    tenant: actor.tenant,
+    startupId: startup.id,
+    kind: 'workshop_assigned',
+    actorId: actor.id,
+    entity: { type: 'workshop_assignments', id: assignment.id },
+    payload: {
+      title: workshopTitle,
+      snippet: dueDate.value ? `Klar senast ${dueDate.value}` : undefined,
+      href: '/mina-aktiviteter'
+    }
+  }).catch(() => undefined);
+
   return ok({
     assignmentId: assignment.id,
     workshopTitle,
@@ -276,6 +291,21 @@ export async function assignEducationDocument(
       due_date: dueDate.value ?? undefined
     }
   });
+
+  if (!existingId) {
+    await notifyStartupMembers(pb, {
+      tenant: actor.tenant,
+      startupId: startup.id,
+      kind: 'document_assigned',
+      actorId: actor.id,
+      entity: { type: 'education_documents', id: doc.id },
+      payload: {
+        title: documentTitle,
+        snippet: dueDate.value ? `Klar senast ${dueDate.value}` : undefined,
+        href: '/mina-aktiviteter'
+      }
+    }).catch(() => undefined);
+  }
 
   return ok({
     assignmentId,

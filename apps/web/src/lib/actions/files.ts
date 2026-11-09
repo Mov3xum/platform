@@ -2,13 +2,14 @@
 
 import { revalidatePath } from 'next/cache';
 import { requireUser, getServerPb } from '@/lib/auth.server';
-import { getServerPbUrl } from '@/lib/pb-url';
-import { extractPdfText, extractXlsxText, extractDocxText, extractPptxText } from '@/lib/ai/attachments';
 import { categorizeFile, type StartupOption } from '@/lib/ai/file-categorize';
-import { indexUserFile } from '@/lib/ai/rag';
-import { logAiUsage, logIndexUsage } from '@/lib/ai/usage';
-import { sanitizePersonnummer } from '@/lib/import/crm-excel';
+import { logAiUsage } from '@/lib/ai/usage';
 import { createUserFileRecord } from '@/lib/user-files.server';
+import {
+  EXTRACTABLE_USER_FILE_FILTER,
+  extractAndIndexUserFile,
+  extractUserFileText
+} from '@/lib/user-files-index.server';
 import { describeUserFileCreateError, validateUserFileUpload } from '@/lib/user-file-upload';
 import {
   isFileTopic,
@@ -188,8 +189,6 @@ export async function uploadUserFileAction(formData: FormData): Promise<FileActi
 
 // ─── AI-kategorisering (CLAUDE.md § 24) ──────────────────────────────────────
 
-/** Mime-typer vi extraherar textutdrag ur för rikare klassning. */
-const SNIPPET_TEXT_MIMES = new Set(['text/plain', 'text/markdown', 'text/csv']);
 /** Tak per kategoriseringskörning (kostnad/robusthet, EU AI Act art. 15). */
 const MAX_CATEGORIZE_PER_RUN = 40;
 
@@ -209,109 +208,9 @@ async function loadStartupOptions(pb: PocketBase, tenant: string): Promise<Start
   }
 }
 
-/** Är filen en av de texttyper vi kan extrahera (pdf/xlsx/docx/pptx/text/csv/md)? */
-function isExtractable(
-  rec: UserFile
-): { pdf: boolean; xlsx: boolean; docx: boolean; pptx: boolean; text: boolean } | null {
-  const mime = (rec.mime || '').toLowerCase();
-  const pdf = mime === 'application/pdf' || rec.doc_kind === 'pdf';
-  const xlsx =
-    mime.includes('spreadsheetml') || mime === 'application/vnd.ms-excel' || rec.doc_kind === 'xlsx';
-  const docx = mime.includes('wordprocessingml') || rec.doc_kind === 'docx';
-  const pptx = mime.includes('presentationml') || rec.doc_kind === 'pptx';
-  const text = SNIPPET_TEXT_MIMES.has(mime);
-  if (!pdf && !xlsx && !docx && !pptx && !text) return null;
-  return { pdf, xlsx, docx, pptx, text };
-}
-
-/**
- * Hämtar filens bytes server-side och extraherar text (pdf/xlsx/text). Cappas
- * till `maxChars`. Fail-soft: returnerar undefined. Texten matas/lagras bara av
- * anroparen (transient för kategorisering, persisterad sanerad för RAG-index).
- */
-async function downloadAndExtractText(
-  pb: PocketBase,
-  rec: UserFile,
-  maxChars: number
-): Promise<string | undefined> {
-  if (!rec.file) return undefined;
-  const kinds = isExtractable(rec);
-  if (!kinds) return undefined;
-  try {
-    const token = await pb.files.getToken();
-    const base = getServerPbUrl().replace(/\/$/, '');
-    const url = `${base}/api/files/user_files/${rec.id}/${encodeURIComponent(
-      rec.file
-    )}?token=${encodeURIComponent(token)}`;
-    const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) return undefined;
-    const buf = Buffer.from(await res.arrayBuffer());
-    let text = '';
-    if (kinds.pdf) text = await extractPdfText(buf);
-    else if (kinds.xlsx) text = await extractXlsxText(buf);
-    else if (kinds.docx) text = await extractDocxText(buf);
-    else if (kinds.pptx) text = await extractPptxText(buf);
-    else text = buf.toString('utf8');
-    return text.slice(0, maxChars).trim() || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 /** Kort utdrag (transient) för AI-kategoriseringen. Lagras ALDRIG. */
 async function extractTextSnippet(pb: PocketBase, rec: UserFile): Promise<string | undefined> {
-  return downloadAndExtractText(pb, rec, 6000);
-}
-
-/** Tak för extraherad text som persisteras + indexeras per personlig fil (§ 27). */
-const RAG_MAX_TEXT_CHARS = 300_000;
-
-/**
- * Extraherar, personnummer-sanerar och RAG-indexerar EN av ägarens egna filer
- * (§ 27) så chatten kan köra mot den via `search_my_files`. Verifierar owner/
- * tenant. Best-effort: en miss markerar bara filen som ej indexerad. Returnerar
- * antal chunkar (0 = ej indexerbar/ingen text).
- */
-async function extractAndIndexUserFile(
-  pb: PocketBase,
-  tenant: string,
-  ownerId: string,
-  fileId: string
-): Promise<number> {
-  let rec: UserFile;
-  try {
-    rec = (await pb.collection('user_files').getOne(fileId)) as unknown as UserFile;
-  } catch {
-    return 0;
-  }
-  if (rec.owner !== ownerId || rec.tenant !== tenant) return 0;
-  if (!isExtractable(rec)) {
-    await pb.collection('user_files').update(fileId, { indexed: false, chunk_count: 0 }).catch(() => {});
-    return 0;
-  }
-
-  const raw = await downloadAndExtractText(pb, rec, RAG_MAX_TEXT_CHARS);
-  if (!raw) {
-    await pb.collection('user_files').update(fileId, { indexed: false, chunk_count: 0 }).catch(() => {});
-    return 0;
-  }
-  // Personnummer-sanering före lagring/indexering (defense-in-depth, samma som
-  // kunskapsbasen och CRM-importen). Originalfilen lämnas orörd.
-  const text = sanitizePersonnummer(raw);
-
-  try {
-    await pb.collection('user_files').update(fileId, { extracted_text: text });
-  } catch {
-    /* fail-soft */
-  }
-
-  try {
-    const idx = await indexUserFile(pb, { tenant, owner: ownerId, sourceId: fileId, text });
-    void logIndexUsage(pb, { tenant, userId: ownerId }, idx.usage);
-    return idx.chunkCount;
-  } catch {
-    return 0;
-  }
+  return extractUserFileText(pb, rec, 6000);
 }
 
 /**
@@ -423,17 +322,13 @@ export interface IndexFilesResult {
 
 /** Tak per indexerings-körning (kostnad/robusthet, EU AI Act art. 15). */
 const MAX_INDEX_PER_RUN = 40;
-/** Filtervärden som plockar ut extraherbara (text-)filer i PB-frågan. */
-const EXTRACTABLE_FILTER =
-  '(doc_kind = "pdf" || doc_kind = "xlsx" || mime = "application/pdf" || ' +
-  'mime ~ "spreadsheetml" || mime = "application/vnd.ms-excel" || ' +
-  'mime = "text/plain" || mime = "text/markdown" || mime = "text/csv")';
 
 /**
  * "Gör mina filer sökbara i chatten" (§ 27): extraherar + RAG-indexerar ägarens
- * ännu icke-indexerade text-filer (PDF/Excel/text/CSV/Markdown) så `search_my_files`
- * kan köra mot dem. Owner-scopad, capad per körning. PowerPoint/Word/bilder
- * hoppas över (ingen textextraktion ännu — exportera till PDF).
+ * ännu icke-indexerade filer (PDF/Excel/Word/PowerPoint/text/CSV/Markdown) så
+ * `search_my_files`/`read_my_file` kan köra mot dem. Owner-scopad, capad per
+ * körning. Bilder hoppas över (ingen OCR). Format-listan och PB-filtret bor i
+ * den delade `user-files-index.server.ts` (samma som uppladdningsrouten).
  */
 export async function indexMyFilesAction(): Promise<IndexFilesResult> {
   const user = await requireUser();
@@ -441,7 +336,7 @@ export async function indexMyFilesAction(): Promise<IndexFilesResult> {
   let pending: UserFile[];
   try {
     const res = await pb.collection('user_files').getList(1, MAX_INDEX_PER_RUN, {
-      filter: pb.filter(`owner = {:o} && tenant = {:t} && indexed != true && ${EXTRACTABLE_FILTER}`, {
+      filter: pb.filter(`owner = {:o} && tenant = {:t} && indexed != true && ${EXTRACTABLE_USER_FILE_FILTER}`, {
         o: user.id,
         t: user.tenant
       }),

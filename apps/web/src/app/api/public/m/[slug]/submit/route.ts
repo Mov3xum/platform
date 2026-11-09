@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createConversation, createLead } from '@/lib/compass/store';
+import { clientIpFromRequest } from '@/lib/client-ip';
 import {
   resolvePublicModule,
   getPublicModuleQuestions,
@@ -9,10 +9,15 @@ import {
 import {
   attachAiSummary,
   buildSubmissionEntries,
+  finalizeLead,
+  leadFieldsFromContact,
   moduleWantsLead,
-  parseContactPreference
+  parseContactPreference,
+  parseContactSubmission
 } from '@/lib/compass/lead-capture';
 import { notifyNewInflow } from '@/lib/compass/notify';
+import { storeSurveyResponse } from '@/lib/compass/survey';
+import { isSurveyModule } from '@platform/shared';
 import { findMissingRequiredAlongPath } from '@/lib/compass/question-flow';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import type { Attribution } from '@/lib/compass/types';
@@ -28,11 +33,18 @@ interface SubmitBody {
   attribution?: Attribution;
   consent?: boolean;
   contact_preference?: string;
+  /** Avsnittet "Dina uppgifter" (§ 23.11) — valideras mot modulens konfiguration. */
+  contact?: unknown;
+  /** Enkätens subjekt ur `?om=<id>` (§ 43) — valideras server-side. */
+  subject?: string;
+  /** Sessionstoken (§ 23.10) — slutför det pågående leadet i stället för att skapa ett nytt. */
+  sessionToken?: string;
 }
 
+// Högra (proxy-tillagda) XFF-värdet — det vänstra är klientstyrt och lät en
+// anropare nollställa per-IP-gränsen genom att rotera headern.
 function clientIp(req: Request): string {
-  const h = req.headers.get('x-forwarded-for') || '';
-  return h.split(',')[0]?.trim() || 'anon';
+  return clientIpFromRequest(req);
 }
 
 /** Tar emot svaren från ett publikt formulär (wizard) och skapar lead. */
@@ -41,10 +53,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
 
   const ip = clientIp(req);
   const rlKey = `compass-pub-submit:${ip}`;
-  if (checkRateLimit(rlKey, MAX_PER_WINDOW).blocked) {
+  if ((await checkRateLimit(rlKey, MAX_PER_WINDOW)).blocked) {
     return NextResponse.json({ error: 'För många förfrågningar. Försök igen om en stund.' }, { status: 429 });
   }
-  recordFailure(rlKey, WINDOW_MS);
+  await recordFailure(rlKey, WINDOW_MS);
 
   let body: SubmitBody;
   try {
@@ -76,24 +88,50 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     );
   }
 
+  // ENKÄT (§ 43): svaren lagras per fråga mot subjektet — inget lead, ingen
+  // session, ingen ip-hash. Misslyckas lagringen felar vi högt (samma
+  // garanti som lead-garantin § 23.6): svaren får inte tyst försvinna.
+  if (isSurveyModule(module)) {
+    const stored = await storeSurveyResponse(pb, tenant, { module, questions, answers, subjectId: body.subject });
+    if (!stored) {
+      return NextResponse.json(
+        { error: 'Dina svar kunde inte sparas just nu. Försök igen om en stund.' },
+        { status: 500 }
+      );
+    }
+    return NextResponse.json({ ok: true });
+  }
+
   // Steg 4-valet: modulen kan vara konfigurerad att INTE skapa lead.
   if (!moduleWantsLead(module)) {
     return NextResponse.json({ ok: true });
   }
 
-  const leadPayload = mapAnswersToLead(answers);
+  // Avsnittet "Dina uppgifter" (§ 23.11): klienten är aldrig gränsen.
+  const contact = parseContactSubmission(module, body.contact);
+  if (contact.error) return NextResponse.json({ error: contact.error }, { status: 400 });
+
+  const leadPayload = { ...mapAnswersToLead(answers), ...leadFieldsFromContact(contact.values) };
   const attribution = pickAttribution(body.attribution);
   const contactPreference = parseContactPreference(body.contact_preference);
 
-  const lead = await createLead(pb, tenant, {
-    ...leadPayload,
-    ...attribution,
-    name: leadPayload.name || 'Anonym',
-    source_key: 'web',
-    landing_module: slug,
-    contact_preference: contactPreference,
-    consent_at: new Date().toISOString()
+  // Slutför det pågående leadet från progress-upserten (§ 23.10) — eller
+  // skapa ett nytt slutfört lead + konversation när ingen session finns.
+  const finalized = await finalizeLead(pb, tenant, {
+    moduleSlug: slug,
+    sessionToken: body.sessionToken,
+    fields: {
+      ...leadPayload,
+      ...attribution,
+      name: leadPayload.name || 'Anonym',
+      source_key: 'web',
+      landing_module: slug,
+      contact_preference: contactPreference,
+      notes: '',
+      consent_at: new Date().toISOString()
+    }
   });
+  const lead = finalized?.lead;
 
   // Hård lead-garanti (CLAUDE.md § 23.6): är modulen konfigurerad att skapa
   // lead MÅSTE leadet finnas — annars felar inskickningen HÖGT i stället för
@@ -105,8 +143,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
       { status: 500 }
     );
   }
-
-  await createConversation(pb, tenant, { moduleSlug: slug, leadId: lead.id });
 
   // AI-sammanställning av det inskickade (best-effort — blockerar aldrig).
   const entries = buildSubmissionEntries(questions, answers);

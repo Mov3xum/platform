@@ -3,9 +3,13 @@
 import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
+import { clientIpFromHeaders } from '@/lib/client-ip';
+import { sanitizeAppPath } from '@/lib/relative-redirect';
+import { recordLogin } from '@/lib/user-activity/record.server';
 import PocketBase from 'pocketbase';
 import { AUTH_COOKIE } from '@/lib/auth.server';
 import { getServerPbUrl } from '@/lib/pb-url';
+import { describeLoginInfraError, probePocketBase, probeSummary } from '@/lib/pb-health';
 import { parseVerificationToken } from '@/lib/verification-token';
 import { checkRateLimit, recordFailure, clearFailures } from '@/lib/rate-limit';
 
@@ -13,11 +17,14 @@ import { checkRateLimit, recordFailure, clearFailures } from '@/lib/rate-limit';
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_MAX_PER_ACCOUNT = 8;
 const LOGIN_MAX_PER_IP = 40;
+const RESET_MAX_PER_IP = 10;
+const RESET_MAX_PER_EMAIL = 3;
 
 async function isHttpsRequest(): Promise<boolean> {
   const h = await headers();
-  const proto = h.get('x-forwarded-proto') || h.get('x-forwarded-protocol');
-  return proto === 'https';
+  const raw = h.get('x-forwarded-proto') || h.get('x-forwarded-protocol') || '';
+  // Kedjade proxies: "https, http" — första värdet är klientens protokoll.
+  return raw.split(',')[0]!.trim().toLowerCase() === 'https';
 }
 
 // Secure-flaggan följer det faktiska request-protokollet (x-forwarded-proto
@@ -33,9 +40,7 @@ async function shouldUseSecureCookie(): Promise<boolean> {
 
 async function getClientIp(): Promise<string> {
   const h = await headers();
-  const xff = h.get('x-forwarded-for');
-  if (xff) return xff.split(',')[0]!.trim();
-  return h.get('x-real-ip') || 'unknown';
+  return clientIpFromHeaders((n) => h.get(n));
 }
 
 type PbError = {
@@ -79,8 +84,10 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     const accountKey = `login:acct:${ip}:${email.toLowerCase()}`;
     const ipKey = `login:ip:${ip}`;
 
-    const acctLimit = checkRateLimit(accountKey, LOGIN_MAX_PER_ACCOUNT);
-    const ipLimit = checkRateLimit(ipKey, LOGIN_MAX_PER_IP);
+    const [acctLimit, ipLimit] = await Promise.all([
+      checkRateLimit(accountKey, LOGIN_MAX_PER_ACCOUNT),
+      checkRateLimit(ipKey, LOGIN_MAX_PER_IP)
+    ]);
     if (acctLimit.blocked || ipLimit.blocked) {
       const retryMin = Math.ceil(Math.max(acctLimit.retryAfterSec, ipLimit.retryAfterSec) / 60);
       return { error: `För många inloggningsförsök. Försök igen om ca ${retryMin} min.` };
@@ -98,8 +105,10 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
       // Räkna bara faktiska autentiseringsfel (fel uppgifter), inte
       // infrastrukturfel som att PB inte går att nå.
       if (e.status === 400 || e.status === 403) {
-        recordFailure(accountKey, LOGIN_WINDOW_MS);
-        recordFailure(ipKey, LOGIN_WINDOW_MS);
+        await Promise.all([
+          recordFailure(accountKey, LOGIN_WINDOW_MS),
+          recordFailure(ipKey, LOGIN_WINDOW_MS)
+        ]);
       }
 
       if (e.status === 400) {
@@ -108,24 +117,28 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
       if (e.status === 403) {
         return { error: 'Kontot är ej verifierat eller saknar behörighet.' };
       }
-      if (e.status === 404) {
-        return { error: 'Users-collectionen saknas i PocketBase — har migrationerna körts?' };
-      }
-      if (!e.status) {
-        return { error: `Kunde inte nå PocketBase (${pbUrl}). Kontrollera POCKETBASE_URL/NEXT_PUBLIC_POCKETBASE_URL.` };
+      // Se api/auth/login/route.ts: 404 kan lika gärna vara proxyn/web-appen
+      // som svarar på PB-adressen — proba /api/health och säg vad den är.
+      if (e.status === 404 || !e.status || e.status >= 500) {
+        const probe = await probePocketBase(pbUrl);
+        console.error('[loginAction] PocketBase probe', { pbUrl, kind: probe.kind, summary: probeSummary(probe) });
+        return { error: describeLoginInfraError(pbUrl, probe) };
       }
       return { error: e.data?.message || e.message || 'Inloggning misslyckades. Försök igen.' };
     }
 
     // Lyckad inloggning — nollställ brute-force-räknarna.
-    clearFailures(accountKey);
-    clearFailures(ipKey);
+    await Promise.all([clearFailures(accountKey), clearFailures(ipKey)]);
 
     // Trim down the cookie payload to just what getCurrentUser needs.
     // The full PB user record with expanded tenant can easily exceed the 4KB
     // browser cookie limit, which silently drops the cookie and creates a
     // login → /dashboard → /login redirect loop with no error.
     const m = pb.authStore.model as Record<string, unknown> | null;
+    // Användaraktivitet (§ 57): senaste inloggning — best-effort, blockerar aldrig.
+    if (m && typeof m.id === 'string' && typeof m.tenant === 'string') {
+      void recordLogin(m.id, m.tenant);
+    }
     const expandTenant =
       (m?.expand as { tenant?: { id: string; name: string; slug: string } } | undefined)?.tenant;
     const compactModel = m
@@ -174,10 +187,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     // redirect() här lämnar kvar det utloggade skalet (toppnavbar med
     // "Logga in", ingen sidmeny) i Next.js client Router Cache fastän sidan
     // renderar inloggad. Sanera next → bara interna paths (öppen-redirect-skydd).
-    const redirectTo =
-      next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\')
-        ? next
-        : '/dashboard';
+    const redirectTo = sanitizeAppPath(next, '/dashboard');
     return { success: true, redirectTo };
   } catch (outerErr: unknown) {
     // Re-throw NEXT_REDIRECT so Next.js can process the redirect normally.
@@ -205,6 +215,24 @@ export async function requestPasswordResetAction(
   if (!email) {
     return { error: 'E-post krävs.' };
   }
+
+  // Rate-limit (A.8.x): utan spärr kunde actionen användas för e-postbombning
+  // av en adress. Per IP och per adress; vid spärr svarar vi ändå "success"
+  // (ingen enumeration) men skickar inget.
+  const ip = await getClientIp();
+  const resetIpKey = `reset:ip:${ip}`;
+  const resetEmailKey = `reset:email:${email.toLowerCase()}`;
+  const [resetIpLimit, resetEmailLimit] = await Promise.all([
+    checkRateLimit(resetIpKey, RESET_MAX_PER_IP),
+    checkRateLimit(resetEmailKey, RESET_MAX_PER_EMAIL)
+  ]);
+  if (resetIpLimit.blocked || resetEmailLimit.blocked) {
+    return { success: true };
+  }
+  await Promise.all([
+    recordFailure(resetIpKey, LOGIN_WINDOW_MS),
+    recordFailure(resetEmailKey, LOGIN_WINDOW_MS)
+  ]);
 
   const pbUrl = getServerPbUrl();
   const pb = new PocketBase(pbUrl);

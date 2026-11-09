@@ -50,7 +50,8 @@ const DEFAULT_INLINE: InlineClasses = {
  */
 export function isSafeHref(escaped: string): boolean {
   if (!escaped || /\s|<|>/.test(escaped)) return false;
-  if (escaped.startsWith('/')) return !escaped.startsWith('//');
+  // `//host` OCH `/\host` är protokollrelativa externa adresser i webbläsare.
+  if (escaped.startsWith('/')) return !escaped.startsWith('//') && !escaped.startsWith('/\\');
   return /^https?:\/\/[^\s]+$/i.test(escaped);
 }
 

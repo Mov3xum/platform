@@ -135,3 +135,173 @@ export function normalizeCompassChoices(raw: unknown): CompassChoice[] {
 
   return out;
 }
+
+/* ────────────────────────────────────────────────────────────────────
+   Frågeordning (sort_order)
+   ──────────────────────────────────────────────────────────────────── */
+
+/** Steg mellan två frågor som läggs efter varandra. */
+export const COMPASS_QUESTION_SORT_STEP = 10;
+
+export interface CompassQuestionInsertPlan {
+  /** `sort_order` för den nya frågan. */
+  sortOrder: number;
+  /**
+   * Satt när gapet mellan grannarna tagit slut: NYA `sort_order` för de
+   * befintliga frågorna (samma ordning som `existingSorted`), som måste
+   * skrivas INNAN den nya frågan skapas. Utelämnad = inga andra rader rörs.
+   */
+  renumber?: number[];
+}
+
+/**
+ * Planerar var en ny fråga hamnar, deterministiskt och oberoende av i vilken
+ * ordning anropen råkar bearbetas.
+ *
+ * - `position` = frågans ABSOLUTA plats i modulen (1 = första frågan). Är
+ *   platsen bortom sista frågan läggs den sist; annars skjuts den in mellan
+ *   grannarna (heltalsmittpunkt). Tar gapet slut numreras modulen om
+ *   (10, 20, 30 …) — `renumber` säger vad de befintliga ska få.
+ * - Ingen position: frågan läggs sist (`högsta + steg`).
+ *
+ * `existingSorted` = befintliga frågors sort_order i visningsordning
+ * (stigande). Ogiltiga värden (NaN, negativa) behandlas som 0. På en tom modul
+ * blir första frågan 10, andra 20 osv.
+ */
+export function planCompassQuestionInsert(
+  existingSorted: readonly (number | null | undefined)[],
+  position?: number | null
+): CompassQuestionInsertPlan {
+  const existing = existingSorted.map((v) => {
+    const n = Number(v ?? 0);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  });
+  const highest = existing.length > 0 ? Math.max(...existing) : 0;
+  const positionRaw = Number(position);
+  const hasPosition =
+    position !== undefined && position !== null && Number.isFinite(positionRaw) && positionRaw >= 1;
+  const index = hasPosition ? Math.floor(positionRaw) - 1 : existing.length;
+
+  if (index >= existing.length) {
+    return { sortOrder: highest + COMPASS_QUESTION_SORT_STEP };
+  }
+
+  const prev = index === 0 ? 0 : existing[index - 1]!;
+  const next = existing[index]!;
+  if (next - prev >= 2) {
+    return { sortOrder: Math.floor((prev + next) / 2) };
+  }
+
+  // Inget gap kvar — numrera om med jämna steg och lägg den nya på sin plats.
+  const renumber: number[] = [];
+  let sortOrder = 0;
+  let cursor = 0;
+  for (let i = 0; i <= existing.length; i++) {
+    cursor += COMPASS_QUESTION_SORT_STEP;
+    if (i === index) {
+      sortOrder = cursor;
+      cursor += COMPASS_QUESTION_SORT_STEP;
+    }
+    if (i < existing.length) renumber.push(cursor);
+  }
+  return { sortOrder, renumber };
+}
+
+export interface CompassQuestionReorderWrite {
+  id: string;
+  sort_order: number;
+}
+
+export type CompassQuestionReorderPlan =
+  | { ok: true; writes: CompassQuestionReorderWrite[] }
+  | { ok: false; error: string };
+
+/**
+ * Planerar en OMORDNING av modulens frågor (drag-and-drop i modul-admin).
+ *
+ * `orderedIds` är den nya visningsordningen (alla frågors id:n), `existing`
+ * frågorna som de ligger i databasen. Hela modulen numreras om med jämna steg
+ * (10, 20, 30 …) i den nya ordningen — det ger alltid gap för framtida
+ * inskjutningar (`planCompassQuestionInsert`) och gör ordningen entydig även
+ * när flera frågor råkat få samma `sort_order` ("6, 1, 9"-buggen). Bara rader
+ * vars nummer faktiskt ändras returneras, så en oförändrad ordning ger inga
+ * skrivningar.
+ *
+ * Avvisar en lista som inte är en exakt permutation av de befintliga id:na
+ * (dubbletter, okända eller saknade id:n) — klienten är aldrig
+ * säkerhetsgränsen, och en halv lista får aldrig tappa frågor.
+ */
+export function planCompassQuestionReorder(
+  orderedIds: readonly string[],
+  existing: readonly CompassQuestionOrderable[]
+): CompassQuestionReorderPlan {
+  const ids = orderedIds.map((id) => String(id ?? '').trim()).filter(Boolean);
+  if (ids.length !== orderedIds.length) {
+    return { ok: false, error: 'Ordningen innehåller ett tomt fråge-id.' };
+  }
+  if (new Set(ids).size !== ids.length) {
+    return { ok: false, error: 'Ordningen innehåller samma fråga flera gånger.' };
+  }
+  const known = new Map(existing.map((q) => [q.id, q]));
+  if (ids.length !== known.size || ids.some((id) => !known.has(id))) {
+    return {
+      ok: false,
+      error: 'Ordningen stämmer inte med modulens frågor — ladda om sidan och försök igen.'
+    };
+  }
+
+  const writes: CompassQuestionReorderWrite[] = [];
+  ids.forEach((id, index) => {
+    const target = (index + 1) * COMPASS_QUESTION_SORT_STEP;
+    const current = Number(known.get(id)!.sort_order ?? NaN);
+    if (current !== target) writes.push({ id, sort_order: target });
+  });
+  return { ok: true, writes };
+}
+
+/**
+ * Flyttar ett element i en lista (ren hjälpare för drag-and-drop i UI:t).
+ * Index utanför listan eller samma plats ger listan oförändrad (ny referens).
+ */
+export function moveCompassQuestion<T>(items: readonly T[], from: number, to: number): T[] {
+  const out = [...items];
+  if (from < 0 || from >= out.length || to < 0 || to >= out.length || from === to) return out;
+  const [moved] = out.splice(from, 1);
+  out.splice(to, 0, moved as T);
+  return out;
+}
+
+/** Minsta gemensamma form för att sortera frågor på läsvägen. */
+export interface CompassQuestionOrderable {
+  id: string;
+  sort_order?: number | null;
+  created?: string | null;
+}
+
+/**
+ * Sorterar frågor deterministiskt: `sort_order` stigande, sedan `created`
+ * (äldst först), sedan `id`. PocketBase avgör lika `sort_order` godtyckligt
+ * (slumpade id:n), vilket är hur "6, 1, 9" uppstod — två frågor som fick
+ * samma sort_order visades i olika ordning varje gång. Görs i JS (inte via
+ * PB:s `sort`-sträng) så att en instans utan `created`-fältet (migration
+ * 1700000126) inte får 400 och en tom lista. Stabil och muterar inte input.
+ */
+export function sortCompassQuestions<T extends CompassQuestionOrderable>(questions: readonly T[]): T[] {
+  const num = (v: number | null | undefined): number => {
+    const n = Number(v ?? 0);
+    return Number.isFinite(n) ? n : 0;
+  };
+  return [...questions].sort((a, b) => {
+    const so = num(a.sort_order) - num(b.sort_order);
+    if (so !== 0) return so;
+    const ca = String(a.created ?? '');
+    const cb = String(b.created ?? '');
+    if (ca !== cb) {
+      // Saknad tidsstämpel sist — en post utan `created` är alltid "okänd".
+      if (!ca) return 1;
+      if (!cb) return -1;
+      return ca < cb ? -1 : 1;
+    }
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+}

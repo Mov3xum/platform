@@ -11,7 +11,7 @@ import DashboardChat, {
 } from '@/components/DashboardChat';
 import { Icon } from '@/components/proto/Icon';
 import MeetingMode, { type MeetingInitial } from '@/components/meeting/MeetingMode';
-import type { ChatAttachment } from '@/lib/actions/chat';
+import type { ChatAttachment } from '@/lib/ai/chat-input';
 import type { GeneratedFileRef, MeetingRequestRef, ToolRunMessage } from '@platform/shared';
 import {
   listResumableMeetingsAction,
@@ -136,19 +136,24 @@ function toUiMessages(messages: ToolRunMessage[]): UiMessage[] {
     .map((m) => ({
       role: m.role as 'user' | 'assistant',
       content: m.content,
+      attachments:
+        m.role === 'user' && m.chat_attachments && m.chat_attachments.length > 0
+          ? m.chat_attachments.map((a) => ({
+              name: a.name,
+              mime: a.mime,
+              kind: a.kind,
+              truncated: a.truncated,
+              text_dropped: a.text_dropped
+            }))
+          : undefined,
       generated_files: m.generated_files,
       visuals: m.visuals,
       steps: m.steps,
+      actions: m.actions,
       approval_request: m.approval_request,
       meeting_request: m.meeting_request,
       sources: m.sources,
-      model: m.role === 'assistant' ? m.model : undefined,
-      // Turens tokens (in + ut, per-turn-metadata § 9.9) → inline miljöchip
-      // under varje assistant-svar.
-      tokens:
-        m.role === 'assistant'
-          ? (Number(m.tokens_in) || 0) + (Number(m.tokens_out) || 0)
-          : undefined
+      model: m.role === 'assistant' ? m.model : undefined
     }));
 }
 
@@ -488,7 +493,22 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
   function runTurn(threadId: string, item: QueuedTurn) {
     updateConv(threadId, (c) => ({
       ...c,
-      messages: [...c.messages, { role: 'user', content: item.displayText }],
+      messages: [
+        ...c.messages,
+        {
+          role: 'user',
+          content: item.displayText,
+          attachments:
+            item.opts.attachments.length > 0
+              ? item.opts.attachments.map((a) => ({
+                  name: a.name,
+                  mime: a.mime,
+                  kind: a.kind,
+                  truncated: a.truncated
+                }))
+              : undefined
+        }
+      ],
       error: null,
       unread: false
     }));

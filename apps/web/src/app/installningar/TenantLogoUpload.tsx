@@ -40,7 +40,12 @@ function LogoUploadPanel({
   }, [preview]);
 
   const isLight = mode === 'light';
-  const label = isLight ? 'Light mode' : 'Dark mode';
+  const label = isLight ? 'Ljust läge' : 'Mörkt läge';
+  // Förklara vilken logotyp som hör hemma var — annars laddas lätt den vita
+  // upp under "ljust" och blir osynlig på den vita canvasen.
+  const hint = isLight
+    ? 'Visas på ljus bakgrund — ladda upp en mörk/färgad logotyp.'
+    : 'Visas på mörk bakgrund — ladda upp en ljus/vit logotyp.';
   const bgClass = isLight
     ? 'bg-white border border-default'
     : 'bg-[#0a0a0a] border border-[#333]';
@@ -63,7 +68,10 @@ function LogoUploadPanel({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="text-sm font-medium text-foreground">{label}</div>
+      <div>
+        <div className="text-sm font-medium text-foreground">{label}</div>
+        <p className="text-xs text-foreground-subtle">{hint}</p>
+      </div>
 
       {/* Preview area */}
       <div

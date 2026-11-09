@@ -4,9 +4,11 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
+import { writeWithFallback } from '@/lib/core/write/helpers';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import {
   ALL_ROLES,
+  sanitizeNeededTags,
   type Mission,
   type MissionParticipant,
   type MissionParticipantRole,
@@ -19,11 +21,81 @@ import {
 import { deriveRecipientsFromParticipants, getMissionContext, unionParticipantIds } from '@/lib/missions-server';
 import { createMissionMemberTasks } from '@/lib/assignments/collaboration';
 import { notify } from '@/lib/notifications-server';
+import { isMissionCompletionTransition, logMissionCompletion } from '@/lib/missions/completion';
+import { isActiveMissionStatus, teamCapViolation } from '@/lib/team/team-cap.server';
 
 const MEMBER_ROLES: Role[] = ALL_ROLES.filter((r) => r !== 'observer');
 
+const ID_RE = /^[a-zA-Z0-9]{1,30}$/;
+const STAFF_FOR_STARTUPS: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'];
+
+/**
+ * Behåller bara id:n för användare i den inloggades tenant. Klienten är aldrig
+ * säkerhetsgränsen: ett uppdrag får inte peka på (och notifiera) användare i en
+ * annan tenant. Läser med användarens token (users.viewRule = samma tenant).
+ */
+async function keepTenantUserIds(
+  pb: Awaited<ReturnType<typeof getServerPb>>,
+  tenant: string,
+  ids: string[]
+): Promise<Set<string>> {
+  const wanted = Array.from(new Set(ids.filter((id) => ID_RE.test(id))));
+  const ok = new Set<string>();
+  for (let i = 0; i < wanted.length; i += 40) {
+    const chunk = wanted.slice(i, i + 40);
+    const params: Record<string, string> = { t: tenant };
+    const ors = chunk.map((id, j) => {
+      params[`u${j}`] = id;
+      return `id = {:u${j}}`;
+    });
+    try {
+      const res = await pb.collection('users').getList(1, chunk.length, {
+        filter: pb.filter(`tenant = {:t} && (${ors.join(' || ')})`, params),
+        fields: 'id'
+      });
+      for (const r of res.items) ok.add(r.id);
+    } catch {
+      /* fail-closed: id:n som inte kunde verifieras släpps */
+    }
+  }
+  return ok;
+}
+
+/** Bolag i tenanten; icke-staff får bara koppla bolag hen är länkad till. */
+async function keepAllowedStartupIds(
+  pb: Awaited<ReturnType<typeof getServerPb>>,
+  user: { tenant: string; roles: Role[]; linkedStartups: string[] },
+  ids: string[]
+): Promise<string[]> {
+  const isStaff = hasRole(user.roles, STAFF_FOR_STARTUPS);
+  const wanted = Array.from(new Set(ids.filter((id) => ID_RE.test(id)))).filter(
+    (id) => isStaff || user.linkedStartups.includes(id)
+  );
+  const ok = new Set<string>();
+  for (let i = 0; i < wanted.length; i += 40) {
+    const chunk = wanted.slice(i, i + 40);
+    const params: Record<string, string> = { t: user.tenant };
+    const ors = chunk.map((id, j) => {
+      params[`s${j}`] = id;
+      return `id = {:s${j}}`;
+    });
+    try {
+      const res = await pb.collection('startups').getList(1, chunk.length, {
+        filter: pb.filter(`tenant = {:t} && (${ors.join(' || ')})`, params),
+        fields: 'id'
+      });
+      for (const r of res.items) ok.add(r.id);
+    } catch {
+      /* fail-closed */
+    }
+  }
+  return wanted.filter((id) => ok.has(id));
+}
+
 export type MissionActionState = {
   error?: string;
+  /** Maskinläsbar orsak — `team_cap` = teamtaket nått (§ 29.7). */
+  code?: 'team_cap';
   missionId?: string;
 };
 
@@ -150,6 +222,15 @@ export async function createMissionAction(
   const accent = String(formData.get('accent') || 'purple').trim() || 'purple';
   const visibilityRaw = String(formData.get('visibility') || 'tenant').trim() as MissionVisibility;
   const participantsRaw = String(formData.get('participants_json') || '').trim();
+  // Hashtags teamet sattes ihop för (AI-förslaget, § 29.7) — meriter när
+  // uppdraget avslutas. Saneras till slugs; okänt fält släpps tyst av PB på
+  // en instans utan migration 1700000179 (meriterna blir då bara 0).
+  let neededTags: string[] = [];
+  try {
+    neededTags = sanitizeNeededTags(JSON.parse(String(formData.get('needed_tags_json') || '[]')));
+  } catch {
+    neededTags = [];
+  }
 
   if (title.length < 2) return { error: 'Titel måste vara minst 2 tecken.' };
   if (title.length > 200) return { error: 'Titel får vara max 200 tecken.' };
@@ -177,12 +258,37 @@ export async function createMissionAction(
     ];
   }
 
+  const pb = await getServerPb();
+
+  // Tenant-/medlemsverifiering av allt klienten pekar ut (bolag, deltagare,
+  // mentor) — annars kunde ett uppdrag kopplas till en annan tenants bolag
+  // och slutförandet skriva aktivitetsrader på dess bolagskort.
+  const requestedStartups = startups;
+  const allowedStartups = await keepAllowedStartupIds(pb, user, requestedStartups);
+  if (allowedStartups.length !== requestedStartups.length) {
+    return { error: 'Ett eller flera valda bolag finns inte eller är inte tillgängliga för dig.' };
+  }
+  const validUsers = await keepTenantUserIds(pb, user.tenant, [
+    ...participants.map((p) => p.user_id),
+    ...(mentor ? [mentor] : [])
+  ]);
+  participants = participants.filter((p) => p.user_id === user.id || validUsers.has(p.user_id));
+  const validMentor = mentor && validUsers.has(mentor) ? mentor : undefined;
+
   const derivedRecipients = deriveRecipientsFromParticipants(participants).filter(
     (id) => id !== user.id
   );
 
   const stages = defaultStagesForType(type);
-  const pb = await getServerPb();
+
+  // § 29.7 — teamtaket: ett nytt uppdrag skapas som pågående, så varje
+  // medlem (även utfärdaren som ansvarig) måste ha en ledig teamplats.
+  const capError = await teamCapViolation(pb, user.tenant, [
+    ...participants.map((p) => p.user_id),
+    ...derivedRecipients,
+    ...(validMentor ? [validMentor] : [])
+  ]);
+  if (capError) return { error: capError, code: 'team_cap' };
 
   let created: Mission;
   try {
@@ -193,7 +299,7 @@ export async function createMissionAction(
       status: 'preparation' satisfies MissionStatus,
       issuer: user.id,
       recipients: derivedRecipients,
-      mentor: mentor || null,
+      mentor: validMentor || null,
       startup: startups[0] || null,
       startups,
       participants_json: participants,
@@ -202,6 +308,7 @@ export async function createMissionAction(
       description: description || '',
       stages_json: stages,
       artifacts_json: [],
+      needed_tags: neededTags,
       accent
     });
   } catch (err) {
@@ -284,8 +391,20 @@ export async function updateMissionStatus(
 
   if (mission.status === status) return { missionId: id };
 
+  // § 29.7 — ett utkast/avslutat uppdrag som blir pågående tar en teamplats
+  // för varje medlem.
+  if (!isActiveMissionStatus(mission.status) && isActiveMissionStatus(status)) {
+    const capError = await teamCapViolation(pb, user.tenant, unionParticipantIds(mission));
+    if (capError) return { error: capError, code: 'team_cap' };
+  }
+
   try {
-    await pb.collection(PB_COLLECTIONS.missions).update(id, { status });
+    await writeWithFallback(pb, (c) => c.collection(PB_COLLECTIONS.missions).update(id, { status }), { fallbackOn404: true });
+
+    // § 29.4 — slutfört team sammanställs på kopplade bolagskort.
+    if (isMissionCompletionTransition(mission.status, status)) {
+      await logMissionCompletion(pb, mission, user.id);
+    }
 
     await notify(pb, {
       tenant: user.tenant,
@@ -350,10 +469,21 @@ export async function advanceStage(id: string, stageId: string, note?: string): 
       ? 'in_progress'
       : mission.status;
 
+  if (!isActiveMissionStatus(mission.status) && isActiveMissionStatus(nextStatus)) {
+    const capError = await teamCapViolation(pb, user.tenant, unionParticipantIds(mission));
+    if (capError) return { error: capError, code: 'team_cap' };
+  }
+
   try {
-    await pb
-      .collection(PB_COLLECTIONS.missions)
-      .update(id, { stages_json: stages, status: nextStatus });
+    await writeWithFallback(pb, (c) =>
+      c.collection(PB_COLLECTIONS.missions).update(id, { stages_json: stages, status: nextStatus }),
+      { fallbackOn404: true }
+    );
+
+    // § 29.4 — sista steget klart ⇒ teamet slutfört ⇒ bolagskortet.
+    if (isMissionCompletionTransition(mission.status, nextStatus)) {
+      await logMissionCompletion(pb, mission, user.id);
+    }
 
     await notify(pb, {
       tenant: user.tenant,
@@ -408,8 +538,14 @@ export async function updateMissionParticipants(
   sanitized.push({ user_id: mission.issuer, role: 'lead', added_at: now, added_by: user.id });
   seen.add(mission.issuer);
 
+  const validUsers = await keepTenantUserIds(
+    pb,
+    user.tenant,
+    (Array.isArray(participants) ? participants : []).map((p) => String(p?.user_id ?? ''))
+  );
   for (const p of participants) {
     if (!p?.user_id || seen.has(p.user_id)) continue;
+    if (!validUsers.has(p.user_id)) continue;
     if (!VALID_PARTICIPANT_ROLES.includes(p.role)) continue;
     sanitized.push({
       user_id: p.user_id,
@@ -424,11 +560,18 @@ export async function updateMissionParticipants(
     (uid) => uid !== mission.issuer
   );
 
+  // § 29.7 — nya medlemmar i ett pågående team måste ha en ledig plats.
+  // Befintliga medlemmar rörs inte (deras plats räknas redan).
+  if (isActiveMissionStatus(mission.status)) {
+    const capError = await teamCapViolation(pb, user.tenant, Array.from(seen), previous);
+    if (capError) return { error: capError, code: 'team_cap' };
+  }
+
   try {
-    await pb.collection(PB_COLLECTIONS.missions).update(id, {
+    await writeWithFallback(pb, (c) => c.collection(PB_COLLECTIONS.missions).update(id, {
       participants_json: sanitized,
       recipients: derivedRecipients
-    });
+    }), { fallbackOn404: true });
 
     const newOnes = Array.from(seen).filter((uid) => !previous.includes(uid) && uid !== user.id);
     if (newOnes.length > 0) {
@@ -489,14 +632,14 @@ export async function updateMissionAction(
   const accent = String(formData.get('accent') || mission.accent || 'purple').trim();
 
   try {
-    await pb.collection(PB_COLLECTIONS.missions).update(id, {
+    await writeWithFallback(pb, (c) => c.collection(PB_COLLECTIONS.missions).update(id, {
       title,
       type,
       visibility,
       due_date: dueDate || null,
       description,
       accent
-    });
+    }), { fallbackOn404: true });
     revalidatePath('/uppdrag');
     revalidatePath(`/uppdrag/${id}`);
     return { missionId: id };
@@ -550,7 +693,8 @@ export async function advanceStageFormAction(formData: FormData): Promise<void> 
   const stageId = String(formData.get('stage_id') || '');
   const note = String(formData.get('note') || '').trim() || undefined;
   if (!id || !stageId) return;
-  await advanceStage(id, stageId, note);
+  const res = await advanceStage(id, stageId, note);
+  if (res.code === 'team_cap') redirect(`/uppdrag/${encodeURIComponent(id)}?fel=team_cap`);
 }
 
 export async function updateMissionStatusFormAction(formData: FormData): Promise<void> {
@@ -558,7 +702,8 @@ export async function updateMissionStatusFormAction(formData: FormData): Promise
   const id = String(formData.get('mission_id') || '');
   const status = String(formData.get('status') || '') as MissionStatus;
   if (!id || !status) return;
-  await updateMissionStatus(id, status);
+  const res = await updateMissionStatus(id, status);
+  if (res.code === 'team_cap') redirect(`/uppdrag/${encodeURIComponent(id)}?fel=team_cap`);
 }
 
 export async function updateMissionParticipantsFormAction(formData: FormData): Promise<void> {

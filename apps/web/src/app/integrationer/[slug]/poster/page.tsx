@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { escFilter } from '@/lib/pb-filter';
 import { notFound, redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
-import { canAccessModuleForUser } from '@/lib/rbac';
+import { canOpenIntegrations } from '@/lib/integrations/access';
 import { PageShell } from '@/components/PageShell';
 
 interface ProviderRow {
@@ -52,7 +52,7 @@ export default async function IntegrationRecordsPage({
   const { slug } = await params;
   const { type, page } = await searchParams;
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'integrationer', user.enabledModules)) {
+  if (!canOpenIntegrations(user)) {
     redirect('/dashboard');
   }
 
@@ -98,8 +98,10 @@ export default async function IntegrationRecordsPage({
   }
 
   const currentPage = Math.max(1, parseInt(page || '1', 10) || 1);
-  const filterParts = [`tenant_integration = "${tenantIntegration.id}"`];
-  if (type) filterParts.push(`record_type = "${type}"`);
+  const filterParts = [`tenant_integration = "${escFilter(tenantIntegration.id)}"`];
+  // `type` kommer från URL:en — escapas (A.8.9) och begränsas till ett kort
+  // identifierarformat.
+  if (type && /^[a-zA-Z0-9_-]{1,64}$/.test(type)) filterParts.push(`record_type = "${escFilter(type)}"`);
 
   let result: { items: IntegrationRecordRow[]; totalPages: number } = {
     items: [],

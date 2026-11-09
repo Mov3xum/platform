@@ -2,7 +2,8 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import { escFilter } from '@/lib/pb-filter';
 import type { AssignableResource } from '@/lib/assignments/types';
-import { parseDateTimeInput } from '@platform/shared';
+import { formatStockholmDateTime, parseDateTimeInput } from '@platform/shared';
+import { notify } from '@/lib/notifications-server';
 
 export type { AssignableResource, AssignmentCollabOptions } from '@/lib/assignments/types';
 
@@ -11,7 +12,7 @@ export type { AssignableResource, AssignmentCollabOptions } from '@/lib/assignme
  *
  * När staff tilldelar en workshop eller ett utbildningsdokument kan de:
  *   • bjuda in andra Movexum-resurser (coacher/mentorer) som medarbetare
- *     → varje resurs får en personlig `tasks`-rad (syns i "Min översikt")
+ *     → varje resurs får en personlig `tasks`-rad (syns i "Mina uppgifter")
  *   • skapa ett möte → `incubator_events` + `event_signups` per inbjuden resurs
  *     (mötet syns i allas agenda-strip eftersom den listar tenantens events)
  *
@@ -75,11 +76,13 @@ interface CollaboratorTaskInput {
   /** Kort, PII-fri beskrivning (t.ex. "Workshop: Internationalisering – Bolaget AB"). */
   description: string;
   dueDate?: string;
+  /** Den som bjuder in — får ingen notis om sin egen handling (§ 50). */
+  actorId?: string;
 }
 
 /**
  * Skapar en personlig uppgift per inbjuden resurs så att tilldelningen dyker
- * upp i deras "Min översikt". Fail-soft per rad. Returnerar id:n som faktiskt
+ * upp i deras "Mina uppgifter". Fail-soft per rad. Returnerar id:n som faktiskt
  * blev medarbetare (för lagring på tilldelningen).
  */
 export async function createCollaboratorTasks(
@@ -106,6 +109,16 @@ export async function createCollaboratorTasks(
       /* fail-soft: en resurs som inte kan få en task blockerar inte tilldelningen */
     }
   }
+  // Notis till de inbjudna (§ 50, `collaborator_invited`). Best-effort.
+  await notify(pb, {
+    tenant: tenantId,
+    recipients: ids,
+    kind: 'collaborator_invited',
+    actorId: input.actorId,
+    entity: { type: 'startups', id: startupId },
+    groupKey: null,
+    payload: { title: desc, href: `/startups/${startupId}` }
+  }).catch(() => undefined);
   return ids;
 }
 
@@ -122,7 +135,7 @@ interface MissionMemberTaskInput {
 
 /**
  * Skapar en personlig uppgift per teammedlem kopplad till ett uppdrag
- * (link_kind='mission', § 29) så att den dyker upp i medlemmens "Min översikt".
+ * (link_kind='mission', § 29) så att den dyker upp i medlemmens "Mina uppgifter".
  * Fail-soft per rad. Returnerar id:n som faktiskt fick en task. Validerar att
  * varje mottagare är staff i tenanten (defense-in-depth) — tvärfunktionella
  * team bemannas av Movexum-resurser.
@@ -231,6 +244,21 @@ export async function createAssignmentMeeting(
       /* fail-soft per inbjuden */
     }
   }
+
+  // Notis till de inbjudna (§ 50, `event_invited`) — organisatören är aktör
+  // och får ingen notis om sin egen inbjudan.
+  await notify(pb, {
+    tenant: tenantId,
+    recipients: [...inviteeIds],
+    kind: 'event_invited',
+    actorId: organizerId,
+    entity: { type: 'incubator_events', id: eventId },
+    payload: {
+      title,
+      snippet: formatStockholmDateTime(startIso),
+      href: `/inflode/events/${eventId}`
+    }
+  }).catch(() => undefined);
 
   return eventId;
 }

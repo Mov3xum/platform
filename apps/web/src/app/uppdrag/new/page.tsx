@@ -1,12 +1,19 @@
-// Movexum OS — Nytt projekt/uppdrag
-// Formulär för att skapa ett nytt projekt eller uppdrag. Stages auto-genereras utifrån typ.
-// Tillgängligt för alla medlemmar utom observer.
+// Movexum OS — Nytt tvärfunktionellt team (uppdrag/projekt)
+// Formulär för att sätta upp ett team runt ett uppdrag. Stages auto-genereras
+// utifrån typ. Deltagare = Movexum-personal (CLAUDE.md § 29) — bolagsmedlemmar,
+// observatörer och externa kontakter listas inte.
 
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { ALL_ROLES, type Role } from '@platform/shared';
+import { ALL_ROLES, type CompetenceId, type Role, type TeamMemberLoad, type UserCompetenceTag } from '@platform/shared';
+import {
+  loadCompetenceTagVocabulary,
+  loadStaffProfiles,
+  loadTeamCap,
+  loadTeamLoadsForCap
+} from '@/lib/team/competence-tags.server';
 import { PageHead, Icon } from '@/components/proto';
 import { NewMissionForm } from './NewMissionForm';
 import { createMissionAction } from '@/lib/actions/missions';
@@ -14,7 +21,11 @@ import { createMissionAction } from '@/lib/actions/missions';
 interface UserOption {
   id: string;
   label: string;
+  competences?: CompetenceId[];
+  tags?: UserCompetenceTag[];
+  load?: TeamMemberLoad;
 }
+
 interface StartupOption {
   id: string;
   name: string;
@@ -32,20 +43,27 @@ export default async function NewMissionPage() {
   let users: UserOption[] = [];
   let startups: StartupOption[] = [];
 
-  try {
-    const res = await pb.collection('users').getList(1, 200, {
-      filter: pb.filter('tenant = {:tenant}', { tenant: user.tenant }),
-      sort: 'display_name',
-      fields: 'id,display_name,email'
-    });
-    users = res.items.map((u) => {
-      const rec = u as unknown as { id: string; display_name?: string; email?: string };
-      const local = rec.email ? rec.email.split('@')[0] : rec.id;
-      return { id: String(rec.id), label: rec.display_name || local };
-    });
-  } catch {
-    /* ignore */
-  }
+  // Kompetensprofiler (hashtags/nivå) + nuvarande belastning (§ 29.7) —
+  // samma läsväg som teamförslaget, så pickern visar vad AI:n ser.
+  // Belastning + teamtak (§ 29.7): räknas över hela tenanten (bara räknare)
+  // och visas bara för staff — en bolagsmedlem ser inga kollegors belastning.
+  const isStaff = hasRole(user.roles, ['admin', 'incubator_lead', 'coach', 'mentor']);
+  const vocabulary = await loadCompetenceTagVocabulary(pb, user.tenant);
+  const [profiles, { loads }, teamCap] = await Promise.all([
+    loadStaffProfiles(pb, user.tenant, vocabulary),
+    isStaff ? loadTeamLoadsForCap(pb, user.tenant) : Promise.resolve({ loads: new Map(), complete: false }),
+    loadTeamCap(pb, user.tenant)
+  ]);
+  // Bara Movexum-personal kan ingå i ett tvärfunktionellt team.
+  users = profiles
+    .filter((p) => p.isStaff)
+    .map((p) => ({
+      id: p.id,
+      label: p.name,
+      competences: p.competences,
+      tags: p.tags,
+      load: isStaff ? (loads.get(p.id) ?? { active: 0, leading: 0 }) : undefined
+    }));
 
   try {
     const res = await pb.collection('startups').getList(1, 100, {
@@ -63,9 +81,9 @@ export default async function NewMissionPage() {
   return (
     <div className="mx-view-pad mx-narrow">
       <PageHead
-        crumb="Hemmaplan / Projekt & uppdrag / Nytt"
-        title="Nytt projekt"
-        subtitle="Bjud in deltagare, koppla bolag och starta samarbetet. Stegen i flödet skapas utifrån typ."
+        crumb="Hemmaplan / Tvärfunktionella team / Nytt"
+        title="Nytt tvärfunktionellt team"
+        subtitle="Beskriv uppdraget, låt AI:n föreslå kollegor utifrån deras kompetenstaggar, koppla bolag och starta samarbetet. Stegen i flödet skapas utifrån typ."
         actions={
           <Link href="/uppdrag" className="mx-btn mx-sm mx-ghost">
             <Icon name="arrow" size={12} /> Tillbaka
@@ -78,6 +96,7 @@ export default async function NewMissionPage() {
         users={users}
         startups={startups}
         currentUserId={user.id}
+        teamCap={teamCap}
       />
     </div>
   );

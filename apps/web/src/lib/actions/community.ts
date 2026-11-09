@@ -42,7 +42,7 @@ export async function inviteAlumniAction(input: {
       active_mentor: Boolean(input.active_mentor),
       accent: input.accent || 'green'
     });
-    revalidatePath('/community');
+    revalidatePath('/inflode/community');
     return { alumniId: String(rec.id) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte bjuda in alumni.' };
@@ -91,7 +91,7 @@ export async function updateAlumniAction(
 
   try {
     await pb.collection(PB_COLLECTIONS.alumni).update(id, partial);
-    revalidatePath('/community');
+    revalidatePath('/inflode/community');
     return { alumniId: id };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte uppdatera alumni.' };
@@ -135,7 +135,7 @@ export async function deleteAlumniAction(id: string): Promise<CommunityActionSta
 
   try {
     await pb.collection(PB_COLLECTIONS.alumni).delete(id);
-    revalidatePath('/community');
+    revalidatePath('/inflode/community');
     return { alumniId: id };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte radera alumni.' };

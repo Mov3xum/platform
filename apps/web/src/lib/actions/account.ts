@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import PocketBase from 'pocketbase';
 import { AUTH_COOKIE, getServerPb, requireUser } from '@/lib/auth.server';
 import { getServerPbUrl } from '@/lib/pb-url';
+import { MAX_AVATAR_BYTES } from '@/lib/account-limits';
 
 const PB_URL = getServerPbUrl();
 
@@ -19,8 +20,6 @@ async function isHttpsRequest(): Promise<boolean> {
   const proto = h.get('x-forwarded-proto') || h.get('x-forwarded-protocol');
   return proto === 'https';
 }
-
-export const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
 
 export type UpdateProfileState = {
   error?: string;

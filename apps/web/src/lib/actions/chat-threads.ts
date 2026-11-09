@@ -11,7 +11,7 @@ import {
 } from '@/lib/ai/thread-turn';
 import type { ChatAttachment } from '@/lib/ai/chat-input';
 import { isAllowedModel } from '@/lib/ai/models';
-import type { ChatThread, ToolRunMessage } from '@platform/shared';
+import { withoutChatAttachmentText, type ChatThread, type ToolRunMessage } from '@platform/shared';
 
 const STAFF_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor'] as const;
 const MAX_TITLE = 200;
@@ -109,7 +109,7 @@ export async function getThreadMessagesAction(
   const t = await getOwnedThread(pb, threadId, user);
   if (!t) return { error: 'Tråden hittades inte.' };
   return {
-    messages: Array.isArray(t.messages) ? t.messages : [],
+    messages: Array.isArray(t.messages) ? withoutChatAttachmentText(t.messages) : [],
     agent: t.agent || undefined,
     title: t.title
   };

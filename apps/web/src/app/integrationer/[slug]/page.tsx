@@ -2,13 +2,18 @@ import Link from 'next/link';
 import { escFilter } from '@/lib/pb-filter';
 import { notFound, redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
-import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
+import { hasRole } from '@/lib/rbac';
+import { canOpenIntegrations, integrationsCatalogHref } from '@/lib/integrations/access';
 import { PageShell } from '@/components/PageShell';
 import { RailSection, RailStat } from '@/components/PageRail';
 import { getHandler } from '@/lib/integrations/registry';
+import { ensureRegistryProviderRows } from '@/lib/integrations/company-registry/catalog-seed';
 import { ConnectForm } from './ConnectForm';
 import { SyncButton } from './SyncButton';
 import { DisconnectForm } from './DisconnectForm';
+import { RegistryLookupForm } from './RegistryLookupForm';
+import { RegistryPricingForm } from '@/components/integrations/RegistryPricingForm';
+import { resolveRegistryPricing } from '@/lib/integrations/company-registry/pricing.server';
 
 interface ProviderRecord {
   id: string;
@@ -30,6 +35,8 @@ interface TenantIntegrationRecord {
   last_sync_status?: 'success' | 'failed' | 'partial';
   last_sync_summary?: string;
   connected_at?: string;
+  /** Kostnad per anrop (migration 1700000188, § 11.8). */
+  pricing?: unknown;
 }
 
 interface SyncRunRecord {
@@ -81,7 +88,7 @@ export default async function IntegrationDetailPage({
 }) {
   const { slug } = await params;
   const user = await requireUser();
-  if (!canAccessModuleForUser(user.roles, 'integrationer', user.enabledModules)) {
+  if (!canOpenIntegrations(user)) {
     redirect('/dashboard');
   }
 
@@ -90,13 +97,27 @@ export default async function IntegrationDetailPage({
   const handler = getHandler(slug);
   const pb = await getServerPb();
 
+  const providerFilter = `slug = "${escFilter(slug)}" && active = true`;
   let provider: ProviderRecord | null = null;
   try {
     provider = await pb
       .collection('integration_providers')
-      .getFirstListItem<ProviderRecord>(`slug = "${escFilter(slug)}" && active = true`);
+      .getFirstListItem<ProviderRecord>(providerFilter);
   } catch {
     provider = null;
+  }
+  if (!provider && isStaff && handler?.kind === 'company_registry') {
+    // Självläk saknad katalograd (migration 1700000173 ej körd, § 11.8).
+    const ensured = await ensureRegistryProviderRows(pb, [slug]);
+    if (ensured.created.includes(slug)) {
+      try {
+        provider = await pb
+          .collection('integration_providers')
+          .getFirstListItem<ProviderRecord>(providerFilter);
+      } catch {
+        provider = null;
+      }
+    }
   }
   if (!provider) notFound();
 
@@ -112,6 +133,12 @@ export default async function IntegrationDetailPage({
   }
 
   const isRegistry = handler?.kind === 'company_registry';
+  const registryHandler = handler?.kind === 'company_registry' ? handler : undefined;
+  // Endpoint per datadel (env-medveten) — visas vid kryssrutorna (§ 11.8).
+  const registryPartEndpoints = registryHandler?.partEndpoints?.();
+  // Prislista: tenantens angivna värden ovanpå env-defaulten (§ 11.8).
+  const registryPricing = isRegistry ? resolveRegistryPricing(slug, tenantIntegration?.pricing) : null;
+  const pricingHref = `/integrationer/${slug}#kostnad`;
 
   let syncRuns: SyncRunRecord[] = [];
   let recentRecords: IntegrationRecordRow[] = [];
@@ -154,7 +181,7 @@ export default async function IntegrationDetailPage({
       const financialsRes = await pb
         .collection('startup_financials')
         .getList<{ startup: string }>(1, 500, {
-          filter: `tenant = "${escFilter(user.tenant)}" && source = "allabolag"`,
+          filter: `tenant = "${escFilter(user.tenant)}" && source = "${escFilter(slug)}"`,
           fields: 'startup'
         });
       const uniqueStartups = new Set(financialsRes.items.map((r) => r.startup));
@@ -215,10 +242,10 @@ export default async function IntegrationDetailPage({
     >
       <div className="space-y-6 py-6">
         <Link
-          href="/integrationer"
+          href={integrationsCatalogHref(user.roles)}
           className="inline-block text-[12px] text-foreground-subtle hover:text-foreground"
         >
-          ← Tillbaka till katalogen
+          ← Tillbaka till integrationerna
         </Link>
 
         {handler && (
@@ -295,6 +322,12 @@ export default async function IntegrationDetailPage({
               <SyncButton
                 tenantIntegrationId={tenantIntegration!.id}
                 providerSlug={slug}
+                providerName={provider.name}
+                registryParts={registryHandler?.parts}
+                partEndpoints={registryPartEndpoints}
+                pricing={registryPricing ?? undefined}
+                companies={registryStats?.startupsWithOrgNr}
+                pricingHref={pricingHref}
               />
               {isAdmin && (
                 <DisconnectForm
@@ -319,6 +352,7 @@ export default async function IntegrationDetailPage({
                     <th className="px-3 py-2 font-medium">Status</th>
                     <th className="px-3 py-2 font-medium">Skapade</th>
                     <th className="px-3 py-2 font-medium">Uppdaterade</th>
+                    <th className="px-3 py-2 font-medium">Hoppade över</th>
                     <th className="px-3 py-2 font-medium">Tid</th>
                   </tr>
                 </thead>
@@ -338,6 +372,9 @@ export default async function IntegrationDetailPage({
                       <td className="px-3 py-2 text-foreground-muted">
                         {run.records_updated ?? 0}
                       </td>
+                      <td className="px-3 py-2 text-foreground-muted">
+                        {run.records_skipped ?? 0}
+                      </td>
                       <td className="px-3 py-2 text-foreground-subtle">
                         {run.duration_ms ? `${Math.round(run.duration_ms)} ms` : '–'}
                       </td>
@@ -347,6 +384,28 @@ export default async function IntegrationDetailPage({
               </table>
             </div>
           </section>
+        )}
+
+        {isConnected && isRegistry && isStaff && registryHandler && registryPricing && (
+          <RegistryPricingForm
+            tenantIntegrationId={tenantIntegration!.id}
+            providerSlug={slug}
+            providerName={provider.name}
+            parts={[...registryHandler.parts, ...(registryHandler.lookupOnlyParts ?? [])]}
+            pricing={registryPricing}
+            portfolioCompanies={registryStats?.startupsWithOrgNr}
+          />
+        )}
+
+        {isConnected && isRegistry && isStaff && handler?.kind === 'company_registry' && handler.lookup && (
+          <RegistryLookupForm
+            providerSlug={slug}
+            providerName={provider.name}
+            registryParts={registryHandler ? [...registryHandler.parts, ...(registryHandler.lookupOnlyParts ?? [])] : []}
+            partEndpoints={registryPartEndpoints}
+            pricing={registryPricing ?? undefined}
+            pricingHref={pricingHref}
+          />
         )}
 
         {isConnected && isRegistry && registryStats && (
@@ -363,7 +422,7 @@ export default async function IntegrationDetailPage({
               </div>
               <div className="rounded-2xl border border-default bg-surface px-4 py-3">
                 <p className="text-[11px] text-foreground-subtle">
-                  Bolag med Allabolag-financials
+                  Bolag med årsrader från {provider.name}
                 </p>
                 <p className="mt-1 text-lg font-semibold text-foreground">
                   {registryStats.startupsWithFinancials}
@@ -375,8 +434,9 @@ export default async function IntegrationDetailPage({
               <code className="mx-1 rounded bg-canvas-subtle px-1 py-0.5 text-[11px]">
                 startup_financials
               </code>
-              — det finns inga separata "poster" att lista här. Se varje bolags
-              "Finansiell historik"-sektion för detaljer.
+              samt <code className="mx-1 rounded bg-canvas-subtle px-1 py-0.5 text-[11px]">startup_ownership</code>
+              (ägarbild) — det finns inga separata "poster" att lista här. Se varje bolags
+              sektioner "Finansiell historik" och "Ägarbild" för detaljer.
             </p>
           </section>
         )}

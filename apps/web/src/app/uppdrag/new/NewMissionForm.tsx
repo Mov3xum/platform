@@ -1,18 +1,28 @@
 'use client';
 
-// Movexum OS — Formulär för nytt projekt/uppdrag.
+// Movexum OS — Formulär för nytt tvärfunktionellt team (uppdrag/projekt).
 // Klientkomponent för useFormState + multi-select av deltagare och bolag.
 // CLAUDE.md § 29: AI-teamförslag — beskriv uppdraget, låt AI:n föreslå
-// kompetenser + kandidater, koppla på med ett klick (människa-i-loopen).
+// kompetenser + kollegor (riktiga användare med kompetenstaggar), koppla på
+// med ett klick (människa-i-loopen).
 
 import { useActionState, useMemo, useState } from 'react';
 import { Card, Icon } from '@/components/proto';
 import {
   COMPETENCE_LABELS,
+  COMPETENCE_LEVEL_LABELS,
+  DEFAULT_MAX_ACTIVE_TEAMS,
+  LOAD_LEVEL_LABELS,
+  describeLoad,
+  isAtTeamCap,
+  loadLevel,
   type CompetenceId,
+  type LoadLevel,
   type MissionParticipantRole,
   type MissionType,
-  type MissionVisibility
+  type MissionVisibility,
+  type TeamMemberLoad,
+  type UserCompetenceTag
 } from '@platform/shared';
 import type { MissionActionState } from '@/lib/actions/missions';
 import { suggestTeamAction, type SuggestTeamResult } from '@/lib/actions/team';
@@ -20,6 +30,28 @@ import { suggestTeamAction, type SuggestTeamResult } from '@/lib/actions/team';
 interface UserOption {
   id: string;
   label: string;
+  /** Kompetensområden (härledda ur hashtags) användaren angett under Min profil. */
+  competences?: CompetenceId[];
+  /** Kompetens-hashtags med nivå (§ 29.7). */
+  tags?: UserCompetenceTag[];
+  /** Nuvarande belastning: pågående team. */
+  load?: TeamMemberLoad;
+}
+
+const LOAD_CHIP_STYLE: Record<LoadLevel, { background: string; color: string }> = {
+  free: { background: 'var(--mx-st-ok-bg, #d9eddd)', color: '#1d3a1f' },
+  normal: { background: 'var(--mx-paper-3)', color: 'inherit' },
+  high: { background: 'var(--mx-st-warn-bg, #f8f1da)', color: '#4b2718' },
+  full: { background: 'var(--mx-st-danger-bg, #f1e5df)', color: '#4b2718' }
+};
+
+function LoadChip({ load, cap }: { load: TeamMemberLoad; cap: number }) {
+  const lvl = loadLevel(load, cap);
+  return (
+    <span className="mx-chip mx-mono" style={LOAD_CHIP_STYLE[lvl]} title={describeLoad(load, cap)}>
+      {LOAD_LEVEL_LABELS[lvl]} · {load.active}/{cap}
+    </span>
+  );
 }
 interface StartupOption {
   id: string;
@@ -60,12 +92,15 @@ export function NewMissionForm({
   action,
   users,
   startups,
-  currentUserId
+  currentUserId,
+  teamCap = DEFAULT_MAX_ACTIVE_TEAMS
 }: {
   action: (state: MissionActionState, formData: FormData) => Promise<MissionActionState>;
   users: UserOption[];
   startups: StartupOption[];
   currentUserId: string;
+  /** Max antal pågående team per person (§ 29.7). */
+  teamCap?: number;
 }) {
   const [state, formAction, pending] = useActionState(action, {} as MissionActionState);
   const [type, setType] = useState<MissionType>('project');
@@ -94,8 +129,13 @@ export function NewMissionForm({
     setSelectedStartups((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]));
   };
 
+  // § 29.7 — den som nått teamtaket kan inte läggas till (servern prövar
+  // samma sak; här blir det tydligt redan i formuläret).
+  const atCap = (u?: UserOption) => Boolean(u?.load && isAtTeamCap(u.load, teamCap));
+  const me = userById.get(currentUserId);
   const addParticipant = (id: string, role: MissionParticipantRole = 'contributor') => {
     if (id === currentUserId) return;
+    if (atCap(userById.get(id))) return;
     setParticipants((prev) =>
       prev.some((p) => p.user_id === id) ? prev : [...prev, { user_id: id, role }]
     );
@@ -131,12 +171,18 @@ export function NewMissionForm({
   function applyWholeTeam() {
     if (!suggestion) return;
     for (const m of suggestion.members) {
-      if (m.kind === 'user') addParticipant(m.id, m.role === 'lead' ? 'contributor' : m.role);
+      addParticipant(m.id, m.role === 'lead' ? 'contributor' : m.role);
     }
   }
 
-  const internalMembers = suggestion?.members.filter((m) => m.kind === 'user') ?? [];
-  const externalMembers = suggestion?.members.filter((m) => m.kind === 'contact') ?? [];
+  const suggestedMembers = suggestion?.members ?? [];
+  const taggedColleagues = otherUsers.filter(
+    (u) => (u.tags?.length ?? 0) > 0 || (u.competences?.length ?? 0) > 0
+  ).length;
+  const [showShortlist, setShowShortlist] = useState(false);
+  const otherShortlist = (suggestion?.shortlist ?? []).filter(
+    (c) => !suggestedMembers.some((m) => m.id === c.id)
+  );
 
   // Skicka full participants_json inkl. utfärdaren som lead
   const submittedParticipants: ParticipantDraft[] = [
@@ -244,9 +290,17 @@ export function NewMissionForm({
           <div className="mx-fw-6 mx-t-14">Föreslå team med AI</div>
         </div>
         <div className="mx-t-12 mx-muted mx-mb-3">
-          Utifrån beskrivningen ovan föreslår AI:n vilka kompetenser uppdraget
-          kräver och vilka kollegor som kan kopplas på. Du bestämmer — inget
-          tilldelas automatiskt. AI-verktyg drivs av Mistral (Frankrike, EU).
+          Utifrån beskrivningen ovan tolkas vilka kompetenser och hashtags
+          uppdraget kräver. Kollegorna rankas sedan på hashtag-träff och nivå,
+          relation till bolaget och <strong>hur många team de redan ingår i</strong>,
+          innan AI:n sätter ihop teamet ur den listan. Bara riktiga användare i
+          systemet som fyllt i <strong>Min profil</strong> kan matchas — inga
+          externa kontakter. Du bestämmer — inget tilldelas automatiskt.
+          AI-verktyg drivs av Mistral (Frankrike, EU).
+        </div>
+        <div className="mx-mono mx-t-xs mx-muted mx-mb-2">
+          {taggedColleagues} {taggedColleagues === 1 ? 'kollega' : 'kollegor'} med
+          kompetensprofil kan matchas.
         </div>
         <button
           type="button"
@@ -275,6 +329,12 @@ export function NewMissionForm({
               <div className="mx-t-13">{suggestion.summary}</div>
             )}
 
+            {!suggestion.loadComplete && (
+              <div className="mx-t-12 mx-muted">
+                Belastningen kunde inte läsas komplett — se den som ungefärlig.
+              </div>
+            )}
+
             {suggestion.needsReview && (
               <div
                 className="mx-card"
@@ -286,22 +346,41 @@ export function NewMissionForm({
               </div>
             )}
 
-            {suggestion.neededCompetences.length > 0 && (
+            {(suggestion.neededTags.length > 0 || suggestion.neededCompetences.length > 0) && (
               <div>
                 <div className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6 mx-mb-2">
-                  Kompetenser uppdraget kräver
+                  Uppdraget kräver
                 </div>
                 <div className="mx-flex mx-gap-2 mx-wrap">
+                  {suggestion.neededTags.map((t) => (
+                    <span
+                      key={`t-${t}`}
+                      className={`mx-chip mx-mono ${suggestion.gaps.tags.includes(t) ? '' : 'mx-active'}`}
+                      title={suggestion.gaps.tags.includes(t) ? 'Ingen kollega har denna hashtag' : 'Täcks av minst en kollega'}
+                    >
+                      #{t}
+                    </span>
+                  ))}
                   {suggestion.neededCompetences.map((c: CompetenceId) => (
-                    <span key={c} className="mx-chip mx-mono">
+                    <span key={`a-${c}`} className="mx-chip mx-mono" style={{ opacity: 0.8 }}>
                       {COMPETENCE_LABELS[c]}
                     </span>
                   ))}
                 </div>
+                {(suggestion.gaps.tags.length > 0 || suggestion.gaps.areas.length > 0) && (
+                  <div className="mx-t-12 mx-muted mx-mt-1">
+                    Saknas helt internt:{' '}
+                    {[
+                      ...suggestion.gaps.tags.map((t) => `#${t}`),
+                      ...suggestion.gaps.areas.map((a) => COMPETENCE_LABELS[a])
+                    ].join(', ')}
+                    .
+                  </div>
+                )}
               </div>
             )}
 
-            {internalMembers.length > 0 && (
+            {suggestedMembers.length > 0 && (
               <div>
                 <div className="mx-flex mx-items-c mx-justify-b mx-mb-2">
                   <div className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6">
@@ -312,7 +391,7 @@ export function NewMissionForm({
                   </button>
                 </div>
                 <ul className="mx-flex mx-col mx-gap-2">
-                  {internalMembers.map((m) => {
+                  {suggestedMembers.map((m) => {
                     const added = participants.some((p) => p.user_id === m.id) || m.id === currentUserId;
                     return (
                       <li
@@ -327,18 +406,23 @@ export function NewMissionForm({
                             <span className="mx-mono mx-t-xs mx-muted"> · {ROLE_LABELS[m.role]}</span>
                           </div>
                           {m.reason && <div className="mx-t-12 mx-muted">{m.reason}</div>}
-                          {m.competences.length > 0 && (
-                            <div className="mx-flex mx-gap-1 mx-wrap mx-mt-1">
-                              {m.competences.map((c) => (
+                          <div className="mx-flex mx-gap-1 mx-wrap mx-mt-1 mx-items-c">
+                            <LoadChip load={m.load} cap={suggestion.teamCap} />
+                            {m.matchedTags.map((t) => (
+                              <span key={t.tag} className="mx-chip mx-mono mx-active" title={COMPETENCE_LEVEL_LABELS[t.level]}>
+                                #{t.tag} · {COMPETENCE_LEVEL_LABELS[t.level].toLowerCase()}
+                              </span>
+                            ))}
+                            {m.matchedTags.length === 0 &&
+                              m.competences.map((c) => (
                                 <span key={c} className="mx-mono mx-t-xs mx-muted">
                                   #{COMPETENCE_LABELS[c]}
                                 </span>
                               ))}
-                            </div>
-                          )}
+                          </div>
                         </div>
-                        <span className="mx-mono mx-t-xs mx-muted" title="AI:ns säkerhet">
-                          {Math.round(m.confidence * 100)}%
+                        <span className="mx-mono mx-t-xs mx-muted" title={`Rankningspoäng ${m.score} · AI:ns säkerhet ${Math.round(m.confidence * 100)}%`}>
+                          {m.score}p
                         </span>
                         {m.id === currentUserId ? (
                           <span className="mx-mono mx-t-xs mx-muted">Du</span>
@@ -362,24 +446,57 @@ export function NewMissionForm({
               </div>
             )}
 
-            {externalMembers.length > 0 && (
+            {otherShortlist.length > 0 && (
               <div>
-                <div className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6 mx-mb-2">
-                  Externa kompetenser att koppla på
-                </div>
-                <ul className="mx-flex mx-col mx-gap-1">
-                  {externalMembers.map((m) => (
-                    <li key={m.id} className="mx-t-12">
-                      <span className="mx-fw-6">{m.name}</span>
-                      {m.title ? <span className="mx-muted"> · {m.title}</span> : null}
-                      {m.reason ? <span className="mx-muted"> — {m.reason}</span> : null}
-                    </li>
-                  ))}
-                </ul>
-                <div className="mx-t-12 mx-muted mx-mt-1">
-                  Externa kontakter kopplas via bolagets kontaktregister — de blir
-                  inte uppdragsdeltagare här.
-                </div>
+                <button
+                  type="button"
+                  className="mx-btn mx-sm mx-ghost"
+                  onClick={() => setShowShortlist((v) => !v)}
+                >
+                  <Icon name={showShortlist ? 'chevdown' : 'chevron'} size={11} />
+                  {showShortlist ? 'Dölj' : 'Visa'} fler rankade kollegor ({otherShortlist.length})
+                </button>
+                {showShortlist && (
+                  <ul className="mx-flex mx-col mx-gap-1 mx-mt-2">
+                    {otherShortlist.map((c) => {
+                      const added = participants.some((p) => p.user_id === c.id) || c.id === currentUserId;
+                      return (
+                        <li
+                          key={c.id}
+                          className="mx-flex mx-items-c mx-gap-2"
+                          style={{ padding: '6px 10px', background: 'var(--mx-paper-3)', borderRadius: 8 }}
+                        >
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div className="mx-t-13 mx-fw-6">
+                              {c.name}
+                              {c.title ? <span className="mx-muted mx-fw-4"> · {c.title}</span> : null}
+                            </div>
+                            <div className="mx-t-12 mx-muted">{c.reasons.join(' · ')}</div>
+                          </div>
+                          <LoadChip load={c.load} cap={suggestion.teamCap} />
+                          <span className="mx-mono mx-t-xs mx-muted">{c.score}p</span>
+                          {added ? (
+                            <span className="mx-mono mx-t-xs mx-muted">Tillagd</span>
+                          ) : (
+                            <button type="button" className="mx-btn mx-sm" onClick={() => addParticipant(c.id)}>
+                              <Icon name="plus" size={11} /> Lägg till
+                            </button>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            {suggestion.atCapacity.length > 0 && (
+              <div className="mx-t-12 mx-muted">
+                <span className="mx-fw-6">Fullt (taket är {suggestion.teamCap} pågående team) — föreslås inte:</span>{' '}
+                {suggestion.atCapacity
+                  .map((c) => (c.matchedTags.length > 0 ? `${c.name} (#${c.matchedTags.join(', #')})` : c.name))
+                  .join(', ')}
+                . Avsluta ett av deras team eller be ledningen höja taket under Inställningar → Kompetenser.
               </div>
             )}
 
@@ -442,8 +559,19 @@ export function NewMissionForm({
               Deltagare ({participants.length + 1})
             </div>
             <div className="mx-t-12 mx-muted mx-mb-2">
-              Du läggs till automatiskt som ansvarig. Lägg till fler kollegor och välj roll.
+              Du läggs till automatiskt som ansvarig. Lägg till fler Movexum-kollegor
+              och välj roll. Bara personal kan ingå i ett tvärfunktionellt team, och
+              varje person får ingå i högst {teamCap} pågående team samtidigt.
             </div>
+            {atCap(me) && (
+              <div
+                className="mx-t-12 mx-mb-2"
+                style={{ padding: '8px 10px', borderRadius: 8, background: 'var(--mx-st-warn-bg)' }}
+              >
+                Du ingår redan i {teamCap} pågående team, vilket är taket. Avsluta ett team
+                eller be ledningen höja taket innan du startar ett nytt.
+              </div>
+            )}
             {participants.length > 0 && (
               <ul className="mx-flex mx-col mx-gap-1 mx-mb-2">
                 {participants.map((p) => {
@@ -461,6 +589,7 @@ export function NewMissionForm({
                       <span className="mx-t-13 mx-fw-6" style={{ flex: 1, minWidth: 0 }}>
                         {u?.label || p.user_id}
                       </span>
+                      {u?.load ? <LoadChip load={u.load} cap={teamCap} /> : null}
                       <select
                         value={p.role}
                         onChange={(e) => setRole(p.user_id, e.target.value as MissionParticipantRole)}
@@ -501,15 +630,38 @@ export function NewMissionForm({
                     type="button"
                     key={u.id}
                     onClick={() => addParticipant(u.id)}
+                    disabled={atCap(u)}
                     className="mx-chip mx-mono"
-                    style={{ cursor: 'pointer' }}
+                    style={{ cursor: atCap(u) ? 'not-allowed' : 'pointer', opacity: atCap(u) ? 0.5 : 1 }}
+                    title={[
+                      atCap(u) ? `Fullt: ingår redan i ${teamCap} pågående team` : '',
+                      u.tags && u.tags.length > 0
+                        ? u.tags.map((t) => `#${t.tag} (${COMPETENCE_LEVEL_LABELS[t.level].toLowerCase()})`).join(', ')
+                        : u.competences && u.competences.length > 0
+                          ? u.competences.map((c) => COMPETENCE_LABELS[c]).join(', ')
+                          : 'Inga kompetenstaggar angivna',
+                      u.load ? describeLoad(u.load, teamCap) : ''
+                    ]
+                      .filter(Boolean)
+                      .join(' — ')}
                   >
                     <Icon name="plus" size={10} /> {u.label}
+                    {u.tags && u.tags.length > 0 ? (
+                      <span className="mx-muted"> · {u.tags.length}#</span>
+                    ) : u.competences && u.competences.length > 0 ? (
+                      <span className="mx-muted"> · {u.competences.length}</span>
+                    ) : null}
+                    {u.load ? (
+                      <span className="mx-muted" title={describeLoad(u.load, teamCap)}>
+                        {' '}· {u.load.active}/{teamCap}
+                        {atCap(u) ? ' fullt' : ''}
+                      </span>
+                    ) : null}
                   </button>
                 ))}
               </div>
             ) : otherUsers.length === 0 ? (
-              <div className="mx-muted mx-t-13">Inga andra användare i din tenant.</div>
+              <div className="mx-muted mx-t-13">Inga andra Movexum-kollegor i din tenant.</div>
             ) : (
               <div className="mx-muted mx-t-12">Alla kollegor är redan tillagda.</div>
             )}
@@ -517,6 +669,12 @@ export function NewMissionForm({
               type="hidden"
               name="participants_json"
               value={JSON.stringify(submittedParticipants)}
+            />
+            {/* Behovet teamet sattes ihop för (§ 29.7) → meriter när uppdraget avslutas. */}
+            <input
+              type="hidden"
+              name="needed_tags_json"
+              value={JSON.stringify(suggestion?.neededTags ?? [])}
             />
           </div>
         </div>
@@ -545,7 +703,7 @@ export function NewMissionForm({
           </a>
           <button type="submit" className="mx-btn mx-primary" disabled={pending}>
             <Icon name="plus" size={13} />
-            {pending ? 'Skapar…' : 'Skapa projekt'}
+            {pending ? 'Skapar…' : 'Skapa team'}
           </button>
         </div>
       </div>

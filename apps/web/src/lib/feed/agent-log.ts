@@ -1,7 +1,16 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
+import {
+  STUDENT_PROFILE_STATUS_LABELS,
+  TALENT_NEED_STATUS_LABELS,
+  TALENT_OUTCOME_LABELS,
+  isStudentProfileStatus,
+  isTalentNeedStatus,
+  isTalentOutcome
+} from '@platform/shared';
+
 import { escFilter } from '@/lib/pb-filter';
-import { isOrgPostKind, orgPostHomePath } from '@platform/shared';
+import { ACTIVITY_OUTCOME_LABELS, isActivityOutcome, isOrgPostKind, orgPostHomePath } from '@platform/shared';
 
 /**
  * Samlad händelselogg för aktivitetsfeeden (CLAUDE.md § 32).
@@ -31,6 +40,10 @@ export interface AgentLogEntry {
   href?: string;
   /** Ikonnamn i `components/proto/Icon`. */
   icon: string;
+  /** Källrad i loggen — låter den personliga feeden (§ 32) dedupa direkta rader. */
+  collection?: string;
+  recordId?: string;
+  actionType?: 'create' | 'update' | 'revert';
 }
 
 interface AgentActionRow {
@@ -62,6 +75,9 @@ const MONTH_NAMES = [
 
 /** Svenska etiketter för de fält skrivlagret kan ändra. */
 const FIELD_LABELS: Record<string, string> = {
+  groups: 'grupper',
+  question_order: 'frågornas ordning',
+  screening_facts: 'de manuella svaren i Bedömning excellens',
   title: 'titeln',
   month: 'månaden',
   day: 'dagen',
@@ -109,6 +125,40 @@ const TASK_COLUMN_LABELS: Record<string, string> = {
 
 function trunc(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+/**
+ * Mål & genomförande på en aktivitet (§ 53.4): koppling till mål eller
+ * utfall. Null för alla andra rader (de mappas som förut).
+ */
+function activityGoalEntry(
+  row: { field?: string },
+  after: Record<string, unknown>,
+  prefix: string,
+  href: string
+): MappedEntry | null {
+  const title = str(after.title);
+  const name = title ? `"${title}"` : 'en aktivitet';
+  if (row.field === 'outcome_verdict') {
+    const outcome = after.outcome;
+    return {
+      title: isActivityOutcome(outcome)
+        ? `${prefix}: ${name} — ${ACTIVITY_OUTCOME_LABELS[outcome].toLowerCase()}`
+        : `${prefix}: ${name} öppnades igen`,
+      detail: typeof after.attended === 'number' ? `${after.attended} närvarande` : undefined,
+      href,
+      icon: 'target'
+    };
+  }
+  if (row.field === 'goal_indicators') {
+    const count = Array.isArray(after.indicators) ? after.indicators.length : 0;
+    return {
+      title: `${prefix}: ${name} kopplades till ${count} målindikator${count === 1 ? '' : 'er'}`,
+      href,
+      icon: 'target'
+    };
+  }
+  return null;
 }
 
 function fieldLabel(field?: string): string {
@@ -179,6 +229,8 @@ function mapRow(
 
   switch (row.collection) {
     case 'annual_wheel_items': {
+      const goalEntry = activityGoalEntry(row, after, 'Årshjulet', '/arshjul');
+      if (goalEntry) return goalEntry;
       if (action === 'create') {
         return {
           title: `Ny aktivitet i årshjulet: "${str(after.title) || 'utan titel'}"`,
@@ -257,6 +309,24 @@ function mapRow(
       };
     }
 
+    case 'surveys': {
+      const href = row.record_id ? `/inflode/utvardering/${row.record_id}` : '/inflode/utvardering';
+      const name = str(after.name);
+      if (action === 'create') {
+        return {
+          title: `Ny enkät under Utvärdering: "${name || 'utan namn'}"`,
+          detail: after.link_label ? `följer upp ${str(after.link_label)}` : 'opublicerad',
+          href,
+          icon: 'compass'
+        };
+      }
+      return {
+        title: name ? `Utvärdering: enkäten "${name}" ${changedVerb}` : `Utvärdering: en enkät ${changedVerb}`,
+        href,
+        icon: 'compass'
+      };
+    }
+
     case 'workshops': {
       if (action === 'create') {
         return {
@@ -281,6 +351,19 @@ function mapRow(
       };
     }
 
+    // KTH IRL på bolagskortet (en ny bedömning per tillfälle).
+    case 'startup_readiness_assessments': {
+      const sid = str(after.startup);
+      const name = str(after.startup_name);
+      const avg = typeof after.average === 'number' ? after.average : null;
+      return {
+        title: `${name ? `${name}: ` : ''}ny IRL-bedömning`,
+        detail: avg !== null ? `Snitt ${avg.toLocaleString('sv-SE')} av 9` : undefined,
+        href: sid ? `/startups/${sid}/utveckling#irl` : undefined,
+        icon: 'target'
+      };
+    }
+
     // Workshop-tilldelningar skapar redan en egen activities-rad i feeden
     // (skrivlagret speglar UI-flödet) — loggraden vore en dubblett.
     case 'workshop_assignments':
@@ -300,13 +383,16 @@ function mapRow(
       if (action === 'create') {
         const startupId = str(after.startup);
         const missionId = str(after.mission);
+        const procurementId = str(after.procurement);
         return {
           title: `Nytt kanban-kort: "${trunc(str(after.description), 60) || 'uppgift'}"`,
           href: startupId
             ? `/startups/${startupId}/aktiviteter`
             : missionId
               ? `/uppdrag/${missionId}`
-              : '/inkorg',
+              : procurementId
+                ? `/upphandlingar/${procurementId}`
+                : '/inkorg',
           icon: 'check'
         };
       }
@@ -320,17 +406,51 @@ function mapRow(
       };
     }
 
+    case 'event_signups': {
+      // Inbjudningar (§ 53.5) — bara antal, aldrig mottagare.
+      const title = str(after.title);
+      const name = title ? `"${title}"` : 'ett event';
+      const href = row.record_id ? `/inflode/inbjudningar/${row.record_id}` : '/inflode/inbjudningar';
+      if (row.field === 'invitations') {
+        return { title: `Inbjudningar till ${name}: ${Number(after.invited) || 0} inbjudna`, href, icon: 'send' };
+      }
+      if (row.field === 'invitation_removed') {
+        return { title: `En inbjudan till ${name} togs bort`, href, icon: 'send' };
+      }
+      if (row.field === 'invitation_sent' || row.field === 'invitation_reminder') {
+        return {
+          title: `${row.field === 'invitation_reminder' ? 'Påminnelse' : 'Inbjudan'} skickad till ${name}`,
+          detail: `${Number(after.sent) || 0} mejl`,
+          href,
+          icon: 'send'
+        };
+      }
+      return null;
+    }
+
     case 'incubator_events': {
+      const goalEntry = activityGoalEntry(row, after, 'Event', row.record_id ? `/inflode/events/${row.record_id}` : '/inflode/events');
+      if (goalEntry) return goalEntry;
       const starts = str(after.starts_at);
       return {
         title: `Nytt event: "${str(after.name) || 'utan namn'}"`,
         detail: starts ? new Date(starts).toLocaleString('sv-SE').slice(0, 16) : undefined,
-        href: row.record_id ? `/events/${row.record_id}` : '/events',
+        href: row.record_id ? `/inflode/events/${row.record_id}` : '/inflode/events',
         icon: 'calendar'
       };
     }
 
     case 'missions': {
+      // Team → aktiviteter (§ 29.8): kopplingen ändrades på teamkortet.
+      if (row.field === 'activities') {
+        const n = (Number(after.wheel_items) || 0) + (Number(after.events) || 0);
+        return {
+          title: `Team: "${str(after.title) || 'utan titel'}" kopplades till ${n} aktivitet${n === 1 ? '' : 'er'}`,
+          detail: Array.isArray(after.activities) ? after.activities.filter(Boolean).slice(0, 4).join(', ') || undefined : undefined,
+          href: row.record_id ? `/uppdrag/${row.record_id}` : '/uppdrag',
+          icon: 'target'
+        };
+      }
       const startupName = str(after.startup_name);
       return {
         title: `Nytt uppdrag: "${str(after.title) || 'utan titel'}"`,
@@ -430,6 +550,633 @@ function mapRow(
       };
     }
 
+    // Målstyrning & verksamhetsplan (§ 42).
+    case 'goal_periods': {
+      const year = str(after.year);
+      const href = year ? `/mal?ar=${year}` : '/mal';
+      if (action === 'create') return { title: `Nytt verksamhetsår: ${year || 'år'}`, href, icon: 'target' };
+      if (after.deleted === true) {
+        return { title: `Verksamhetsår ${year} borttaget`, detail: after.goals ? `${str(after.goals)} mål` : undefined, href: '/mal', icon: 'target' };
+      }
+      const field = str(row.field);
+      if (field === 'year' || field === 'title') {
+        return { title: `Verksamhetsår ${year} redigerat`, detail: str(after.title) || undefined, href, icon: 'target' };
+      }
+      return { title: `Verksamhetsår ${year}: status ${changedVerb}`, detail: str(after.status) || undefined, href, icon: 'target' };
+    }
+    case 'goals': {
+      const year = str(after.year);
+      const href = `/mal${year ? `?ar=${year}&` : '?'}mal=${row.record_id ?? ''}`;
+      const kindLabel = str(after.kind) === 'personal' ? 'Personligt mål' : 'Mål';
+      if (action === 'create') {
+        return {
+          title: `Nytt ${kindLabel.toLowerCase()}: "${str(after.title) || 'utan titel'}"`,
+          detail: str(after.owner_team) || undefined,
+          href,
+          icon: 'target'
+        };
+      }
+      if (after.deleted === true) {
+        return { title: `${kindLabel} "${str(after.title) || ''}" borttaget`, href: year ? `/mal?ar=${year}` : '/mal', icon: 'target' };
+      }
+      const GOAL_FIELD_LABELS: Record<string, string> = {
+        title: 'titel',
+        description: 'beskrivning',
+        owner_team: 'team',
+        focus_area: 'fokusområde',
+        kind: 'måltyp',
+        owner_user: 'ägare',
+        level: 'nivå',
+        parent_goal: 'överliggande mål',
+        responsible: 'ansvarig',
+        subteam: 'delteam'
+      };
+      const field = str(row.field)
+        .split(',')
+        .map((f) => GOAL_FIELD_LABELS[f.trim()] ?? f.trim())
+        .filter(Boolean)
+        .join(', ');
+      return { title: `${kindLabel} "${str(after.title) || ''}": ${field || 'fält'} ${changedVerb}`, href, icon: 'target' };
+    }
+    case 'goal_indicators': {
+      const goalId = str(after.goal);
+      const href = goalId ? `/mal?mal=${goalId}` : '/mal';
+      if (after.deleted === true) {
+        return { title: `Indikator "${str(after.label) || 'indikator'}" borttagen`, detail: str(after.goal_title) || undefined, href, icon: 'target' };
+      }
+      if (action === 'update') {
+        return { title: `Indikator "${str(after.label) || 'indikator'}" ${changedVerb}`, detail: str(after.goal_title) || undefined, href, icon: 'target' };
+      }
+      return {
+        title: `Ny indikator: "${str(after.label) || 'indikator'}"`,
+        detail: str(after.goal_title) || undefined,
+        href,
+        icon: 'target'
+      };
+    }
+    case 'goal_status_entries': {
+      const status = str(after.status);
+      const label: Record<string, string> = { on_track: 'I fas', delayed: 'Försenad', not_started: 'Ej startad', done: 'Klar' };
+      const goalId = str(after.goal);
+      const year = str(after.year);
+      const q = str(after.quarter);
+      return {
+        title: `Q${q}: "${str(after.indicator_label) || 'indikator'}" → ${label[status] ?? status}`,
+        detail: str(after.goal_title) || undefined,
+        href: `/mal${year ? `?ar=${year}&q=${q}&` : `?q=${q}&`}mal=${goalId}`,
+        icon: 'target'
+      };
+    }
+    // Kontaktboken (§ 45). Aldrig e-post/telefon i loggen — bara namn/organisation.
+    case 'contacts': {
+      const name = str(after.name) || 'en kontakt';
+      const href = row.record_id ? `/kontakter/${row.record_id}` : '/kontakter';
+      if (action === 'create') {
+        return {
+          title: `Ny kontakt i kontaktboken: ${name}`,
+          detail: str(after.organization) || undefined,
+          href,
+          icon: 'user'
+        };
+      }
+      if (after.deleted === true) {
+        return { title: `Kontaktboken: ${name} togs bort`, href: '/kontakter', icon: 'user' };
+      }
+      const field = str(row.field);
+      return {
+        title: `Kontaktboken: ${name} — ${field ? FIELD_LABELS[field] ?? field : 'uppgifter'} ${changedVerb}`,
+        href,
+        icon: 'user'
+      };
+    }
+    case 'contact_requests': {
+      const name = str(after.contact_name) || 'en kontakt';
+      const contactId = str(after.contact);
+      const href = contactId ? `/kontakter/${contactId}?request=${row.record_id ?? ''}` : '/kontakter/forfragningar';
+      const startupName = str(after.startup_name);
+      if (action === 'create') {
+        const status = str(after.status);
+        return {
+          title:
+            status === 'approved'
+              ? `Kontakt använd: ${name}${startupName ? ` → ${startupName}` : ''}`
+              : `Förfrågan om kontakt: ${name}${startupName ? ` → ${startupName}` : ''}`,
+          detail: str(after.purpose) || undefined,
+          href,
+          icon: 'send'
+        };
+      }
+      const value = str(after.value);
+      return {
+        title:
+          value === 'approved'
+            ? `Förfrågan godkänd: ${name}${startupName ? ` → ${startupName}` : ''}`
+            : value === 'declined'
+              ? `Förfrågan avböjd: ${name}`
+              : value === 'withdrawn'
+                ? `Förfrågan återkallad: ${name}`
+                : `Förfrågan om ${name} ${changedVerb}`,
+        href,
+        icon: value === 'approved' ? 'check' : 'send'
+      };
+    }
+    // Kompetens-hashtags (§ 29.7) — tenantens vokabulär.
+    case 'competence_tags': {
+      const slug = str(after.slug);
+      const tag = slug ? `#${slug}` : 'en hashtag';
+      const href = '/installningar/kompetenser';
+      if (after.deleted === true) return { title: `Hashtag borttagen: ${tag}`, href, icon: 'trash' };
+      if (action === 'create') {
+        return {
+          title: str(after.status) === 'approved' ? `Hashtag tillagd: ${tag}` : `Hashtag föreslagen: ${tag}`,
+          href,
+          icon: 'star'
+        };
+      }
+      const field = str(row.field);
+      if (field === 'status') {
+        return {
+          title: str(after.status) === 'approved' ? `Hashtag godkänd: ${tag}` : `Hashtag åter föreslagen: ${tag}`,
+          href,
+          icon: 'check'
+        };
+      }
+      return { title: `Hashtag ${tag} ${changedVerb}`, href, icon: 'edit3' };
+    }
+    // Teamtak (§ 29.7) — ledningen ändrade max antal pågående team per person.
+    case 'team_cap': {
+      const cap = typeof after.max_active_teams_per_person === 'number' ? after.max_active_teams_per_person : null;
+      return {
+        title: cap ? `Teamtak ändrat till ${cap} pågående team per person` : 'Teamtak återställt till standard',
+        href: '/installningar/kompetenser',
+        icon: 'people'
+      };
+    }
+    // Impact Navigator (§ 56) — hållbarhetsanalys per bolag.
+    case 'sustainability_assessments': {
+      const name = str(after.startup_name) || 'bolaget';
+      const version = str(after.version);
+      const startupId = str(after.startup);
+      const href = startupId ? `/impactnavigator/${startupId}` : '/impactnavigator';
+      const vLabel = version ? ` (version ${version})` : '';
+      if (action === 'create') {
+        return { title: `Impact Navigator: ny analys startad för ${name}${vLabel}`, href, icon: 'globe' };
+      }
+      const field = str(row.field);
+      if (field === 'materiality') return { title: `Impact Navigator: väsentlighetsanalys klar för ${name}${vLabel}`, detail: 'Väntar på granskning', href, icon: 'globe' };
+      if (field === 'materiality_confirmed') return { title: `Impact Navigator: väsentligheten bekräftad för ${name}${vLabel}`, href, icon: 'check' };
+      if (field === 'sufficiency') {
+        const q = Number(after.questions);
+        return { title: `Impact Navigator: underlaget prövat för ${name}${vLabel}`, detail: q > 0 ? `${q} kompletteringsfrågor` : undefined, href, icon: 'globe' };
+      }
+      if (field === 'dashboard') {
+        return { title: `Impact Navigator: ${after.update === true ? 'uppdaterad slutanalys' : 'slutanalys klar'} för ${name}${vLabel}`, detail: str(after.impact_level) || undefined, href, icon: 'sparkle' };
+      }
+      return { title: `Impact Navigator: analysen för ${name} ${changedVerb}`, href, icon: 'globe' };
+    }
+    case 'sustainability_gap_questions': {
+      const startupId = str(after.startup);
+      return {
+        title: `Impact Navigator: kompletteringsfråga ${str(after.status) === 'not_available' ? 'markerad som ej tillgänglig' : 'besvarad'}`,
+        detail: str(after.aspect_code) || undefined,
+        href: startupId ? `/impactnavigator/${startupId}` : '/impactnavigator',
+        icon: 'message'
+      };
+    }
+    case 'sustainability_update_events': {
+      const startupId = str(after.startup);
+      return {
+        title: `Impact Navigator: uppdatering inlämnad för ${str(after.startup_name) || 'bolaget'}`,
+        detail: str(after.version) ? `Version ${str(after.version)}` : undefined,
+        href: startupId ? `/impactnavigator/${startupId}` : '/impactnavigator',
+        icon: 'rotate-ccw'
+      };
+    }
+    case 'sustainability_documents': {
+      const startupId = str(after.startup);
+      const href = startupId ? `/impactnavigator/${startupId}` : '/impactnavigator';
+      if (after.deleted === true) return { title: 'Impact Navigator: underlag borttaget', href, icon: 'trash' };
+      return { title: `Impact Navigator: underlag uppladdat för ${str(after.startup_name) || 'bolaget'}`, href, icon: 'upload' };
+    }
+    // Export Lab (§ 58) — internationaliseringsanalys per bolag.
+    case 'export_assessments': {
+      const name = str(after.startup_name) || 'bolaget';
+      const version = str(after.version);
+      const startupId = str(after.startup);
+      const href = startupId ? `/exportlab/${startupId}` : '/exportlab';
+      const vLabel = version ? ` (version ${version})` : '';
+      if (after.deleted === true) return { title: `Export Lab: analysen för ${name} togs bort`, href: '/exportlab', icon: 'trash' };
+      if (action === 'create') return { title: `Export Lab: ny exportanalys startad för ${name}${vLabel}`, href, icon: 'compass' };
+      const field = str(row.field);
+      if (field === 'profile') return { title: `Export Lab: exportprofil klar för ${name}${vLabel}`, detail: 'Marknaderna väntar på granskning', href, icon: 'compass' };
+      if (field === 'markets_confirmed') return { title: `Export Lab: marknaderna bekräftade för ${name}${vLabel}`, href, icon: 'check' };
+      if (field === 'sufficiency') {
+        const q = Number(after.questions);
+        return { title: `Export Lab: underlaget prövat för ${name}${vLabel}`, detail: q > 0 ? `${q} kompletteringsfrågor` : undefined, href, icon: 'compass' };
+      }
+      if (field === 'plan') return { title: `Export Lab: ${after.update === true ? 'uppdaterad exportplan' : 'exportplan klar'} för ${name}${vLabel}`, detail: str(after.readiness) || undefined, href, icon: 'sparkle' };
+      return { title: `Export Lab: analysen för ${name} ${changedVerb}`, href, icon: 'compass' };
+    }
+    case 'export_update_events': {
+      const startupId = str(after.startup);
+      return { title: `Export Lab: uppdatering inlämnad för ${str(after.startup_name) || 'bolaget'}`, detail: str(after.version) ? `Version ${str(after.version)}` : undefined, href: startupId ? `/exportlab/${startupId}` : '/exportlab', icon: 'rotate-ccw' };
+    }
+    case 'export_documents': {
+      const startupId = str(after.startup);
+      const href = startupId ? `/exportlab/${startupId}` : '/exportlab';
+      if (after.deleted === true) return { title: 'Export Lab: underlag borttaget', href, icon: 'trash' };
+      return { title: `Export Lab: underlag uppladdat för ${str(after.startup_name) || 'bolaget'}`, href, icon: 'upload' };
+    }
+    // Önskemål & buggar (§ 49) — intern backlog.
+    case 'feedback_items': {
+      const title = str(after.title) || 'utan rubrik';
+      const kindLabel =
+        str(after.kind) === 'bug'
+          ? 'Bugg'
+          : str(after.kind) === 'feature'
+            ? 'Önskemål'
+            : str(after.kind) === 'change'
+              ? 'Ändringsförslag'
+              : 'Fråga';
+      const areaLabel = str(after.area_label);
+      const href = row.record_id ? `/onskemal#kort-${row.record_id}` : '/onskemal';
+      if (after.deleted === true) {
+        return { title: `${kindLabel} borttaget: "${title}"`, href: '/onskemal', icon: 'trash' };
+      }
+      if (action === 'create') {
+        return {
+          title: `${kindLabel} upplagt: "${title}"`,
+          detail: areaLabel || undefined,
+          href,
+          icon: 'help'
+        };
+      }
+      const field = str(row.field);
+      if (field === 'answer') {
+        return { title: `Svar på "${title}"`, detail: areaLabel || undefined, href, icon: 'message' };
+      }
+      if (field === 'status') {
+        const status = str(after.status);
+        const statusTitle =
+          status === 'done'
+            ? `Klart: "${title}"`
+            : status === 'awaiting_feedback'
+              ? `Väntar återkoppling: "${title}"`
+              : status === 'in_progress'
+                ? `Påbörjat: "${title}"`
+                : `Återöppnat: "${title}"`;
+        return {
+          title: statusTitle,
+          detail: areaLabel || undefined,
+          href,
+          icon: status === 'done' ? 'check' : status === 'awaiting_feedback' ? 'eye' : status === 'in_progress' ? 'bolt' : 'help'
+        };
+      }
+      if (field === 'tester') {
+        return {
+          title: after.has_tester === true ? `Testare utpekad: "${title}"` : `Testare borttagen: "${title}"`,
+          detail: areaLabel || undefined,
+          href,
+          icon: 'user'
+        };
+      }
+      if (field === 'test_note') {
+        const result = str(after.test_result);
+        return {
+          title: result === 'ok' ? `Testat och klart: "${title}"` : `Testat — fungerar inte än: "${title}"`,
+          detail: areaLabel || undefined,
+          href,
+          icon: result === 'ok' ? 'check' : 'alert'
+        };
+      }
+      return { title: `${kindLabel} ${changedVerb}: "${title}"`, detail: areaLabel || undefined, href, icon: 'pencil' };
+    }
+    case 'goal_import': {
+      const created = typeof after.created === 'number' ? after.created : 0;
+      const indicators = typeof after.indicators === 'number' ? after.indicators : 0;
+      const statuses = typeof after.statuses === 'number' ? after.statuses : 0;
+      const year = str(after.year);
+      return {
+        title: `Mål importerade${year ? ` till ${year}` : ''}: ${created} nya mål, ${indicators} indikatorer${statuses ? `, ${statuses} kvartalsstatusar` : ''}`,
+        href: year ? `/mal?ar=${year}` : '/mal',
+        icon: 'upload'
+      };
+    }
+    case 'contact_groups': {
+      const name = str(after.name) || 'en grupp';
+      if (action === 'create') {
+        return { title: `Ny grupp i kontaktboken: ${name}`, href: `/kontakter?grupp=${row.record_id ?? ''}`, icon: 'people' };
+      }
+      if (after.deleted === true) {
+        return { title: `Kontaktboken: gruppen ${name} togs bort`, href: '/kontakter/grupper', icon: 'people' };
+      }
+      const added = typeof after.added === 'number' ? after.added : 0;
+      const removed = typeof after.removed === 'number' ? after.removed : 0;
+      return {
+        title: added
+          ? `Kontaktboken: ${added} kontakter lades till i ${name}`
+          : removed
+            ? `Kontaktboken: ${removed} kontakter togs bort ur ${name}`
+            : `Kontaktboken: gruppen ${name} ${changedVerb}`,
+        href: `/kontakter?grupp=${row.record_id ?? ''}`,
+        icon: 'people'
+      };
+    }
+    case 'email_campaigns': {
+      const title = str(after.title) || 'en kampanj';
+      const href = `/inflode/kampanjer/${row.record_id ?? ''}`;
+      if (action === 'create') return { title: `Ny e-postkampanj: ${title}`, href, icon: 'send' };
+      if (after.deleted === true) return { title: `E-postkampanjen ${title} togs bort`, href: '/inflode/kampanjer', icon: 'send' };
+      switch (row.field) {
+        case 'scheduled':
+          return { title: `E-postkampanjen ${title} schemalades (${typeof after.recipients === 'number' ? after.recipients : 0} mottagare)`, href, icon: 'send' };
+        case 'schedule_cancelled':
+          return { title: `Schemaläggningen för ${title} avbröts`, href, icon: 'send' };
+        case 'sent': {
+          const sent = typeof after.sent === 'number' ? after.sent : 0;
+          return { title: `E-postkampanjen ${title} skickades · ${sent} mejl`, href, icon: 'send' };
+        }
+        case 'test_sent':
+          return { title: `Testmejl för ${title} skickades`, href, icon: 'send' };
+        default:
+          return { title: `E-postkampanjen ${title} ${changedVerb}`, href, icon: 'send' };
+      }
+    }
+    case 'email_suppressions': {
+      if (after.deleted === true) return { title: 'En spärr i e-postlistan togs bort', href: '/installningar/e-post', icon: 'shield' };
+      return { title: `En adress spärrades för utskick (${str(after.reason) || 'manuellt'})`, href: '/installningar/e-post', icon: 'shield' };
+    }
+    case 'email_suppression_import': {
+      const added = typeof after.added === 'number' ? after.added : 0;
+      return { title: `Spärrlista importerad: ${added} nya spärrar`, href: '/installningar/e-post', icon: 'shield' };
+    }
+    case 'contact_import': {
+      const created = typeof after.created === 'number' ? after.created : 0;
+      const updated = typeof after.updated === 'number' ? after.updated : 0;
+      return {
+        title: `Kontakter importerade: ${created} nya, ${updated} uppdaterade`,
+        href: '/kontakter',
+        icon: 'upload'
+      };
+    }
+
+    // Upphandlingar & excellens-insatser (§ 39).
+    case 'procurements': {
+      const href = row.record_id ? `/upphandlingar/${row.record_id}` : '/upphandlingar';
+      if (action === 'create') {
+        return {
+          title: `Ny upphandling: "${str(after.title) || 'utan titel'}"`,
+          detail: str(after.supplier) || undefined,
+          href,
+          icon: 'briefcase'
+        };
+      }
+      const field = str(row.field);
+      return {
+        title: field
+          ? `Upphandling: ${field} ${changedVerb}`
+          : `En upphandling ${changedVerb}`,
+        detail: field === 'status' ? str(row.after_value) || undefined : undefined,
+        href,
+        icon: 'briefcase'
+      };
+    }
+
+    case 'procurement_calloffs': {
+      const procurementId = str(after.procurement);
+      const startupName = str(after.startup_name);
+      const href = procurementId ? `/upphandlingar/${procurementId}` : '/upphandlingar';
+      if (action === 'create') {
+        return {
+          title: `Nytt avrop: ${startupName || 'bolag'}${str(after.procurement_title) ? ` — ${str(after.procurement_title)}` : ''}`,
+          detail: str(after.title) || undefined,
+          href,
+          icon: 'briefcase'
+        };
+      }
+      const field = str(row.field);
+      const label =
+        field === 'milestone_1_approved_at'
+          ? 'Milstolpe 1 godkänd'
+          : field === 'milestone_2_approved_at'
+            ? 'Milstolpe 2 godkänd'
+            : field === 'final_report_received_at'
+              ? 'Slutrapport mottagen'
+              : field === 'evaluation_score'
+                ? 'Avrop utvärderat'
+                : field
+                  ? `Avrop: ${field} ${changedVerb}`
+                  : `Ett avrop ${changedVerb}`;
+      return {
+        title: startupName ? `${label}: ${startupName}` : label,
+        href,
+        icon: field === 'evaluation_score' ? 'star' : 'check'
+      };
+    }
+
+    case 'procurement_rules': {
+      const name = str(after.name);
+      if (after.deleted === true) {
+        return { title: `Uppföljningsregel borttagen: "${name || 'regel'}"`, href: '/upphandlingar/regler', icon: 'gear' };
+      }
+      return {
+        title: action === 'create' ? `Ny uppföljningsregel: "${name || 'regel'}"` : `Uppföljningsregel ${changedVerb}: "${name || 'regel'}"`,
+        href: '/upphandlingar/regler',
+        icon: 'gear'
+      };
+    }
+
+    case 'procurement_followups': {
+      const created = Number(after.created ?? 0);
+      const resolved = Number(after.resolved ?? 0);
+      const bits = [
+        created > 0 ? `${created} nya uppföljningar` : null,
+        resolved > 0 ? `${resolved} auto-stängda` : null
+      ].filter(Boolean);
+      return {
+        title: `Uppföljning: ${str(after.procurement_title) || 'upphandling'}`,
+        detail: bits.join(' · ') || undefined,
+        href: row.record_id ? `/upphandlingar/${row.record_id}` : '/upphandlingar',
+        icon: 'zap'
+      };
+    }
+
+    case 'procurement_documents': {
+      const procurementId = str(after.procurement);
+      return {
+        title: `Upphandlingsunderlag borttaget: "${str(after.filename) || 'dokument'}"`,
+        href: procurementId ? `/upphandlingar/${procurementId}` : '/upphandlingar',
+        icon: 'doc'
+      };
+    }
+
+    // Stödcheckar & finansieringsprojekt (§ 46).
+    // Bedömning excellens (§ 51.6): körningar på bolagskortet + begäran om komplettering.
+    case 'startup_screenings': {
+      const name = str(after.startup_name);
+      const sid = str(after.startup);
+      return {
+        title: `${name ? `${name}: ` : ''}bedömning excellens gjord`,
+        detail: [str(after.state_aid), str(after.vinnova)].filter(Boolean).join(' · ') || undefined,
+        href: sid ? `/startups/${sid}/ekonomi#statsstod` : '/bedomning-excellens',
+        icon: 'shield'
+      };
+    }
+    // Ärenden i Bedömning excellens (§ 51.10).
+    // Studenter & talang (§ 54) — PII-fritt: rubrik/typ/status, aldrig studentens namn.
+    case 'talent_needs': {
+      const title = str(after.title) || 'utan rubrik';
+      const company = str(after.startup_name);
+      const href = row.record_id ? `/talang/behov/${row.record_id}` : '/talang';
+      if (after.deleted === true) return { title: `Behov mot studenter borttaget: "${title}"`, href: '/talang', icon: 'trash' };
+      if (action === 'create') {
+        return { title: `${company ? `${company}: ` : ''}nytt behov mot studenter "${title}"`, detail: isTalentNeedStatus(after.status) ? TALENT_NEED_STATUS_LABELS[after.status] : undefined, href, icon: 'cap' };
+      }
+      if (row.field === 'status') {
+        return { title: `${company ? `${company}: ` : ''}behovet "${title}" — ${(isTalentNeedStatus(after.status) ? TALENT_NEED_STATUS_LABELS[after.status] : 'status').toLowerCase()}`, href, icon: str(after.status) === 'published' ? 'check' : 'cap' };
+      }
+      return { title: `${company ? `${company}: ` : ''}behovet "${title}" ${changedVerb}`, href, icon: 'cap' };
+    }
+    case 'talent_interests': {
+      const title = str(after.need_title) || 'ett behov';
+      const company = str(after.startup_name);
+      const href = row.record_id ? '/talang/matchningar' : '/talang';
+      if (action === 'create') {
+        return { title: `${company ? `${company}: ` : ''}en student föreslogs för "${title}"`, href, icon: 'send' };
+      }
+      const status = str(after.status);
+      const label = status === 'matched' ? 'matchad med en student' : status === 'dialogue' ? 'dialog med en student' : status === 'declined' ? 'en student avböjdes' : `intresse ${changedVerb}`;
+      return { title: `${company ? `${company}: ` : ''}"${title}" — ${label}`, detail: isTalentOutcome(after.outcome) ? TALENT_OUTCOME_LABELS[after.outcome] : undefined, href, icon: status === 'matched' ? 'check' : 'cap' };
+    }
+    case 'student_profiles': {
+      if (after.deleted === true) return { title: 'En studentprofil togs bort', href: '/talang/studenter', icon: 'trash' };
+      return { title: `En studentprofil — ${(isStudentProfileStatus(after.status) ? STUDENT_PROFILE_STATUS_LABELS[after.status] : 'status').toLowerCase()}`, href: row.record_id ? `/talang/studenter/${row.record_id}` : '/talang/studenter', icon: 'cap' };
+    }
+    case 'screening_cases': {
+      const name = str(after.subject_name);
+      const href = row.record_id ? `/bedomning-excellens?arende=${row.record_id}` : '/bedomning-excellens';
+      if (action === 'create') return { title: `${name ? `${name}: ` : ''}ärende i Bedömning excellens skapat`, href, icon: 'shield' };
+      const done = str(after.status) === 'done';
+      return { title: `${name ? `${name}: ` : ''}ärende i Bedömning excellens ${done ? 'klarmarkerat' : 'öppnat igen'}`, href, icon: done ? 'check' : 'shield' };
+    }
+    case 'screening_requests': {
+      const name = str(after.startup_name);
+      const to = str(after.recipient_kind) === 'coach' ? 'coachen' : 'bolaget';
+      const href = row.record_id ? `/komplettering/${row.record_id}` : '/bedomning-excellens';
+      if (after.closed === true) return { title: `${name ? `${name}: ` : ''}begäran om komplettering avslutad`, href, icon: 'check' };
+      if (action === 'create') {
+        return {
+          title: `${name ? `${name}: ` : ''}begäran om komplettering till ${to}`,
+          detail: typeof after.items === 'number' ? `${after.items} punkter` : undefined,
+          href,
+          icon: 'send'
+        };
+      }
+      return {
+        title: `${name ? `${name}: ` : ''}komplettering besvarad`,
+        detail: typeof after.answered === 'number' ? `${after.answered} av ${after.items ?? '?'} punkter` : undefined,
+        href,
+        icon: 'check'
+      };
+    }
+    case 'support_check_types': {
+      const title = str(after.title);
+      if (after.deleted === true) return { title: `Checktyp borttagen: "${title || 'checktyp'}"`, href: '/checkar/typer', icon: 'check' };
+      return {
+        title: action === 'create' ? `Ny checktyp: "${title || 'checktyp'}"` : `Checktyp ${changedVerb}${row.field ? ` (${fieldLabel(str(row.field))})` : ''}`,
+        href: row.record_id ? `/checkar/typer/${row.record_id}` : '/checkar/typer',
+        icon: 'check'
+      };
+    }
+    case 'support_check_applications': {
+      const href = row.record_id ? `/checkar/${row.record_id}` : '/checkar';
+      const startupName = str(after.startup_name);
+      const who = startupName ? `${startupName}: ` : '';
+      if (action === 'create') {
+        return { title: `${who}ny ansökan om ${str(after.check_type_title) || 'stödcheck'}`, detail: str(after.title) || undefined, href, icon: 'check' };
+      }
+      const field = str(row.field);
+      if (field === 'status') {
+        const status = str(after.status);
+        const label: Record<string, string> = {
+          submitted: 'Ansökan inskickad och signerad',
+          changes_requested: 'Komplettering begärd',
+          under_review: 'Under bedömning',
+          approved: `Stödcheck beviljad${typeof after.approved_amount_sek === 'number' ? ` ${Math.round(after.approved_amount_sek).toLocaleString('sv-SE')} kr` : ''}`,
+          rejected: 'Ansökan avslagen',
+          paid: `Stödcheck utbetald${typeof after.paid_amount_sek === 'number' ? ` ${Math.round(after.paid_amount_sek).toLocaleString('sv-SE')} kr` : ''}`,
+          closed: 'Stödcheck avslutad',
+          withdrawn: 'Ansökan återkallad'
+        };
+        return {
+          title: `${who}${label[status] ?? `status ${changedVerb}`}`,
+          detail: str(after.project_title) || undefined,
+          href,
+          icon: status === 'approved' || status === 'paid' ? 'shield' : 'check'
+        };
+      }
+      const fieldTitle: Record<string, string> = {
+        coach_statement: 'Coachutlåtande lämnat',
+        controller_statement: 'Controllerutlåtande lämnat',
+        assessment_score: 'Ansökan bedömd',
+        funding: 'Finansiering satt',
+        final_report_received_at: 'Slutrapport mottagen',
+        draft: 'Ansökan uppdaterad'
+      };
+      return { title: `${who}${fieldTitle[field] ?? `ansökan ${changedVerb}`}`, href, icon: 'check' };
+    }
+    case 'support_check_comments': {
+      const appId = str(after.application);
+      return {
+        title: `${str(after.startup_name) ? `${str(after.startup_name)}: ` : ''}${action === 'create' ? (after.visible_to_applicant ? 'kompletteringspunkt' : 'intern kommentar') : 'punkt ' + changedVerb}`,
+        href: appId ? `/checkar/${appId}#kommentarer` : '/checkar',
+        icon: 'message'
+      };
+    }
+    case 'support_check_documents': {
+      const appId = str(after.application);
+      return {
+        title: after.deleted === true ? `Bilaga borttagen: "${str(after.filename) || 'fil'}"` : `${str(after.startup_name) ? `${str(after.startup_name)}: ` : ''}bilaga uppladdad — ${str(after.filename) || 'fil'}`,
+        href: appId ? `/checkar/${appId}` : '/checkar',
+        icon: 'doc'
+      };
+    }
+    case 'support_check_rules': {
+      const name = str(after.name);
+      if (after.deleted === true) return { title: `Uppföljningsregel borttagen: "${name || 'regel'}"`, href: '/checkar/regler', icon: 'gear' };
+      return { title: action === 'create' ? `Ny uppföljningsregel (stödcheckar): "${name || 'regel'}"` : `Uppföljningsregel ${changedVerb}: "${name || 'regel'}"`, href: '/checkar/regler', icon: 'gear' };
+    }
+    case 'support_check_followups': {
+      const created = Number(after.created ?? 0);
+      const resolved = Number(after.resolved ?? 0);
+      const bits = [created > 0 ? `${created} nya uppföljningar` : null, resolved > 0 ? `${resolved} auto-stängda` : null].filter(Boolean);
+      return {
+        title: `Uppföljning: ${str(after.startup_name) || 'stödcheck'}${str(after.application_title) ? ` — ${str(after.application_title)}` : ''}`,
+        detail: bits.join(' · ') || undefined,
+        href: row.record_id ? `/checkar/${row.record_id}` : '/checkar',
+        icon: 'zap'
+      };
+    }
+    case 'funding_projects': {
+      const title = str(after.title);
+      if (after.deleted === true) return { title: `Finansieringsprojekt borttaget: "${title || 'projekt'}"`, href: '/projekt', icon: 'graph' };
+      return {
+        title: action === 'create' ? `Nytt finansieringsprojekt: "${title || 'projekt'}"` : `Finansieringsprojekt ${changedVerb}${row.field ? ` (${fieldLabel(str(row.field))})` : ''}`,
+        href: row.record_id ? `/projekt/${row.record_id}` : '/projekt',
+        icon: 'graph'
+      };
+    }
+    case 'funding_work_packages': {
+      const projectId = str(after.project);
+      const label = `${str(after.code) ? `${str(after.code)} ` : ''}${str(after.title) || 'arbetspaket'}`;
+      return {
+        title: after.deleted === true ? `Arbetspaket borttaget: ${label}` : action === 'create' ? `Nytt arbetspaket: ${label}` : `Arbetspaket ${changedVerb}: ${label}`,
+        detail: str(after.project_title) || undefined,
+        href: projectId ? `/projekt/${projectId}` : '/projekt',
+        icon: 'graph'
+      };
+    }
+
     case 'notes': {
       const startupId = str(after.startup);
       return {
@@ -456,12 +1203,18 @@ function mapRow(
 export async function loadAgentLogEntries(
   pb: PocketBase,
   tenant: string,
-  perPage = 60
+  perPage = 60,
+  opts: {
+    /** Bara rader där denna användare är actor (den personliga loggen på `/chatt`). */
+    actorId?: string;
+  } = {}
 ): Promise<AgentLogEntry[]> {
   let rows: AgentActionRow[] = [];
   try {
     const res = await pb.collection('agent_actions').getList<AgentActionRow>(1, perPage, {
-      filter: pb.filter('tenant = {:tenant}', { tenant }),
+      filter: opts.actorId
+        ? pb.filter('tenant = {:tenant} && actor = {:actor}', { tenant, actor: opts.actorId })
+        : pb.filter('tenant = {:tenant}', { tenant }),
       sort: '-created',
       expand: 'actor'
     });
@@ -505,7 +1258,10 @@ export async function loadAgentLogEntries(
       viaAgent: row.actor_kind === 'agent',
       created: row.created,
       href: mapped.href,
-      icon: mapped.icon
+      icon: mapped.icon,
+      collection: row.collection,
+      recordId: row.record_id,
+      actionType: row.action_type
     });
   }
   return entries;

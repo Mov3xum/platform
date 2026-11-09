@@ -87,6 +87,17 @@ services:
       MOVEXUM_STT_MODEL: ${MOVEXUM_STT_MODEL:-}
       MOVEXUM_STT_LANGUAGE: ${MOVEXUM_STT_LANGUAGE:-}
       MOVEXUM_MEETING_DIARIZATION: ${MOVEXUM_MEETING_DIARIZATION:-}
+      # E-post via Resend (CLAUDE.md § 53.5). Utan RESEND_API_KEY skickas inga
+      # inbjudningar/enkäter/notiser. Avsändaren MÅSTE ligga på en domän som är
+      # verifierad i Resend (Domains) — annars 403. Kontrollera med
+      # /api/health → email.configured efter omdeploy.
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-}
+      RESEND_INVITE_FROM_EMAIL: ${RESEND_INVITE_FROM_EMAIL:-}
+      RESEND_REPLY_TO: ${RESEND_REPLY_TO:-}
+      MOVEXUM_INFLOW_EMAIL: ${MOVEXUM_INFLOW_EMAIL:-}
+      MOVEXUM_UNSUBSCRIBE_SECRET: ${MOVEXUM_UNSUBSCRIBE_SECRET:-}
+      APP_URL: ${APP_URL:-}
       # Superuser-credentials krävs för fallback-skapande av records när
       # PB:s createRule failar transient (se workshops.ts). Sätt
       # POCKETBASE_SUPERUSER_EMAIL/PASSWORD som secrets i Coolify

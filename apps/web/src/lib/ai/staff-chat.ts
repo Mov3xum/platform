@@ -5,6 +5,7 @@ import { runAgentLoop, type AgentLoopStep } from './agent-runtime';
 import { buildChatTools, buildMemoryRecallBlock } from './tools';
 import { getExposedCollections } from './schema';
 import { selectRelevantCollections, buildScopedSchemaSummary } from './schema-scope';
+import { makeToolResolver, scopeTools } from './tool-scope';
 import { buildPortfolioContext, renderPromptTemplate } from './context';
 import { buildKnowledgeContext } from './agent-prompt';
 import {
@@ -13,6 +14,7 @@ import {
   KNOWLEDGE_GUIDANCE,
   AUTHORING_GUIDANCE,
   APPROVAL_GUIDANCE,
+  WRITE_HONESTY_GUIDANCE,
   MEETING_GUIDANCE,
   CHAT_WRITE_ACTIONS_GUIDANCE,
   WEB_SEARCH_GUIDANCE,
@@ -25,6 +27,7 @@ import { withAttachedImages } from './chat-input';
 import { logAiUsage } from './usage';
 import type { Actor } from '@/lib/core/write';
 import type {
+  AgentActionReceipt,
   AiUsageSurface,
   ApprovalRequestRef,
   GeneratedFileRef,
@@ -47,8 +50,9 @@ export const CHAT_FALLBACK_MODELS = [
   'mistral-medium-latest',
   'mistral-large-latest'
 ];
-// Vision-kapabel modell när bilder bifogas (stödjer även function calling).
-export const VISION_FALLBACK_MODELS = ['pixtral-12b-2409'];
+// Vision-kapabla modeller när bilder bifogas (båda stödjer function calling).
+// Bara registrerade modeller (lib/ai/models.ts) — pris och etikett blir rätt.
+export const VISION_FALLBACK_MODELS = ['mistral-medium-latest', 'pixtral-large-latest'];
 // Interaktiv staff-chatt: ett intent-flöde blir lätt search_records →
 // describe_collection → query → aggregate → svar — och kräver ibland ett par
 // självkorrigeringar (fel kollektion/fält först). Taket höjs därför rejält
@@ -118,7 +122,9 @@ const STAFF_TOOL_GUIDANCE =
   '- `memory_read` / `memory_write`: ditt tvärsessions-minne (per tenant). När ' +
   'personalen RÄTTAR dig eller lär dig en bestående regel ("räkna inte lån som ' +
   'investeringar", "Bolag X heter numera Y") — spara det med `memory_write` ' +
-  '(kort `key`, tydlig `content`) så att det gäller även i framtida samtal. ' +
+  '(kort `key`, tydlig `content` och ALLTID en `category`: terminologi | ' +
+  'datatolkning | arbetssatt | bolag | portfolj | processer | ovrigt) så att det ' +
+  'gäller även i framtida samtal och personalen får överblick per kategori. ' +
   'Lagra ALDRIG personuppgifter i minnet, bara generella regler/slutsatser. ' +
   'Inlärt minne injiceras automatiskt i din kontext; använd `memory_read` för ' +
   'fler detaljer.\n' +
@@ -324,6 +330,8 @@ export interface StaffTurnResult {
   model: string;
   tokensIn: number;
   tokensOut: number;
+  /** Antal modellanrop i turen (1 + ett per verktygssteg) — per-turn-metadata § 9.9. */
+  calls: number;
   /** Dokument som agenten genererade under turn:en (för nedladdnings-chips). */
   generatedFiles: GeneratedFileRef[];
   /** Inline-visualiseringar (diagram/KPI-kort) som agenten tog fram under turn:en. */
@@ -334,6 +342,12 @@ export interface StaffTurnResult {
   meetingRequest?: MeetingRequestRef;
   /** Webbkällor agenten hämtade via `web_search` (visas under svaret). */
   sources: WebSearchSourceRef[];
+  /**
+   * Deterministiska kvitton på skrivningar i turen (§ 33.4) — byggda ur
+   * verktygsresultaten, aldrig ur modellens text. Persisteras som
+   * `ToolRunMessage.actions` och renderas som "Utfört i systemet".
+   */
+  receipts: AgentActionReceipt[];
 }
 
 export interface RunStaffChatTurnOptions {
@@ -348,6 +362,14 @@ export interface RunStaffChatTurnOptions {
   includeWebSearch?: boolean;
   agentBlock?: string;
   images?: Array<{ dataUrl: string }>;
+  /**
+   * Samtalet UTAN bilagornas text — styr schema-/verktygsskopning och
+   * modellval så en bifogad fils innehåll inte avgör vilka verktyg som laddas.
+   * Utelämnad = `userMessages`.
+   */
+  scopeMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  /** Användaren bifogade filer/bilder i turen (modellval minst Medium). */
+  hasAttachments?: boolean;
   /** Agent-id (persona) — sätts på actorn för audit. */
   agentId?: string;
   /** Exponera generate_document (interaktiv yta med människa-i-loopen). */
@@ -414,16 +436,16 @@ export async function runStaffChatTurn(
     agentId: opts.agentId
   };
 
-  // Vision-körningar kör verktygslöst (pixtral saknar tool-stöd, § 13.5).
-  const useTools = images.length === 0;
-  const tools = useTools
-    ? buildChatTools(collections, {
-        actor,
-        includeMemory: true,
-        includeDocuments: opts.includeDocuments,
-        includeWebSearch: opts.includeWebSearch
-      })
-    : undefined;
+  // Bild-turer kör MED verktyg: vision-kedjan (Mistral Medium → Pixtral
+  // Large) stödjer function calling, så "lägg in det här i årshjulet" med en
+  // skärmdump fungerar. (Tidigare kördes bildturer verktygslöst på en
+  // oregistrerad pixtral-12b — modellen kunde då varken läsa data eller agera.)
+  const fullTools = buildChatTools(collections, {
+    actor,
+    includeMemory: true,
+    includeDocuments: opts.includeDocuments,
+    includeWebSearch: opts.includeWebSearch
+  });
 
   const today = new Date().toISOString().slice(0, 10);
   const identityBlock =
@@ -436,25 +458,33 @@ export async function runStaffChatTurn(
 
   // Skopad schema-sammanfattning (§ 28.4): fulla fältlistor bara för kärnset +
   // kollektioner relevanta för de senaste användarturerna; resten som kompakt
-  // namnindex (describe_collection täcker detaljerna). Vision-turer kör
-  // verktygslöst (§ 13.5) → verktygsguide + schema utelämnas helt där.
-  const scopeText = opts.userMessages
+  // namnindex (describe_collection täcker detaljerna).
+  const scopeSource = opts.scopeMessages ?? opts.userMessages;
+  const scopeText = scopeSource
     .filter((m) => m.role === 'user')
     .slice(-3)
     .map((m) => m.content)
     .join('\n');
-  const schemaBlock = useTools
-    ? `\n\n${buildScopedSchemaSummary(collections, selectRelevantCollections(collections, scopeText))}`
-    : '';
-  const toolGuidanceBlocks = useTools
-    ? STAFF_TOOL_GUIDANCE +
-      APPROVAL_GUIDANCE +
-      AUTHORING_GUIDANCE +
-      MEETING_GUIDANCE +
-      SEARCH_STRATEGY_GUIDANCE +
-      KNOWLEDGE_GUIDANCE +
-      (opts.includeWebSearch ? WEB_SEARCH_GUIDANCE : WEB_SEARCH_OFF_HINT)
-    : '';
+  const schemaBlock = `\n\n${buildScopedSchemaSummary(collections, selectRelevantCollections(collections, scopeText))}`;
+  // Skopad verktygsyta (§ 28.4, `tool-scope.ts`): domänspecifika skrivverktyg
+  // skickas bara när de senaste turerna eller agentens persona matchar
+  // domänen; övriga laddas vid behov via `resolveTool` i loopen. Halverar
+  // ungefär prompt-tokens per anrop utan att någon funktion försvinner.
+  const toolScopeText = [
+    scopeText,
+    scopeSource.filter((m) => m.role === 'assistant').at(-1)?.content ?? '',
+    opts.agentBlock ?? ''
+  ].join('\n');
+  const tools = scopeTools(fullTools, toolScopeText);
+  const toolGuidanceBlocks =
+    STAFF_TOOL_GUIDANCE +
+    WRITE_HONESTY_GUIDANCE +
+    APPROVAL_GUIDANCE +
+    AUTHORING_GUIDANCE +
+    MEETING_GUIDANCE +
+    SEARCH_STRATEGY_GUIDANCE +
+    KNOWLEDGE_GUIDANCE +
+    (opts.includeWebSearch ? WEB_SEARCH_GUIDANCE : WEB_SEARCH_OFF_HINT);
 
   const systemContent =
     BASE_SYSTEM_PROMPT +
@@ -474,6 +504,7 @@ export async function runStaffChatTurn(
 
   let tokensIn = 0;
   let tokensOut = 0;
+  let calls = 0;
   let lastModel = '';
   const generatedFiles: GeneratedFileRef[] = [];
   const inlineVisuals: InlineVisualRef[] = [];
@@ -485,8 +516,9 @@ export async function runStaffChatTurn(
   // Modellval efter komplexitet (ej längre default small). Bilder → vision.
   const models = routeChatModels({
     hasImages: images.length > 0,
-    message: latestUserMessage(opts.userMessages),
+    message: latestUserMessage(scopeSource),
     hasAgent: Boolean(opts.agentId),
+    hasAttachments: opts.hasAttachments,
     historyTurns: opts.userMessages.length,
     preferredModel
   });
@@ -509,11 +541,13 @@ export async function runStaffChatTurn(
         webSources
       },
       maxIterations: MAX_TOOL_ITERATIONS,
+      resolveTool: makeToolResolver(fullTools),
       onStep: opts.onStep,
       onToken: opts.onToken,
       onUsage: (u) => {
         tokensIn += u.tokensIn;
         tokensOut += u.tokensOut;
+        calls += 1;
         lastModel = u.model;
         return logAiUsage(pb, {
           tenant: user.tenant,
@@ -532,11 +566,13 @@ export async function runStaffChatTurn(
         model: lastModel,
         tokensIn,
         tokensOut,
+        calls,
         generatedFiles,
         visuals: inlineVisuals,
         approvalRequest: approvalRequests[0],
         meetingRequest: meetingRequests[0],
-        sources: webSources
+        sources: webSources,
+        receipts: result.receipts
       }
     };
   } catch (err) {

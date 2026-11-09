@@ -17,11 +17,11 @@
     "clsx": "^2.1.1",
     "cmdk": "^0.2.1",
     "docx": "^9.7.0",
-    "echarts": "^5.5.1",
+    "echarts": "^6.1.0",
     "exceljs": "^4.4.0",
     "framer-motion": "^12.38.0",
     "lucide-react": "^0.469.0",
-    "next": "15.5.19",
+    "next": "15.5.27",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.10.38",
     "pocketbase": "^0.25.0",
@@ -39,7 +39,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "eslint": "^8.57.0",
-    "eslint-config-next": "15.5.19",
+    "eslint-config-next": "15.5.27",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.5.4"
   }

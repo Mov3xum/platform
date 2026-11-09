@@ -55,7 +55,13 @@ const nextConfig = {
     return [
       // Inflöde (tidigare Kompassen). Backkompat för gamla länkar.
       { source: '/kompassen', destination: '/inflode', permanent: true },
-      { source: '/kompassen/:path*', destination: '/inflode/:path*', permanent: true }
+      { source: '/kompassen/:path*', destination: '/inflode/:path*', permanent: true },
+      // Events och Community bor som flikar under Marknadsverktyg (2026-10).
+      // Sparade notiser, aktivitetslogg och bokmärken pekar på de gamla adresserna.
+      { source: '/events', destination: '/inflode/events', permanent: true },
+      { source: '/events/:path*', destination: '/inflode/events/:path*', permanent: true },
+      { source: '/community', destination: '/inflode/community', permanent: true },
+      { source: '/community/:path*', destination: '/inflode/community/:path*', permanent: true }
     ];
   },
   // Produces a minimal runtime build at .next/standalone with only the
@@ -80,25 +86,14 @@ const nextConfig = {
     'exceljs',
   ],
   images: {
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: '**',
-      },
-      {
-        protocol: 'http',
-        hostname: 'localhost',
-        port: '8080',
-      },
-      {
-        protocol: 'http',
-        hostname: 'pocketbase',
-        port: '8080',
-      },
-      // Staging/production PocketBase körs över https på sina sslip.io-hosts
-      // (Let's Encrypt via Coolify, se infra/SSL.md) → avatarer täcks redan av
-      // catch-all https-mönstret ovan. Inget http-sslip.io-undantag behövs.
-    ],
+    // Bildoptimeraren (/_next/image) är avstängd (2026-09-30): med
+    // `remotePatterns: hostname '**'` var den en oautentiserad bildproxy/
+    // blind SSRF mot valfri https-host (sökvägen ligger utanför middleware:ns
+    // matcher). Alla våra bilder är antingen lokala (/brand, /icons),
+    // PB-filer via samma-origin-proxys eller data-URL-previews — ingen
+    // behöver optimeraren. `unoptimized` gör att <Image> renderar en vanlig
+    // <img> utan proxy-endpoint.
+    unoptimized: true,
   },
   // Skip build-only packages from output file tracing. Without this,
   // @vercel/nft has to stat all of node_modules (including the @swc/core

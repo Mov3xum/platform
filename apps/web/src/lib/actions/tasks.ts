@@ -5,6 +5,10 @@ import type PocketBase from 'pocketbase';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { getOneForTenant } from '@/lib/pb.server';
 import { hasRole } from '@/lib/rbac';
+import { writeWithFallback } from '@/lib/core/write/helpers';
+import { logAgentAction } from '@/lib/core/write/audit';
+import { validateDateOnly } from '@/lib/core/write/validators';
+import type { Actor } from '@/lib/core/write/types';
 import { toRawStatus, type BoardStatus } from '@/lib/overview/status';
 import {
   isStartupBoardStatus,
@@ -13,6 +17,7 @@ import {
 import { listAssignableResourcesForTenant } from '@/lib/assignments/collaboration';
 import { unionParticipantIds } from '@/lib/missions-server';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+import { notify } from '@/lib/notifications-server';
 import { parseDateTimeInput, type Mission } from '@platform/shared';
 
 /**
@@ -124,7 +129,7 @@ export async function logMeetingAsTaskAction(
   return { summary: 'Loggad ✓' };
 }
 
-/** Snabb-skapa en fristående uppgift för "Min översikt". Bara staff. */
+/** Snabb-skapa en uppgift från "Mina uppgifter" (valfritt datum + bolag). Bara staff. */
 export async function createTaskAction(input: {
   description: string;
   kind?: string;
@@ -217,6 +222,197 @@ export async function updateTaskStatusAction(
   return { ok: true };
 }
 
+function str(v: unknown): string {
+  return typeof v === 'string' ? v.trim() : '';
+}
+
+function actorFor(user: { id: string; tenant: string; roles: string[] }): Actor {
+  return { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Actor['roles'] };
+}
+
+/** Bara fristående/bolagskopplade kort får byta bolag — övriga behåller sin polymorfa länk. */
+function canRelinkStartup(linkKind: string | undefined): boolean {
+  return !linkKind || linkKind === 'none' || linkKind === 'startup';
+}
+
+/**
+ * Redigera titel, förfallodatum och bolag på en uppgift från "Mina uppgifter".
+ * Staff eller ägare (speglar tasks.updateRule). Bolaget tenant-verifieras
+ * innan det kopplas; tomt bolag kopplar bort (link_kind → none).
+ *
+ * `link_kind`/`startup` rörs BARA när kortet är fristående eller bolags-
+ * kopplat. Uppföljningar från upphandlingar (§ 39.2), uppdrags-, kontakt-
+ * och eventkort behåller sin länk: ett `startup` på en upphandlings-
+ * uppföljning skulle ge bolagsmedlemmar läsrätt till intern avtalsdata
+ * via tasks-RLS (§ 21).
+ */
+export async function updateTaskDetailsAction(input: {
+  taskId: string;
+  description: string;
+  dueAt?: string;
+  startupId?: string;
+}): Promise<TaskActionResult> {
+  const user = await requireUser();
+
+  const taskId = str(input?.taskId);
+  if (!taskId) return { ok: false, error: 'Uppgiften saknas.' };
+  const description = str(input?.description);
+  if (!description) return { ok: false, error: 'Beskrivning krävs.' };
+  if (description.length > 500) {
+    return { ok: false, error: 'Beskrivning får vara max 500 tecken.' };
+  }
+  const due = validateDateOnly(str(input?.dueAt), 'Datum');
+  if (!due.ok) return { ok: false, error: due.error };
+  const startupId = str(input?.startupId);
+
+  const pb = await getServerPb();
+
+  let row: {
+    id: string;
+    tenant?: string;
+    owner?: string;
+    startup?: string;
+    link_kind?: string;
+    description?: string;
+  };
+  try {
+    row = await pb
+      .collection('tasks')
+      .getOne(taskId, { fields: 'id,tenant,owner,startup,link_kind,description' });
+  } catch {
+    return { ok: false, error: 'Uppgiften hittades inte.' };
+  }
+  if (row.tenant !== user.tenant) {
+    return { ok: false, error: 'Åtkomst nekad.' };
+  }
+  const canEdit = hasRole(user.roles, [...STAFF_ROLES]) || row.owner === user.id;
+  if (!canEdit) {
+    return { ok: false, error: 'Du får inte ändra denna uppgift.' };
+  }
+
+  const patch: Record<string, unknown> = {
+    description,
+    due_at: due.value
+  };
+
+  const relink = canRelinkStartup(row.link_kind);
+  if (relink) {
+    if (startupId) {
+      try {
+        await getOneForTenant('startups', startupId);
+      } catch {
+        return { ok: false, error: 'Bolaget hittades inte i din organisation.' };
+      }
+    }
+    patch.startup = startupId || null;
+    patch.link_kind = startupId ? 'startup' : 'none';
+  } else if (startupId && startupId !== (row.startup || '')) {
+    return {
+      ok: false,
+      error: 'Den här uppgiften hör till ett uppdrag, en kontakt, ett event eller en upphandling och kan inte kopplas till ett bolag.'
+    };
+  }
+
+  try {
+    // Superuser-fallback bara vid PB v0.23.4:s tysta regel-nekande (§ 21.3);
+    // roll + tenant är verifierade ovan.
+    await writeWithFallback(pb, (client) => client.collection('tasks').update(taskId, patch));
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Kunde inte uppdatera uppgiften.'
+    };
+  }
+
+  await logAgentAction(pb, {
+    actor: actorFor(user),
+    action_type: 'update',
+    collection: 'tasks',
+    record_id: taskId,
+    before_value: { description: row.description ?? null, startup: row.startup || null },
+    after_value: { description, due_at: due.value, startup: relink ? startupId || null : row.startup || null }
+  });
+
+  revalidatePath('/inkorg');
+  if (row.startup) revalidateStartupBoard(row.startup);
+  if (relink && startupId && startupId !== row.startup) revalidateStartupBoard(startupId);
+  return { ok: true };
+}
+
+/**
+ * Ta bort en uppgift (t.ex. en dubblett) från "Mina uppgifter". Speglar
+ * tasks.deleteRule: admin/incubator_lead eller ägaren. Regeln använder bart
+ * `?=` mot roller (§ 21.3) och kan därför tyst neka en admin som inte äger
+ * kortet → superuser-fallback efter den verifierade roll-/tenant-kollen.
+ */
+export async function deleteTaskAction(taskIdInput: string): Promise<TaskActionResult> {
+  const user = await requireUser();
+  const taskId = str(taskIdInput);
+  if (!taskId) return { ok: false, error: 'Uppgiften saknas.' };
+  const pb = await getServerPb();
+
+  let row: {
+    id: string;
+    tenant?: string;
+    owner?: string;
+    startup?: string;
+    mission?: string;
+    link_kind?: string;
+    rule_key?: string;
+    description?: string;
+  };
+  try {
+    row = await pb
+      .collection('tasks')
+      .getOne(taskId, { fields: 'id,tenant,owner,startup,mission,link_kind,rule_key,description' });
+  } catch {
+    return { ok: false, error: 'Uppgiften hittades inte.' };
+  }
+  if (row.tenant !== user.tenant) {
+    return { ok: false, error: 'Åtkomst nekad.' };
+  }
+  const canDelete = hasRole(user.roles, ['admin', 'incubator_lead']) || row.owner === user.id;
+  if (!canDelete) {
+    return { ok: false, error: 'Bara ägaren eller admin kan ta bort uppgiften.' };
+  }
+  // Uppföljningar som upphandlingsreglerna genererat (§ 39.2) återskapas av
+  // synken så länge villkoret gäller — radering vore en tyst no-op. Markera
+  // klar i stället, eller ändra regeln i /upphandlingar/regler.
+  if (row.rule_key || row.link_kind === 'procurement') {
+    return {
+      ok: false,
+      error: 'Uppföljningen styrs av upphandlingens regler och kan inte tas bort här — markera den klar eller ändra regeln.'
+    };
+  }
+
+  try {
+    // tasks.deleteRule använder bart `?=` mot roller (§ 21.3) och PB svarar
+    // 404 när regeln filtrerar bort posten → 404 ingår i fallback-klassen här.
+    await writeWithFallback(pb, (client) => client.collection('tasks').delete(taskId), {
+      fallbackOn404: true
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Kunde inte ta bort uppgiften.'
+    };
+  }
+
+  // Radering loggas som `update` + `deleted` (action_type saknar delete, § 30.6).
+  await logAgentAction(pb, {
+    actor: actorFor(user),
+    action_type: 'update',
+    collection: 'tasks',
+    record_id: taskId,
+    after_value: { deleted: true, description: row.description ?? null, startup: row.startup || null }
+  });
+
+  revalidatePath('/inkorg');
+  if (row.startup) revalidateStartupBoard(row.startup);
+  if (row.mission) revalidatePath(`/uppdrag/${row.mission}`);
+  return { ok: true };
+}
+
 // ============================================================================
 // Bolagskanban — fliken "Aktiviteter" på bolagskortet (CLAUDE.md § 15.7).
 // Sex kolumner = råa tasks.status-värden (migration 1700000129).
@@ -240,6 +436,29 @@ function revalidateStartupBoard(startupId: string) {
   revalidatePath(`/startups/${startupId}/aktiviteter`);
   revalidatePath(`/startups/${startupId}`);
   revalidatePath('/inkorg');
+}
+
+/**
+ * Notis till kollegor som tilldelats ett kort (§ 50, `task_assigned`).
+ * Best-effort — ett notisfel får aldrig fälla själva tilldelningen.
+ */
+async function notifyTaskAssignees(
+  pb: PocketBase,
+  user: { id: string; tenant: string },
+  taskId: string,
+  assigneeIds: string[],
+  description: string,
+  href: string
+): Promise<void> {
+  if (assigneeIds.length === 0) return;
+  await notify(pb, {
+    tenant: user.tenant,
+    recipients: assigneeIds,
+    kind: 'task_assigned',
+    actorId: user.id,
+    entity: { type: 'tasks', id: taskId },
+    payload: { title: description, href }
+  }).catch(() => undefined);
 }
 
 /** Skapa en uppgift direkt i en kolumn på bolagskanbanen. Bara staff. */
@@ -294,8 +513,10 @@ export async function createStartupBoardTaskAction(input: {
     payload.due_at = input.dueAt;
   }
 
+  let createdId: string;
   try {
-    await pb.collection('tasks').create(payload);
+    const created = await pb.collection('tasks').create<{ id: string }>(payload);
+    createdId = created.id;
   } catch (err) {
     return {
       ok: false,
@@ -303,6 +524,7 @@ export async function createStartupBoardTaskAction(input: {
     };
   }
 
+  await notifyTaskAssignees(pb, user, createdId, assignees, description, `/startups/${input.startupId}/aktiviteter`);
   revalidateStartupBoard(input.startupId);
   return { ok: true };
 }
@@ -365,11 +587,18 @@ export async function setTaskAssigneesAction(
 
   const pb = await getServerPb();
 
-  let row: { id: string; tenant?: string; startup?: string; mission?: string };
+  let row: {
+    id: string;
+    tenant?: string;
+    startup?: string;
+    mission?: string;
+    assignees?: string[];
+    description?: string;
+  };
   try {
     row = await pb
       .collection('tasks')
-      .getOne(taskId, { fields: 'id,tenant,startup,mission' });
+      .getOne(taskId, { fields: 'id,tenant,startup,mission,assignees,description' });
   } catch {
     return { ok: false, error: 'Uppgiften hittades inte.' };
   }
@@ -388,6 +617,16 @@ export async function setTaskAssigneesAction(
       error: err instanceof Error ? err.message : 'Kunde inte uppdatera tilldelningen.'
     };
   }
+
+  // Notis bara till NYA tilldelade (§ 50).
+  const before = new Set(Array.isArray(row.assignees) ? row.assignees : []);
+  const added = assignees.filter((id) => !before.has(id));
+  const href = row.mission
+    ? `/uppdrag/${row.mission}`
+    : row.startup
+      ? `/startups/${row.startup}/aktiviteter`
+      : '/inkorg';
+  await notifyTaskAssignees(pb, user, taskId, added, row.description || 'Uppgift', href);
 
   if (row.startup) revalidateStartupBoard(row.startup);
   if (row.mission) revalidatePath(`/uppdrag/${row.mission}`);
@@ -475,8 +714,10 @@ export async function createMissionBoardTaskAction(input: {
     payload.due_at = input.dueAt;
   }
 
+  let createdId: string;
   try {
-    await pb.collection('tasks').create(payload);
+    const created = await pb.collection('tasks').create<{ id: string }>(payload);
+    createdId = created.id;
   } catch (err) {
     return {
       ok: false,
@@ -484,6 +725,7 @@ export async function createMissionBoardTaskAction(input: {
     };
   }
 
+  await notifyTaskAssignees(pb, user, createdId, assignees, description, `/uppdrag/${input.missionId}`);
   revalidateMissionBoard(input.missionId);
   return { ok: true };
 }

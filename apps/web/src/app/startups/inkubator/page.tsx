@@ -1,3 +1,4 @@
+import { escFilter } from '@/lib/pb-filter';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { listForTenant } from '@/lib/pb.server';
@@ -27,7 +28,7 @@ interface StartupRecord {
 
 function buildFilter(q?: string, phase?: string, status?: string): string | undefined {
   const parts: string[] = [];
-  if (q) parts.push(`name ~ "${q.replace(/"/g, '\\"')}"`);
+  if (q) parts.push(`name ~ "${escFilter(q)}"`);
   if (phase && ALL_PHASES.includes(phase as StartupPhase)) parts.push(`phase = "${phase}"`);
   if (status && ALLOWED_STATUS.has(status as StartupStatus)) parts.push(`status = "${status}"`);
   return parts.length > 0 ? parts.join(' && ') : undefined;

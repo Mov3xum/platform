@@ -6,6 +6,7 @@ import { getServerPb, getCurrentUser } from '@/lib/auth.server';
 import { getServerPbUrl } from '@/lib/pb-url';
 import { hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
+import { notifyStartupMembers } from '@/lib/notifications-server';
 import { escFilter } from '@/lib/pb-filter';
 import {
   createCollaboratorTasks,
@@ -19,6 +20,8 @@ import type {
 } from '@platform/shared';
 
 const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
+// Radering (dokument + alla bolags tilldelningar) är ett ledningsbeslut.
+const DELETE_ROLES: Role[] = ['admin', 'incubator_lead'];
 const PB_URL = getServerPbUrl();
 
 export interface DocumentActionState {
@@ -105,7 +108,8 @@ export async function assignDocumentToStartupAction(
       startupId,
       collaboratorIds,
       description: `Utbildningsdokument: ${doc.title} – ${startupName}`,
-      dueDate
+      dueDate,
+      actorId: user.id
     });
   }
   let meetingId: string | null = null;
@@ -132,6 +136,7 @@ export async function assignDocumentToStartupAction(
   if (linkedCollaborators.length > 0) payload.collaborators = linkedCollaborators;
   if (meetingId) payload.meeting = meetingId;
 
+  let createdNew = false;
   try {
     // Finns redan en tilldelning? Uppdatera den (idempotent).
     const existing = await pb
@@ -150,6 +155,7 @@ export async function assignDocumentToStartupAction(
         await client
           .collection(PB_COLLECTIONS.educationDocumentAssignments)
           .create({ ...payload, status: 'assigned' });
+        createdNew = true;
       }
     };
 
@@ -173,8 +179,23 @@ export async function assignDocumentToStartupAction(
     return { error: 'Tilldelningen misslyckades.' };
   }
 
+  // Notis till bolagets medlemmar vid ny tilldelning (§ 50). Best-effort.
+  if (createdNew) {
+    await notifyStartupMembers(pb, {
+      tenant: user.tenant,
+      startupId,
+      kind: 'document_assigned',
+      actorId: user.id,
+      entity: { type: 'education_documents', id: documentId },
+      payload: {
+        title: doc.title || 'Utbildningsdokument',
+        snippet: dueDate ? `Klar senast ${dueDate}` : undefined,
+        href: '/mina-aktiviteter'
+      }
+    }).catch(() => undefined);
+  }
+
   revalidatePath('/education/documents');
-  revalidatePath('/pagaende');
   revalidatePath('/inkorg');
   revalidatePath(`/startups/${startupId}`);
   return { ok: true };
@@ -324,7 +345,7 @@ export async function deleteDocumentAssignmentAction(
 ): Promise<DocumentActionState> {
   const user = await getCurrentUser();
   if (!user) return { error: 'Ej inloggad.' };
-  if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Åtkomst nekad.' };
+  if (!hasRole(user.roles, DELETE_ROLES)) return { error: 'Endast inkubatorledning kan ta bort.' };
 
   const pb = await getServerPb();
   let assignment: EducationDocumentAssignment;
@@ -429,7 +450,7 @@ export async function deleteEducationDocumentAction(
 ): Promise<DocumentActionState> {
   const user = await getCurrentUser();
   if (!user) return { error: 'Ej inloggad.' };
-  if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Åtkomst nekad.' };
+  if (!hasRole(user.roles, DELETE_ROLES)) return { error: 'Endast inkubatorledning kan ta bort.' };
 
   const pb = await getServerPb();
   let doc: EducationDocument;

@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+
 // Movexum OS — MissionList (vänster pane på /uppdrag)
 // Klient-komponent för urval. Klick byter aktivt uppdrag via URL-uppdatering.
 
@@ -82,15 +84,15 @@ export function MissionList({
             const total = Math.max(stages.length, 1);
             const isSel = m.id === selectedId;
             return (
-              <button
-                key={m.id}
+              <div key={m.id} style={{ position: 'relative' }}>
+                <button
                 onClick={() => select(m.id)}
                 type="button"
                 style={{
                   display: 'block',
                   width: '100%',
                   textAlign: 'left',
-                  padding: '12px 16px',
+                  padding: '12px 16px 30px',
                   borderBottom: '1px solid var(--mx-line-soft)',
                   cursor: 'pointer',
                   background: isSel ? 'var(--mx-paper-3)' : 'transparent',
@@ -136,7 +138,18 @@ export function MissionList({
                     {done}/{stages.length}
                   </span>
                 </div>
-              </button>
+                </button>
+                {/* Egen länk till teamkortet (tavla, dokumentation, kommentarer,
+                    Aktiviteter & mål) — en länk får inte ligga inuti knappen. */}
+                <Link
+                  href={`/uppdrag/${m.id}`}
+                  className="mx-t-xs text-link hover:underline"
+                  style={{ position: 'absolute', right: 16, bottom: 10 }}
+                  title="Öppna teamkortet"
+                >
+                  Öppna →
+                </Link>
+              </div>
             );
           })
         )}

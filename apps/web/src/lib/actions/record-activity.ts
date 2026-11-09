@@ -16,7 +16,9 @@ export type ActivityKind =
   | 'chat'
   | 'education_document'
   | 'agreement'
-  | 'integration_sync';
+  | 'integration_sync'
+  | 'mission'
+  | 'support_check';
 
 export interface RecordActivityParams {
   tenant: string;

@@ -1,6 +1,8 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 import { escFilter } from '@/lib/pb-filter';
+import { getSuperuserPb } from '@/lib/integrations/credentials';
+import { pickSpendSource, usageMonthKey, type UsageRollupRow } from './usage-rollup';
 import {
   AiBudgetExceededError,
   effectiveBudgetUsd,
@@ -28,36 +30,85 @@ const SPEND_PAGE = 500;
 const spendCache = new Map<string, SpendCacheEntry>();
 
 /**
- * Summerar tenantens `cost_estimate_usd` för innevarande kalendermånad. Cachad
- * 60 s per tenant så att checken inte paginerar om vid varje turn. Best-effort:
- * vid extrem volym (> MAX_SPEND_PAGES × SPEND_PAGE events/månad) blir summan en
- * nedre gräns — den kan aldrig FALSKT blockera en legitim användare, bara
- * underskatta vid orimligt höga volymer.
+ * Läsaren för spärren. Superusern föredras: spärren är en robusthetsgräns
+ * för HELA tenanten, och en coach/mentor/bolagsmedlems token får inte läsa
+ * `ai_usage_events` (staff-lead-RLS) — med användarens token blev summan då
+ * tyst 0 och taket gällde bara för ledningen. Bara ett tal lämnar
+ * funktionen. Saknas superuser används anroparens klient (som förut).
+ */
+async function spendReader(pb: PocketBase): Promise<PocketBase> {
+  try {
+    const su = await getSuperuserPb();
+    if (su.ok) return su.pb;
+  } catch {
+    /* fail-open → anroparens klient */
+  }
+  return pb;
+}
+
+/**
+ * Läser tenantens rollup-rad (`ai_usage_monthly`, migration 1700000185) för
+ * månaden. `null` = kollektionen saknas, läsfel eller ingen rad ännu —
+ * anroparen faller då tillbaka på summering.
+ */
+async function readRollupRow(
+  pb: PocketBase,
+  tenantId: string,
+  month: string
+): Promise<UsageRollupRow | null> {
+  try {
+    const res = await pb.collection('ai_usage_monthly').getList<UsageRollupRow>(1, 1, {
+      filter: pb.filter('tenant = {:tenant} && month = {:month}', { tenant: tenantId, month }),
+      fields: 'cost_usd,tokens_in,tokens_out,events'
+    });
+    return res.items[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Den gamla vägen: summerar månadens events (paginerat, best-effort-tak). */
+async function sumMonthlyEventsUsd(pb: PocketBase, tenantId: string, now: Date): Promise<number> {
+  const filter = `tenant = "${escFilter(tenantId)}" && created >= "${escFilter(monthStartIso(now))}"`;
+  let total = 0;
+  for (let page = 1; page <= MAX_SPEND_PAGES; page++) {
+    const res = await pb.collection('ai_usage_events').getList(page, SPEND_PAGE, {
+      filter,
+      fields: 'cost_estimate_usd',
+      sort: '-created'
+    });
+    for (const row of res.items as { cost_estimate_usd?: number }[]) {
+      const c = Number(row.cost_estimate_usd);
+      if (Number.isFinite(c)) total += c;
+    }
+    if (res.items.length < SPEND_PAGE || page * SPEND_PAGE >= res.totalItems) break;
+  }
+  return total;
+}
+
+/**
+ * Tenantens `cost_estimate_usd` för innevarande kalendermånad (UTC). Läser EN
+ * rad ur månadsrollupen (`ai_usage_monthly`, hålls aktuell atomiskt av
+ * PB-hooken `ai_usage_rollup.pb.js`). Saknas raden — kollektionen ännu inte
+ * migrerad, hooken inte aktiv eller inga anrop denna månad — summeras
+ * events som förut (vid extrem volym en nedre gräns; kan aldrig FALSKT
+ * blockera). Cachad 60 s per tenant. Fail-open: ett läsfel blockerar aldrig AI.
  */
 export async function getMonthlyAiSpendUsd(
   pb: PocketBase,
   tenantId: string,
   now: Date = new Date()
 ): Promise<number> {
-  const cacheKey = `${tenantId}:${monthStartIso(now).slice(0, 7)}`;
+  const month = usageMonthKey(now);
+  const cacheKey = `${tenantId}:${month}`;
   const cached = spendCache.get(cacheKey);
   if (cached && Date.now() - cached.at < SPEND_CACHE_TTL_MS) return cached.value;
 
-  const filter = `tenant = "${escFilter(tenantId)}" && created >= "${escFilter(monthStartIso(now))}"`;
-  let total = 0;
+  const reader = await spendReader(pb);
+  let total: number;
   try {
-    for (let page = 1; page <= MAX_SPEND_PAGES; page++) {
-      const res = await pb.collection('ai_usage_events').getList(page, SPEND_PAGE, {
-        filter,
-        fields: 'cost_estimate_usd',
-        sort: '-created'
-      });
-      for (const row of res.items as { cost_estimate_usd?: number }[]) {
-        const c = Number(row.cost_estimate_usd);
-        if (Number.isFinite(c)) total += c;
-      }
-      if (res.items.length < SPEND_PAGE || page * SPEND_PAGE >= res.totalItems) break;
-    }
+    const source = pickSpendSource(await readRollupRow(reader, tenantId, month));
+    total = source.kind === 'rollup' ? source.costUsd : await sumMonthlyEventsUsd(reader, tenantId, now);
   } catch {
     // Fail-open: ett läsfel får inte blockera AI (samma princip som usage-loggen).
     // Spärren är en robusthetsgräns, inte en säkerhetsgräns.

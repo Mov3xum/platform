@@ -1,8 +1,15 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
-import { getSuperuserPb } from '@/lib/integrations/credentials';
-import { extractLead, scoreLead, type CompassChatMessage } from './chat';
-import { appendMessage, createConversation, createLead, updateLead } from './store';
+import { extractLead, scoreLead, type CompassAiUsage, type CompassChatMessage } from './chat';
+import { logAiUsage } from '@/lib/ai/usage';
+import {
+  appendMessage,
+  createConversation,
+  createLead,
+  findConversationBySession,
+  patchConversation,
+  updateLead
+} from './store';
 import { notifyNewInflow } from './notify';
 import type { CompassModule, Conversation } from './types';
 
@@ -19,42 +26,28 @@ import type { CompassModule, Conversation } from './types';
    eller AI-extraktionen lyckas. */
 
 /** Hämta/skapa en konversation per session (kontinuitet i intag-chatten). */
+/**
+ * Sessionstoken från klienten som nycklar konversationen (och lead-upserten)
+ * per tenant+modul. Klienten genererar `s_<uuid>` (CompassChat). Kravet:
+ * URL-säkra tecken, minst 16 tecken — ett saknat/kort värde avvisas i stället
+ * för att falla på en delad konstant (`'anon'` lät varje tur utan token
+ * skriva över samma lead, dvs. blanda/ersätta andra besökares uppgifter).
+ */
+export function isValidChatSessionToken(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{16,100}$/.test(value);
+}
+
 export async function getOrCreateChatConversation(
   pb: PocketBase,
   tenant: string,
   moduleSlug: string,
   sessionToken: string
 ): Promise<Conversation | null> {
-  // Hitta en pågående session-konversation. PB v0.23.4 kan TYST neka
-  // list/view-regeln (roll mot multi-value-fält, CLAUDE.md § 21.3), så vi
-  // faller tillbaka på en superuser-läsning innan vi ger upp och skapar en ny —
-  // annars skulle varje tur skapa en NY konversation (och tappa idempotensen på
-  // lead-upserten via conversation.lead).
-  const findExisting = (client: PocketBase) =>
-    client
-      .collection('compass_conversations')
-      .getFirstListItem<Conversation>(
-        client.filter('tenant = {:t} && module_slug = {:m} && session_token = {:s}', {
-          t: tenant,
-          m: moduleSlug,
-          s: sessionToken
-        })
-      );
-
-  try {
-    return await findExisting(pb);
-  } catch {
-    const su = await getSuperuserPb();
-    if (su.ok) {
-      try {
-        const found = await findExisting(su.pb);
-        if (found && found.tenant === tenant) return found;
-      } catch {
-        // ingen befintlig konversation — skapa en ny nedan
-      }
-    }
-  }
-
+  // Hitta en pågående session-konversation (superuser-fallback vid PB
+  // v0.23.4:s tysta regel-nekande, § 21.3) — annars skulle varje tur skapa en
+  // NY konversation och tappa idempotensen på lead-upserten.
+  const existing = await findConversationBySession(pb, tenant, moduleSlug, sessionToken);
+  if (existing) return existing;
   // Skapa via den delade store-helpern som har superuser-skriv-fallback.
   return createConversation(pb, tenant, { moduleSlug, sessionToken });
 }
@@ -109,6 +102,12 @@ export interface UpsertChatLeadOptions {
   /** När satt + leadet skapas första gången → notifiera inflödesmailen (en gång). */
   notifyModule?: CompassModule;
   /**
+   * Inloggad användare för token-loggen av extraktion/bedömning (§ 9.6).
+   * Utelämnas i den publika chatten — raderna loggas då anonymt via
+   * superuser-klienten (migration 1700000185).
+   */
+  usageUserId?: string | null;
+  /**
    * Steg 4-valet "Skapa lead" (migration 1700000125). Default true — bara ett
    * uttryckligt false hoppar över lead-upserten (meddelandena loggas ändå).
    */
@@ -145,7 +144,26 @@ export async function persistChatTurnAndUpsertLead(
 
   // Extrahera kontakt/idé ur samtalet (människa-i-loopen granskar sedan).
   const fullHistory: CompassChatMessage[] = [...history, { role: 'assistant', content: reply.text }];
-  const extracted = await extractLead(fullHistory);
+  // Extraktion + bedömning är egna Mistral-anrop per tur — de räknas mot
+  // månadstaket och syns i AI-analysen (surface `suggestions`, § 9.6).
+  const usages: CompassAiUsage[] = [];
+  const sink = (u: CompassAiUsage) => {
+    usages.push(u);
+  };
+  const flushUsage = async () => {
+    for (const u of usages.splice(0)) {
+      await logAiUsage(pb, {
+        tenant,
+        userId: opts.usageUserId ?? null,
+        surface: 'suggestions',
+        model: u.model,
+        tokensIn: u.tokensIn,
+        tokensOut: u.tokensOut
+      });
+    }
+  };
+  const extracted = await extractLead(fullHistory, sink);
+  await flushUsage();
   const fallback = summarizeChatLead(fullHistory, opts.moduleName);
   const leadFields = {
     name: extracted?.name || 'Anonym',
@@ -155,7 +173,11 @@ export async function persistChatTurnAndUpsertLead(
     idea_summary: extracted?.idea_summary || fallback.summary,
     idea_category: extracted?.idea_category || undefined,
     source_detail: `AI-chatt via ${opts.moduleName}`,
-    notes: fallback.notes
+    notes: fallback.notes,
+    // Besökaren är mitt i samtalet (§ 23.10) — slutfört sätts av avslutssteget
+    // (/complete), avbrutet av pagehide-beacon eller lazy-svepet. En
+    // återvändande besökare efter "abandoned" blir pågående igen.
+    completion: 'in_progress' as const
   };
 
   if (conversation.lead) {
@@ -171,7 +193,8 @@ export async function persistChatTurnAndUpsertLead(
     idea_summary: leadFields.idea_summary,
     idea_category: leadFields.idea_category || null
   };
-  const { score, reasoning } = await scoreLead(scoringSource);
+  const { score, reasoning } = await scoreLead(scoringSource, sink);
+  await flushUsage();
   const lead = await createLead(pb, tenant, {
     ...leadFields,
     ...(opts.attribution || {}),
@@ -185,18 +208,7 @@ export async function persistChatTurnAndUpsertLead(
     // Koppla leadet till konversationen så efterföljande turer berikar SAMMA
     // lead (idempotens) i stället för att skapa en ny per tur. Samma v0.23.4
     // rule-eval-risk → superuser-fallback om användartokenets update nekas.
-    try {
-      await pb.collection('compass_conversations').update(conversation.id, { lead: lead.id });
-    } catch {
-      const su = await getSuperuserPb();
-      if (su.ok) {
-        try {
-          await su.pb.collection('compass_conversations').update(conversation.id, { lead: lead.id });
-        } catch {
-          // best-effort — leadet finns redan, kopplingen är en bekvämlighet
-        }
-      }
-    }
+    await patchConversation(pb, conversation.id, { lead: lead.id });
     // Notifiera Movexums inflödesmail om det nya inflödet (en gång, vid
     // första skapandet — inte vid efterföljande uppdateringar).
     if (opts.notifyModule) {

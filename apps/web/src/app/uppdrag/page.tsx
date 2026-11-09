@@ -1,4 +1,4 @@
-// Movexum OS — Uppdrag & flöden (lista + flöde / kanban)
+// Movexum OS — Tvärfunktionella team (uppdrag & flöden: lista + flöde / kanban)
 
 import Link from 'next/link';
 import { requireUser, getServerPb } from '@/lib/auth.server';
@@ -124,14 +124,14 @@ export default async function UppdragPage({
           href="/uppdrag/new"
           className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[12.5px] font-medium text-brand-foreground hover:bg-brand-hover"
         >
-          <Icon name="plus" size={12} /> Nytt uppdrag
+          <Icon name="plus" size={12} /> Nytt team
         </Link>
       )}
     </>
   );
 
   return (
-    <PageShell title="Uppdrag & flöden" actions={actions} rightPanel={rail}>
+    <PageShell title="Tvärfunktionella team" actions={actions} rightPanel={rail}>
       <div className="flex min-h-0 flex-1 flex-col gap-4 py-5">
         <div className="flex flex-wrap items-center gap-2">
           {FILTER_OPTIONS.map((opt) => {
@@ -163,7 +163,7 @@ export default async function UppdragPage({
               />
             ) : (
               <div className="rounded-2xl border border-default bg-surface p-6 text-[13px] text-foreground-muted">
-                Välj ett uppdrag i listan.
+                Välj ett team i listan.
               </div>
             )}
           </div>

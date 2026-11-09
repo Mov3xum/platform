@@ -3,7 +3,7 @@ import { Fragment } from 'react';
 import type { HomeTimeline } from '@platform/shared';
 
 /**
- * 14-dagarsremsan på Hemmaplan (CLAUDE.md § 37): en dagslinjal med årshjulets
+ * 14-dagarsremsan på Översikt (CLAUDE.md § 37): en dagslinjal med årshjulets
  * poster och events som band som löper över sina dagar — perioder blir långa
  * band, enskilda dagar korta, och överlappande band packas i körfält av den
  * rena, enhetstestade `buildHomeTimeline`. Ren presentation (server), ingen

@@ -4,7 +4,20 @@ import { requireUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { PageShell } from '@/components/PageShell';
 import { Card, Chip, Icon } from '@/components/proto';
-import { listLeads, listLeadSources, listModules } from '@/lib/compass/store';
+import {
+  LEAD_LIST_FIELDS,
+  listLeads,
+  listLeadSources,
+  listModules,
+  markStaleLeadsAbandoned
+} from '@/lib/compass/store';
+import {
+  isLeadCompletion,
+  LEAD_COMPLETION_LABEL,
+  normalizeLeadCompletion,
+  type LeadCompletion
+} from '@/lib/compass/completion';
+import { pagerState, parsePageParam } from '@/lib/read-scaling';
 import {
   LEAD_STATUS_LABEL,
   LEAD_STATUS_ORDER,
@@ -16,7 +29,8 @@ import { buildInflodeTabs } from '../_tabs';
 
 export const dynamic = 'force-dynamic';
 
-const PER_PAGE = 30;
+// Server-side paginering (PB getList) — bara en sida + listans fält hämtas.
+const PER_PAGE = 50;
 
 export default async function LeadsPage({
   searchParams
@@ -26,6 +40,8 @@ export default async function LeadsPage({
     q?: string;
     src?: string;
     landing?: string;
+    /** Genomförandefilter (§ 23.10): in_progress | completed | abandoned. */
+    done?: string;
     page?: string;
   }>;
 }) {
@@ -38,17 +54,23 @@ export default async function LeadsPage({
   const q = params.q?.trim() || undefined;
   const sourceKey = params.src?.trim() || undefined;
   const landingModule = params.landing?.trim() || undefined;
-  const page = Math.max(1, Number(params.page) || 1);
+  const completion: LeadCompletion | undefined = isLeadCompletion(params.done) ? params.done : undefined;
+  const page = parsePageParam(params.page);
 
   const pb = await getServerPb();
-  const [{ items, totalItems, totalPages }, sources, modules] = await Promise.all([
+  // Lazy-svep (§ 23.10): påbörjade flöden utan aktivitet på två timmar blir
+  // "Avbrutna" när personalen tittar — ingen cron, fail-soft.
+  await markStaleLeadsAbandoned(pb, user.tenant);
+  const [{ items, totalItems }, sources, modules] = await Promise.all([
     listLeads(pb, user.tenant, {
       status,
       q,
       sourceKey,
       landingModule,
+      completion,
       page,
-      perPage: PER_PAGE
+      perPage: PER_PAGE,
+      fields: LEAD_LIST_FIELDS
     }),
     listLeadSources(pb),
     listModules(pb, user.tenant)
@@ -70,13 +92,16 @@ export default async function LeadsPage({
   if (status) baseQs.set('status', status);
   if (q) baseQs.set('q', q);
   if (sourceKey) baseQs.set('src', sourceKey);
+  if (completion) baseQs.set('done', completion);
   if (landingModule) baseQs.set('landing', landingModule);
+
+  const pager = pagerState(page, PER_PAGE, totalItems);
 
   const tabs = buildInflodeTabs();
 
   return (
     <PageShell
-      title="Startupkompassen"
+      title="Marknadsverktyg"
       tabs={tabs}
       meta={
         <span className="text-[12px] text-foreground-subtle">
@@ -164,10 +189,41 @@ export default async function LeadsPage({
         >
           {PREVIEW_SOURCE_LABEL}
         </Link>
+        <span className="mx-muted mx-t-xs" aria-hidden style={{ alignSelf: 'center' }}>
+          ·
+        </span>
+        {(['abandoned', 'in_progress'] as const).map((c) => (
+          <Link
+            key={c}
+            href={`/inflode/leads?done=${c}`}
+            className={`mx-chip mx-mono${completion === c ? ' mx-ink-chip' : ''}`}
+            style={{ textDecoration: 'none' }}
+            title={
+              c === 'abandoned'
+                ? 'Besökaren påbörjade modulen men slutförde den inte — räknas inte i statistiken'
+                : 'Pågår just nu (eller lämnades för mindre än två timmar sedan)'
+            }
+          >
+            {LEAD_COMPLETION_LABEL[c]}
+          </Link>
+        ))}
       </div>
 
       {/* Lista */}
-      {items.length === 0 ? (
+      {items.length === 0 && pager.outOfRange ? (
+        <Card style={{ padding: 24, textAlign: 'center' }}>
+          <div className="mx-disp mx-fw-6" style={{ fontSize: 16, marginBottom: 6 }}>
+            Sidan {page} finns inte längre
+          </div>
+          <div className="mx-muted mx-t-13">
+            Filtret har {totalItems} {totalItems === 1 ? 'lead' : 'leads'} på {pager.totalPages}{' '}
+            {pager.totalPages === 1 ? 'sida' : 'sidor'}.{' '}
+            <Link href={`/inflode/leads?${appendPage(baseQs, pager.totalPages)}`}>
+              Gå till sista sidan
+            </Link>
+          </div>
+        </Card>
+      ) : items.length === 0 ? (
         <Card style={{ padding: 24, textAlign: 'center' }}>
           <div className="mx-disp mx-fw-6" style={{ fontSize: 16, marginBottom: 6 }}>
             Inga leads matchar filtret
@@ -195,6 +251,14 @@ export default async function LeadsPage({
                       <Chip variant={statusChipVariant(lead.status)} mono>
                         {LEAD_STATUS_LABEL[lead.status]}
                       </Chip>
+                      {normalizeLeadCompletion(lead.completion) !== 'completed' && (
+                        <Chip
+                          variant={normalizeLeadCompletion(lead.completion) === 'abandoned' ? 'copper' : 'review'}
+                          mono
+                        >
+                          {LEAD_COMPLETION_LABEL[normalizeLeadCompletion(lead.completion)].toUpperCase()}
+                        </Chip>
+                      )}
                       {lead.source_key === PREVIEW_SOURCE_KEY ? (
                         <Chip variant="draft" mono>
                           {PREVIEW_SOURCE_LABEL.toUpperCase()}
@@ -236,29 +300,49 @@ export default async function LeadsPage({
         </div>
       )}
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="mx-flex mx-items-c mx-gap-2" style={{ marginTop: 16, justifyContent: 'center' }}>
-          {page > 1 && (
-            <Link
-              href={`/inflode/leads?${appendPage(baseQs, page - 1)}`}
-              className="mx-btn mx-sm"
-            >
-              ← Föregående
-            </Link>
+      {/* Pagination — sidnumret ligger i URL:en (?page=) och alla aktiva
+          filter följer med i länkarna. */}
+      {pager.totalPages > 1 && !pager.outOfRange && (
+        <nav
+          aria-label="Sidnavigering"
+          className="mx-flex mx-items-c mx-gap-2 mx-wrap"
+          style={{ marginTop: 16, justifyContent: 'center' }}
+        >
+          {pager.hasPrev && (
+            <>
+              <Link href={`/inflode/leads?${appendPage(baseQs, 1)}`} className="mx-btn mx-sm">
+                « Första
+              </Link>
+              <Link
+                href={`/inflode/leads?${appendPage(baseQs, page - 1)}`}
+                className="mx-btn mx-sm"
+                rel="prev"
+              >
+                ← Föregående
+              </Link>
+            </>
           )}
           <span className="mx-mono mx-t-xs mx-muted">
-            Sida {page} av {totalPages}
+            {pager.from}–{pager.to} av {totalItems} · sida {page} av {pager.totalPages}
           </span>
-          {page < totalPages && (
-            <Link
-              href={`/inflode/leads?${appendPage(baseQs, page + 1)}`}
-              className="mx-btn mx-sm"
-            >
-              Nästa →
-            </Link>
+          {pager.hasNext && (
+            <>
+              <Link
+                href={`/inflode/leads?${appendPage(baseQs, page + 1)}`}
+                className="mx-btn mx-sm"
+                rel="next"
+              >
+                Nästa →
+              </Link>
+              <Link
+                href={`/inflode/leads?${appendPage(baseQs, pager.totalPages)}`}
+                className="mx-btn mx-sm"
+              >
+                Sista »
+              </Link>
+            </>
           )}
-        </div>
+        </nav>
       )}
     </PageShell>
   );

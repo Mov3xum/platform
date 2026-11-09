@@ -2,67 +2,101 @@
 
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { escFilter } from '@/lib/pb-filter';
 import { logAiUsage } from '@/lib/ai/usage';
+import { assertWithinAiBudget, AiBudgetExceededError } from '@/lib/ai/budget.server';
+import { composeTeam, extractTeamNeed, TEAM_MATCH_MODEL } from '@/lib/ai/team-match';
 import {
-  matchTeam,
-  type TeamCandidate
-} from '@/lib/ai/team-match';
+  loadCompetenceTagVocabulary,
+  loadCompletedMissions,
+  loadStaffProfiles,
+  loadTeamCap,
+  loadTeamLoadsForCap
+} from '@/lib/team/competence-tags.server';
 import {
-  inferCompetencesFromText,
-  sanitizeCompetences,
+  TEAM_SHORTLIST_SIZE,
+  computeTeamMerits,
+  rankTeamCandidates,
+  teamNeedGaps,
   type CompetenceId,
+  type CompetenceLevel,
+  type LoadLevel,
   type MissionParticipantRole,
-  type Role
+  type RankableCandidate,
+  type Role,
+  type TeamMemberLoad,
+  type UserCompetenceTag
 } from '@platform/shared';
 
-// CLAUDE.md § 29 — Server action för AI-teamförslag (Fas 1).
-// Staff beskriver ett uppdrag → AI:n föreslår kompetenser + kandidater.
-// Människa-i-loopen: förslaget AUTO-tilldelar aldrig (klienten lägger till
-// valda personer i deltagarlistan, som staff sedan bekräftar genom att skapa
-// uppdraget).
+// CLAUDE.md § 29 / § 29.7 — Server action för AI-teamförslag.
+//
+// Kandidater = RIKTIGA användare i systemet (Movexum-personal i tenanten)
+// som angett kompetens-hashtags (eller, för äldre profiler, områden) under
+// /min-profil. Bolagsmedlemmar, observatörer och externa CRM-kontakter är
+// ALDRIG kandidater — teamen är interna Movexum-team.
+//
+// Flöde: behov (AI + heuristik) → DETERMINISTISK rankning med hashtag/nivå,
+// bolagsrelation och NUVARANDE BELASTNING (aktiva team) → AI sätter ihop
+// teamet ur shortlistan. Allt som visas (poäng, skäl, belastning) kommer ur
+// den rena rankningen, så förslaget är förklarbart även när modellen inte
+// svarar. Människa-i-loopen: förslaget AUTO-tilldelar aldrig.
 
 const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
-const MATCH_MODEL = 'mistral-small-latest';
 
 export interface SuggestedMemberView {
   id: string;
-  kind: 'user' | 'contact';
   name: string;
   title?: string;
   role: MissionParticipantRole;
   reason: string;
   confidence: number;
   competences: CompetenceId[];
+  tags: UserCompetenceTag[];
+  matchedTags: Array<{ tag: string; level: CompetenceLevel }>;
+  load: TeamMemberLoad;
+  loadLevel: LoadLevel;
+  score: number;
+}
+
+export interface ShortlistEntryView {
+  id: string;
+  name: string;
+  title?: string;
+  score: number;
+  reasons: string[];
+  load: TeamMemberLoad;
+  loadLevel: LoadLevel;
+}
+
+export interface AtCapacityView {
+  id: string;
+  name: string;
+  load: TeamMemberLoad;
+  /** Träffade hashtags — varför personen annars hade passat. */
+  matchedTags: string[];
 }
 
 export type SuggestTeamResult =
   | {
       ok: true;
       neededCompetences: CompetenceId[];
+      neededTags: string[];
       members: SuggestedMemberView[];
+      /** Hela den rankade shortlistan (för "fler kandidater"). */
+      shortlist: ShortlistEntryView[];
+      gaps: { tags: string[]; areas: CompetenceId[] };
       externalNote: string | null;
       summary: string;
       needsReview: boolean;
+      /** Antal kollegor som kunde matchas (har kompetensprofil). */
+      candidateCount: number;
+      /** false = belastningen kunde inte läsas komplett (visa som osäker). */
+      loadComplete: boolean;
+      /** Max antal pågående team per person (§ 29.7). */
+      teamCap: number;
+      /** Kollegor som matchar behovet men redan nått taket (föreslås aldrig). */
+      atCapacity: AtCapacityView[];
     }
   | { ok: false; error: string };
-
-interface UserRow {
-  id: string;
-  display_name?: string;
-  email?: string;
-  title?: string;
-  roles?: string[];
-  competences?: unknown;
-}
-
-interface ContactRow {
-  id: string;
-  first_name?: string;
-  last_name?: string;
-  primary_role?: string;
-  skills?: string;
-}
 
 export async function suggestTeamAction(input: {
   description: string;
@@ -78,109 +112,161 @@ export async function suggestTeamAction(input: {
   }
 
   const pb = await getServerPb();
-  const tenantFilter = `tenant = "${escFilter(user.tenant)}"`;
 
-  // ── Kandidater: interna users med kompetenser ──────────────────────────
-  const candidates: TeamCandidate[] = [];
-  const byId = new Map<string, TeamCandidate>();
+  // Månadstaket (§ 9.6) prövas före de två Mistral-anropen.
   try {
-    const res = await pb.collection('users').getList<UserRow>(1, 200, {
-      filter: tenantFilter,
-      sort: 'display_name',
-      fields: 'id,display_name,email,title,roles,competences'
-    });
-    for (const u of res.items) {
-      // Bara potentiella resurser (staff) — bolagsmedlemmar bemannar inte team.
-      if (!Array.isArray(u.roles) || !u.roles.some((r) => STAFF_ROLES.includes(r as Role))) {
-        continue;
-      }
-      const comp = sanitizeCompetences(u.competences);
-      const cand: TeamCandidate = {
-        id: String(u.id),
-        kind: 'user',
-        name: u.display_name || (u.email ? u.email.split('@')[0] : String(u.id)),
-        title: u.title || undefined,
-        competences: comp
-      };
-      candidates.push(cand);
-      byId.set(cand.id, cand);
-    }
-  } catch {
-    /* fail-soft */
+    await assertWithinAiBudget(pb, user.tenant);
+  } catch (err) {
+    if (err instanceof AiBudgetExceededError) return { ok: false, error: err.message };
+    throw err;
   }
 
-  // ── Kandidater: externa contacts med skills (kompetens härleds) ────────
-  try {
-    const res = await pb.collection('contacts').getList<ContactRow>(1, 200, {
-      filter: tenantFilter,
-      sort: 'last_name',
-      fields: 'id,first_name,last_name,primary_role,skills'
-    });
-    for (const c of res.items) {
-      const name = `${c.first_name || ''} ${c.last_name || ''}`.trim() || String(c.id);
-      const inferred = inferCompetencesFromText(c.skills);
-      const cand: TeamCandidate = {
-        id: String(c.id),
-        kind: 'contact',
-        name,
-        title: c.primary_role || undefined,
-        competences: inferred,
-        skillsText: c.skills || undefined
-      };
-      candidates.push(cand);
-      byId.set(cand.id, cand);
-    }
-  } catch {
-    /* fail-soft — contacts kanske inte finns i tenanten */
-  }
+  // ── Underlag (parallellt, alla fail-soft) ───────────────────────────────
+  const vocabulary = await loadCompetenceTagVocabulary(pb, user.tenant);
+  // Belastningen räknas över HELA tenanten (även uppdrag anroparens token
+  // inte ser) eftersom den avgör teamtaket (§ 29.7) — bara räknare används.
+  const [profiles, { loads, complete: loadComplete }, { missions: completedMissions }, teamCap] =
+    await Promise.all([
+      loadStaffProfiles(pb, user.tenant, vocabulary),
+      loadTeamLoadsForCap(pb, user.tenant),
+      loadCompletedMissions(pb, user.tenant),
+      loadTeamCap(pb, user.tenant)
+    ]);
 
-  // ── Valfri bolagskontext (kort etikett, ingen PII) ─────────────────────
+  // ── Valfri bolagskontext (kort etikett, ingen PII) + relation ──────────
   let startupContext: string | undefined;
+  const relatedUserIds = new Set<string>();
   if (input.startupId) {
     try {
       const s = await pb
         .collection('startups')
-        .getOne(input.startupId, { fields: 'id,name,industri,phase,tenant' });
-      const rec = s as unknown as { name?: string; industri?: string; phase?: string; tenant?: string };
+        .getOne(input.startupId, { fields: 'id,name,industri,phase,tenant,coaches,owner' });
+      const rec = s as unknown as {
+        name?: string;
+        industri?: string;
+        phase?: string;
+        tenant?: string;
+        coaches?: unknown;
+        owner?: unknown;
+      };
       if (rec.tenant === user.tenant) {
         startupContext = [rec.name, rec.industri, rec.phase].filter(Boolean).join(' · ');
+        if (Array.isArray(rec.coaches)) rec.coaches.forEach((c) => relatedUserIds.add(String(c)));
+        if (typeof rec.owner === 'string' && rec.owner) relatedUserIds.add(rec.owner);
       }
     } catch {
       /* ignore */
     }
   }
 
-  const { result, usage } = await matchTeam({ description, startupContext, candidates });
+  // ── Kandidater: interna kollegor med kompetensprofil ────────────────────
+  const eligible = profiles.filter((p) => p.isStaff && (p.tags.length > 0 || p.competences.length > 0));
+  if (eligible.length === 0) {
+    return {
+      ok: false,
+      error:
+        'Ingen kollega har angett sina kompetenser ännu. Be teamet fylla i ' +
+        'hashtags under Min profil — AI:n matchar bara mot dem.'
+    };
+  }
+  const profileById = new Map(profiles.map((p) => [p.id, p]));
+
+  // ── Steg 1: behov ───────────────────────────────────────────────────────
+  const needRes = await extractTeamNeed({ description, startupContext, vocabulary });
+
+  // Meriter ur avslutade team (lätt vikt, § 29.7): räknas mot det tolkade
+  // behovet, därför efter steg 1.
+  const merits = computeTeamMerits(completedMissions, needRes.need.tags);
+  const candidates: RankableCandidate[] = eligible.map((p) => ({
+    id: p.id,
+    name: p.name,
+    title: p.title,
+    tags: p.tags,
+    areas: p.competences,
+    developmentInterests: p.developmentInterests,
+    load: loads.get(p.id) ?? { active: 0, leading: 0 },
+    relatedToStartup: relatedUserIds.has(p.id),
+    merit: merits.get(p.id)
+  }));
+
+  // ── Steg 2: deterministisk rankning (hashtag/nivå/relation/belastning) ──
+  // Teamtaket är en hård gräns: den som redan är i `teamCap` pågående team
+  // hamnar aldrig i shortlistan, men listas som "fullt" så människan ser
+  // varför en annars självklar kollega saknas.
+  const ranked = rankTeamCandidates(needRes.need, candidates, { teamCap });
+  const shortlist = ranked.filter((r) => r.score > 0 && !r.atCapacity).slice(0, TEAM_SHORTLIST_SIZE);
+  const atCapacity: AtCapacityView[] = ranked
+    .filter((r) => r.atCapacity && (r.matchedTags.length > 0 || r.matchedAreas.length > 0 || r.relatedToStartup))
+    .slice(0, TEAM_SHORTLIST_SIZE)
+    .map((r) => ({ id: r.id, name: r.name, load: r.load, matchedTags: r.matchedTags.map((m) => m.tag) }));
+  // Gap räknas bara mot kollegor med ledig plats: täcks en hashtag enbart av
+  // fullbelagda kollegor saknas den i praktiken (→ extern kompetens).
+  const gaps = teamNeedGaps(
+    needRes.need,
+    candidates.filter((c) => !ranked.find((r) => r.id === c.id)?.atCapacity)
+  );
+
+  // ── Steg 3: AI sätter ihop teamet ur shortlistan ────────────────────────
+  const composed = await composeTeam({
+    description,
+    startupContext,
+    need: needRes.need,
+    shortlist,
+    gaps,
+    teamCap
+  });
 
   void logAiUsage(pb, {
     tenant: user.tenant,
     userId: user.id,
     surface: 'suggestions',
-    model: MATCH_MODEL,
-    tokensIn: usage.tokensIn,
-    tokensOut: usage.tokensOut
+    model: TEAM_MATCH_MODEL,
+    tokensIn: needRes.usage.tokensIn + composed.usage.tokensIn,
+    tokensOut: needRes.usage.tokensOut + composed.usage.tokensOut
   });
 
-  const members: SuggestedMemberView[] = result.members.map((m) => {
-    const cand = byId.get(m.id);
+  const rankedById = new Map(ranked.map((r) => [r.id, r]));
+  // Defense-in-depth: ingen som nått taket når förslaget, oavsett modellen.
+  const members: SuggestedMemberView[] = composed.result.members.filter((m) => !rankedById.get(m.id)?.atCapacity).map((m) => {
+    const r = rankedById.get(m.id);
+    const p = profileById.get(m.id);
     return {
       id: m.id,
-      kind: m.kind,
-      name: cand?.name || m.id,
-      title: cand?.title,
+      name: p?.name || m.id,
+      title: p?.title,
       role: m.role,
       reason: m.reason,
       confidence: m.confidence,
-      competences: cand?.competences ?? []
+      competences: p?.competences ?? [],
+      tags: p?.tags ?? [],
+      matchedTags: r?.matchedTags ?? [],
+      load: r?.load ?? { active: 0, leading: 0 },
+      loadLevel: r?.loadLevel ?? 'free',
+      score: r?.score ?? 0
     };
   });
 
   return {
     ok: true,
-    neededCompetences: result.neededCompetences,
+    neededCompetences: needRes.need.areas,
+    neededTags: needRes.need.tags,
     members,
-    externalNote: result.externalNote,
-    summary: result.summary,
-    needsReview: result.needsReview
+    shortlist: shortlist.map((r) => ({
+      id: r.id,
+      name: r.name,
+      title: r.title,
+      score: r.score,
+      reasons: r.reasons,
+      load: r.load,
+      loadLevel: r.loadLevel
+    })),
+    gaps,
+    externalNote: composed.result.externalNote,
+    summary: composed.result.summary,
+    needsReview: composed.result.needsReview || needRes.aiFailed,
+    candidateCount: candidates.length,
+    loadComplete,
+    teamCap,
+    atCapacity
   };
 }

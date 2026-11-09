@@ -11,7 +11,7 @@ import { listThreadsAction } from '@/lib/actions/chat-threads';
 import { PageShell } from '@/components/PageShell';
 import { getBuiltin } from '@/lib/ai/builtins';
 import { listActiveConnectors } from '@/lib/ai/connectors';
-import { loadActivityFeed } from '@/lib/feed/activity-feed';
+import { loadPersonalActivityFeed } from '@/lib/feed/activity-feed';
 import { swedishGreeting } from '@platform/shared';
 
 interface ToolRow {
@@ -64,9 +64,10 @@ export default async function ChattPage() {
       }),
       fields: 'id,connector_kind,connector_id,label'
     }),
-    // Bolagshändelser + systemlogg i EN kronologisk feed (§ 32) — samma
-    // laddare som Dashboard (`/hem`) så de två ytorna aldrig divergerar.
-    loadActivityFeed(pb, user.tenant, 60)
+    // Den PERSONLIGA loggen (§ 32): allt den inloggade gjort och dragits in i
+    // (uppdragsteam, uppgifter, filer, dokument, inlägg …). Portföljbred feed
+    // finns på `/hem` (Bolagsnytt) och `/aktivitet`.
+    loadPersonalActivityFeed(pb, user.tenant, user.id, 60)
   ]);
 
   const tools = toolsRes.status === 'fulfilled' ? toolsRes.value.items : [];

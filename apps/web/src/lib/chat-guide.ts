@@ -61,8 +61,11 @@ const GUIDE: ChatGuideSection[] = [
       {
         title: 'Kunskapsbasen & dina filer',
         description:
-          'Chatten söker i organisationens uppladdade material (/kunskapsbas) och i dina egna filer (/filer).',
-        examples: ['Vad säger vår coachningsprocess om det första bolagsmötet?']
+          'Chatten söker i organisationens uppladdade material (/kunskapsbas) och i dina egna filer (/filer). Nämn en fil vid namn så letar chatten upp den även om du stavar lite fel.',
+        examples: [
+          'Vad säger vår coachningsprocess om det första bolagsmötet?',
+          'Sammanfatta pitchdecket jag laddade upp i mina filer'
+        ]
       },
       {
         title: 'Sök på internet (Webbkällor)',
@@ -155,14 +158,14 @@ const GUIDE: ChatGuideSection[] = [
       {
         title: 'Events',
         description:
-          'Boka ett event/möte i kalendern (status "planerat"). Deltagare bjuds in i /events.',
+          'Boka ett event/möte i kalendern (status "planerat"). Deltagare bjuds in under Marknadsverktyg → Events.',
         roles: EVENT_MANAGE,
         examples: ['Boka en pitchträning torsdag 14:00 i Gävle']
       },
       {
-        title: 'Uppdrag',
+        title: 'Tvärfunktionella team',
         description:
-          'Skapa ett uppdrags-utkast (t.ex. en bolagsutmaning). Teamet kopplas på — gärna med AI-teamförslaget — och uppdraget startas i /uppdrag.',
+          'Skapa ett uppdrags-utkast (t.ex. en bolagsutmaning). Teamet kopplas på i Tvärfunktionella team (/uppdrag) — gärna med AI-teamförslaget, som matchar Movexum-kollegor på deras kompetenstaggar.',
         examples: ['Skapa ett uppdrag kring bolagets exportsatsning, deadline sista oktober']
       }
     ]
@@ -178,7 +181,17 @@ const GUIDE: ChatGuideSection[] = [
           'Bygg intag-moduler (quiz, formulär eller AI-chatt) med frågor — som opublicerade utkast. Publicering görs i modul-admin.',
         roles: COMPASS_MANAGE,
         examples: [
-          'Gör ett quiz i Startupkompassen som heter "Är du redo för inkubator?" med fem frågor'
+          'Gör ett quiz i Startupkompassen (Marknadsverktyg) som heter "Är du redo för inkubator?" med fem frågor'
+        ]
+      },
+      {
+        title: 'Enkäter under Utvärdering (Marknadsverktyg)',
+        description:
+          'Skapa en digital enkät för utvärdering av ett event, en communityfrukost, en workshop eller programmet — med egna frågor eller från mall. Enkäten skapas opublicerad; du granskar, publicerar och skickar ut den i /inflode/utvardering.',
+        roles: COMPASS_MANAGE,
+        examples: [
+          'Skapa en enkät under Utvärdering för communityfrukosten med tre betygsfrågor och en fritextfråga',
+          'Gör en uppföljningsenkät till workshopen om prissättning'
         ]
       },
       {
@@ -188,11 +201,12 @@ const GUIDE: ChatGuideSection[] = [
         examples: ['Skapa en workshop om prissättning med tre moduler']
       },
       {
-        title: 'Hemmaplan: internutbildningar, anslagstavla & rutiner',
+        title: 'Översikt: internutbildningar, anslagstavla & rutiner',
         description:
-          'Lägg upp, uppdatera, fäst eller låt inlägg utgå på startsidan — fliken Internutbildningar administreras helt via chatten.',
+          'Lägg upp, uppdatera, fäst eller låt inlägg utgå på startsidan — fliken Internutbildningar administreras helt via chatten. Välj målgrupp: bara teamet, hela organisationen eller bara bolagen (visas då på Mitt bolag).',
         examples: [
           'Lägg upp en internutbildning om GDPR i coachning torsdag 14:00 med länk till materialet i kunskapsbasen',
+          'Publicera ett inlägg bara till bolagen: ansökan till Vinnovas innovationscheck öppnar 1 oktober',
           'Fäst internutbildningen om pitchcoaching överst och låt den utgå sista oktober'
         ]
       }
@@ -208,6 +222,54 @@ const GUIDE: ChatGuideSection[] = [
         description:
           'Registrera mottaget stöd — posten prövas automatiskt mot förordningens tak och det samlade taket (300 000 EUR) och blockeras vid överskridande.',
         examples: ['Registrera 50 000 kr de minimis-stöd från Almi för bolaget, beslut 1 september']
+      },
+      {
+        title: 'Kontaktboken',
+        description:
+          'Lägg till externa kontakter i Movexums gemensamma kontaktbok, be kontaktägaren om att få använda en kontakt för ett syfte och dela den med ett bolag — ägaren godkänner i chatten eller på kontaktkortet.',
+        examples: [
+          'Lägg till Anna Andersson på Vinnova som kontakt, handläggare för innovationsbidrag — hon är informerad om att vi sparar uppgifterna',
+          'Vem äger våra investerarkontakter i Gävle?',
+          'Be om att få koppla ihop Vinnova-kontakten med bolaget inför deras ansökan',
+          'Godkänn förfrågan om min Almi-kontakt'
+        ]
+      },
+      {
+        title: 'Stödcheckar & finansieringsprojekt',
+        description:
+          'Skapa finansieringsprojekt (kassan stödet tas ur), checktyper som bolagen kan söka och utkast till ansökningar. Inskick, signering, bedömning, finansiering och beslut görs av människor i /checkar.',
+        roles: SCHEDULE_MANAGE,
+        examples: [
+          'Skapa finansieringsprojektet Vinnova Excellens 2026–2027 med budget 3,1 MSEK, de minimis som default',
+          'Lägg upp en resecheck för internationalisering med tak 50 000 kr som kräver IRL 4 och slutrapport',
+          'Skapa ett ansökningsutkast om excellenscheck för bolaget med insatsen marknadsundersökning Norden, 40 000 kr'
+        ]
+      },
+      {
+        title: 'Upphandlingar & excellens-insatser',
+        description:
+          'Registrera en upphandling ur ett bifogat underlag, lägg in avrop per bolag och godkänn milstolpar — uppföljningsuppgifterna skapas och stängs automatiskt enligt reglerna i /upphandlingar.',
+        examples: [
+          'Registrera upphandlingen i det bifogade underlaget',
+          'Lägg in ett avrop av grundpaketet för bolaget från 1 oktober',
+          'Godkänn milstolpe 1 för bolagets avrop',
+          'Vilka avrop har försenade milstolpar eller saknar slutrapport?'
+        ]
+      },
+      {
+        title: 'Mål & indikatorer i verksamhetsplanen',
+        description:
+          'Lägg till övergripande mål (ledningen) eller ditt eget personliga mål under ett fokusområde, och indikatorer som räknas ur data eller bedöms manuellt. Måltal och årets status sätter ledningen i /mal.',
+        roles: SCHEDULE_MANAGE,
+        examples: [
+          'Lägg till målet "Konvertering 50 % från ink till acc inom 8 månader" under Kundvärde och kvalitetssäkring, coachgruppen'
+        ]
+      },
+      {
+        title: 'Rapportera kvartalsstatus på målen',
+        description:
+          'Markera en indikator som I fas, Försenad, Ej startad eller Klar för ett kvartal, med kort motivering. Beräknade indikatorer hämtar värdet ur data.',
+        examples: ['Markera medarbetarindex som försenad i Q3, kommentar: väntar på enkätmotor', 'Hur ligger vi mot målen i Q3?']
       },
       {
         title: 'Schemalägg AI-agenter',

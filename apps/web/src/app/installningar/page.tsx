@@ -5,8 +5,11 @@ import { hasRole } from '@/lib/rbac';
 import { Chip } from '@/components/proto';
 import { PageShell } from '@/components/PageShell';
 import { RailSection, RailItem, RailStat, RailNote } from '@/components/PageRail';
+import { loadTenantActivity } from '@/lib/user-activity/data.server';
+import { activityStatus } from '@platform/shared';
 import { getBudgetStatus } from '@/lib/ai/budget.server';
 import { getInfraHealth, healthStateLabel, type HealthState } from '@/lib/health';
+import { loadTeamCapSetting } from '@/lib/team/competence-tags.server';
 import { SETTINGS_GROUPS, SETTINGS_SECTIONS, settingsSectionsFor } from '@/lib/settings-sections';
 import { requireSettingsUser, SettingsCard, settingsTabsFor } from './shared';
 
@@ -37,16 +40,26 @@ export default async function InstallningarPage() {
   let userCount = 0;
   let memberCount = 0;
   let unverifiedCount = 0;
+  // Användaraktivitet (§ 57): hur många som aldrig loggat in — onboarding-signal.
+  let neverLoggedInCount = 0;
+  let activityKnown = false;
   try {
-    const res = await pb.collection('users').getList<{ roles?: unknown; verified?: boolean }>(1, 500, {
-      filter: tenantFilter,
-      fields: 'id,roles,verified'
-    });
+    const [res, activity] = await Promise.all([
+      pb.collection('users').getList<{ id: string; roles?: unknown; verified?: boolean }>(1, 500, {
+        filter: tenantFilter,
+        fields: 'id,roles,verified'
+      }),
+      loadTenantActivity(pb, user.tenant)
+    ]);
     userCount = res.totalItems;
+    activityKnown = !activity.unavailable;
+    const now = new Date();
     for (const u of res.items) {
       const roles = Array.isArray(u.roles) ? (u.roles as string[]) : [];
       if (roles.includes('startup_member')) memberCount += 1;
       if (u.verified === false) unverifiedCount += 1;
+      const stats = activity.byUser.get(u.id);
+      if (activityKnown && (!stats || activityStatus(stats, now) === 'never')) neverLoggedInCount += 1;
     }
   } catch (error) {
     console.error('[installningar] failed to count users', { tenant: user.tenant, error });
@@ -58,6 +71,36 @@ export default async function InstallningarPage() {
     memoryCount = mem.totalItems;
   } catch {
     /* ignore */
+  }
+
+  // Kompetens-hashtags (§ 29.7): vokabulärens storlek + förslag som väntar.
+  let tagCount = 0;
+  let suggestedTagCount = 0;
+  try {
+    const all = await pb.collection('competence_tags').getList(1, 1, { filter: tenantFilter, fields: 'id' });
+    tagCount = all.totalItems;
+    const sugg = await pb.collection('competence_tags').getList(1, 1, {
+      filter: pb.filter('tenant = {:t} && status = "suggested"', { t: user.tenant }),
+      fields: 'id'
+    });
+    suggestedTagCount = sugg.totalItems;
+  } catch {
+    /* ignore (omigrerat schema) */
+  }
+  const teamCap = await loadTeamCapSetting(pb, user.tenant);
+
+  let connectedIntegrations = 0;
+  let pilotIntegrations = 0;
+  try {
+    const rows = await pb
+      .collection('tenant_integrations')
+      .getList<{ status?: string }>(1, 200, { filter: tenantFilter, fields: 'id,status' });
+    for (const r of rows.items) {
+      if (r.status === 'connected') connectedIntegrations += 1;
+      if (r.status === 'pilot_requested') pilotIntegrations += 1;
+    }
+  } catch {
+    /* ignore — kortet visar då 0 */
   }
 
   let tenantCount = 1;
@@ -92,10 +135,19 @@ export default async function InstallningarPage() {
       stat: `${userCount} användare`,
       hint: `${memberCount} bolagsmedlem${memberCount === 1 ? '' : 'mar'} · ${userCount - memberCount} personal & övriga · moduler per person`,
       status:
-        unverifiedCount > 0 ? (
-          <Chip variant="yellow" mono>
-            {unverifiedCount} ej verifierad{unverifiedCount === 1 ? '' : 'e'}
-          </Chip>
+        unverifiedCount > 0 || (activityKnown && neverLoggedInCount > 0) ? (
+          <span className="flex flex-wrap gap-1.5">
+            {unverifiedCount > 0 && (
+              <Chip variant="yellow" mono>
+                {unverifiedCount} ej verifierad{unverifiedCount === 1 ? '' : 'e'}
+              </Chip>
+            )}
+            {activityKnown && neverLoggedInCount > 0 && (
+              <Chip variant="yellow" mono>
+                {neverLoggedInCount} aldrig inloggad{neverLoggedInCount === 1 ? '' : 'e'}
+              </Chip>
+            )}
+          </span>
         ) : undefined
     },
     organisation: {
@@ -112,12 +164,25 @@ export default async function InstallningarPage() {
           </Chip>
         )
     },
-    'ai-kostnad': {
+    integrationer: {
+      stat: `${connectedIntegrations} ${connectedIntegrations === 1 ? 'ansluten tjänst' : 'anslutna tjänster'}`,
+      hint:
+        pilotIntegrations > 0
+          ? `${pilotIntegrations} pilot begärd${pilotIntegrations === 1 ? '' : 'a'} · bolagsregister, connectors, personliga kopplingar`
+          : 'Bolagsregister (Roaring, Bolagsverket), connectors, personliga kopplingar',
+      status:
+        connectedIntegrations > 0 ? (
+          <Chip variant="active" mono>
+            {connectedIntegrations}
+          </Chip>
+        ) : undefined
+    },
+    'ai-analys': {
       stat: `${usd(budgetStatus.spentUsd)} förbrukat denna månad`,
       hint:
         budgetStatus.effectiveUsd > 0
-          ? `Tak ${usd(budgetStatus.effectiveUsd)} · ${budgetPct} % använt`
-          : 'Ingen kostnadsspärr aktiv',
+          ? `Tak ${usd(budgetStatus.effectiveUsd)} · ${budgetPct} % använt · användning & miljö`
+          : 'Ingen kostnadsspärr aktiv · användning & miljö',
       status:
         budgetPct !== null && budgetPct >= 80 ? (
           <Chip variant={budgetPct >= 95 ? 'copper' : 'yellow'} mono>
@@ -128,6 +193,19 @@ export default async function InstallningarPage() {
     'ai-minne': {
       stat: `${memoryCount} ${memoryCount === 1 ? 'notering' : 'noteringar'}`,
       hint: 'Generella regler chatten tar med i framtida samtal'
+    },
+    kompetenser: {
+      stat: `${tagCount} hashtags i vokabulären`,
+      hint:
+        suggestedTagCount > 0
+          ? `${suggestedTagCount} ${suggestedTagCount === 1 ? 'förslag väntar' : 'förslag väntar'} på godkännande`
+          : `Max ${teamCap.cap} team per person${teamCap.configured ? '' : ' (standard)'} · täckning, gap och profiler`,
+      status:
+        suggestedTagCount > 0 ? (
+          <Chip variant="yellow" mono>
+            {suggestedTagCount}
+          </Chip>
+        ) : undefined
     },
     utseende: {
       stat: hasLogo ? 'Logotyp uppladdad' : 'Ingen egen logotyp',

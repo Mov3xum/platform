@@ -1,6 +1,7 @@
 import 'server-only';
 import { escFilter } from '@/lib/pb-filter';
 import type PocketBase from 'pocketbase';
+import { getSuperuserPb } from '@/lib/integrations/credentials';
 import type { WebSourceKey } from '@platform/shared';
 import {
   MAX_ITEMS_PER_FEED,
@@ -367,10 +368,23 @@ export async function fetchWebFeedItems(sources: WebSourceKey[]): Promise<WebFee
 // Cache (PocketBase `web_cache` collection)
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * `web_cache` är GLOBAL (ingen tenant) och dess text injiceras i AI-prompter.
+ * Läs/skriv därför bara via superuser — kollektionens API-regler är stängda
+ * (migration 1700000182) så ingen användartoken kan förgifta cachen.
+ * Utan superuser hoppas cachen över (fail-soft: live-hämtning varje gång).
+ */
+async function cachePb(): Promise<PocketBase | null> {
+  const su = await getSuperuserPb();
+  return su.ok ? su.pb : null;
+}
+
 async function readCache(
-  pb: PocketBase,
+  _pb: PocketBase,
   source: WebSourceKey
 ): Promise<{ body: string; fetched_at: string } | null> {
+  const pb = await cachePb();
+  if (!pb) return null;
   try {
     const record = await pb
       .collection('web_cache')
@@ -385,11 +399,13 @@ async function readCache(
 }
 
 async function writeCache(
-  pb: PocketBase,
+  _pb: PocketBase,
   source: WebSourceKey,
   body: string,
   fetched_at: string
 ): Promise<void> {
+  const pb = await cachePb();
+  if (!pb) return;
   // Upsert by source-key — radera äldre poster för att hålla collectionen smal.
   try {
     const existing = await pb

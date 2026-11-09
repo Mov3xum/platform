@@ -1,39 +1,52 @@
-import 'server-only';
+/**
+ * Howspace → NormalizedRecord — REN modul (ingen IO, inget `server-only`),
+ * enhetstestad i `normalize.test.ts`. Fälttolkningen bor i
+ * `@platform/shared` (howspace.ts) och delas med `/howspace`-sidan.
+ *
+ * Deltagardata reduceras till räknare — inga namn, e-postadresser eller
+ * inläggstexter lämnar Howspace (CLAUDE.md § 11.4, GDPR § 5).
+ */
+import {
+  HOWSPACE_DEFAULT_APP_URL,
+  HOWSPACE_RECORD_TYPES,
+  howspaceWorkspaceUrl,
+  type HowspaceStatsData,
+  type HowspaceWorkspaceData
+} from '@platform/shared';
 import type { NormalizedRecord } from '../../types';
-import type { HowspaceParticipantStats, HowspaceWorkspace } from './client';
 
-// Howspace → NormalizedRecord. Participant data is reduced to counts
-// only — no participant names, emails or post bodies leave Howspace
-// (CLAUDE.md § 10.2 GDPR § 5).
-
-export function normalizeWorkspace(ws: HowspaceWorkspace): NormalizedRecord {
-  const occurred = ws.updatedAt || ws.createdAt || new Date().toISOString();
+export function normalizeWorkspace(
+  ws: HowspaceWorkspaceData,
+  appUrl: string = HOWSPACE_DEFAULT_APP_URL,
+  now: string = new Date().toISOString()
+): NormalizedRecord {
+  const occurred = ws.updatedAt || ws.createdAt || now;
   return {
     externalId: ws.id,
-    recordType: 'workspace',
+    recordType: HOWSPACE_RECORD_TYPES.workspace,
     title: ws.name,
-    summary: ws.description?.slice(0, 240) || (ws.status ? `Status: ${ws.status}` : ''),
-    url: ws.url || `https://app.howspace.com/workspace/${ws.id}`,
+    summary: ws.description.slice(0, 240) || (ws.status ? `Status: ${ws.status}` : ''),
+    url: howspaceWorkspaceUrl(ws.id, ws.url, appUrl),
     occurredAt: occurred,
     payload: {
-      status: ws.status || '',
+      status: ws.status,
       participantCount: ws.participantCount ?? 0
     }
   };
 }
 
 export function normalizeWorkspaceStats(
-  workspaceId: string,
-  workspaceName: string,
-  stats: HowspaceParticipantStats,
-  syncedAt: string
+  ws: HowspaceWorkspaceData,
+  stats: HowspaceStatsData,
+  syncedAt: string,
+  appUrl: string = HOWSPACE_DEFAULT_APP_URL
 ): NormalizedRecord {
   return {
-    externalId: `${workspaceId}:stats`,
-    recordType: 'workspace_stats',
-    title: `${workspaceName} – deltagarstatistik`,
+    externalId: `${ws.id}:stats`,
+    recordType: HOWSPACE_RECORD_TYPES.workspaceStats,
+    title: `${ws.name} – deltagarstatistik`,
     summary: `${stats.total ?? 0} totalt · ${stats.active ?? 0} aktiva (anonymiserad)`,
-    url: `https://app.howspace.com/workspace/${workspaceId}`,
+    url: howspaceWorkspaceUrl(ws.id, ws.url, appUrl),
     occurredAt: syncedAt,
     payload: {
       total: stats.total ?? 0,

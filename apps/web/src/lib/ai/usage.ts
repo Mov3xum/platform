@@ -8,7 +8,14 @@ export type { AiUsageSurface };
 
 interface LogAiUsageParams {
   tenant: string;
-  userId: string;
+  /**
+   * Inloggad användare. Utelämnas BARA för anonyma publika flöden (publik
+   * kompass-chatt, AI-sammanställning av formulär/quiz) — de loggas då utan
+   * användare via superuser-klienten (migration 1700000185 gjorde `user`
+   * valfritt; createRule kräver fortfarande `user = auth.id` för vanliga
+   * tokens). Tenant krävs alltid så förbrukningen räknas mot rätt tak.
+   */
+  userId?: string | null;
   surface: AiUsageSurface;
   model: string;
   tokensIn: number;
@@ -35,7 +42,7 @@ export async function logAiUsage(
     );
     await pb.collection('ai_usage_events').create({
       tenant: params.tenant,
-      user: params.userId,
+      user: params.userId || null,
       surface: params.surface,
       model: params.model,
       tokens_in: params.tokensIn,
@@ -46,6 +53,7 @@ export async function logAiUsage(
   } catch (err) {
     console.warn('[ai-usage] log failed (swallowed)', {
       surface: params.surface,
+      anonymous: !params.userId,
       model: params.model,
       error: err instanceof Error ? err.message : err
     });
@@ -60,7 +68,7 @@ export async function logAiUsage(
  */
 export async function logIndexUsage(
   pb: PocketBase,
-  who: { tenant: string; userId: string; surface?: AiUsageSurface },
+  who: { tenant: string; userId?: string | null; surface?: AiUsageSurface },
   usage: { tokensIn: number; tokensOut: number; context?: { tokensIn: number; tokensOut: number } }
 ): Promise<void> {
   const surface = who.surface ?? 'suggestions';

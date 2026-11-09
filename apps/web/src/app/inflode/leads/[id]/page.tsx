@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { contactValueLabel } from '@platform/shared';
 import { notFound, redirect } from 'next/navigation';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
@@ -11,6 +12,7 @@ import {
 } from '@/components/proto';
 import { ConfirmSubmitButton } from '@/components/ConfirmSubmitButton';
 import { getLead, listAssignableStaff, listLeadSources, listModules } from '@/lib/compass/store';
+import { normalizeLeadCompletion } from '@/lib/compass/completion';
 import {
   CONTACT_PREFERENCE_LABEL,
   LEAD_STATUS_LABEL,
@@ -109,6 +111,27 @@ export default async function LeadDetailPage({
         }
       />
 
+      {normalizeLeadCompletion(lead.completion) !== 'completed' && (
+        <Card style={{ padding: 12, marginBottom: 16, background: 'var(--mx-st-review-bg)' }}>
+          <div className="mx-flex mx-items-c mx-gap-2 mx-t-13">
+            <Icon name="clock" size={14} />
+            <span>
+              {normalizeLeadCompletion(lead.completion) === 'abandoned' ? (
+                <>
+                  <strong>Avbrutet flöde.</strong> Besökaren påbörjade modulen men slutförde den
+                  inte — uppgifterna är det som hann lämnas. Räknas inte i statistik eller tratt.
+                </>
+              ) : (
+                <>
+                  <strong>Pågående flöde.</strong> Besökaren är mitt i modulen (eller lämnade den
+                  för mindre än två timmar sedan). Markeras avbrutet automatiskt om inget mer händer.
+                </>
+              )}
+            </span>
+          </div>
+        </Card>
+      )}
+
       {lead.source_key === PREVIEW_SOURCE_KEY && (
         <Card style={{ padding: 12, marginBottom: 16, background: 'var(--mx-paper-2)' }}>
           <div className="mx-flex mx-items-c mx-gap-2 mx-t-13 mx-muted">
@@ -147,6 +170,21 @@ export default async function LeadDetailPage({
               <Field label="E-post" value={lead.email} mono />
               <Field label="Telefon" value={lead.phone} mono />
               <Field label="Organisation" value={lead.organization} />
+              <Field label="Kommuntillhörighet" value={contactValueLabel('kommun', lead.kommun)} />
+              <Field
+                label="Hur hen kom i kontakt med Movexum"
+                value={contactValueLabel('referral_channel', lead.referral_channel)}
+              />
+              <Field label="Övriga teammedlemmar" value={lead.team_members} multiline />
+              {lead.founder_gender && (
+                <div>
+                  <div className="mx-label">Kön på grundare</div>
+                  <div className="mx-t-13">{contactValueLabel('founder_gender', lead.founder_gender)}</div>
+                  <div className="mx-mono mx-t-xs mx-muted" style={{ marginTop: 2 }}>
+                    Uppgift för Vinnovas könsstatistik — används aldrig i bedömningen.
+                  </div>
+                </div>
+              )}
               {lead.contact_preference && (
                 <div>
                   <div className="mx-label">Kontaktpreferens</div>

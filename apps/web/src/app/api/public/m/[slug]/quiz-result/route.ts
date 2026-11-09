@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import { createLead } from '@/lib/compass/store';
+import { clientIpFromRequest } from '@/lib/client-ip';
+import { isSurveyModule } from '@platform/shared';
+import { storeSurveyResponse } from '@/lib/compass/survey';
 import {
   resolvePublicModule,
   getPublicModuleQuestions,
@@ -8,8 +10,11 @@ import {
 import {
   attachAiSummary,
   buildSubmissionEntries,
+  finalizeLead,
+  leadFieldsFromContact,
   moduleWantsLead,
-  parseContactPreference
+  parseContactPreference,
+  parseContactSubmission
 } from '@/lib/compass/lead-capture';
 import { notifyNewInflow } from '@/lib/compass/notify';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
@@ -24,21 +29,21 @@ const MAX_PER_WINDOW = 15;
 
 interface QuizBody {
   answers: Record<string, string | string[]>;
-  contact?: { name?: string; email?: string; phone?: string; organization?: string };
+  /** Avsnittet "Dina uppgifter" (§ 23.11) — valideras mot modulens konfiguration. */
+  contact?: unknown;
+  /** Enkätens subjekt ur `?om=<id>` (§ 43). */
+  subject?: string;
   attribution?: Attribution;
   consent?: boolean;
   contact_preference?: string;
+  /** Sessionstoken (§ 23.10) — slutför det pågående leadet i stället för att skapa ett nytt. */
+  sessionToken?: string;
 }
 
+// Högra (proxy-tillagda) XFF-värdet — det vänstra är klientstyrt och lät en
+// anropare nollställa per-IP-gränsen genom att rotera headern.
 function clientIp(req: Request): string {
-  const h = req.headers.get('x-forwarded-for') || '';
-  return h.split(',')[0]?.trim() || 'anon';
-}
-
-function cleanContact(v: unknown, max: number): string | undefined {
-  if (typeof v !== 'string') return undefined;
-  const t = v.trim();
-  return t ? t.slice(0, max) : undefined;
+  return clientIpFromRequest(req);
 }
 
 // Beräknar quiz-resultatet SERVER-side (poäng kan inte manipuleras i klienten)
@@ -48,10 +53,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
 
   const ip = clientIp(req);
   const rlKey = `compass-pub-quiz:${ip}`;
-  if (checkRateLimit(rlKey, MAX_PER_WINDOW).blocked) {
+  if ((await checkRateLimit(rlKey, MAX_PER_WINDOW)).blocked) {
     return NextResponse.json({ error: 'För många förfrågningar. Försök igen om en stund.' }, { status: 429 });
   }
-  recordFailure(rlKey, WINDOW_MS);
+  await recordFailure(rlKey, WINDOW_MS);
 
   let body: QuizBody;
   try {
@@ -72,16 +77,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     return NextResponse.json({ error: 'Samtycke krävs.' }, { status: 400 });
   }
 
-  const contact = body.contact || {};
-  if (module.require_email && !cleanContact(contact.email, 254)) {
-    return NextResponse.json({ error: 'E-post krävs.' }, { status: 400 });
-  }
-  if (module.require_phone && !cleanContact(contact.phone, 50)) {
-    return NextResponse.json({ error: 'Telefon krävs.' }, { status: 400 });
-  }
-  if (module.require_organization && !cleanContact(contact.organization, 200)) {
-    return NextResponse.json({ error: 'Organisation krävs.' }, { status: 400 });
-  }
+  // Avsnittet "Dina uppgifter" (§ 23.11): klienten är aldrig gränsen.
+  const contact = parseContactSubmission(module, body.contact);
+  if (contact.error) return NextResponse.json({ error: contact.error }, { status: 400 });
+  const contactFields = leadFieldsFromContact(contact.values);
 
   const questions = await getPublicModuleQuestions(pb, module.id);
   const quizQuestions: QuizQuestion[] = questions.map((q) => ({
@@ -94,6 +93,24 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   const buckets = isResultBucketArray(module.result_buckets) ? module.result_buckets : [];
   const bucket = resolveBucket(score, buckets);
 
+  // ENKÄT (§ 43): svaren lagras per fråga mot subjektet — inget lead. Fela
+  // högt om lagringen misslyckas (svaren får inte tyst försvinna).
+  if (isSurveyModule(module)) {
+    const stored = await storeSurveyResponse(pb, tenant, {
+      module,
+      questions,
+      answers: body.answers || {},
+      subjectId: body.subject
+    });
+    if (!stored) {
+      return NextResponse.json(
+        { error: 'Dina svar kunde inte sparas just nu. Försök igen om en stund.' },
+        { status: 500 }
+      );
+    }
+    return NextResponse.json({ bucket, score: score.total });
+  }
+
   // Steg 4-valet: modulen kan vara konfigurerad att INTE skapa lead — visa
   // bara resultatet i så fall.
   if (!moduleWantsLead(module)) {
@@ -104,11 +121,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   // frivilliga om modulen inte kräver dem.
   const attribution = pickAttribution(body.attribution);
   const contactPreference = parseContactPreference(body.contact_preference);
-  const lead = await createLead(pb, tenant, {
-    name: cleanContact(contact.name, 200) || 'Anonym',
-    email: cleanContact(contact.email, 254),
-    phone: cleanContact(contact.phone, 50),
-    organization: cleanContact(contact.organization, 200),
+  const finalized = await finalizeLead(pb, tenant, {
+    moduleSlug: slug,
+    sessionToken: body.sessionToken,
+    fields: {
+    ...contactFields,
+    name: contactFields.name || 'Anonym',
     idea_category: bucket?.key,
     idea_summary: bucket ? `Quiz "${module.name}": ${bucket.title}` : `Quiz "${module.name}"`,
     ...attribution,
@@ -117,8 +135,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     quiz_result_bucket: bucket?.key,
     quiz_score: score.total,
     contact_preference: contactPreference,
+    notes: '',
     consent_at: new Date().toISOString()
+    }
   });
+  const lead = finalized?.lead;
 
   // Hård lead-garanti (CLAUDE.md § 23.6): leadet MÅSTE finnas när modulen är
   // konfigurerad att skapa det — fela högt i stället för att besökaren ser

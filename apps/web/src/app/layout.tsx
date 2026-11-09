@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { isPresentationPath } from '@/lib/auth-paths';
 import { headers } from 'next/headers';
 import { Navbar } from '@/components/Navbar';
 import { ThemeScript } from '@/components/ThemeProvider';
@@ -13,7 +14,7 @@ const ICON_VERSION = 2;
 
 export const metadata: Metadata = {
   title: 'Movexum Inkubatorplattform',
-  description: 'Modulär plattform för Movexums inkubatorer',
+  description: 'Modulär plattform för Movexums inkubator',
   applicationName: 'Movexum',
   // PWA / hemskärm (CLAUDE.md § 35): manifest + iOS-specifika taggar. iOS
   // läser inte manifestets ikoner → apple-touch-icon krävs separat.
@@ -70,17 +71,27 @@ export default async function RootLayout({
   // ytor. De ska ALDRIG visa systemets vänstermeny/AppShell — även om en
   // inloggad medarbetare öppnar den publika länken ska sidan se ut som den
   // gör för en anonym besökare (en ren, isolerad chatt-/formulär-yta).
-  const isPublicModule = pathname === '/m' || pathname.startsWith('/m/');
+  const isPublicModule =
+    pathname === '/m' ||
+    pathname.startsWith('/m/') ||
+    // Publika enkäter (§ 39) är likaså fristående ytor.
+    pathname === '/u' ||
+    pathname.startsWith('/u/') ||
+    // Svar på inbjudningar (§ 53.5) — likaså fristående.
+    pathname.startsWith('/e/') ||
+    // Studentsidan (§ 54) — publik, oinloggad yta för studenter.
+    pathname === '/s' ||
+    pathname.startsWith('/s/');
 
   // Inloggningssidan är en fristående, helsides split-screen-yta (bild +
   // formulär) som bär sin egen branding — den ska aldrig visa den utloggade
   // toppnavigationen (Navbar). Samma princip som de publika modulerna ovan.
   const isAuthPage = pathname === '/login';
 
-  // Årshjulets presentationsläge (§ 30) är en helskärmsyta för projektorn —
-  // ingen rail, ingen sidmeny. Sidan kräver fortfarande inloggning + staff
-  // (RBAC i page.tsx); bara ramen tas bort.
-  const isPresentation = pathname === '/arshjul/presentation';
+  // Presentationslägen (årshjulet § 30, målcockpiten § 42) är helskärmsytor
+  // för projektorn — ingen rail, ingen sidmeny. Sidorna kräver fortfarande
+  // inloggning + staff (RBAC i page.tsx); bara ramen tas bort.
+  const isPresentation = isPresentationPath(pathname);
 
   // Offline-fallbacken (§ 35) förcachas av service workern. Den renderas
   // utan AppShell så att den cachade HTML:en aldrig innehåller inloggad

@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
 import { requireUser, getServerPb } from '@/lib/auth.server';
-import { getServerPbUrl } from '@/lib/pb-url';
 import { categorizeFile, type StartupOption } from '@/lib/ai/file-categorize';
-import { extractPdfText, extractXlsxText } from '@/lib/ai/attachments';
 import { logAiUsage } from '@/lib/ai/usage';
-import { indexUserFile } from '@/lib/ai/rag';
-import { sanitizePersonnummer } from '@/lib/import/crm-excel';
 import { createUserFileRecord } from '@/lib/user-files.server';
+import {
+  EXTRACTABLE_USER_FILE_FILTER,
+  extractAndIndexUserFile,
+  extractUserFileText
+} from '@/lib/user-files-index.server';
 import { describeUserFileCreateError, validateUserFileUpload } from '@/lib/user-file-upload';
 import {
   isFileTopic,
@@ -22,11 +23,6 @@ export const dynamic = 'force-dynamic';
 
 const MAX_FILENAME = 255;
 const MAX_INDEX_PER_RUN = 40;
-const RAG_MAX_TEXT_CHARS = 300_000;
-const EXTRACTABLE_FILTER =
-  '(doc_kind = "pdf" || doc_kind = "xlsx" || mime = "application/pdf" || ' +
-  'mime ~ "spreadsheetml" || mime = "application/vnd.ms-excel" || ' +
-  'mime = "text/plain" || mime = "text/markdown" || mime = "text/csv")';
 
 export interface FileListItem {
   id: string;
@@ -79,64 +75,9 @@ async function listStartupOptions(pb: Awaited<ReturnType<typeof getServerPb>>, t
   }
 }
 
-async function extractTextSnippet(pb: Awaited<ReturnType<typeof getServerPb>>, rec: UserFile, maxChars = 6000): Promise<string | undefined> {
-  if (!rec.file) return undefined;
-  const mime = (rec.mime || '').toLowerCase();
-  const isPdf = mime === 'application/pdf' || rec.doc_kind === 'pdf';
-  const isXlsx = mime.includes('spreadsheetml') || mime === 'application/vnd.ms-excel' || rec.doc_kind === 'xlsx';
-  const isText = ['text/plain', 'text/markdown', 'text/csv'].includes(mime);
-  if (!isPdf && !isXlsx && !isText) return undefined;
-  try {
-    const token = await pb.files.getToken();
-    const base = getServerPbUrl().replace(/\/$/, '');
-    const url = `${base}/api/files/user_files/${rec.id}/${encodeURIComponent(rec.file)}?token=${encodeURIComponent(token)}`;
-    const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) return undefined;
-    const buf = Buffer.from(await res.arrayBuffer());
-    let text = '';
-    if (isPdf) text = await extractPdfText(buf);
-    else if (isXlsx) text = await extractXlsxText(buf);
-    else text = buf.toString('utf8');
-    return text.slice(0, maxChars).trim() || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function extractAndIndexFile(
-  pb: Awaited<ReturnType<typeof getServerPb>>,
-  tenant: string,
-  ownerId: string,
-  rec: UserFile
-): Promise<number> {
-  if (rec.owner !== ownerId || rec.tenant !== tenant) return 0;
-  const raw = await extractTextSnippet(pb, rec, RAG_MAX_TEXT_CHARS);
-  if (!raw) {
-    await pb.collection('user_files').update(rec.id, { indexed: false, chunk_count: 0 }).catch(() => {});
-    return 0;
-  }
-  const text = sanitizePersonnummer(raw);
-  try {
-    await pb.collection('user_files').update(rec.id, { extracted_text: text });
-  } catch {
-    /* fail-soft */
-  }
-  try {
-    const idx = await indexUserFile(pb, { tenant, owner: ownerId, sourceId: rec.id, text });
-    if (idx.usage.tokensIn > 0) {
-      void logAiUsage(pb, {
-        tenant,
-        userId: ownerId,
-        surface: 'suggestions',
-        model: 'mistral-embed',
-        tokensIn: idx.usage.tokensIn,
-        tokensOut: idx.usage.tokensOut
-      });
-    }
-    return idx.chunkCount;
-  } catch {
-    return 0;
-  }
+/** Kort utdrag (transient) för AI-kategoriseringen. Lagras ALDRIG. */
+async function extractTextSnippet(pb: Awaited<ReturnType<typeof getServerPb>>, rec: UserFile): Promise<string | undefined> {
+  return extractUserFileText(pb, rec, 6000);
 }
 
 async function categorizeAndStore(
@@ -250,12 +191,7 @@ export async function POST(req: Request) {
     // Best-effort AI-kategorisering + RAG-indexering (fail-soft) — samma som
     // server-actionen; uppladdningen är redan lyckad här.
     await categorizeAndStore(pb, user.tenant, user.id, rec.id).catch(() => {});
-    try {
-      const full = (await pb.collection('user_files').getOne(rec.id)) as unknown as UserFile;
-      await extractAndIndexFile(pb, user.tenant, user.id, full).catch(() => 0);
-    } catch {
-      /* fail-soft */
-    }
+    await extractAndIndexUserFile(pb, user.tenant, user.id, rec.id).catch(() => 0);
     return NextResponse.json({ ok: true, fileId: rec.id });
   }
 
@@ -371,7 +307,7 @@ export async function POST(req: Request) {
     try {
       const res = await pb.collection('user_files').getList(1, MAX_INDEX_PER_RUN, {
         filter: pb.filter(
-          `owner = {:o} && tenant = {:t} && indexed != true && ${EXTRACTABLE_FILTER}`,
+          `owner = {:o} && tenant = {:t} && indexed != true && ${EXTRACTABLE_USER_FILE_FILTER}`,
           { o: user.id, t: user.tenant }
         ),
         sort: '-created'
@@ -384,7 +320,7 @@ export async function POST(req: Request) {
     let indexed = 0;
     let skipped = 0;
     for (const rec of pending) {
-      const chunks = await extractAndIndexFile(pb, user.tenant, user.id, rec as unknown as UserFile);
+      const chunks = await extractAndIndexUserFile(pb, user.tenant, user.id, rec as unknown as UserFile);
       if (chunks > 0) indexed += 1;
       else skipped += 1;
     }

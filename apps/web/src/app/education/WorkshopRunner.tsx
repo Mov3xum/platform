@@ -714,6 +714,12 @@ export function WorkshopRunner({
                     setError(result.error);
                     return;
                   }
+                  if (result.warning) {
+                    // Ändrat innehåll efter coachens godkännande → ny granskning krävs.
+                    setCoachDecision(null);
+                    setMessage(result.warning);
+                    return;
+                  }
                   setMessage('Progression sparad.');
                 });
               }}
@@ -750,6 +756,7 @@ export function WorkshopRunner({
                   setError(saveResult.error);
                   return;
                 }
+                if (saveResult.warning) setCoachDecision(null);
                 const result = await completeWorkshopAction(assignment.id);
                 if (result.error) {
                   setError(result.error);

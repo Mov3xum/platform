@@ -135,8 +135,17 @@ function FileRow({
   );
 }
 
-export default async function FilerPage() {
+export default async function FilerPage({
+  searchParams
+}: {
+  searchParams?: Promise<{ vy?: string; bolag?: string }>;
+}) {
   const user = await requireUser();
+  // Djuplänk till en bolagsmapp (bara formatvaliderad — RLS/ägarskap styr
+  // vad som faktiskt listas; en okänd nyckel ger en tom mapp).
+  const params = (await searchParams) ?? {};
+  const initialOpenKey = params.bolag && /^[a-z0-9]{1,30}$/i.test(params.bolag) ? params.bolag : null;
+  const initialView = params.vy === 'bolag' || initialOpenKey ? ('bolag' as const) : ('amnen' as const);
   const files = await listFilesAction();
   const startups = await listFileStartupOptionsAction();
   const isMember = isPureStartupMember(user.roles);
@@ -197,11 +206,11 @@ export default async function FilerPage() {
               <h2 className="mb-4 font-heading text-lg font-semibold text-foreground">
                 Dina filer
               </h2>
-              <FilesBrowser initialFiles={files} startups={startups} />
+              <FilesBrowser initialFiles={files} startups={startups} initialView={initialView} initialOpenKey={initialOpenKey} />
             </section>
           </>
         ) : (
-          <FilesBrowser initialFiles={files} startups={startups} />
+          <FilesBrowser initialFiles={files} startups={startups} initialView={initialView} initialOpenKey={initialOpenKey} />
         )}
       </div>
     </PageShell>

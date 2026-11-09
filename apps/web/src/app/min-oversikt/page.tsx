@@ -15,6 +15,10 @@ import {
 import type { StartupStatus } from '@/lib/labels';
 import { canManageStartupDeMinimis } from '@/lib/de-minimis/data';
 import { DeMinimisSection } from '@/app/startups/[id]/DeMinimisSection';
+import { SharedContactsCard } from './SharedContactsCard';
+import { TalentCard } from './TalentCard';
+import { ScreeningRequestsCard } from './ScreeningRequestsCard';
+import { StartupSupportChecksSection } from '@/app/startups/[id]/StartupSupportChecksSection';
 import { DocumentCompleteButton } from '@/app/education/documents/DocumentCompleteButton';
 import { OrgPostList, type BoardPost } from '@/components/home/OrgPostList';
 import { chatMarkdownToHtml } from '@/lib/safe-html';
@@ -215,7 +219,8 @@ export default async function MinOversiktPage() {
   }
 
   // Anslagstavlan (§ 37): inlägg riktade till hela organisationen
-  // (audience=all) visas för bolagsmedlemmen — RLS släpper bara igenom dem.
+  // (audience=all) eller bara till bolagen (audience=startups) visas för
+  // bolagsmedlemmen — RLS släpper bara igenom dem.
   let orgPosts: BoardPost[] = [];
   if (isPureMember) {
     const now = new Date();
@@ -324,7 +329,7 @@ export default async function MinOversiktPage() {
           </section>
         ) : null}
 
-        {/* Från Movexum — anslagstavlan (audience=all), bara för bolagsmedlemmar. */}
+        {/* Från Movexum — anslagstavlan (audience=all/startups), bara för bolagsmedlemmar. */}
         {isPureMember && orgPosts.length > 0 ? (
           <OrgPostList
             posts={orgPosts}
@@ -343,7 +348,7 @@ export default async function MinOversiktPage() {
           title="De minimis-status"
           action={
             <Link
-              href={`/startups/${linkedId}#de-minimis`}
+              href={`/startups/${linkedId}/ekonomi#de-minimis`}
               className="inline-flex items-center gap-1.5 rounded-full border border-default bg-surface px-3 py-1 text-sm font-medium text-foreground-muted transition hover:bg-canvas-subtle"
             >
               På bolagskortet <Icon name="external" size={14} />
@@ -356,6 +361,29 @@ export default async function MinOversiktPage() {
             canManage={canManageDeMinimis}
           />
         </Card>
+
+        {/* § 51.6 — begäran om komplettering inför statsstödsbedömning */}
+        <ScreeningRequestsCard
+          pb={pb}
+          viewer={{ tenant: user.tenant, roles: user.roles, linkedStartups: user.linkedStartups }}
+          startupId={linkedId}
+          isStaff={isStaff}
+        />
+
+        {/* § 54 — bolagets behov mot studenter + nya intressen */}
+        <TalentCard pb={pb} tenantId={user.tenant} startupId={linkedId} />
+
+        {/* § 45.4 — kontakter Movexum delat med bolaget via kontaktboken */}
+        <SharedContactsCard tenantId={user.tenant} startupId={linkedId} />
+
+        {/* § 46.7 — bolagets stödcheckar: status, nästa steg, beviljat/utbetalt */}
+        <StartupSupportChecksSection
+          pb={pb}
+          tenantId={user.tenant}
+          startupId={linkedId}
+          isStaff={isStaff}
+          canApply={isStaff || isLinkedMember}
+        />
 
         {/* Tilldelade verktyg — för bolagsmedlemmar samlat under "Aktiviteter". */}
         {!isPureMember ? (

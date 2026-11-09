@@ -13,6 +13,8 @@
 // spärr hindrar oändlig reload-loop om chunken är borta för gott (t.ex.
 // rollback) — då faller vi tillbaka på den branded felvyn i stället.
 
+import { isStaleDeploymentError } from './action-error';
+
 const RELOAD_GUARD_KEY = 'movexum:chunk-reload-at';
 // Hur länge efter ett reload-försök vi avstår från att försöka igen.
 const RELOAD_COOLDOWN_MS = 10_000;
@@ -43,6 +45,18 @@ export function isChunkLoadError(error: unknown): boolean {
     // MIME-felet som uppstår när en saknad chunk serveras som HTML-felsida.
     /because its MIME type \('text\/html'\)/i.test(message)
   );
+}
+
+/**
+ * Sant för alla fel som betyder "fliken är äldre än servern" och läks av ett
+ * reload: saknade chunk-filer OCH server actions vars id inte längre finns
+ * (`UnrecognizedActionError` — Next byter action-id vid varje deploy, så en
+ * flik som var öppen under deployen fick "Något gick fel" när den skickade
+ * ett formulär). Anropet nådde aldrig servern, så ett reload förlorar ingen
+ * skrivning — bara det som stod i formuläret.
+ */
+export function isDeployMismatchError(error: unknown): boolean {
+  return isChunkLoadError(error) || isStaleDeploymentError(error);
 }
 
 /**

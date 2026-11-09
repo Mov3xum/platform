@@ -1,12 +1,16 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser, getServerPb } from '@/lib/auth.server';
+import { hasRole } from '@/lib/rbac';
+import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import { createLead, getModuleBySlug, listQuestionsForModule } from '@/lib/compass/store';
 import { pickAttribution } from '@/lib/compass/public';
 import {
   attachAiSummary,
   buildSubmissionEntries,
+  leadFieldsFromContact,
   moduleWantsLead,
-  parseContactPreference
+  parseContactPreference,
+  parseContactSubmission
 } from '@/lib/compass/lead-capture';
 import { scoreQuiz, resolveBucket, isResultBucketArray, type QuizQuestion } from '@platform/shared';
 import { PREVIEW_SOURCE_KEY, type Attribution } from '@/lib/compass/types';
@@ -16,15 +20,10 @@ export const dynamic = 'force-dynamic';
 
 interface QuizBody {
   answers: Record<string, string | string[]>;
-  contact?: { name?: string; email?: string; phone?: string; organization?: string };
+  /** Avsnittet "Dina uppgifter" (§ 23.11) — valideras mot modulens konfiguration. */
+  contact?: unknown;
   attribution?: Attribution;
   contact_preference?: string;
-}
-
-function cleanContact(v: unknown, max: number): string | undefined {
-  if (typeof v !== 'string') return undefined;
-  const t = v.trim();
-  return t ? t.slice(0, max) : undefined;
 }
 
 // Intern (inloggad admin-preview) av ett quiz-flöde. Speglar den publika
@@ -39,6 +38,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   if (!user) {
     return NextResponse.json({ error: 'Login krävs' }, { status: 401 });
   }
+  // Intern förhandsgranskning: samma krets som modul-admin (§ 23.1). Utan
+  // rollkontroll kunde varje inloggad (även bolagsmedlem/observer) skapa
+  // staff-only leads och driva AI-sammanställningar.
+  if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) {
+    return NextResponse.json({ error: 'Saknar behörighet.' }, { status: 403 });
+  }
+  const rlKey = `inflode-quiz:${user.id}`;
+  if ((await checkRateLimit(rlKey, 30)).blocked) {
+    return NextResponse.json({ error: 'För många förfrågningar. Försök igen om en stund.' }, { status: 429 });
+  }
+  await recordFailure(rlKey, 5 * 60 * 1000);
 
   let body: QuizBody;
   try {
@@ -56,16 +66,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     return NextResponse.json({ error: 'Modulen är inte ett quiz.' }, { status: 400 });
   }
 
-  const contact = body.contact || {};
-  if (mod.require_email && !cleanContact(contact.email, 254)) {
-    return NextResponse.json({ error: 'E-post krävs.' }, { status: 400 });
-  }
-  if (mod.require_phone && !cleanContact(contact.phone, 50)) {
-    return NextResponse.json({ error: 'Telefon krävs.' }, { status: 400 });
-  }
-  if (mod.require_organization && !cleanContact(contact.organization, 200)) {
-    return NextResponse.json({ error: 'Organisation krävs.' }, { status: 400 });
-  }
+  // Avsnittet "Dina uppgifter" (§ 23.11) — samma validering som publika routen.
+  const contact = parseContactSubmission(mod, body.contact);
+  if (contact.error) return NextResponse.json({ error: contact.error }, { status: 400 });
+  const contactFields = leadFieldsFromContact(contact.values);
 
   const questions = await listQuestionsForModule(pb, mod.id);
   const quizQuestions: QuizQuestion[] = questions.map((q) => ({
@@ -85,10 +89,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
 
   const attribution = pickAttribution(body.attribution);
   const lead = await createLead(pb, user.tenant, {
-    name: cleanContact(contact.name, 200) || 'Anonym',
-    email: cleanContact(contact.email, 254),
-    phone: cleanContact(contact.phone, 50),
-    organization: cleanContact(contact.organization, 200),
+    ...contactFields,
+    name: contactFields.name || 'Anonym',
     idea_category: bucket?.key,
     idea_summary: bucket ? `Quiz "${mod.name}": ${bucket.title}` : `Quiz "${mod.name}"`,
     ...attribution,
@@ -113,7 +115,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   // AI-sammanställning av svaren + resultatprofilen (best-effort).
   const entries = buildSubmissionEntries(questions, body.answers || {});
   const resultLine = bucket ? `${bucket.title} (${score.total} poäng)` : `${score.total} poäng`;
-  await attachAiSummary(pb, user.tenant, lead, entries, mod.name, resultLine);
+  await attachAiSummary(pb, user.tenant, lead, entries, mod.name, resultLine, { userId: user.id });
 
   return NextResponse.json({ bucket, score: score.total, leadId: lead.id });
 }

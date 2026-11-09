@@ -6,6 +6,7 @@
 
 import PocketBase from 'pocketbase';
 import { authenticateSuperuserWithRetry } from './lib/pb-auth-retry.mjs';
+import { SECURITY_RULES, PROTECTED_FILE_FIELDS } from './security-rules.mjs';
 
 const PB_URL_RAW = process.env.PB_URL;
 const SU_EMAIL = process.env.PB_SU_EMAIL;
@@ -141,13 +142,57 @@ async function verifyCollectionsExist() {
     'missions',
     'mission_comments',
     'notifications',
+    // Notisinställningar per användare (§ 50, migration 1700000186).
+    'notification_preferences',
     'strategies',
     'strategy_revisions',
     'sprint_x_checkins',
     'startup_phase_history',
     'startup_financials',
+    // Ägarbild från bolagsregister (§ 11.8, migration 1700000172).
+    'startup_ownership',
     // CRM / bolagsisolering (§ 21)
     'startup_contacts',
+    // Kontaktboken (§ 45, migration 1700000157) — förfrågningar om kontaktanvändning.
+    'contact_requests',
+    // Kontaktboken: egna grupper (§ 45.8, migration 1700000199).
+    'contact_groups',
+    // E-postkampanjer (§ 55, migration 1700000203).
+    'email_campaigns',
+    'email_campaign_recipients',
+    'email_suppressions',
+    'email_events',
+    // Kampanjbilder (§ 55.9, migration 1700000204).
+    'email_media',
+    // Önskemål & buggar (§ 49, migration 1700000176) — intern backlog.
+    'feedback_items',
+    // Kompetens-hashtags (§ 29.7, migration 1700000178) — tenantens vokabulär.
+    'competence_tags',
+    // Bedömning excellens (§ 51.6, migration 1700000191) — historik + begäran om komplettering.
+    'startup_screenings',
+    'screening_requests',
+    // Ärenden i Bedömning excellens (§ 51.10, migration 1700000200).
+    'screening_cases',
+    // Impact Navigator (§ 56, migration 1700000206) — hållbarhetsanalysen per bolag.
+    'sustainability_assessments',
+    'sustainability_gap_questions',
+    'sustainability_materiality_overrides',
+    'sustainability_update_events',
+    'sustainability_documents',
+    'sustainability_ai_jobs',
+    // Export Lab (§ 58, migration 1700000210) — internationaliseringsanalysen per bolag.
+    'export_assessments',
+    'export_gap_questions',
+    'export_market_reviews',
+    'export_update_events',
+    'export_documents',
+    'export_ai_jobs',
+    // Användaraktivitet (§ 57, migration 1700000209) — stöd för att hjälpa användare igång.
+    'user_activity',
+    // Studenter & talang (§ 54, migration 1700000201).
+    'talent_needs',
+    'student_profiles',
+    'talent_interests',
     'capital_rounds',
     'intellectual_property',
     'startup_kpis',
@@ -165,6 +210,9 @@ async function verifyCollectionsExist() {
     'alumni',
     // AI + scheduling
     'ai_usage_events',
+    // Månadsrollup av AI-förbrukningen (§ 9.6, migration 1700000185) —
+    // månadstaket och AI-analysen läser den i stället för att summera events.
+    'ai_usage_monthly',
     'agent_actions',
     'tool_schedules',
     // Startupkompassen / inflöde (§ 23). Dessa skapas BARA av migrationerna
@@ -187,6 +235,31 @@ async function verifyCollectionsExist() {
     // Saknas den felar "Starta mötet" med ett 404 från PB; gör den till ett
     // hårt invariant så att en instans utan migrationen fälls i deployen.
     'meeting_transcripts',
+    // Marknadsverktyg → Utvärdering (§ 47, migration 1700000149_create_surveys).
+    // Saknas `surveys` svarar PB 404 på "Skapa enkät" (incident 2026-09:
+    // /inflode/utvardering/new gav 500). Speglas numera även i
+    // setup-via-api.mjs; existensen är ett hårt invariant.
+    'surveys',
+    'survey_responses',
+    // Stödcheckar & finansieringsprojekt (§ 46, migrationer 1700000161–167).
+    'funding_projects',
+    'funding_work_packages',
+    'support_check_types',
+    'support_check_applications',
+    'support_check_revisions',
+    'support_check_comments',
+    'support_check_documents',
+    'support_check_rules',
+    // Oföränderliga bevis-/historikkollektioner (MUST_BE_IMMUTABLE) — måste
+    // finnas i kartan för att asserteras, annars hoppas de tyst.
+    'agreement_signatures',
+    'tool_versions',
+    // Delat processöverskridande tillstånd för horisontell skalning (§ 21.8,
+    // migration 1700000184): rate-limiterns räknare + distribuerade lås.
+    // Saknas de faller appen tyst tillbaka på processminnet — då gäller
+    // gränserna per container i stället för globalt, så de är ett hårt invariant.
+    'rate_limits',
+    'app_locks',
     // Övrigt
     'web_cache'
   ];
@@ -231,6 +304,43 @@ function assertCreateRuleDoesNotJoinRecord(collection) {
 // ägar-check. Migration 1700000111 + setup-via-api FORCE_CREATE_RULES håller
 // detta. Den här svep-kontrollen fångar varje NY kollektion som återinför
 // mönstret INNAN den når staging/produktion.
+// CLAUDE.md § 21.8: de härdade reglerna i scripts/security-rules.mjs MÅSTE
+// gälla live — exakt. setup-via-api.mjs skrev tidigare tyst över dem med
+// roll-lösa `auth && tenant`-regler vid varje sync (säkerhetsgranskning
+// 2026-10-08); den här kontrollen fäller deployen om det händer igen.
+async function verifySecurityRules() {
+  let collections;
+  try {
+    const all = await pb.collections.getFullList({ $autoCancel: false });
+    collections = new Map(all.map((c) => [c.name, c]));
+  } catch (err) {
+    fail(`Kunde inte lista kollektioner för säkerhetsregel-svep:\n${describeError(err)}`);
+  }
+  const offenders = [];
+  for (const [name, rules] of Object.entries(SECURITY_RULES)) {
+    const col = collections.get(name);
+    if (!col) continue; // migration-only-familjer som inte finns på instansen
+    for (const [key, expected] of Object.entries(rules)) {
+      const actual = col[key] ?? null;
+      if (actual !== expected) {
+        offenders.push(`${name}.${key}: förväntat ${JSON.stringify(expected)}, fick ${JSON.stringify(actual)}`);
+      }
+    }
+    for (const fieldName of PROTECTED_FILE_FIELDS[name] || []) {
+      const field = (col.fields || []).find((f) => f.name === fieldName);
+      if (field && !field.protected) offenders.push(`${name}.${fieldName}: filfältet är inte protected`);
+    }
+  }
+  if (offenders.length) {
+    fail(
+      'Härdade API-regler (§ 21.8) gäller inte live:\n' +
+        offenders.map((o) => `  - ${o}`).join('\n') +
+        '\nKör migration 1700000182 / setup-via-api.mjs.'
+    );
+  }
+  ok(`säkerhetsregler (§ 21.8): ${Object.keys(SECURITY_RULES).length} kollektioner verifierade`);
+}
+
 async function verifyNoBrokenCreateRules() {
   let all;
   try {
@@ -341,7 +451,18 @@ const MUST_SCOPE_TO_MEMBER = [
   'de_minimis_units',
   'de_minimis_unit_orgnr',
   'de_minimis_stod',
-  'event_signups'
+  'event_signups',
+  // Stödcheckar (§ 46): bolaget ser sina egna ansökningar/bevis/kommentarer/bilagor.
+  'support_check_applications',
+  'support_check_revisions',
+  'support_check_comments',
+  'support_check_documents',
+  // Bedömning excellens (§ 51.6): bolaget ser/svarar på en begäran om
+  // komplettering BARA när den är ställd till bolaget (recipient_kind).
+  'screening_requests',
+  // Studenter & talang (§ 54): bolaget ser sina egna behov och intressen.
+  'talent_needs',
+  'talent_interests'
 ];
 
 const MUST_BE_STAFF_OR_OBSERVER = [
@@ -369,7 +490,83 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   'annual_wheel_items',
   // Årshjulets dynamiska kategorier (migration 1700000139, § 30). Samma
   // isolering som posterna — de beskriver Movexums interna kalender.
-  'annual_wheel_categories'
+  'annual_wheel_categories',
+  // Upphandlingar & excellens-insatser (migrationer 1700000149–151, § 39).
+  // Intern inköps-/avtalsdata med avrop per bolag → staff/observer-only; en
+  // ren startup_member ska aldrig se andra bolags avrop eller utvärderingar.
+  'procurements',
+  'procurement_calloffs',
+  'procurement_rules',
+  'procurement_documents',
+  // Utvärdering/enkäter (§ 47). Enkätdefinitioner och anonyma svar (fritext
+  // kan bära PII) → staff/observer-only; bolagen svarar bara via /u/<slug>.
+  'surveys',
+  'survey_responses',
+  // Målstyrning & verksamhetsplan (migration 1700000159, § 42). Tenant-bred
+  // intern styrning (VP-mål, kvartalsstatus) → staff/observer-only.
+  'goal_periods',
+  'goals',
+  'goal_indicators',
+  'goal_status_entries',
+  // Kontaktboken (§ 45, migration 1700000157). Förfrågningar innehåller syfte
+  // + vem som frågar om vilken extern kontakt → staff/observer-only; bolagen
+  // ser DELADE kontakter via den kurerade vyn på Mitt bolag, inte här.
+  'contact_requests',
+  // Egna grupper i kontaktboken (§ 45.8, migration 1700000199) → staff/observer-only.
+  'contact_groups',
+  // E-postkampanjer (§ 55, migration 1700000203): utskick, mottagarrader
+  // (hashade adresser), spärrlista och webhook-händelser → staff/observer-only.
+  'email_campaigns',
+  'email_campaign_recipients',
+  'email_suppressions',
+  'email_events',
+  // Kampanjbilder (§ 55.9, migration 1700000204) → staff/observer-only.
+  'email_media',
+  // Önskemål & buggar (§ 49, migration 1700000176). Intern backlog för
+  // Movexum-personal (kort + ledningens svar) → staff/observer-only.
+  'feedback_items',
+  // Kompetens-hashtags (§ 29.7, migration 1700000178). Intern bemannings-
+  // vokabulär → staff/observer-only.
+  'competence_tags',
+  // Bedömning excellens (§ 51.6, migration 1700000191). Statsstödsbedömningar
+  // (utfall, punkter, PDF) är internt underlag → staff/observer-only.
+  'startup_screenings',
+  // Ärenden i Bedömning excellens (§ 51.10, migration 1700000200) — internt
+  // statsstödsunderlag per bolag → staff/observer-only.
+  'screening_cases',
+  // Hållbarhetsanalysen (§ 56, migration 1700000206): personalverktyg utan
+  // bolagsmedlemsyta — analyser, frågor, dokumenttext och AI-körningar är
+  // internt underlag → staff/observer-only.
+  'sustainability_assessments',
+  'sustainability_gap_questions',
+  'sustainability_materiality_overrides',
+  'sustainability_update_events',
+  'sustainability_documents',
+  'sustainability_ai_jobs',
+  // Export Lab (§ 58, migration 1700000210): personalverktyg utan
+  // bolagsmedlemsyta — exportprofiler, planer, frågor, dokumenttext och
+  // AI-körningar är internt underlag → staff/observer-only.
+  'export_assessments',
+  'export_gap_questions',
+  'export_market_reviews',
+  'export_update_events',
+  'export_documents',
+  'export_ai_jobs',
+  // Studentprofiler (§ 54, migration 1700000201): privatpersoners uppgifter —
+  // bolaget ser dem BARA anonymiserat via kod, aldrig via RLS.
+  'student_profiles',
+  // Finansieringsprojekt/arbetspaket och stödcheck-regler (§ 46). Intern
+  // projektekonomi och uppföljningsstyrning → staff/observer-only.
+  'funding_projects',
+  'funding_work_packages',
+  'support_check_rules',
+  // Ägarbild från bolagsregister (§ 11.8, migration 1700000172). Intern
+  // bedömningsdata (koncernstruktur, verklig huvudman som anonym andel) →
+  // staff/observer-only; en ren startup_member ser sitt team på bolagskortet.
+  'startup_ownership',
+  // AI-förbrukningens månadsrollup (§ 9.6, migration 1700000185). Tekniska
+  // aggregat per tenant — läsbar för staff/observer, aldrig för medlemmar.
+  'ai_usage_monthly'
 ];
 
 // Cross-tenant-scope (säkerhetsgranskning 2026-06, C1/M8/M9). Dessa
@@ -383,6 +580,152 @@ const MUST_SCOPE_CROSS_TENANT = [
   { name: 'compass_questions', token: 'module.tenant' },
   { name: 'tenants', token: '@request.auth.tenant = id' }
 ];
+
+// Oföränderliga bevis-/historikkollektioner (ISO 27001 A.8.32): update/delete
+// får BARA vara superuser (regel = null). Signeringsbevis (§ 19, § 46.4) och
+// agent-versionshistorik (§ 16.6) får aldrig kunna skrivas om via API:t.
+// `ai_usage_monthly` (§ 9.6) skrivs bara av PB-hooken/superuser — månadstaket
+// läser den, så aggregatet får aldrig gå att manipulera via API:t.
+const MUST_BE_IMMUTABLE = ['agreement_signatures', 'tool_versions', 'support_check_revisions', 'ai_usage_monthly'];
+
+// Migration 1700000175: update/delete på compass-barnkollektionerna måste bära
+// samma förälder-tenant-join som list/view (en coach kunde annars ändra en
+// annan tenants frågor/meddelanden/svar via direkt-API).
+const COMPASS_WRITE_SCOPE = [
+  { name: 'compass_questions', token: '@request.auth.tenant = module.tenant' },
+  { name: 'compass_messages', token: '@request.auth.tenant = conversation.tenant' },
+  { name: 'compass_responses', token: '@request.auth.tenant = conversation.tenant' }
+];
+
+function verifyCompassWriteRulesScoped(collections) {
+  for (const { name, token } of COMPASS_WRITE_SCOPE) {
+    const col = collections.get(name);
+    if (!col) {
+      fail(`Collection "${name}" saknas (compass är migration-only — kör migrationerna)`);
+      continue;
+    }
+    assertRuleContains(col, 'updateRule', token);
+    assertRuleContains(col, 'deleteRule', token);
+  }
+  ok('compass write rules are tenant-scoped (migration 1700000175)');
+}
+
+// Kollektioner som BARA appens superuser-klient får röra (alla fem regler
+// null): rate-limiterns räknare (nycklarna är hashade e-post/IP) och de
+// distribuerade låsen (§ 21.8, migration 1700000184). En öppnad regel skulle
+// låta vem som helst nollställa en inloggningsspärr eller ta ett lås.
+const MUST_BE_SUPERUSER_ONLY = ['rate_limits', 'app_locks'];
+
+function verifySuperuserOnlyCollections(collections) {
+  for (const name of MUST_BE_SUPERUSER_ONLY) {
+    const col = collections.get(name);
+    if (!col) {
+      fail(`Collection "${name}" saknas (migration 1700000184 ej applicerad?)`);
+      continue;
+    }
+    for (const ruleName of ['listRule', 'viewRule', 'createRule', 'updateRule', 'deleteRule']) {
+      const rule = col[ruleName];
+      if (rule !== null && rule !== undefined) {
+        fail(`Superuser-only: ${name}.${ruleName} måste vara null, är \`${String(rule)}\`.`);
+      }
+    }
+  }
+  ok('Delat skalningstillstånd (rate_limits, app_locks) är superuser-only (§ 21.8)');
+}
+
+function verifyImmutableCollections(collections) {
+  for (const name of MUST_BE_IMMUTABLE) {
+    const col = collections.get(name);
+    if (!col) continue; // kollektion saknas i denna instans — hoppa
+    for (const ruleName of ['updateRule', 'deleteRule']) {
+      const rule = col[ruleName];
+      if (rule !== null && rule !== undefined) {
+        fail(`Oföränderlighet: ${name}.${ruleName} måste vara null (endast superuser), är \`${String(rule)}\`.`);
+      }
+    }
+  }
+  ok('Oföränderliga bevis-/historikkollektioner (A.8.32) verifierade');
+}
+
+// Notifikationssystemet (§ 50, migration 1700000186). Notiser skapas BARA av
+// servern (createRule = null) — den gamla regeln lät vem som helst skapa
+// notiser till vem som helst, i valfri tenant, med valfri länk. Notiser och
+// notisinställningar är STRIKT ägaren-bara: list/view måste vara
+// `@request.auth.id = user` och får aldrig öppnas för staff/tenant.
+// Studentprofiler och intressen (§ 54) skapas bara av servern: studenten har
+// ingen användarsession, och ett intresse får aldrig förfalskas av ett bolag.
+// Användaraktivitet (§ 57, migration 1700000209): bara servern skriver raderna
+// (en användare ska inte kunna PATCH:a sin egen eller någon annans aktivitet).
+const MUST_BE_SERVER_CREATE_ONLY = ['notifications', 'student_profiles', 'talent_interests', 'user_activity'];
+const MUST_BE_OWNER_ONLY = ['notifications', 'notification_preferences'];
+
+function verifyNotificationRules(collections) {
+  for (const name of MUST_BE_SERVER_CREATE_ONLY) {
+    const col = collections.get(name);
+    if (!col) continue;
+    if (col.createRule !== null && col.createRule !== undefined) {
+      fail(
+        `${name}.createRule måste vara null (bara servern skapar raderna), är \`${String(col.createRule)}\`.\n` +
+          'Kör migration 1700000186/1700000201 eller setup-via-api.mjs.'
+      );
+    }
+  }
+  for (const name of MUST_BE_OWNER_ONLY) {
+    const col = collections.get(name);
+    if (!col) continue;
+    for (const ruleName of ['listRule', 'viewRule', 'updateRule', 'deleteRule']) {
+      const rule = col[ruleName];
+      if (typeof rule !== 'string' || !rule.includes('@request.auth.id = user')) {
+        fail(`${name}.${ruleName} måste vara ägaren-bara (\`@request.auth.id = user\`), är \`${String(rule)}\`.`);
+      }
+      if (/@request\.auth\.roles|@request\.auth\.tenant = tenant/.test(rule)) {
+        fail(`${name}.${ruleName} får inte öppnas för roller/tenant — notiser är privata: \`${rule}\`.`);
+      }
+    }
+  }
+  const notif = collections.get('notifications');
+  if (notif) {
+    for (const token of ['@request.body.user:isset = false', '@request.body.tenant:isset = false', '@request.body.payload_json:isset = false', '@request.body.actor:isset = false']) {
+      if (typeof notif.updateRule !== 'string' || !notif.updateRule.includes(token)) {
+        fail(
+          `notifications.updateRule måste vara fältlåst (saknar \`${token}\`) — annars kan en egen notis ` +
+            'PATCH:as om till en annan användare/tenant. Kör migration 1700000186 eller setup-via-api.mjs.'
+        );
+      }
+    }
+  }
+  ok('Notiser: bara servern skapar, bara ägaren läser, update fältlåst (§ 50)');
+}
+
+// Användaraktivitet (§ 57, migration 1700000209): skrivs bara av servern och
+// läses bara av ledningen i tenanten eller personen själv — aldrig av övrig
+// personal, observatörer eller bolagsmedlemmar (det är stöd för introduktion,
+// inte ett prestationsmått).
+function verifyUserActivityRules(collections) {
+  const col = collections.get('user_activity');
+  if (!col) return;
+  for (const ruleName of ['updateRule', 'deleteRule']) {
+    if (col[ruleName] !== null && col[ruleName] !== undefined) {
+      fail(`user_activity.${ruleName} måste vara null (bara servern skriver), är \`${String(col[ruleName])}\`.`);
+    }
+  }
+  for (const ruleName of ['listRule', 'viewRule']) {
+    const rule = col[ruleName];
+    if (typeof rule !== 'string' || !rule.includes('@request.auth.id = user')) {
+      fail(`user_activity.${ruleName} måste låta personen läsa sin egen rad (\`@request.auth.id = user\`), är \`${String(rule)}\`.`);
+      continue;
+    }
+    for (const r of ['coach', 'mentor', 'observer', 'startup_member', 'partner']) {
+      if (rule.includes(`"${r}"`)) {
+        fail(`user_activity.${ruleName} får bara öppnas för ledningen (admin/incubator_lead), inte \`${r}\`: \`${rule}\`.`);
+      }
+    }
+    if (!rule.includes('"incubator_lead"') || !rule.includes('@request.auth.tenant = tenant')) {
+      fail(`user_activity.${ruleName} ska låta ledningen i samma tenant läsa: \`${rule}\`.`);
+    }
+  }
+  ok('Användaraktivitet: bara servern skriver, ledningen i tenanten eller ägaren läser (§ 57)');
+}
 
 function verifyStartupMemberIsolation(collections) {
   for (const name of MUST_SCOPE_TO_MEMBER) {
@@ -453,7 +796,12 @@ const AI_DENYLIST = new Set([
   'users', 'tenants', 'verification_tokens', 'pending_signups',
   'tenant_integrations', 'user_app_integrations', 'user_mistral_connectors',
   'chat_threads', 'user_files', 'user_file_chunks', 'deep_jobs',
-  'org_knowledge', 'org_knowledge_chunks', 'agent_memory'
+  'org_knowledge', 'org_knowledge_chunks', 'agent_memory',
+  'notifications', 'notification_preferences', 'rate_limits', 'app_locks',
+  'student_profiles', 'talent_interests',
+  'sustainability_documents', 'sustainability_ai_jobs',
+  'export_documents', 'export_ai_jobs',
+  'user_activity'
 ]);
 
 // PII-stavningar som substring-maskern INTE redan fångar. Förankrade till `_`
@@ -532,6 +880,11 @@ function verifyRlsAndRbac(collections) {
   assertRuleContains(users, 'listRule', '@request.auth.tenant = tenant');
   assertRuleContains(users, 'viewRule', '@request.auth.tenant = tenant');
   assertRuleContains(users, 'updateRule', '@request.auth.id = id');
+  // Migration 1700000174: självservice-uppdateringen är FÄLTLÅST — en
+  // användartoken får aldrig sätta behörighets-/identitetsfält via API:t.
+  for (const field of ['roles', 'tenant', 'linked_startups', 'enabled_modules', 'verified', 'email']) {
+    assertRuleContains(users, 'updateRule', `@request.body.${field}:isset = false`);
+  }
 
   const startups = collections.get('startups');
   assertRuleContains(startups, 'listRule', '@request.auth.id != ""');
@@ -605,6 +958,11 @@ function verifyRlsAndRbac(collections) {
   }
 
   verifyStartupMemberIsolation(collections);
+  verifyImmutableCollections(collections);
+  verifyNotificationRules(collections);
+  verifyUserActivityRules(collections);
+  verifySuperuserOnlyCollections(collections);
+  verifyCompassWriteRulesScoped(collections);
 
   ok('RLS/RBAC baseline checks passed (createRules är säkra)');
 }
@@ -828,13 +1186,146 @@ async function verifyHealthEndpoint() {
  * obligatoriskt i schemat → varje create svarar 400.
  */
 const REQUIRED_APP_FIELDS = [
+  // Önskemål & buggar (§ 49, migration 1700000208): testare + återkoppling —
+  // utan fälten "pekas testaren ut" tyst bort och återkopplingen försvinner.
+  { collection: 'feedback_items', fields: ['tester', 'test_note', 'tested_at'] },
   // Årshjul (§ 30): day = migration 1700000138, tags/responsible = 1700000139.
   // day = 1700000138, tags/responsible = 1700000139, end_* = 1700000141.
-  { collection: 'annual_wheel_items', fields: ['day', 'tags', 'responsible', 'end_month', 'end_day'] }
+  { collection: 'annual_wheel_items', fields: ['day', 'tags', 'responsible', 'end_month', 'end_day'] },
+  // Event ↔ årshjul (§ 53, migration 1700000194): utan fältet "sparas"
+  // kopplingen tyst bort och eventet tappar sin plan.
+  { collection: 'incubator_events', fields: ['wheel_item'] },
+  // Utvärderingsmallar (§ 53.3, migration 1700000195): utan fälten "sparas"
+  // en mall tyst som en vanlig (publicerbar) enkät.
+  { collection: 'surveys', fields: ['is_template', 'template_for'] },
+  // Mål som drivs av aktiviteter (§ 53.4, migration 1700000196): utan fälten
+  // "sparas" koppling/plan/utfall tyst bort och målen uppdateras aldrig.
+  { collection: 'goal_indicators', fields: ['activity_measure'] },
+  { collection: 'annual_wheel_items', fields: ['goal_indicators', 'planned_participants', 'completed_at', 'outcome_verdict'] },
+  { collection: 'incubator_events', fields: ['goal_indicators', 'planned_participants', 'completed_at', 'outcome_verdict'] },
+  // Inbjudningar (§ 53.5, migration 1700000197): utan fälten "sparas"
+  // svarstoken/avregistrering tyst bort och svarslänkarna slutar fungera.
+  { collection: 'event_signups', fields: ['contact', 'rsvp_token_hash', 'invited_at', 'invite_sent_at', 'responded_at', 'invite_opened_at'] },
+  { collection: 'contacts', fields: ['invite_opt_out', 'invite_opt_out_at'] },
+  // Upphandlingar (§ 39): regelgenererade uppföljningar = tasks med
+  // procurement-länk + rule_key (migration 1700000152). Saknas fälten
+  // skapas korten utan idempotensnyckel → dubbletter vid varje synk.
+  { collection: 'tasks', fields: ['procurement', 'procurement_calloff', 'rule_key'] },
+  // Kontaktboken (§ 45, migration 1700000156): utan owners/organization/
+  // category "sparas" ägare/kategori tyst bort (PB släpper okända fält).
+  { collection: 'contacts', fields: ['owners', 'organization', 'category'] },
+  // Grupper i kontaktboken (§ 45.8, migration 1700000199).
+  { collection: 'contacts', fields: ['groups'] },
+  // E-postkampanjer (§ 55, migration 1700000203): utan fälten "sparas"
+  // spärrstatus/preferenser/samtycke tyst bort, gästfrågor och incheckning
+  // försvinner och påminnelserna skickas aldrig.
+  { collection: 'contacts', fields: ['email_status', 'email_status_at', 'email_opt_out', 'newsletter_consent', 'newsletter_consent_at', 'newsletter_consent_source'] },
+  { collection: 'event_signups', fields: ['plus_ones', 'diet', 'custom_answer', 'checked_in_at', 'campaign'] },
+  // Kampanjens kopplade utvärdering (§ 55.3, migration 1700000203) — fyller {{utvärdering.länk}}.
+  { collection: 'email_campaigns', fields: ['survey', 'event', 'audience', 'blocks'] },
+  // Leveransstatus från Resend per mottagare (§ 55.4, migration 1700000205):
+  // utan fälten "sparas" statusen tyst bort och "kom det fram?" förblir obesvarat.
+  { collection: 'email_campaign_recipients', fields: ['delivery_status', 'delivery_checked_at'] },
+  { collection: 'incubator_events', fields: ['rsvp_settings', 'reminder_unanswered_sent_at', 'reminder_confirmed_sent_at'] },
+  // AI-minne (§ 16.4): kategori per notering = migration 1700000155. Saknas
+  // fältet "sparas" kategorin från UI/memory_write men försvinner tyst.
+  { collection: 'agent_memory', fields: ['category'] },
+  // Bolagsregister (§ 11.8, migration 1700000171): utan fälten "sparas"
+  // balansomslutning/eget kapital tyst bort vid synk från Roaring.
+  { collection: 'startup_financials', fields: ['balance_sheet_sek', 'equity_sek', 'net_result_sek', 'dividend_sek', 'dividend_reported'] },
+  { collection: 'startup_ownership', fields: ['source_part'] },
+  // Bedömning excellens (§ 51.4, migration 1700000190): utan fältet "sparas"
+  // controllerns manuella svar tyst bort och varje körning börjar om.
+  { collection: 'startups', fields: ['screening_facts'] },
+  // Hållbarhetsanalysen (§ 56, migration 1700000206): utan fälten "sparas"
+  // bolagets resa/status/ansvarig tyst bort och importen avbryts.
+  { collection: 'startups', fields: ['sustainability_journey_text', 'sustainability_status', 'sustainability_assigned_to'] },
+  { collection: 'sustainability_assessments', fields: ['external_id', 'source_created_at', 'previous_assessment', 'dashboard'] },
+  // Export Lab (§ 58, migration 1700000210): utan fälten "sparas" bolagets
+  // ambition/status/ansvarig tyst bort och planen kan inte lagras.
+  { collection: 'startups', fields: ['export_ambition_text', 'export_desired_markets', 'export_status', 'export_assigned_to'] },
+  { collection: 'export_assessments', fields: ['previous_assessment', 'profile', 'plan', 'irl_snapshot'] },
+  // KTH IRL på bolagskortet (migration 1700000193): utan fälten "sparas"
+  // teknik/IPR/finansiering tyst bort och radarn ritas med tre tomma axlar.
+  { collection: 'startup_readiness_assessments', fields: ['trl', 'iprl', 'frl', 'axis_notes'] },
+  { collection: 'startup_screenings', fields: ['context'] },
+  // Målstyrning (§ 42, migration 1700000159) + enkätkälla (§ 43, migration
+  // 1700000160): utan flaggorna sparas "okänt" som 0 och en enkätindikator tappar sin källa.
+  { collection: 'goal_indicators', fields: ['has_target', 'survey_module'] },
+  { collection: 'goal_status_entries', fields: ['has_value'] },
+  // Måltyp + ägare (migration 1700000161): utan fälten "sparas" ett personligt
+  // mål tyst som övergripande utan ägare.
+  { collection: 'goals', fields: ['kind', 'owner_user'] },
+  // Migration 1700000198: OKR-struktur (§ 42.5).
+  { collection: 'goals', fields: ['level', 'parent_goal', 'responsible', 'subteam'] },
+  { collection: 'goal_indicators', fields: ['target_text'] },
+  // Kompetens-hashtags (§ 29.7, migration 1700000178): utan fälten "sparas"
+  // taggar/nivåer tyst bort från Min profil och teammatchningen ser bara områden.
+  { collection: 'users', fields: ['competence_tags', 'development_interests', 'competence_updated_at'] },
+  // Meriter ur avslutade team (§ 29.7, migration 1700000179): utan fältet
+  // tappas behovet på nya team tyst och meriterna blir alltid 0.
+  { collection: 'missions', fields: ['needed_tags'] },
+  // Team → aktiviteter → mål (§ 29.8, migration 1700000212): utan fälten
+  // "sparas" teamets aktiviteter tyst bort och målen på teamkortet blir tomma.
+  { collection: 'missions', fields: ['wheel_items', 'events'] },
+  // Stödcheckar (§ 46, migrationer 1700000168/170): uppföljningskort länkas via
+  // tasks.support_check_application; bokföringsspåren länkar tillbaka till ansökan.
+  { collection: 'tasks', fields: ['support_check_application'] },
+  { collection: 'capital_rounds', fields: ['support_check_application'] },
+  { collection: 'de_minimis_stod', fields: ['support_check_application'] },
+  // Inloggningssidans utseende (§ 48, migration 1700000172; bildtexten
+  // `login_caption` i 1700000175): utan fälten "sparas" mall/bild tyst bort
+  // och /login förblir standard.
+  {
+    collection: 'tenants',
+    fields: [
+      'login_layout',
+      'login_accent',
+      'login_headline',
+      'login_tagline',
+      'login_caption',
+      'login_image',
+      'login_video'
+    ]
+  },
+  // Teamtak (§ 29.7, migration 1700000181): utan fältet "sparas" ledningens
+  // tak tyst bort och alla får default 3.
+  { collection: 'tenants', fields: ['max_active_teams_per_person'] },
+  // Bolagsregister (§ 11.8): kostnad per API-anrop (migration 1700000188) —
+  // utan fältet "sparas" ledningens priser tyst som no-op.
+  { collection: 'tenant_integrations', fields: ['pricing'] },
+  // Notifikationssystemet (§ 50, migration 1700000186): utan fälten tappas
+  // gruppering, tystning och "sedd"-markering tyst.
+  {
+    collection: 'notifications',
+    fields: ['category', 'priority', 'entity_type', 'entity_id', 'group_key', 'count', 'seen_at', 'latest_at', 'dedupe_key']
+  },
+  { collection: 'notification_preferences', fields: ['user', 'tenant', 'settings'] }
+];
+
+/**
+ * Select-värden appen skriver (union-migrationer). PB avvisar ett okänt
+ * select-värde med 400 — utan värdet nedan svarar "publicera bara till
+ * bolagen" (§ 37.2, migration 1700000171) med "audience: Invalid value".
+ */
+const REQUIRED_SELECT_VALUES = [
+  { collection: 'org_posts', field: 'audience', values: ['staff', 'all', 'startups'], migration: '1700000171' },
+  { collection: 'goal_indicators', field: 'source', values: ['computed', 'manual', 'survey', 'activities'], migration: '1700000196' },
+  { collection: 'goals', field: 'focus_area', values: ['projekt'], migration: '1700000198' },
+  { collection: 'goal_status_entries', field: 'status', values: ['risk'], migration: '1700000198' },
+  { collection: 'event_signups', field: 'stage', values: ['invited', 'declined'], migration: '1700000197' },
+  { collection: 'event_signups', field: 'stage', values: ['waitlist'], migration: '1700000203' },
+  // Önskemål & buggar (§ 49, migration 1700000208): fyrstegsflödet.
+  { collection: 'feedback_items', field: 'status', values: ['in_progress', 'awaiting_feedback'], migration: '1700000208' }
 ];
 
 const MUST_NOT_BE_REQUIRED = [
-  { collection: 'annual_wheel_items', fields: ['track'] }
+  { collection: 'annual_wheel_items', fields: ['track'] },
+  // Kontaktboken (§ 45): efternamn valfritt (chatten/Outlook-export ger ofta bara ett namnfält).
+  { collection: 'contacts', fields: ['last_name'] },
+  // AI-förbrukning (§ 9.6, migration 1700000185): anonyma publika flöden
+  // loggas utan användare — ett obligatoriskt `user` tappar dem tyst.
+  { collection: 'ai_usage_events', fields: ['user'], migration: '1700000185' }
 ];
 
 function verifyAppWritableFields(collections) {
@@ -859,7 +1350,24 @@ function verifyAppWritableFields(collections) {
     ok(`collection "${collection}" har appens skrivbara fält (${fields.join(', ')})`);
   }
 
-  for (const { collection, fields } of MUST_NOT_BE_REQUIRED) {
+  for (const { collection, field, values, migration } of REQUIRED_SELECT_VALUES) {
+    const col = byName.get(collection);
+    if (!col) continue;
+    const colFields = col.fields || col.schema || [];
+    const selectField = colFields.find((f) => f.name === field);
+    if (!selectField) continue; // fångas av REQUIRED_APP_FIELDS om det är listat där
+    const present = new Set(Array.isArray(selectField.values) ? selectField.values : []);
+    const missing = values.filter((v) => !present.has(v));
+    if (missing.length > 0) {
+      fail(
+        `Select "${collection}.${field}" saknar värden som appen skriver: ${missing.join(', ')}.\n` +
+          `PocketBase avvisar värdet med 400 ("Invalid value"). Kör migration ${migration} eller setup-via-api.mjs.`
+      );
+    }
+    ok(`select "${collection}.${field}" har appens värden (${values.join(', ')})`);
+  }
+
+  for (const { collection, fields, migration } of MUST_NOT_BE_REQUIRED) {
     const col = byName.get(collection);
     if (!col) continue;
     const colFields = col.fields || col.schema || [];
@@ -868,7 +1376,7 @@ function verifyAppWritableFields(collections) {
       if (field && field.required) {
         fail(
           `Field "${collection}.${name}" är obligatoriskt men skrivs inte längre av appen ` +
-            '→ varje create avvisas med 400. Kör migration 1700000139 eller setup-via-api.mjs.'
+            `→ varje create avvisas med 400. Kör migration ${migration || '1700000139'} eller setup-via-api.mjs.`
         );
       }
     }
@@ -900,6 +1408,7 @@ async function main() {
   verifyRlsAndRbac(collections);
   verifyAppWritableFields(collections);
   await verifyNoBrokenCreateRules();
+  await verifySecurityRules();
   await verifyNoBareMultiValueOperators();
   await verifyAiPiiMasking();
   await verifyAppUser();

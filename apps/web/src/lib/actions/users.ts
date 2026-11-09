@@ -12,6 +12,7 @@ import {
   ROLE_LABELS,
   enabledModulesAfterRoleChange,
   validateDeleteConfirmation,
+  validateDisplayName,
   validateEnabledModules,
   validateNewPassword,
   validateNewUserInput,
@@ -254,11 +255,17 @@ export async function updateUserStartupLinkAction(
   try {
     const target = await pb
       .collection('users')
-      .getOne<{ id: string; tenant: string; email?: string }>(userId, {
-        fields: 'id,tenant,email'
+      .getOne<{ id: string; tenant: string; email?: string; roles?: unknown }>(userId, {
+        fields: 'id,tenant,email,roles'
       });
     if (String(target.tenant) !== actor.tenant) {
       return { status: 'error', message: 'Användaren tillhör inte din organisation.' };
+    }
+    const targetRoles = Array.isArray(target.roles)
+      ? target.roles.filter((r): r is string => typeof r === 'string')
+      : [];
+    if (!canManageUser(actor.roles, targetRoles)) {
+      return { status: 'error', message: 'Bara en administratör kan administrera ett admin-konto.' };
     }
     targetEmail = target.email ?? '';
   } catch {
@@ -318,6 +325,16 @@ export async function updateUserStartupLinkAction(
 // - Självskydd: egna administrationsroller kan inte tas bort, eget lösenord
 //   byts på /konto, eget konto kan inte raderas här.
 // - Loggar aldrig lösenord eller PII i klartext (bara status/id).
+
+/**
+ * Kontoövertagande (nytt lösenord, radering) av ett ANNAT ledningskonto
+ * (`incubator_lead`) kräver admin — en incubator_lead ska inte kunna ta över
+ * ett jämbördigt konto.
+ */
+function canTakeOverPeer(actorRoles: readonly string[] | undefined, targetRoles: readonly string[]): boolean {
+  if (actorRoles?.includes('admin')) return true;
+  return !targetRoles.includes('incubator_lead');
+}
 
 async function loadManagedTarget(
   actor: { id: string; tenant: string; roles?: Role[] },
@@ -455,6 +472,37 @@ export async function updateUserModulesAction(
   };
 }
 
+/**
+ * Byter visningsnamn på ett konto i den egna tenanten (pennan i
+ * Inställningar → Användare). Samma RBAC/tenant-gate som övrig
+ * användaradministration (`loadManagedTarget`); det egna kontot får också
+ * döpas om här. Bara `display_name` skrivs — aldrig e-post eller roller.
+ */
+export async function updateUserDisplayNameAction(
+  _prev: UpdateUserState,
+  formData: FormData
+): Promise<UpdateUserState> {
+  const actor = await requireUser();
+  const userId = String(formData.get('user_id') ?? '').trim();
+  const loaded = await loadManagedTarget(actor, userId);
+  if (!loaded.ok) return { status: 'error', message: loaded.message };
+
+  const validated = validateDisplayName(formData.get('display_name'));
+  if (!validated.ok) return { status: 'error', message: validated.message };
+
+  try {
+    await loaded.pb.collection('users').update(userId, { display_name: validated.value });
+  } catch (err: unknown) {
+    const e = err as PbError;
+    console.error('[updateUserDisplayName] failed', { status: e.status });
+    return { status: 'error', message: 'Kunde inte spara namnet. Försök igen.' };
+  }
+
+  revalidatePath('/installningar/anvandare');
+  revalidatePath('/', 'layout');
+  return { status: 'ok', message: 'Namnet är sparat.' };
+}
+
 /** Sätter ett nytt initialt lösenord åt en annan användare. */
 export async function resetUserPasswordAction(
   _prev: UpdateUserState,
@@ -467,6 +515,9 @@ export async function resetUserPasswordAction(
   }
   const loaded = await loadManagedTarget(actor, userId);
   if (!loaded.ok) return { status: 'error', message: loaded.message };
+  if (!canTakeOverPeer(actor.roles, loaded.target.roles)) {
+    return { status: 'error', message: 'Bara en administratör kan återställa lösenordet för ett annat ledningskonto.' };
+  }
 
   const validated = validateNewPassword(formData.get('password'));
   if (!validated.ok) return { status: 'error', message: validated.message };
@@ -505,6 +556,9 @@ export async function deleteUserAction(
   }
   const loaded = await loadManagedTarget(actor, userId);
   if (!loaded.ok) return { status: 'error', message: loaded.message };
+  if (!canTakeOverPeer(actor.roles, loaded.target.roles)) {
+    return { status: 'error', message: 'Bara en administratör kan radera ett annat ledningskonto.' };
+  }
 
   const confirmed = validateDeleteConfirmation(formData.get('confirm_email'), loaded.target.email);
   if (!confirmed.ok) return { status: 'error', message: confirmed.message };

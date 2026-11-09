@@ -23,39 +23,21 @@ jobs:
     name: Trigger Coolify stack redeploy (production)
     runs-on: ubuntu-latest
     steps:
-      - name: Call Coolify deploy webhook
+      # Jobbet körde tidigare utan checkout och kunde därför inte hitta
+      # repo-skript. Delat, testat skript: .github/scripts/coolify-deploy.sh.
+      - uses: actions/checkout@v4
+
+      - name: Trigger Coolify stack redeploy (production)
         env:
           COOLIFY_BASE_URL: ${{ secrets.COOLIFY_BASE_URL }}
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
           COOLIFY_APP_UUID: ${{ secrets.COOLIFY_APP_UUID_PRODUCTION || secrets.COOLIFY_PROJECT_ID_PRODUCTION }}
           COOLIFY_DEPLOY_WEBHOOK: ${{ secrets.COOLIFY_DEPLOY_WEBHOOK_PRODUCTION }}
-        run: |
-          set -euo pipefail
-
-          if [ -n "${COOLIFY_DEPLOY_WEBHOOK:-}" ]; then
-            echo "Trigging Coolify deploy webhook (production stack redeploy)..."
-            curl --fail-with-body -sS -X POST \
-              -H "Authorization: Bearer $COOLIFY_TOKEN" \
-              -H "Accept: application/json" \
-              "$COOLIFY_DEPLOY_WEBHOOK"
-            echo
-            echo "✓ Coolify deploy triggered. PB-containern byggs om med nya migrations."
-            exit 0
-          fi
-
-          if [ -z "${COOLIFY_APP_UUID:-}" ]; then
-            echo "::warning::Ingen COOLIFY_DEPLOY_WEBHOOK_PRODUCTION eller COOLIFY_APP_UUID_PRODUCTION — hoppar över stack-redeploy."
-            echo "Sätt en av dem som secret för att automatisera PB-migrations-deployment."
-            exit 0
-          fi
-
-          encoded_identifier=$(node -e "process.stdout.write(encodeURIComponent(process.argv[1]))" "$COOLIFY_APP_UUID")
-          curl --fail-with-body -sS -X POST \
-            -H "Authorization: Bearer $COOLIFY_TOKEN" \
-            -H "Accept: application/json" \
-            "$COOLIFY_BASE_URL/api/v1/deploy?uuid=$encoded_identifier&force=true"
-          echo
-          echo "✓ Coolify deploy triggered via API."
+          COOLIFY_TARGET_LABEL: production stack
+          COOLIFY_UUID_SECRET_NAME: COOLIFY_APP_UUID_PRODUCTION
+          COOLIFY_FORCE: 'true'
+          COOLIFY_MISSING_UUID_IS_WARNING: 'true'
+        run: bash .github/scripts/coolify-deploy.sh
 
   api-sync:
     name: Self-healing rule sync via API (production)

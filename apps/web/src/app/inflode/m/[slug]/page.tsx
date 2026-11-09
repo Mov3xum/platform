@@ -7,6 +7,7 @@ import { CompassChat } from '@/components/compass/CompassChat';
 import { ModuleWizard } from '@/components/compass/ModuleWizard';
 import { ModuleQuiz } from '@/components/compass/ModuleQuiz';
 import { FLOW_TYPE_LABEL } from '@/lib/compass/types';
+import { contactSectionForModule } from '@platform/shared';
 
 export const dynamic = 'force-dynamic';
 
@@ -77,6 +78,8 @@ export default async function ModulePage({
           <CompassChat
             moduleSlug={mod.slug}
             initialAssistantMessage={mod.intro_message || undefined}
+            title={mod.chat_persona || mod.name}
+            avatarInitial={(mod.name || 'M').slice(0, 1).toUpperCase()}
           />
         </div>
       ) : mod.flow_type === 'quiz' ? (
@@ -84,9 +87,7 @@ export default async function ModulePage({
           <ModuleQuiz
             moduleSlug={mod.slug}
             questions={questions}
-            requireEmail={mod.require_email}
-            requirePhone={mod.require_phone}
-            requireOrganization={mod.require_organization}
+            contactSection={contactSectionForModule(mod)}
             successMessage={mod.success_message}
           />
         </Card>
@@ -95,6 +96,7 @@ export default async function ModulePage({
           <ModuleWizard
             moduleSlug={mod.slug}
             questions={questions}
+            contactSection={contactSectionForModule(mod)}
             successMessage={mod.success_message}
             redirectUrl={mod.redirect_url}
           />

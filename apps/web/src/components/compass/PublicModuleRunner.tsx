@@ -1,19 +1,25 @@
 'use client';
 
 import { useState } from 'react';
-import type { CompassModule, CompassQuestion, NextModuleLink } from '@/lib/compass/types';
+import {
+  compassStartPageTitle,
+  hasCompassStartPage,
+  parseCompassStartPageBlocks
+} from '@platform/shared';
+import type { CompassQuestion, NextModuleLink } from '@/lib/compass/types';
+import type { PublicCompassModule } from '@/lib/compass/public';
 import { CompassChat } from './CompassChat';
 import { ModuleWizard } from './ModuleWizard';
 import { ModuleQuiz } from './ModuleQuiz';
 import { NextModuleCta } from './NextModuleCta';
 
 interface Props {
-  module: CompassModule;
+  module: PublicCompassModule;
   questions: CompassQuestion[];
-  /** Tenantens namn — visas i det nedladdningsbara resultatet. */
-  brandName?: string;
   /** Kedjad nästa modul (migration 1700000124) — visas efter slutfört flöde. */
   nextModule?: NextModuleLink | null;
+  /** Enkätens subjekt ur `?om=<id>` (§ 43). */
+  subject?: string | null;
 }
 
 const PUBLIC_API_BASE = '/api/public/m';
@@ -25,31 +31,57 @@ const FLOW_LABEL: Record<string, string> = {
   wizard: 'Formulär'
 };
 
-// Publik (oinloggad) körning av en Startupkompass-modul. Visar en
-// samtyckesgrind före all datainsamling (GDPR art. 7) och dispatchar sedan
-// till rätt flöde. Skickar consent=true till de publika API-routarna.
-export function PublicModuleRunner({ module, questions, brandName, nextModule }: Props) {
+// Publik (oinloggad) körning av en Startupkompass-modul. Visar först
+// modulens STARTSIDA (beskrivning + syfte, § 23.11) och/eller en
+// samtyckesgrind före all datainsamling (GDPR art. 7) — på EN sida med EN
+// knapp när båda finns — och dispatchar sedan till rätt flöde. Skickar
+// consent=true till de publika API-routarna.
+export function PublicModuleRunner({ module, questions, nextModule, subject }: Props) {
   const hasConsentGate = Boolean(module.consent_note);
-  const [consented, setConsented] = useState(!hasConsentGate);
+  const hasStartPage = hasCompassStartPage(module);
+  const [started, setStarted] = useState(!hasConsentGate && !hasStartPage);
 
-  if (!consented) {
+  if (!started) {
+    const startBlocks = hasStartPage ? parseCompassStartPageBlocks(module.start_page_body) : [];
     return (
-      <div className="mx-consent">
+      <div className="mx-consent mx-startpage">
         <div className="mx-mono mx-t-xs mx-t-up mx-muted">Innan vi börjar</div>
         <h2 className="mx-disp" style={{ fontSize: 24, fontWeight: 700, margin: 0, color: 'var(--mx-ink)' }}>
-          Så hanterar vi dina uppgifter
+          {hasStartPage ? compassStartPageTitle(module) : 'Så hanterar vi dina uppgifter'}
         </h2>
-        <p className="mx-t-13 mx-muted" style={{ lineHeight: 1.65, maxWidth: 560 }}>
-          {module.consent_note}
-        </p>
+        {hasStartPage && (
+          <div className="mx-startpage-body">
+            {startBlocks.map((block, i) => {
+              if (block.kind === 'heading') return <h3 key={i}>{block.text}</h3>;
+              if (block.kind === 'list') {
+                return (
+                  <ul key={i}>
+                    {block.items.map((item, j) => (
+                      <li key={j}>{item}</li>
+                    ))}
+                  </ul>
+                );
+              }
+              return <p key={i}>{block.text}</p>;
+            })}
+          </div>
+        )}
+        {hasConsentGate && (
+          <div className={hasStartPage ? 'mx-startpage-consent' : undefined}>
+            {hasStartPage && (
+              <div className="mx-mono mx-t-xs mx-t-up mx-muted" style={{ marginBottom: 6 }}>
+                Så hanterar vi dina uppgifter
+              </div>
+            )}
+            <p className="mx-t-13 mx-muted" style={{ lineHeight: 1.65, maxWidth: 560, margin: 0 }}>
+              {module.consent_note}
+            </p>
+          </div>
+        )}
         <div className="mx-consent-cta">
           <span className="mx-chip mx-mono">{FLOW_LABEL[module.flow_type]}</span>
-          <button
-            type="button"
-            className="mx-btn mx-primary mx-lg"
-            onClick={() => setConsented(true)}
-          >
-            Jag förstår, starta <span aria-hidden>→</span>
+          <button type="button" className="mx-btn mx-primary mx-lg" onClick={() => setStarted(true)}>
+            {hasConsentGate ? 'Jag förstår, starta' : 'Starta'} <span aria-hidden>→</span>
           </button>
         </div>
       </div>
@@ -61,7 +93,7 @@ export function PublicModuleRunner({ module, questions, brandName, nextModule }:
     // under chatten när modulen är kedjad till en nästa modul.
     return (
       <div style={{ display: 'grid', gap: 16 }}>
-        <div style={{ height: '70vh', minHeight: 520 }}>
+        <div className="mx-compass-chatbox">
           <CompassChat
             endpoint={`${PUBLIC_API_BASE}/${module.public_slug || module.slug}/chat`}
             moduleSlug={module.public_slug || module.slug}
@@ -70,9 +102,22 @@ export function PublicModuleRunner({ module, questions, brandName, nextModule }:
             avatarInitial={(module.name || 'M').slice(0, 1).toUpperCase()}
             maxExchanges={module.max_exchanges || 0}
             consent
+            closing={
+              module.collects_lead
+                ? {
+                    apiBase: PUBLIC_API_BASE,
+                    questions,
+                    contactSection: module.contact_section,
+                    successMessage: module.success_message
+                  }
+                : undefined
+            }
+            nextModule={nextModule}
           />
         </div>
-        {nextModule && <NextModuleCta next={nextModule} prompt="Klar? Gå vidare till nästa steg." />}
+        {!module.collects_lead && nextModule && (
+          <NextModuleCta next={nextModule} prompt="Klar? Gå vidare till nästa steg." />
+        )}
       </div>
     );
   }
@@ -84,13 +129,11 @@ export function PublicModuleRunner({ module, questions, brandName, nextModule }:
         questions={questions}
         apiBase={PUBLIC_API_BASE}
         consent
-        requireEmail={module.require_email}
-        requirePhone={module.require_phone}
-        requireOrganization={module.require_organization}
+        contactSection={module.contact_section}
         successMessage={module.success_message}
-        moduleName={module.welcome_title || module.name}
-        brandName={brandName}
         nextModule={nextModule}
+        subject={subject}
+        trackProgress={module.collects_lead}
       />
     );
   }
@@ -101,9 +144,12 @@ export function PublicModuleRunner({ module, questions, brandName, nextModule }:
       questions={questions}
       apiBase={PUBLIC_API_BASE}
       consent
+      contactSection={module.contact_section}
       successMessage={module.success_message}
       redirectUrl={module.redirect_url}
       nextModule={nextModule}
+      subject={subject}
+      trackProgress={module.collects_lead}
     />
   );
 }

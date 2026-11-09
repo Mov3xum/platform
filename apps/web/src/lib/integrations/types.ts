@@ -1,4 +1,6 @@
 import 'server-only';
+import type { RegistryCompany } from './company-registry/types';
+import type { RegistryPartId } from './company-registry/parts';
 
 // The shape every provider must produce. Keeping it minimal +
 // generic means the UI renders any provider without bespoke code,
@@ -31,6 +33,11 @@ export interface TestConnectionResult {
 export interface SyncContext {
   tenantId: string;
   tenantIntegrationId: string;
+  /**
+   * Bolagsregister: vilka datadelar personalen valt att hämta (§ 11.8).
+   * Utelämnat = allt providern stödjer. Records-providers ignorerar fältet.
+   */
+  parts?: RegistryPartId[];
 }
 
 // Result returned by company_registry-providers (Allabolag and similar).
@@ -40,8 +47,12 @@ export interface SyncContext {
 export interface RegistrySyncResult {
   startupsUpdated: number;
   financialsUpserted: number;
+  /** Ägarbildsrader skrivna till startup_ownership (§ 11.8). */
+  ownershipWritten?: number;
   skipped: number;
   perStartupErrors?: Array<{ startupId: string; error: string }>;
+  /** Antal bolag med org-nr som synken försökte hämta (portföljsynk). */
+  startupsTotal?: number;
 }
 
 // Discriminated union: 'records' providers produce NormalizedRecord[]
@@ -67,6 +78,12 @@ export interface RecordsHandler extends BaseIntegrationHandler {
 
 export interface CompanyRegistryHandler extends BaseIntegrationHandler {
   kind: 'company_registry';
+  /** Datadelar providern kan hämta OCH synka till bolagskortet, i visningsordning (§ 11.8). */
+  parts: RegistryPartId[];
+  /** Delar som bara finns vid uppslag (Testa mot org-nr, Bedömning excellens) — aldrig vid synk (§ 51.11). */
+  lookupOnlyParts?: RegistryPartId[];
+  /** Leverantörens endpoint per del — visas vid kryssrutorna. */
+  partEndpoints?(): Partial<Record<RegistryPartId, string>>;
   syncRegistry(
     creds: Record<string, string>,
     ctx: SyncContext
@@ -79,6 +96,15 @@ export interface CompanyRegistryHandler extends BaseIntegrationHandler {
     ctx: SyncContext,
     startupId: string
   ): Promise<RegistrySyncResult>;
+  // Förhandsgranskning: hämtar + normaliserar ett org-nr UTAN att skriva
+  // något. Används av "Testa mot org-nr" på /integrationer/<slug> så att
+  // fältmappningen kan verifieras mot en riktig leverantörsrespons innan
+  // portföljen synkas (§ 11.8).
+  lookup?(
+    orgNr: string,
+    creds: Record<string, string>,
+    parts?: RegistryPartId[]
+  ): Promise<RegistryCompany>;
 }
 
 export type IntegrationHandler = RecordsHandler | CompanyRegistryHandler;
@@ -91,4 +117,6 @@ export interface SyncResult {
   recordsSkipped: number;
   errorMessage?: string;
   durationMs: number;
+  /** Bolagsregister: antal bolag leverantören anropades för (kostnadsunderlag, § 11.8). */
+  companiesFetched?: number;
 }

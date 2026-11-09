@@ -8,20 +8,20 @@
 // gammal flik som möter en ny deploy alltid läker sig själv via ett reload.
 
 import { useEffect } from 'react';
-import { attemptChunkReload, isChunkLoadError } from '@/lib/chunk-reload';
+import { attemptChunkReload, isDeployMismatchError } from '@/lib/chunk-reload';
 
 export function ChunkReloadListener() {
   useEffect(() => {
     function onError(event: ErrorEvent) {
       // event.error finns för JS-undantag; för resurs-/script-laddningsfel
       // (t.ex. <script src=…> som 404:ar) saknas det och vi tittar på message.
-      if (isChunkLoadError(event.error) || isChunkLoadError(event.message)) {
+      if (isDeployMismatchError(event.error) || isDeployMismatchError(event.message)) {
         attemptChunkReload();
       }
     }
 
     function onRejection(event: PromiseRejectionEvent) {
-      if (isChunkLoadError(event.reason)) {
+      if (isDeployMismatchError(event.reason)) {
         attemptChunkReload();
       }
     }

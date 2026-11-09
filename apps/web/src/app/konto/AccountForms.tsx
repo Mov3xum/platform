@@ -6,10 +6,10 @@ import { Camera, Check, Eye, EyeOff, KeyRound, User } from 'lucide-react';
 import {
   changePasswordAction,
   updateProfileAction,
-  MAX_AVATAR_BYTES,
   type ChangePasswordState,
   type UpdateProfileState
 } from '@/lib/actions/account';
+import { MAX_AVATAR_BYTES } from '@/lib/account-limits';
 
 const INPUT_CLASS =
   'block w-full rounded-xl border border-default bg-surface px-4 py-2.5 text-sm text-foreground outline-none transition focus:border-brand focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila';

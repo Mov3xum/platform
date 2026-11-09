@@ -1,15 +1,19 @@
-import { getPublicPbUrl } from '@/lib/pb-url';
 import type { CompassModule } from './types';
 
-// Bygger publika URL:er till en moduls omslagsmedia (hero_image/hero_video).
-// Filfälten är ICKE skyddade → serveras tokenlöst via PocketBase, precis som
-// tenant-logos och workshop_media (CLAUDE.md § 18.2). Därför fungerar URL:erna
-// även för en anonym besökare på /m/<slug>. Returnerar null när fil saknas.
+// Bygger URL:er till en moduls omslagsmedia (hero_image/hero_video).
+//
+// URL:erna pekar på den EGNA originen — proxyn i
+// app/api/public/compass-media/[id]/[filename]/route.ts strömmar filen från
+// PocketBase server-side. Tidigare byggdes en direkt PB-URL
+// (getPublicPbUrl()): den fungerar bara om webbläsaren litar på PB-hostens
+// certifikat och protokoll, vilket sslip.io-staging inte uppfyller
+// (infra/SSL.md) — bilden blockerades tyst och reservgrafiken visades trots
+// lyckad uppladdning. Relativa sökvägar fungerar lika bra i <img>/<video>
+// och i editorns förhandsvisning. Returnerar null när fil saknas.
 
 function moduleFileUrl(moduleId: string, filename?: string): string | null {
   if (!filename) return null;
-  const base = getPublicPbUrl().replace(/\/$/, '');
-  return `${base}/api/files/compass_modules/${moduleId}/${encodeURIComponent(filename)}`;
+  return `/api/public/compass-media/${encodeURIComponent(moduleId)}/${encodeURIComponent(filename)}`;
 }
 
 export function moduleHeroImageUrl(

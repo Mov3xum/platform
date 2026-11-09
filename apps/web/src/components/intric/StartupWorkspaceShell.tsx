@@ -2,82 +2,60 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Icon } from '@/components/proto/Icon';
-import type { StartupPhase } from '@platform/shared';
+import { STARTUP_TABS, activeStartupTab, type StartupTabId } from '@/lib/startup-tabs';
 
 interface StartupHeader {
   id: string;
   name: string;
-  phase?: StartupPhase | string;
-  industry?: string;
-  coachName?: string;
 }
 
 interface Props {
   startup: StartupHeader;
   children: React.ReactNode;
+  /** Chips under namnet (fas, status, IRL …) — renderas på servern. */
+  meta?: React.ReactNode;
+  /** Knappar till höger om namnet (Redigera …). */
+  actions?: React.ReactNode;
   rightPanel?: React.ReactNode;
-  activeTabBadges?: Partial<Record<TabId, number>>;
+  activeTabBadges?: Partial<Record<StartupTabId, number>>;
 }
 
-type TabId = 'overview' | 'aktiviteter' | 'verktyg' | 'logg';
-
-const TABS: { id: TabId; label: string; path: string }[] = [
-  { id: 'overview', label: 'Översikt', path: '' },
-  { id: 'aktiviteter', label: 'Aktiviteter', path: '/aktiviteter' },
-  { id: 'verktyg', label: 'Verktyg', path: '/verktyg' },
-  { id: 'logg', label: 'Logg', path: '/logg' }
-];
-
-function deriveActiveTab(pathname: string, startupId: string): TabId {
-  const base = `/startups/${startupId}`;
-  if (pathname.startsWith(`${base}/aktiviteter`)) return 'aktiviteter';
-  if (pathname.startsWith(`${base}/verktyg`)) return 'verktyg';
-  if (pathname.startsWith(`${base}/logg`)) return 'logg';
-  return 'overview';
-}
-
-export function StartupWorkspaceShell({
-  startup,
-  children,
-  rightPanel,
-  activeTabBadges
-}: Props) {
+/**
+ * Bolagskortets skal: namn + chips + åtgärder och flikarna. Flikarna och
+ * sökvägarna kommer från `lib/startup-tabs.ts` (en källa — även gamla
+ * ankarlänkar slås upp där).
+ */
+export function StartupWorkspaceShell({ startup, children, meta, actions, rightPanel, activeTabBadges }: Props) {
   const pathname = usePathname();
-  const activeTab = deriveActiveTab(pathname, startup.id);
+  const activeTab = activeStartupTab(pathname, startup.id);
 
   return (
     <div className={`mx-workspace ${rightPanel ? 'mx-with-right' : ''}`}>
       <div className="mx-workspace-main">
         <div className="mx-startup-head">
-          <div className="mx-startup-head-row">
-            <h1 className="mx-startup-title">{startup.name}</h1>
-            {startup.phase && (
-              <span className="inline-flex items-center gap-1.5 rounded-md bg-movexum-pastell-lila px-2 py-0.5 text-[11px] font-medium text-movexum-lila">
-                <Icon name="target" size={11} /> {String(startup.phase)}
-              </span>
-            )}
-            {startup.industry && (
-              <span className="inline-flex items-center rounded-md border border-default bg-canvas-muted px-2 py-0.5 text-[11px] text-foreground-muted">
-                {startup.industry}
-              </span>
-            )}
-            {startup.coachName && (
-              <span className="hidden items-center gap-1.5 px-2 py-0.5 text-[11px] text-foreground-subtle md:inline-flex">
-                <Icon name="people" size={11} /> Coach: {startup.coachName}
-              </span>
-            )}
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="mb-1">
+                <Link href="/startups" className="text-xs text-foreground-subtle hover:text-foreground">
+                  ← Alla bolag
+                </Link>
+              </div>
+              <h1 className="font-heading text-2xl font-semibold tracking-tight text-foreground">{startup.name}</h1>
+              {meta ? <div className="mt-2 flex flex-wrap items-center gap-2">{meta}</div> : null}
+            </div>
+            {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
           </div>
 
           <nav className="mx-startup-tabs" aria-label="Bolagsvyer">
-            {TABS.map((t) => {
+            {STARTUP_TABS.map((t) => {
               const href = `/startups/${startup.id}${t.path}`;
               const badge = activeTabBadges?.[t.id] || 0;
               return (
                 <Link
                   key={t.id}
                   href={href}
-                  className={`mx-startup-tab ${activeTab === t.id ? 'mx-active' : ''}`}
+                  aria-current={activeTab === t.id ? 'page' : undefined}
+                  className={`mx-startup-tab whitespace-nowrap ${activeTab === t.id ? 'mx-active' : ''}`}
                 >
                   {t.label}
                   {badge > 0 && <span className="mx-tab-badge">{badge}</span>}

@@ -26,6 +26,12 @@
  *   PB_SU_EMAIL='hampus@movexum.se' \
  *   PB_SU_PASSWORD='<superuser password>' \
  *   node backend/pocketbase-schema/scripts/diagnose-migrations.mjs
+ * Add --wait-for-schema to poll until all migration-created collections exist
+ * (15 minutes by default; override with PB_SCHEMA_WAIT_TIMEOUT_MS). In that
+ * mode the script is ADVISORY: a timeout or missing collections are reported
+ * as warnings and the exit code is 0, so the following setup-via-api.mjs step
+ * (which mirrors a subset of the collections) and verify-baseline.mjs (the
+ * hard gate) can run.
  */
 
 import PocketBase from 'pocketbase';
@@ -33,6 +39,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { authenticateSuperuserWithRetry } from './lib/pb-auth-retry.mjs';
+import { waitForCollections } from './lib/migration-readiness.mjs';
 
 const PB_URL_RAW = process.env.PB_URL;
 const SU_EMAIL = process.env.PB_SU_EMAIL;
@@ -106,6 +113,19 @@ async function main() {
   log(`PB: ${PB_URL}`);
   log(`Migrations: ${MIGRATIONS_DIR}`);
 
+  const files = listMigrationFiles();
+  const migrationCollections = files.map((file) => {
+    const source = readFileSync(join(MIGRATIONS_DIR, file), 'utf8');
+    return { file, created: collectionsCreatedBy(source) };
+  }).filter(({ created }) => created.length > 0);
+  const expectedNames = [...new Set(migrationCollections.flatMap(({ created }) => created))];
+  const waitForSchema = process.argv.includes('--wait-for-schema');
+  const timeoutMs = Number(process.env.PB_SCHEMA_WAIT_TIMEOUT_MS ?? 15 * 60 * 1000);
+  if (waitForSchema && (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0)) {
+    console.error('PB_SCHEMA_WAIT_TIMEOUT_MS must be a non-negative integer.');
+    process.exit(1);
+  }
+
   const pb = new PocketBase(PB_URL);
   pb.autoCancellation(false);
 
@@ -122,16 +142,44 @@ async function main() {
   }
   ok(`Autentiserad som superuser ${SU_EMAIL}`);
 
-  // 1. Befintliga kollektioner i instansen.
-  const liveCollections = await pb.collections.getFullList({ batch: 1000, $autoCancel: false });
-  const liveNames = new Set(liveCollections.filter((c) => !c.system).map((c) => c.name));
+  // Vänta på migrations-skapade kollektioner när Coolify har accepterat en
+  // redeploy men den nya PocketBase-containern ännu inte har startat.
+  const { liveNames, timedOut, lastError } = await waitForCollections(
+    expectedNames,
+    async () => {
+      const collections = await pb.collections.getFullList({ batch: 1000, $autoCancel: false });
+      return new Set(collections.filter((c) => !c.system).map((c) => c.name));
+    },
+    {
+      timeoutMs: waitForSchema ? timeoutMs : 0,
+      pollIntervalMs: 15_000,
+      onPending: (missing) => warn(
+        `Väntar på ${missing.length} migrations-skapade kollektioner: ${missing.slice(0, 8).join(', ')}${missing.length > 8 ? ', …' : ''}`
+      ),
+      onError: (error) => warn(`Kunde inte läsa PocketBase-kollektioner ännu: ${error?.message || error}`)
+    }
+  );
+  if (lastError) {
+    console.error(`✗ Kunde inte läsa PocketBase-kollektioner: ${lastError?.message || lastError}`);
+    process.exit(1);
+  }
+  if (timedOut) {
+    // Rådgivande, ALDRIG fatalt (incident 2026-09): väntesteget i workflowen
+    // "Sync PocketBase" körs FÖRE setup-via-api.mjs. Kollektioner som
+    // bootstrap-skriptet speglar (t.ex. `surveys`) skapas först i nästa steg,
+    // och migration-only-kollektioner dyker aldrig upp om PB-imagen inte
+    // byggts om — ett hårt fel här stoppade hela synken i 15 minuter utan
+    // att något kunde läka. verify-baseline.mjs efter synken är den hårda
+    // grinden (must-exist), inte den här väntan.
+    warn(
+      `Migrations-skapade kollektioner saknas fortfarande efter ${Math.ceil(timeoutMs / 1000)} s — ` +
+        'fortsätter ändå. setup-via-api.mjs speglar en delmängd; verify-baseline.mjs avgör efteråt.'
+    );
+  }
   ok(`Hittade ${liveNames.size} icke-system-kollektioner i instansen`);
 
-  // 2. Migrationsfiler + vilka kollektioner de skapar.
-  const files = listMigrationFiles();
+  // 2. PB:s migrationshistorik (om åtkomlig).
   ok(`Hittade ${files.length} migrationsfiler på disk`);
-
-  // 3. PB:s migrationshistorik (om åtkomlig).
   const history = await readMigrationHistory(pb);
   if (history) {
     ok(`Läste _migrations-historik: ${history.length} applicerade poster`);
@@ -139,13 +187,10 @@ async function main() {
     warn('Kunde inte läsa _migrations-historiken via REST — härleder status från kollektioner i stället.');
   }
 
-  // 4. Per migration: vilka kollektioner skapas, finns de?
+  // 3. Per migration: vilka kollektioner skapas, finns de?
   const missingByFile = [];
   const allMissingCollections = new Set();
-  for (const file of files) {
-    const source = readFileSync(join(MIGRATIONS_DIR, file), 'utf8');
-    const created = collectionsCreatedBy(source);
-    if (created.length === 0) continue; // utökning/seed/rules — inget att verifiera här
+  for (const { file, created } of migrationCollections) {
     const missing = created.filter((name) => !liveNames.has(name));
     if (missing.length > 0) {
       missingByFile.push({ file, missing, created });
@@ -182,6 +227,13 @@ async function main() {
       'för migration-only-kollektioner (t.ex. compass_*).'
   );
   console.log('======================\n');
+  // I --wait-for-schema-läge (pre-sync i workflowen) är rapporten rådgivande:
+  // nästa steg (setup-via-api.mjs) kan skapa det som saknas, och
+  // verify-baseline.mjs fäller deployen om det verkligen saknas efteråt.
+  if (waitForSchema) {
+    warn('Rådgivande läge (--wait-for-schema): avslutar med kod 0 så synken kan fortsätta.');
+    return;
+  }
   process.exit(1);
 }
 

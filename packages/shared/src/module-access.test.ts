@@ -70,7 +70,7 @@ test('resolveEnabledModules: lagrad lista vinner, annars allt rollen tillåter m
 
 test('rollstandarden täcker sidor som staff-korslänkar förutsätter (§ 22, § 20.4, § 26)', () => {
   for (const role of ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'] as const) {
-    assert.ok(DEFAULT_MODULES_BY_ROLE[role].includes('mina_aktiviteter'), `${role}: /pagaende → /mina-aktiviteter`);
+    assert.ok(DEFAULT_MODULES_BY_ROLE[role].includes('mina_aktiviteter'), `${role}: bolagskortet → /mina-aktiviteter`);
   }
   for (const role of ['coach', 'mentor', 'observer'] as const) {
     assert.ok(DEFAULT_MODULES_BY_ROLE[role].includes('de_minimis'), `${role}: § 20.4`);

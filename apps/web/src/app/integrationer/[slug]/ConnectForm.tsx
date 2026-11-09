@@ -18,11 +18,21 @@ interface Props {
   providerSlug: string;
   providerName: string;
   fields: FieldSpec[];
+  /** Text som visas efter lyckad anslutning (default pekar på "Synka nu"). */
+  successMessage?: string;
+  /** Knapptext (default "Anslut <leverantör>"). */
+  submitLabel?: string;
 }
 
 const initialState: IntegrationConnectState = {};
 
-export function ConnectForm({ providerSlug, providerName, fields }: Props) {
+export function ConnectForm({
+  providerSlug,
+  providerName,
+  fields,
+  successMessage,
+  submitLabel
+}: Props) {
   const [state, formAction, pending] = useActionState(
     connectIntegrationAction,
     initialState
@@ -60,7 +70,7 @@ export function ConnectForm({ providerSlug, providerName, fields }: Props) {
       )}
       {state.success && (
         <p className="rounded-xl bg-movexum-pastell-gron px-3 py-2 text-xs text-movexum-morkgron dark:bg-movexum-morkgron/30 dark:text-movexum-pastell-gron">
-          {providerName} ansluten. Klicka på "Synka nu" för att hämta data.
+          {successMessage ?? `${providerName} ansluten. Klicka på "Synka nu" för att hämta data.`}
         </p>
       )}
 
@@ -69,7 +79,7 @@ export function ConnectForm({ providerSlug, providerName, fields }: Props) {
         disabled={pending}
         className="w-full rounded-2xl bg-brand px-4 py-2.5 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover disabled:cursor-wait disabled:opacity-60"
       >
-        {pending ? 'Verifierar…' : `Anslut ${providerName}`}
+        {pending ? 'Verifierar…' : (submitLabel ?? `Anslut ${providerName}`)}
       </button>
     </form>
   );

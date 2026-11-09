@@ -25,11 +25,30 @@ test('denylist håller ute auth-, credential- och privat-innehåll-kollektioner'
     'tenant_integrations', // krypterade credentials
     'user_app_integrations',
     'user_mistral_connectors',
+    'rate_limits', // hashade rate-limit-nycklar (§21.8)
+    'app_locks', // distribuerade lås (§21.8)
     // B. Strikt privat ägaren-bara-innehåll
     'chat_threads', // privat innehåll (§17.2)
     'user_files',
     'deep_jobs',
     'meeting_transcripts', // råa mötestranskript (§34)
+    'notifications', // privata notiser — superuser-körningar fick annars läsa alla i tenanten (§50)
+    'notification_preferences', // notisinställningar per användare (§50)
+    'procurement_documents', // fritext ur uppladdade upphandlingsunderlag (§39.3)
+    'support_check_applications', // insatsernas deltagarfält = personnamn; utlåtanden/beslut (§46)
+    'support_check_revisions', // signeringsbevis (§46)
+    'support_check_comments', // kompletteringspunkter (§46)
+    'support_check_documents', // bilagor (§46)
+    'compass_responses', // råa enkät-/intagssvar per fråga — bara aggregatet når målstyrningen (§43)
+    'startup_screenings', // statsstödsbedömningar på bolagskortet (§51.6)
+    'screening_requests', // begäran om komplettering med grundaruppgifter (§51.6)
+    'screening_cases', // ärenden i Bedömning excellens — underlag + manuella svar (§51.10)
+    'student_profiles', // studenter = privatpersoner: namn, e-post, fritext (§54)
+    'talent_interests', // intresseanmälningar med meddelanden (§54)
+    'sustainability_documents', // text ur uppladdade dokument i Hållbarhetsanalysen (§56)
+    'sustainability_ai_jobs', // rå modellutdata från Hållbarhetsanalysen (§56)
+    'export_documents', // text ur uppladdade dokument i Export Lab (§58)
+    'export_ai_jobs', // rå modellutdata från Export Lab (§58)
     'agent_memory' // tvärsessions-minne (§16.4)
   ]) {
     assert.equal(isDeniedCollection(name), true, `${name} ska vara denylistad`);
@@ -43,12 +62,15 @@ test('domändata är LÄSBAR (låstes upp 2026-06; skyddas av RLS + fältmasknin
     'tool_runs',
     'activities',
     'startup_financials',
+    'sustainability_assessments',
+    'sustainability_gap_questions',
+    'export_assessments',
+    'export_gap_questions',
     // C — tidigare denylistat, nu läsbart med fältmaskning
     'contacts',
     'compass_leads',
     'compass_conversations',
     'compass_messages',
-    'compass_responses',
     'compass_security_events',
     'agent_actions',
     'agreement_signatures',
@@ -78,7 +100,8 @@ test('PII-mönstren täcker direkt-PII, GDPR art. 9 och pseudonym-PII', () => {
     'session_token', // compass-besökarsession
     'street_address',
     'postal_code',
-    'ip_hash'
+    'ip_hash',
+    'team_members' // § 23.11 — övriga teammedlemmar (namn + e-post) på compass_leads
   ]) {
     assert.ok(PII_FIELD_PATTERNS.includes(p), `mönstret '${p}' saknas`);
   }

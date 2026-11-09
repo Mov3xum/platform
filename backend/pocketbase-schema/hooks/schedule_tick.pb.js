@@ -22,10 +22,15 @@
 // kraschar inte hooken — annars skulle en buggig schedule-rad blockera
 // resten.
 
-const TICK_INTERVAL = '* * * * *'; // varje minut
-const LOCK_AHEAD_MS = 60 * 60 * 1000; // 1 timme
-
-cronAdd('movexum-schedule-tick', TICK_INTERVAL, () => {
+// Alla hook-filer evalueras i SAMMA JSVM-scope — en toppnivå-konstant med
+// samma namn i två filer ger "Identifier has already been declared" och den
+// andra filen laddas aldrig (incident 2026-10-19: survey_dispatch_tick
+// registrerades inte). Deklarera därför aldrig något på toppnivå.
+cronAdd('movexum-schedule-tick', '* * * * *', () => {
+  // PB:s JSVM kör hanteraren i en isolerad kontext — variabler deklarerade
+  // UTANFÖR handlern finns inte här (ReferenceError). Konstanten bor därför
+  // inne i handlern.
+  const LOCK_AHEAD_MS = 60 * 60 * 1000; // 1 timme
   const secret = $os.getenv('MOVEXUM_SCHEDULE_SECRET');
   if (!secret) {
     // Schemaläggning är inte aktiverad — tyst no-op.

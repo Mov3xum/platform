@@ -73,33 +73,41 @@ export function AgendaStrip({
   items: AgendaItem[];
   outlookState: OutlookState;
 }) {
+  const outlookLink =
+    outlookState !== 'connected' ? (
+      <Link
+        href="/integrationer/outlook-calendar"
+        className="inline-flex items-center gap-1 rounded-md bg-canvas-muted px-2 py-0.5 text-[10.5px] text-foreground-muted transition hover:text-foreground"
+      >
+        <Icon name="calendar" size={11} />
+        {outlookState === 'error' ? 'Återanslut Outlook' : 'Anslut Outlook'}
+      </Link>
+    ) : null;
+
+  // Tom agenda = en rad, inte en stor streckad ruta som tar bästa platsen.
+  if (items.length === 0) {
+    return (
+      <section className="flex flex-wrap items-center gap-2 border-b border-default pb-3 text-[12px] text-foreground-subtle">
+        <Icon name="calendar" size={12} />
+        <span>Inga möten eller events inom kort.</span>
+        {outlookLink}
+      </section>
+    );
+  }
+
   return (
     <section>
       <div className="mb-3 flex items-center gap-2">
         <h2 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground-subtle">
           Kommande möten & events
         </h2>
-        {outlookState !== 'connected' && (
-          <Link
-            href="/integrationer/outlook-calendar"
-            className="inline-flex items-center gap-1 rounded-md bg-canvas-muted px-2 py-0.5 text-[10.5px] text-foreground-muted transition hover:text-foreground"
-          >
-            <Icon name="calendar" size={11} />
-            {outlookState === 'error' ? 'Återanslut Outlook' : 'Anslut Outlook'}
-          </Link>
-        )}
+        {outlookLink}
       </div>
-      {items.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-default px-4 py-5 text-[12px] text-foreground-subtle">
-          Inga möten eller events inom kort.
-        </div>
-      ) : (
-        <div className="flex gap-3 overflow-x-auto pb-2">
-          {items.map((it) => (
-            <AgendaCard key={`${it.source}-${it.id}`} item={it} />
-          ))}
-        </div>
-      )}
+      <div className="flex gap-3 overflow-x-auto pb-2">
+        {items.map((it) => (
+          <AgendaCard key={`${it.source}-${it.id}`} item={it} />
+        ))}
+      </div>
     </section>
   );
 }

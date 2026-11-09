@@ -19,6 +19,14 @@ export {
   type CompassModuleWritableField
 } from './compass';
 export { createWorkshop } from './workshops';
+// Marknadsverktyget → Utvärdering (§ 47)
+export {
+  createSurvey,
+  surveyPath,
+  SURVEY_LINK_SOURCE,
+  type CreateSurveyParams,
+  type CreatedSurveyResult
+} from './surveys';
 // Utökad chatt-skrivyta (§ 33)
 export { assignWorkshop, assignEducationDocument } from './assignments';
 export { createTask, moveTask, TASK_KINDS } from './tasks';
@@ -28,6 +36,151 @@ export { addStartupKpi, addCapitalRound, createStartupNote, CAPITAL_TYPES } from
 export { registerDeMinimisSupport, FORORDNINGAR } from './de-minimis';
 export { scheduleAgent } from './schedules';
 export { createOrgPost, updateOrgPostFields, type OrgPostChanges } from './org-posts';
+// Upphandlingar & excellens-insatser (§ 39)
+export {
+  createProcurement,
+  updateProcurementFields,
+  createProcurementCalloff,
+  updateProcurementCalloffFields,
+  evaluateProcurementCalloff,
+  upsertProcurementRule,
+  deleteProcurementRule,
+  attachProcurementDocument,
+  deleteProcurementDocument,
+  procurementPath,
+  PROCUREMENT_WRITABLE_FIELDS,
+  CALLOFF_WRITABLE_FIELDS,
+  type ProcurementChanges,
+  type CalloffChanges,
+  type ProcurementWritableField,
+  type CalloffWritableField
+} from './procurements';
+// Målstyrning & verksamhetsplan (§ 42)
+export {
+  createGoalPeriod,
+  updateGoalPeriod,
+  deleteGoalPeriod,
+  setGoalPeriodStatus,
+  createGoal,
+  updateGoalField,
+  updateGoalFields,
+  deleteGoal,
+  createGoalIndicator,
+  updateGoalIndicator,
+  deleteGoalIndicator,
+  importGoals,
+  recordGoalStatus,
+  currentQuarter,
+  goalsPath,
+  type GoalWritableField,
+  type ImportGoalsResult,
+  type RecordGoalStatusInput,
+  type RecordGoalStatusResult
+} from './goals';
+// Kontaktboken (§ 45)
+export {
+  createContact,
+  updateContactFields,
+  deleteContact,
+  requestContactUse,
+  decideContactRequest,
+  withdrawContactRequest,
+  importContacts,
+  contactPath,
+  CONTACT_WRITABLE_FIELDS,
+  type ContactInput,
+  type ContactChanges,
+  type ContactWritableField,
+  type ContactResult,
+  type ContactRequestResult,
+  type DecidedContactRequestResult,
+  type ImportContactsOptions,
+  type ImportContactsResult
+} from './contacts';
+export {
+  createContactGroup,
+  updateContactGroup,
+  deleteContactGroup,
+  changeContactGroupMembers,
+  setContactGroups,
+  contactGroupPath,
+  CONTACT_GROUPS_MIGRATION_HINT,
+  type ContactGroupResult,
+  type GroupMembershipResult
+} from './contact-groups';
+// Stödcheckar & finansieringsprojekt (§ 46)
+export {
+  createFundingProject,
+  updateFundingProjectFields,
+  deleteFundingProject,
+  createFundingWorkPackage,
+  updateFundingWorkPackageFields,
+  deleteFundingWorkPackage,
+  fundingProjectPath
+} from './funding';
+export {
+  createSupportCheckType,
+  updateSupportCheckTypeFields,
+  deleteSupportCheckType,
+  createSupportCheckApplication,
+  updateSupportCheckDraft,
+  submitSupportCheckApplication,
+  requestSupportCheckChanges,
+  recordSupportCheckStatement,
+  assessSupportCheckApplication,
+  setSupportCheckFunding,
+  decideSupportCheckApplication,
+  markSupportCheckPaid,
+  recordSupportCheckFinalReport,
+  closeSupportCheckApplication,
+  withdrawSupportCheckApplication,
+  addSupportCheckComment,
+  resolveSupportCheckComment,
+  deleteSupportCheckDocument,
+  upsertSupportCheckRule,
+  deleteSupportCheckRule,
+  supportCheckPath,
+  CHECK_TYPE_WRITABLE_FIELDS,
+  type CheckTypeChanges,
+  type CheckTypeWritableField,
+  type ApplicationDraftInput,
+  type ApplicationResult,
+  type AccessContext,
+  type DecisionResult
+} from './support-checks';
+export {
+  createEmailCampaign,
+  updateEmailCampaign,
+  deleteEmailCampaign,
+  saveCampaignAsTemplate,
+  previewCampaignRecipients,
+  scheduleEmailCampaign,
+  cancelEmailCampaignSchedule,
+  sendEmailCampaignNow,
+  sendEmailCampaignTest,
+  addManualSuppression,
+  deleteSuppression,
+  importSuppressions,
+  setNewsletterConsent,
+  campaignPath,
+  type CampaignWriteResult,
+  type SuppressionImportResult
+} from './email-campaigns';
+// Studenter & talang (§ 54)
+export {
+  createTalentNeed,
+  updateTalentNeed,
+  setTalentNeedStatus,
+  deleteTalentNeed,
+  proposeStudentForNeed,
+  setInterestStatus,
+  setStudentProfileStatus,
+  deleteStudentProfile,
+  talentNeedPath,
+  type TalentAccess,
+  type TalentNeedResult,
+  type InterestResult
+} from './talent';
 export { logAgentAction } from './audit';
 export {
   canWriteField,

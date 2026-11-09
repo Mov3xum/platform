@@ -50,7 +50,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const rateKey = `voice:${user.id}`;
-  const limited = checkRateLimit(rateKey, RATE_MAX_PER_USER);
+  const limited = await checkRateLimit(rateKey, RATE_MAX_PER_USER);
   if (limited.blocked) {
     return NextResponse.json(
       { error: 'För många röstinspelningar just nu. Vänta en stund och försök igen.' },
@@ -80,7 +80,7 @@ export async function POST(request: Request): Promise<Response> {
 
   // Varje anrop räknas mot fönstret (inte bara fel) — det är kostnaden vi
   // skyddar, inte ett lösenord.
-  recordFailure(rateKey, RATE_WINDOW_MS);
+  await recordFailure(rateKey, RATE_WINDOW_MS);
 
   const buffer = Buffer.from(await entry.arrayBuffer());
 

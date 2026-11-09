@@ -9,9 +9,28 @@ import {
   getSuperuserPb,
   saveCredentials
 } from '@/lib/integrations/credentials';
-import { getHandler } from '@/lib/integrations/registry';
+import { getHandler, listCompanyRegistrySlugs } from '@/lib/integrations/registry';
+import { ensureRegistryProviderRows } from '@/lib/integrations/company-registry/catalog-seed';
 import { runSync, runRegistrySyncForStartup } from '@/lib/integrations/sync';
+import { describeCredentialFailure } from '@/lib/integrations/credential-errors';
+import {
+  describeRegistryParts,
+  parseRegistryParts,
+  type RegistryPartId
+} from '@/lib/integrations/company-registry/parts';
+import type { RegistryCompany } from '@/lib/integrations/company-registry/types';
 import { recordActivity } from './record-activity';
+import { runRegistryLookup } from '@/lib/integrations/company-registry/lookup.server';
+import {
+  estimateRegistryCost,
+  formatRegistryCost,
+  parseRegistryPricingJson,
+  validateRegistryPricingInput,
+  type RegistryCostEstimate,
+  type RegistryPricing
+} from '@/lib/integrations/company-registry/pricing';
+import { loadRegistryPricing } from '@/lib/integrations/company-registry/pricing.server';
+import { REGISTRY_PART_IDS } from '@/lib/integrations/company-registry/parts';
 
 export type IntegrationPilotState = {
   error?: string;
@@ -28,6 +47,8 @@ export type IntegrationSyncState = {
   summary?: string;
   recordsCreated?: number;
   recordsUpdated?: number;
+  /** Uppskattad kostnad för hämtningen (valda delar × bolag), § 11.8. */
+  cost?: RegistryCostEstimate;
 };
 
 interface ExistingTenantIntegration {
@@ -110,6 +131,7 @@ export async function requestIntegrationPilotAction(
   }
 
   revalidatePath('/integrationer');
+  revalidatePath('/installningar/integrationer');
   return { success: true };
 }
 
@@ -151,12 +173,30 @@ export async function connectIntegrationAction(
 
   const pb = await getServerPb();
 
-  let provider: ProviderRow;
+  const providerFilter = `slug = "${escFilter(providerSlug)}"`;
+  let provider: ProviderRow | null = null;
   try {
     provider = await pb
       .collection('integration_providers')
-      .getFirstListItem<ProviderRow>(`slug = "${escFilter(providerSlug)}"`);
+      .getFirstListItem<ProviderRow>(providerFilter);
   } catch {
+    provider = null;
+  }
+  if (!provider && handler.kind === 'company_registry') {
+    // Katalograden seedas av migration 1700000173; självläk om PB-imagen inte
+    // byggts om sedan dess (§ 11.8), annars ett tydligt fel med orsak.
+    const ensured = await ensureRegistryProviderRows(pb, [providerSlug]);
+    const miss = ensured.missing.find((m) => m.slug === providerSlug);
+    if (miss) return { error: `Leverantören finns inte i katalogen. ${miss.reason}` };
+    try {
+      provider = await pb
+        .collection('integration_providers')
+        .getFirstListItem<ProviderRow>(providerFilter);
+    } catch {
+      provider = null;
+    }
+  }
+  if (!provider) {
     return { error: 'Leverantören finns inte i katalogen.' };
   }
 
@@ -197,10 +237,28 @@ export async function connectIntegrationAction(
   }
 
   const saved = await saveCredentials(tenantIntegrationId, creds);
-  if (!saved) {
+  if (!saved.ok) {
+    // Statusen sattes till 'connected' ovan. Utan sparade nycklar visade
+    // detaljsidan då "Aktiv koppling" utan anslutningsformulär, och varje
+    // synk föll på "saknas eller kunde inte dekrypteras" (incident 2026-10).
+    // Återställ statusen så att formuläret visas igen.
+    try {
+      await pb.collection('tenant_integrations').update(tenantIntegrationId, {
+        status: existing && existing.status !== 'connected' ? existing.status : 'available',
+        connected_at: null
+      });
+    } catch (error) {
+      console.error('[integrations] failed to roll back status after credential save', {
+        tenant: user.tenant,
+        providerSlug,
+        error
+      });
+    }
+    revalidatePath('/integrationer');
+    revalidatePath('/installningar/integrationer');
+    revalidatePath(`/integrationer/${providerSlug}`);
     return {
-      error:
-        'Krypterad lagring misslyckades — kontrollera MOVEXUM_INTEGRATION_KEY på servern.'
+      error: `Anslutningen mot leverantören fungerade, men nycklarna kunde inte sparas. ${describeCredentialFailure(saved.reason)}`
     };
   }
 
@@ -213,6 +271,7 @@ export async function connectIntegrationAction(
   });
 
   revalidatePath('/integrationer');
+  revalidatePath('/installningar/integrationer');
   revalidatePath(`/integrationer/${providerSlug}`);
   return { success: true };
 }
@@ -253,7 +312,24 @@ export async function disconnectIntegrationAction(
   }
 
   revalidatePath('/integrationer');
+  revalidatePath('/installningar/integrationer');
   return { success: true };
+}
+
+/**
+ * Läser personalens val av datadelar ur formuläret (§ 11.8). Formulär utan
+ * kryssrutor (`parts_present` saknas) hämtar allt providern stödjer, som förr.
+ * Valet valideras mot handlerns deklarerade delar — klienten är aldrig
+ * säkerhetsgränsen.
+ */
+function readRequestedParts(
+  formData: FormData,
+  supported: RegistryPartId[]
+): { ok: true; parts: RegistryPartId[] | undefined } | { ok: false; error: string } {
+  if (!formData.has('parts_present')) return { ok: true, parts: undefined };
+  const parsed = parseRegistryParts(formData.getAll('parts'), supported);
+  if (!parsed.ok) return parsed;
+  return { ok: true, parts: parsed.parts };
 }
 
 // Triggers a sync. RBAC: admin + incubator_lead. Wraps runSync()
@@ -286,13 +362,31 @@ export async function syncIntegrationAction(
     return { error: 'Integrationen hittades inte.' };
   }
 
-  const result = await runSync(tenantIntegrationId, user.id);
+  const syncHandler = providerSlug ? getHandler(providerSlug) : undefined;
+  let parts: RegistryPartId[] | undefined;
+  if (syncHandler?.kind === 'company_registry') {
+    const requested = readRequestedParts(formData, syncHandler.parts);
+    if (!requested.ok) return { error: requested.error };
+    parts = requested.parts;
+  }
+
+  const result = await runSync(tenantIntegrationId, user.id, { parts });
 
   const pb = await getServerPb();
+  const partsLabel = parts ? ` Hämtade: ${describeRegistryParts(parts)}.` : '';
+  // Kostnad: valda delar × bolag leverantören anropades för (§ 11.8).
+  let cost: RegistryCostEstimate | undefined;
+  if (syncHandler?.kind === 'company_registry' && result.status !== 'failed') {
+    const pricing = await loadRegistryPricing(user.tenant, providerSlug, pb);
+    cost = estimateRegistryCost(pricing, parts ?? syncHandler.parts, result.companiesFetched ?? 0);
+  }
+  const costLabel = cost ? ` Kostnad: ${formatRegistryCost(cost)}.` : '';
   const summary =
     result.status === 'failed'
       ? `Synk misslyckades: ${result.errorMessage || 'okänt fel'}`
-      : `Synk klar — ${result.recordsCreated} nya, ${result.recordsUpdated} uppdaterade.`;
+      : `Synk klar — ${result.recordsCreated} nya, ${result.recordsUpdated} uppdaterade.${partsLabel}${costLabel}${
+          result.status === 'partial' && result.errorMessage ? ` Varning: ${result.errorMessage}` : ''
+        }`;
 
   await recordActivity(pb, {
     tenant: user.tenant,
@@ -303,6 +397,7 @@ export async function syncIntegrationAction(
   });
 
   revalidatePath('/integrationer');
+  revalidatePath('/installningar/integrationer');
   if (providerSlug) {
     revalidatePath(`/integrationer/${providerSlug}`);
     revalidatePath(`/integrationer/${providerSlug}/poster`);
@@ -315,15 +410,18 @@ export async function syncIntegrationAction(
   return {
     summary,
     recordsCreated: result.recordsCreated,
-    recordsUpdated: result.recordsUpdated
+    recordsUpdated: result.recordsUpdated,
+    cost
   };
 }
 
-// Per-startup Allabolag-sync. Triggas från bolagsdetaljvyn när org_nr
-// är ifyllt. Tenant-isolation: verifierar att bolaget tillhör inloggad
-// users tenant via tenant-bunden PB INNAN superuser-skrivningen i
-// runRegistrySyncForStartup (CLAUDE.md § 10.5 punkt 5).
-export async function syncStartupFromAllabolagAction(
+// Per-bolag-synk från en bolagsregister-provider (Allabolag-stubben,
+// Roaring, Bolagsverket — § 11.8). Triggas från bolagskortet när org_nr är
+// ifyllt. Tenant-isolation: verifierar att bolaget tillhör inloggad users
+// tenant via tenant-bunden PB INNAN superuser-skrivningen i
+// runRegistrySyncForStartup (CLAUDE.md § 10.5 punkt 5). Provider-sluggen
+// valideras mot registrets company_registry-handlers — aldrig fri text.
+export async function syncStartupFromRegistryAction(
   _prev: IntegrationSyncState,
   formData: FormData
 ): Promise<IntegrationSyncState> {
@@ -334,6 +432,12 @@ export async function syncStartupFromAllabolagAction(
 
   const startupId = String(formData.get('startup_id') || '').trim();
   if (!startupId) return { error: 'Saknad bolags-id.' };
+  const providerSlug = String(formData.get('provider_slug') || 'allabolag').trim();
+  if (!listCompanyRegistrySlugs().includes(providerSlug)) {
+    return { error: 'Okänd bolagsregister-leverantör.' };
+  }
+  const handler = getHandler(providerSlug);
+  const providerLabel = providerSlug === 'roaring' ? 'Roaring' : providerSlug === 'bolagsverket' ? 'Bolagsverket' : 'Allabolag';
 
   // Steg 1: tenant-bunden read som verifierar att startupId tillhör
   // user.tenant. Misslyckas detta får vi inte gå vidare till superuser.
@@ -352,7 +456,7 @@ export async function syncStartupFromAllabolagAction(
     return { error: 'Bolaget hittades inte.' };
   }
 
-  // Steg 2: hitta tenant_integration för allabolag.
+  // Steg 2: hitta tenant_integration för leverantören.
   const adminResult = await getSuperuserPb();
   if (!adminResult.ok) return { error: 'Serverkonfiguration ofullständig.' };
 
@@ -360,9 +464,9 @@ export async function syncStartupFromAllabolagAction(
   try {
     provider = await adminResult.pb
       .collection('integration_providers')
-      .getFirstListItem<ProviderRow>('slug = "allabolag"');
+      .getFirstListItem<ProviderRow>(`slug = "${escFilter(providerSlug)}"`);
   } catch {
-    return { error: 'Allabolag-leverantören saknas i katalogen.' };
+    return { error: `${providerLabel}-leverantören saknas i katalogen.` };
   }
 
   let tenantIntegration: { id: string; status: string };
@@ -373,34 +477,50 @@ export async function syncStartupFromAllabolagAction(
         `tenant = "${escFilter(user.tenant)}" && provider = "${escFilter(provider.id)}"`
       );
   } catch {
-    return { error: 'Anslut Allabolag först på /integrationer/allabolag.' };
+    return { error: `Anslut ${providerLabel} först på /integrationer/${providerSlug}.` };
   }
   if (tenantIntegration.status !== 'connected') {
-    return { error: 'Allabolag är inte ansluten för denna tenant.' };
+    return { error: `${providerLabel} är inte ansluten för denna tenant.` };
   }
+  if (!handler || handler.kind !== 'company_registry') {
+    return { error: 'Leverantören stödjer inte per-bolag-synk.' };
+  }
+  const requested = readRequestedParts(formData, handler.parts);
+  if (!requested.ok) return { error: requested.error };
 
   const result = await runRegistrySyncForStartup(
     tenantIntegration.id,
     startupId,
-    user.id
+    user.id,
+    { parts: requested.parts }
   );
 
+  const partsLabel = requested.parts ? ` Hämtade: ${describeRegistryParts(requested.parts)}.` : '';
+  // Kostnad för DETTA bolag: valda delar × 1 (§ 11.8).
+  let cost: RegistryCostEstimate | undefined;
+  if (result.status !== 'failed') {
+    const pricing = await loadRegistryPricing(user.tenant, providerSlug, pb);
+    cost = estimateRegistryCost(pricing, requested.parts ?? handler.parts, result.companiesFetched ?? 1);
+  }
+  const costLabel = cost ? ` Kostnad: ${formatRegistryCost(cost)}.` : '';
   const summary =
     result.status === 'failed'
       ? `Synk misslyckades: ${result.errorMessage || 'okänt fel'}`
-      : `Synk klar — ${result.recordsCreated} årsrader uppdaterade.`;
+      : `Synk klar — ${result.recordsUpdated ? 'bolagskortet uppdaterat, ' : ''}${result.recordsCreated} årsrader uppdaterade.${partsLabel}${costLabel}${
+          result.status === 'partial' && result.errorMessage ? ` Varning: ${result.errorMessage}` : ''
+        }`;
 
   await recordActivity(pb, {
     tenant: user.tenant,
     kind: 'integration_sync',
     actor: user.id,
-    title: 'Allabolag synkad (per bolag)',
+    title: `${providerLabel} synkad (per bolag)`,
     meta: summary,
     startup: startupId
   });
 
   revalidatePath(`/startups/${startupId}`);
-  revalidatePath('/integrationer/allabolag');
+  revalidatePath(`/integrationer/${providerSlug}`);
   revalidatePath('/aktivitet');
 
   if (result.status === 'failed') {
@@ -409,6 +529,138 @@ export async function syncStartupFromAllabolagAction(
   return {
     summary,
     recordsCreated: result.recordsCreated,
-    recordsUpdated: result.recordsUpdated
+    recordsUpdated: result.recordsUpdated,
+    cost
   };
+}
+
+// ── Förhandsgranskning mot ett org-nr (§ 11.8) ─────────────────────────────
+// Hämtar + normaliserar ett bolag hos leverantören UTAN att skriva något, så
+// att fältmappningen kan verifieras mot en riktig respons innan portföljen
+// synkas. Returnerar bara whitelistade, PII-fria fält (RegistryCompany):
+// fysiska personer i ägarbilden är redan anonyma i normaliseraren.
+
+export type RegistryLookupState = {
+  error?: string;
+  company?: RegistryCompany;
+  /** Delarna som begärdes (även de som föll) — styr vilka sektioner som visas. */
+  requestedParts?: RegistryPartId[];
+  /** Uppskattad kostnad för uppslaget (§ 11.8). */
+  cost?: RegistryCostEstimate;
+};
+
+export async function previewRegistryLookupAction(
+  _prev: RegistryLookupState,
+  formData: FormData
+): Promise<RegistryLookupState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
+    return { error: 'Endast inkubatorledning kan testa uppslag.' };
+  }
+  // Valfritt bolag — uppslaget kräver INTE att bolaget finns i databasen.
+  // Kärnan (validering, rate-limit, credentials, audit) delas med
+  // "Bedömning excellens" (§ 51) i lookup.server.ts.
+  const result = await runRegistryLookup(user, {
+    providerSlug: String(formData.get('provider_slug') || ''),
+    orgNrRaw: String(formData.get('org_nr') || ''),
+    formData,
+    auditLabel: 'förhandsgranskning av bolagsuppslag'
+  });
+  if (!result.ok) return { error: result.error };
+  return { company: result.company, requestedParts: result.requestedParts, cost: result.cost };
+}
+
+// ── Kostnad per anrop (§ 11.8) ─────────────────────────────────────────────
+// Ledningen anger vad leverantören debiterar per API-anrop och datadel
+// (credits) samt kronor per credit enligt avtalet. Lagras i
+// `tenant_integrations.pricing` (ingen hemlighet, ingen PII) och visas vid
+// varje hämtning. Tenantens värde vinner över env-defaulten på web-appen.
+
+export type RegistryPricingState = {
+  error?: string;
+  success?: boolean;
+  warning?: string;
+  pricing?: RegistryPricing;
+};
+
+export async function saveRegistryPricingAction(
+  _prev: RegistryPricingState,
+  formData: FormData
+): Promise<RegistryPricingState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, ['admin', 'incubator_lead'])) {
+    return { error: 'Endast inkubatorledning kan ange priser.' };
+  }
+  const tenantIntegrationId = String(formData.get('tenant_integration_id') || '').trim();
+  const providerSlug = String(formData.get('provider_slug') || '').trim();
+  if (!tenantIntegrationId || !/^[a-z0-9]{1,30}$/i.test(tenantIntegrationId)) return { error: 'Saknad integration.' };
+  if (!listCompanyRegistrySlugs().includes(providerSlug)) {
+    return { error: 'Priser kan bara anges för bolagsregister-leverantörer.' };
+  }
+  const credits: Partial<Record<RegistryPartId, string>> = {};
+  for (const part of REGISTRY_PART_IDS) credits[part] = String(formData.get(`credits_${part}`) ?? '');
+  const validated = validateRegistryPricingInput({
+    sekPerCredit: String(formData.get('sek_per_credit') ?? ''),
+    credits,
+    note: String(formData.get('note') ?? '')
+  });
+  if (!validated.ok) return { error: validated.error };
+
+  const adminResult = await getSuperuserPb();
+  if (!adminResult.ok) return { error: 'Serverkonfiguration ofullständig.' };
+  let row: { id: string; tenant: string; provider: string };
+  try {
+    row = await adminResult.pb
+      .collection('tenant_integrations')
+      .getOne<{ id: string; tenant: string; provider: string }>(tenantIntegrationId, { fields: 'id,tenant,provider' });
+  } catch {
+    return { error: 'Integrationen hittades inte.' };
+  }
+  if (row.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
+  try {
+    const provider = await adminResult.pb
+      .collection('integration_providers')
+      .getOne<{ slug: string }>(row.provider, { fields: 'slug' });
+    if (provider.slug !== providerSlug) return { error: 'Leverantören matchar inte kopplingen.' };
+  } catch {
+    return { error: 'Leverantören saknas i katalogen.' };
+  }
+
+  const value = { ...validated.value, updated_at: new Date().toISOString() };
+  let stored: unknown;
+  try {
+    const updated = await adminResult.pb
+      .collection('tenant_integrations')
+      .update<{ pricing?: unknown }>(tenantIntegrationId, { pricing: value }, { fields: 'id,pricing' });
+    stored = updated.pricing;
+  } catch (err) {
+    console.error('[integrations] pricing save failed', {
+      status: (err as { status?: number })?.status ?? 0
+    });
+    return { error: 'Kunde inte spara priserna. Försök igen.' };
+  }
+  // Schema-drift (§ 24.4-invarianten): PB släpper okända fält tyst — läs
+  // tillbaka och säg ifrån i stället för en tyst lyckad no-op.
+  const parsed = parseRegistryPricingJson(stored);
+  const anyInput = Object.keys(validated.value.credits ?? {}).length > 0 || validated.value.sek_per_credit !== undefined;
+  const warning =
+    anyInput && parsed.source === 'none'
+      ? 'Priserna sparades inte — fältet `pricing` saknas i schemat. Kör migration 1700000188 (eller "Sync PocketBase").'
+      : undefined;
+
+  const pb = await getServerPb();
+  await recordActivity(pb, {
+    tenant: user.tenant,
+    kind: 'integration_sync',
+    actor: user.id,
+    title: `${providerSlug}: kostnad per anrop uppdaterad`,
+    meta: `${Object.keys(validated.value.credits ?? {}).length} delar prissatta${
+      validated.value.sek_per_credit !== undefined ? `, ${validated.value.sek_per_credit} kr/credit` : ', kr/credit ej angivet'
+    }`
+  }).catch(() => undefined);
+
+  revalidatePath(`/integrationer/${providerSlug}`);
+  revalidatePath('/installningar/integrationer');
+  revalidatePath('/bedomning-excellens');
+  return { success: true, warning, pricing: await loadRegistryPricing(user.tenant, providerSlug, pb) };
 }

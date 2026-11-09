@@ -1,5 +1,5 @@
-// Movexum OS — Uppdrag/Projekt detalj
-// Visar fullt flöde + artefakter + deltagare + kommentarer för ett enskilt uppdrag.
+// Movexum OS — Tvärfunktionellt team (uppdrag/projekt) — detalj
+// Visar fullt flöde + dokumentation + team + kommentarer för ett enskilt uppdrag.
 
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
@@ -24,8 +24,28 @@ import { ConfirmDeleteButton } from '@/components/ConfirmDeleteButton';
 import { TeamCompetencePanel, type TeamMemberView } from './TeamCompetencePanel';
 import { MissionTaskBoard } from './MissionTaskBoard';
 import { MissionDocuments, type MissionDocView } from './MissionDocuments';
-import { sanitizeCompetences } from '@platform/shared';
-import type { Mission, MissionComment, MissionParticipant, MissionDocument, CompetenceId, Role } from '@platform/shared';
+import { FollowUpSurveys } from '@/components/surveys/FollowUpSurveys';
+import { MissionActivitiesPanel } from '@/components/missions/MissionActivitiesPanel';
+import { listMissionActivityOptions, loadMissionActivities } from '@/lib/missions/activities.server';
+import { stockholmDateKey } from '@platform/shared';
+import {
+  loadCompetenceTagVocabulary,
+  loadStaffProfiles,
+  loadTeamCap,
+  loadTeamLoads
+} from '@/lib/team/competence-tags.server';
+import { isActiveMissionStatus } from '@/lib/team/team-cap.server';
+import { isAtTeamCap } from '@platform/shared';
+import type {
+  Mission,
+  MissionComment,
+  MissionParticipant,
+  MissionDocument,
+  CompetenceId,
+  Role,
+  TeamMemberLoad,
+  UserCompetenceTag
+} from '@platform/shared';
 
 const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
 
@@ -54,14 +74,19 @@ interface UserOption {
 interface UserMeta {
   title?: string;
   competences: CompetenceId[];
+  tags: UserCompetenceTag[];
+  load: TeamMemberLoad;
 }
 
 export default async function MissionDetailPage({
-  params
+  params,
+  searchParams
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ fel?: string }>;
 }) {
   const { id } = await params;
+  const { fel } = await searchParams;
   const user = await requireUser();
   const pb = await getServerPb();
 
@@ -79,33 +104,34 @@ export default async function MissionDetailPage({
   const ctx = getMissionContext(mission, user.id, user.roles);
   if (!ctx.canView) redirect('/uppdrag');
 
-  // Hämta tenant-användare (för @mention-autocomplete + deltagar-picker) inkl.
-  // kompetenser/titel för "Team & kompetenser"-panelen (§ 29).
-  let users: UserOption[] = [];
+  // Hämta tenant-användare (för @mention-autocomplete i kommentarer) inkl.
+  // kompetenser/titel för "Team & kompetenser"-panelen (§ 29). Deltagar-pickern
+  // får bara Movexum-personal — tvärfunktionella team bemannas av staff.
+  // Hashtags/nivå + nuvarande belastning (§ 29.7) via samma läsväg som
+  // teamförslaget — fail-soft (tomma listor mot ett omigrerat schema).
+  const users: UserOption[] = [];
+  const teamUsers: UserOption[] = [];
   const userMeta = new Map<string, UserMeta>();
-  try {
-    const res = await pb.collection('users').getList(1, 200, {
-      filter: pb.filter('tenant = {:tenant}', { tenant: user.tenant }),
-      sort: 'display_name',
-      fields: 'id,display_name,email,title,competences'
-    });
-    users = res.items.map((u) => {
-      const rec = u as unknown as {
-        id: string;
-        display_name?: string;
-        email?: string;
-        title?: string;
-        competences?: unknown;
-      };
-      const local = rec.email ? rec.email.split('@')[0] : rec.id;
-      userMeta.set(rec.id, {
-        title: rec.title || undefined,
-        competences: sanitizeCompetences(rec.competences)
+  let teamCap = 3;
+  {
+    const vocabulary = await loadCompetenceTagVocabulary(pb, user.tenant);
+    const [profiles, { loads }, cap] = await Promise.all([
+      loadStaffProfiles(pb, user.tenant, vocabulary),
+      loadTeamLoads(pb, user.tenant),
+      loadTeamCap(pb, user.tenant)
+    ]);
+    teamCap = cap;
+    for (const p of profiles) {
+      userMeta.set(p.id, {
+        title: p.title,
+        competences: p.competences,
+        tags: p.tags,
+        load: loads.get(p.id) ?? { active: 0, leading: 0 }
       });
-      return { id: rec.id, label: rec.display_name || local };
-    });
-  } catch {
-    /* ignore */
+      const opt = { id: p.id, label: p.name };
+      users.push(opt);
+      if (p.isStaff) teamUsers.push(opt);
+    }
   }
 
   // Hämta kommentarer
@@ -214,6 +240,14 @@ export default async function MissionDetailPage({
     /* fail-soft: ej migrerat schema → tom lista */
   }
 
+  // ── Aktiviteter & mål (§ 29.8): teamets årshjulsposter/event + målen de
+  // bidrar till, härledda ur aktiviteternas kopplingar (§ 53.4). Valen för
+  // pickern läses bara när läsaren får koppla. Allt med användarens token.
+  const activitiesView = await loadMissionActivities(pb, user.tenant, mission);
+  const activityOptions = ctx.canEdit
+    ? await listMissionActivityOptions(pb, user.tenant, activitiesView.activities)
+    : [];
+
   // Team-medlemmar med kompetenser (för panelen)
   const usersByIdLabel = new Map(users.map((u) => [u.id, u.label]));
   const teamMembers: TeamMemberView[] = participantsForUi.map((p) => {
@@ -223,9 +257,29 @@ export default async function MissionDetailPage({
       name: usersByIdLabel.get(p.user_id) || p.user_id,
       title: meta?.title,
       role: p.role,
-      competences: meta?.competences ?? []
+      competences: meta?.competences ?? [],
+      tags: meta?.tags ?? [],
+      // Belastning bara för staff: en bolagsmedlems token ser via RLS bara
+      // egna uppdrag, så siffran vore både fel och intern (§ 29.7).
+      load: isStaff ? (meta?.load ?? { active: 0, leading: 0 }) : undefined
     };
   });
+
+  // § 29.7 — teamtaket. Belastning visas bara för staff (RLS-skäl ovan).
+  const missionActive = isActiveMissionStatus(mission.status);
+  const pickerUsers = teamUsers.map((u) => {
+    const load = userMeta.get(u.id)?.load ?? { active: 0, leading: 0 };
+    return isStaff ? { ...u, load, atCap: isAtTeamCap(load, teamCap) } : u;
+  });
+  // Ett blockerat statusbyte/steg (formuläråtgärd) kommer tillbaka som
+  // ?fel=team_cap — sidan namnger själv vilka som nått taket (ingen fritext
+  // i URL:en).
+  const capBlockedNames =
+    fel === 'team_cap'
+      ? participantsForUi
+          .filter((p) => isAtTeamCap(userMeta.get(p.user_id)?.load ?? { active: 0, leading: 0 }, teamCap))
+          .map((p) => usersByIdLabel.get(p.user_id) || 'En kollega')
+      : [];
 
   return (
     <div
@@ -233,13 +287,13 @@ export default async function MissionDetailPage({
       style={{ padding: '20px 24px 0', display: 'flex', flexDirection: 'column', gap: 16 }}
     >
       <PageHead
-        crumb="Dashboard / Projekt & uppdrag / Detalj"
+        crumb="Dashboard / Tvärfunktionella team / Detalj"
         title={mission.title}
         subtitle={`${mission.type === 'project' ? 'Projekt' : 'Uppdrag'} · ${mission.id.slice(0, 8)} · ${mission.type.replace('_', ' ')}`}
         actions={
           <>
             <Link href="/uppdrag" className="mx-btn mx-sm mx-ghost">
-              <Icon name="arrow" size={12} /> Alla projekt
+              <Icon name="arrow" size={12} /> Alla team
             </Link>
             <Link
               href={{ pathname: '/uppdrag', query: { m: mission.id } }}
@@ -264,6 +318,18 @@ export default async function MissionDetailPage({
           </>
         }
       />
+
+      {fel === 'team_cap' ? (
+        <div
+          role="alert"
+          className="rounded-xl border border-movexum-orange/40 bg-movexum-pastell-orange px-4 py-3 text-[13px] text-movexum-morkorange"
+        >
+          Teamet kunde inte bli pågående: någon i teamet ingår redan i {teamCap} pågående team, vilket är
+          taket.
+          {capBlockedNames.length > 0 ? ` (${capBlockedNames.join(', ')})` : ''} Avsluta ett annat team,
+          ta bort personen ur teamet, eller be ledningen höja taket under Inställningar → Kompetenser.
+        </div>
+      ) : null}
 
       {startupRefs.length > 0 && <MissionStartupsChips startups={startupRefs} />}
 
@@ -298,6 +364,15 @@ export default async function MissionDetailPage({
               canManage={boardCanManage}
             />
           </section>
+          <MissionActivitiesPanel
+            missionId={mission.id}
+            activities={activitiesView.activities}
+            goals={activitiesView.goals}
+            options={activityOptions}
+            notice={activitiesView.notice}
+            today={stockholmDateKey(new Date())}
+            canEdit={ctx.canEdit}
+          />
           <MissionComments
             missionId={mission.id}
             comments={comments}
@@ -310,15 +385,24 @@ export default async function MissionDetailPage({
           <ParticipantsPanel
             missionId={mission.id}
             issuerId={mission.issuer}
-            users={users}
+            users={pickerUsers}
             initialParticipants={participantsForUi}
             canEdit={ctx.canEdit}
+            teamCap={teamCap}
+            missionActive={missionActive}
           />
-          <TeamCompetencePanel members={teamMembers} />
+          <TeamCompetencePanel members={teamMembers} teamCap={teamCap} />
           <MissionDocuments
             missionId={mission.id}
             documents={documents}
             canManage={isStaff}
+          />
+          <FollowUpSurveys
+            pb={pb}
+            tenant={user.tenant}
+            kind="mission"
+            id={mission.id}
+            canCreate={hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])}
           />
         </div>
       </div>

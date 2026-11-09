@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
+  isActivityOutcome,
   ANNUAL_WHEEL_TAGS,
   ANNUAL_WHEEL_CATEGORY_LABEL_MAX,
   ANNUAL_WHEEL_COLOR_TOKENS,
@@ -62,6 +63,7 @@ import {
   type AnnualWheelColorToken,
   type AnnualWheelItem,
   type AnnualWheelPeriodKey,
+  type AnnualWheelOccurrence,
   type AnnualWheelRepeat,
   type AnnualWheelSort,
   type AnnualWheelTag,
@@ -81,6 +83,10 @@ import {
   type LoadMode
 } from './Dashboard';
 import type { AssignableResource } from '@/lib/assignments/types';
+import type { ActivityIndicatorOption } from '@/lib/goals/activities';
+import { ActivityGoalPanel } from '@/components/activities/ActivityGoalPanel';
+import { LinkedTeams } from '@/components/missions/LinkedTeams';
+import type { MissionRef } from '@/lib/missions/activities.server';
 import {
   createAnnualWheelCategoryAction,
   createAnnualWheelItemAction,
@@ -114,12 +120,20 @@ interface Props {
   canManageCategories: boolean;
   /** Schemadrift som inte kunde repareras automatiskt (server-side check). */
   schemaNotice?: string | null;
+  /** Läsfel/kapning från sidan — visas som banner i stället för ett tomt hjul. */
+  readNotice?: string | null;
   /**
-   * Djuplänk (`/arshjul?item=<id>`, t.ex. från Hemmaplans kalender): posten
+   * Djuplänk (`/arshjul?item=<id>`, t.ex. från Översiktens kalender): posten
    * öppnas i sin helhet vid inläsning — redigeringsdialogen för staff,
    * annars fokus + markering i månadslistan.
    */
   openItemId?: string | null;
+  /** Indikatorer en aktivitet kan bidra till (§ 53.4). */
+  goalOptions?: ActivityIndicatorOption[];
+  /** Event som genomför respektive post (wheel_item → event). */
+  eventsByItem?: Record<string, { id: string; name: string }[]>;
+  /** Tvärfunktionella team som arbetar med respektive post (§ 29.8). */
+  teamsByItem?: Record<string, MissionRef[]>;
 }
 
 interface FormState {
@@ -139,24 +153,44 @@ interface FormState {
   repeatUntilYear: string; // '' = basåret + 2 (bara 'yearly')
 }
 
-/** Hur många aktiviteter en serie skulle skapa (för förhandsbeskedet i UI:t). */
-function seriesPreviewCount(form: FormState): number {
-  if (form.month === '' && form.repeat !== 'yearly') return 1;
-  return Math.max(
-    1,
-    expandAnnualWheelSeries(
-      {
-        year: form.year,
-        month: form.month === '' ? null : Number(form.month),
-        day: form.day === '' ? null : Number(form.day),
-        end_month: form.endMonth === '' ? null : Number(form.endMonth),
-        end_day: form.endDay === '' ? null : Number(form.endDay)
-      },
-      form.repeat,
-      form.repeatUntilMonth === '' ? 12 : Number(form.repeatUntilMonth),
-      form.repeatUntilYear === '' ? null : Number(form.repeatUntilYear)
-    ).length
+/** Förekomsterna en serie skulle skapa (för förhandsbeskedet i UI:t). */
+function seriesPreview(form: FormState): AnnualWheelOccurrence[] {
+  if (form.month === '' && form.repeat !== 'yearly') return [];
+  return expandAnnualWheelSeries(
+    {
+      year: form.year,
+      month: form.month === '' ? null : Number(form.month),
+      day: form.day === '' ? null : Number(form.day),
+      end_month: form.endMonth === '' ? null : Number(form.endMonth),
+      end_day: form.endDay === '' ? null : Number(form.endDay)
+    },
+    form.repeat,
+    form.repeatUntilMonth === '' ? 12 : Number(form.repeatUntilMonth),
+    form.repeatUntilYear === '' ? null : Number(form.repeatUntilYear)
   );
+}
+
+/**
+ * Förhandsbesked som säger VAD serien blir, inte bara hur många: "3 aktiviteter
+ * — en per år, 2026–2028" respektive "8 aktiviteter — en per månad, maj–dec".
+ * Så att "varje år" aldrig kan förväxlas med "varje månad" innan man sparar.
+ */
+function seriesPreviewLabel(form: FormState): string {
+  const occ = seriesPreview(form);
+  const count = Math.max(1, occ.length);
+  if (form.repeat === 'yearly') {
+    const first = occ[0]?.year ?? form.year;
+    const last = occ[occ.length - 1]?.year ?? form.year;
+    return count === 1
+      ? 'Skapar 1 aktivitet (bara det här året)'
+      : `Skapar ${count} aktiviteter — en per år, ${first}–${last}`;
+  }
+  const months = occ.map((o) => o.month).filter((m): m is number => m !== null);
+  const span =
+    months.length > 1 ? `, ${monthShortLabel(months[0])}–${monthShortLabel(months[months.length - 1])}` : '';
+  const cadence =
+    form.repeat === 'monthly' ? 'en per månad' : form.repeat === 'bimonthly' ? 'en varannan månad' : 'en per kvartal';
+  return count === 1 ? 'Skapar 1 aktivitet' : `Skapar ${count} aktiviteter — ${cadence}${span}`;
 }
 
 /** Ordnings-okänslig jämförelse av två tagguppsättningar. */
@@ -174,7 +208,11 @@ export function AnnualWheelView({
   people,
   canManageCategories,
   schemaNotice = null,
-  openItemId = null
+  readNotice = null,
+  openItemId = null,
+  goalOptions = [],
+  eventsByItem = {},
+  teamsByItem = {}
 }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -255,12 +293,10 @@ export function AnnualWheelView({
     () => filterAnnualWheelItems(items, { year, categories: categoryList, tag, responsible }),
     [items, year, categoryList, tag, responsible]
   );
-  // Hjulet visar ALLA kategorier (bara år/tagg/ansvarig filtrerar) så att man
-  // kan klicka i fler ringar — valda kategorier markeras i stället.
-  const wheelItems = useMemo(
-    () => filterAnnualWheelItems(items, { year, tag, responsible }),
-    [items, year, tag, responsible]
-  );
+  // Hjulet följer kategorivalet: bara valda kategorier ritas som ringar
+  // (tomt val = alla). Fler kategorier väljs i legenden eller dropdownen —
+  // ett klick på en ring i hjulet avmarkerar den kategorin.
+  const wheelItems = filtered;
   // Kategoriernas legend-ordning styr sorteringen "Kategori".
   const categoryOrder = useMemo(() => categories.map((c) => c.id), [categories]);
   const byMonth = useMemo(
@@ -380,7 +416,7 @@ export function AnnualWheelView({
     window.setTimeout(() => setHighlightId((cur) => (cur === item.id ? null : cur)), 2400);
   }
 
-  // Djuplänk från Hemmaplan: öppna posten i sin helhet direkt vid inläsning.
+  // Djuplänk från Översikt: öppna posten i sin helhet direkt vid inläsning.
   // Query-parametern tas bort ur URL:en efteråt så en omladdning inte öppnar
   // dialogen igen.
   const openedRef = useRef<string | null>(null);
@@ -558,6 +594,12 @@ export function AnnualWheelView({
               {repairing ? 'Reparerar…' : 'Försök reparera'}
             </button>
           ) : null}
+        </div>
+      ) : null}
+      {readNotice ? (
+        <div className="flex items-start gap-2 rounded-xl bg-movexum-pastell-orange px-3 py-2 text-[12.5px] text-movexum-morkorange">
+          <Icon name="alert" size={14} />
+          <span className="flex-1">{readNotice}</span>
         </div>
       ) : null}
       {notice ? (
@@ -1023,6 +1065,31 @@ export function AnnualWheelView({
           pending={pending}
           error={error}
           people={people}
+          goalPanel={(() => {
+            const saved = form.id ? items.find((i) => i.id === form.id) : undefined;
+            if (!saved) return null;
+            const teams = teamsByItem[saved.id] ?? [];
+            return (
+              <>
+                {teams.length > 0 ? (
+                  <div className="border-b border-default pb-3">
+                    <LinkedTeams teams={teams} compact />
+                  </div>
+                ) : null}
+                <ActivityGoalPanel
+                  kind="annual_wheel"
+                  id={saved.id}
+                  options={goalOptions}
+                  selected={saved.goal_indicators ?? []}
+                  plannedParticipants={saved.planned_participants ?? null}
+                  outcome={isActivityOutcome(saved.outcome_verdict) ? saved.outcome_verdict : null}
+                  completedAt={saved.completed_at}
+                  viaEvents={eventsByItem[saved.id]}
+                  canEdit={canEdit}
+                />
+              </>
+            );
+          })()}
         />
       ) : null}
 
@@ -1447,7 +1514,8 @@ export function EditorModal({
   onClose,
   pending,
   error,
-  people
+  people,
+  goalPanel = null
 }: {
   form: FormState;
   categories: AnnualWheelCategoryDef[];
@@ -1457,6 +1525,8 @@ export function EditorModal({
   pending: boolean;
   error: string | null;
   people: AssignableResource[];
+  /** "Mål & genomförande" för en sparad post (§ 53.4) — sparas för sig. */
+  goalPanel?: React.ReactNode;
 }) {
   const yearNow = new Date().getFullYear();
   const yearOptions = [yearNow - 1, yearNow, yearNow + 1, yearNow + 2];
@@ -1482,10 +1552,14 @@ export function EditorModal({
 
   function toggleRepeat(on: boolean) {
     setRepeatOpen(on);
-    // Utan månad är "varje år" den enda meningsfulla upprepningen.
+    // "Upprepa" i ett årshjul betyder i första hand SAMMA DATUM VARJE ÅR —
+    // det är därför standardvalet (för daterade OCH odaterade aktiviteter).
+    // Varje månad/varannan/kvartal väljs uttryckligen i "Hur ofta"; tidigare
+    // förvaldes 'monthly' för daterade poster, vilket gjorde att ett "upprepa"
+    // tyst blev en förekomst i varje månad under året.
     setForm({
       ...form,
-      repeat: on ? (form.month === '' ? 'yearly' : 'monthly') : 'none',
+      repeat: on ? 'yearly' : 'none',
       repeatUntilMonth: on ? form.repeatUntilMonth : '',
       repeatUntilYear: on ? form.repeatUntilYear : ''
     });
@@ -1711,10 +1785,10 @@ export function EditorModal({
                 label="Upprepa"
                 hint={
                   repeatOpen && form.repeat !== 'none'
-                    ? `Skapar ${seriesPreviewCount(form)} aktiviteter — en per förekomst`
+                    ? seriesPreviewLabel(form)
                     : hasMonth
-                      ? 'Varje månad, varannan, varje kvartal eller varje år'
-                      : 'Varje år (helårsaktivitet)'
+                      ? 'Samma datum varje år — eller varje månad/kvartal'
+                      : 'Samma helårsaktivitet varje år'
                 }
                 checked={repeatOpen}
                 onChange={toggleRepeat}
@@ -1726,13 +1800,15 @@ export function EditorModal({
                       onChange={(e) => setForm({ ...form, repeat: e.target.value as AnnualWheelRepeat })}
                       className={inputCls}
                     >
-                      {ANNUAL_WHEEL_REPEATS.filter((r) => r.id !== 'none' && (hasMonth || r.id === 'yearly')).map(
-                        (r) => (
+                      {/* Varje år först — det är standardvalet och det vanligaste i ett årshjul. */}
+                      {[...ANNUAL_WHEEL_REPEATS]
+                        .filter((r) => r.id !== 'none' && (hasMonth || r.id === 'yearly'))
+                        .sort((a, b) => Number(b.id === 'yearly') - Number(a.id === 'yearly'))
+                        .map((r) => (
                           <option key={r.id} value={r.id}>
                             {r.label}
                           </option>
-                        )
-                      )}
+                        ))}
                     </select>
                   </Field>
                   {form.repeat === 'yearly' ? (
@@ -1827,9 +1903,40 @@ export function EditorModal({
               <span>{error}</span>
             </p>
           ) : null}
+
+          {goalPanel ? (
+            <div className="space-y-2 rounded-xl border border-default p-3">
+              <div className="flex items-center gap-1.5 text-[13px] font-semibold text-foreground">
+                <Icon name="target" size={13} /> Mål &amp; genomförande
+              </div>
+              {goalPanel}
+            </div>
+          ) : null}
         </div>
 
         <div className="sticky bottom-0 flex items-center justify-end gap-2 border-t border-default bg-surface/95 px-5 py-3 backdrop-blur-sm">
+          {form.id ? (
+            // Uppföljning av en kampanj/aktivitet (§ 47.4): öppnar "Ny enkät"
+            // förkopplad till posten. Bara för sparade poster (id krävs).
+            <Link
+              href={`/inflode/utvardering/new?for=${encodeURIComponent(`annual_wheel:${form.id}`)}`}
+              className="mr-auto inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-[13px] text-foreground-muted hover:text-brand"
+              title="Skapa en enkät som följer upp den här aktiviteten"
+            >
+              <Icon name="link" size={13} /> Skapa uppföljning
+            </Link>
+          ) : null}
+          {form.id ? (
+            // Genomförandet (§ 53): ett event med deltagarlista som pekar
+            // tillbaka på den här aktiviteten — namn och datum förifylls.
+            <Link
+              href={`/inflode/events/new?fran=${encodeURIComponent(form.id)}`}
+              className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-[13px] text-foreground-muted hover:text-brand"
+              title="Skapa ett event med deltagarlista för den här aktiviteten"
+            >
+              <Icon name="calendar" size={13} /> Skapa event
+            </Link>
+          ) : null}
           <button
             type="button"
             onClick={onClose}
@@ -2122,7 +2229,7 @@ function CategoryManagerModal({
         <p className="mt-1 text-[12px] text-foreground-muted">
           Kategorierna styr hjulets legend och färg. Bara superadmin kan lägga till eller ta bort
           dem. En kategori som används av aktiviteter måste tömmas först. Bocken{' '}
-          <span className="font-medium text-foreground">Hemmaplan</span> avgör om kategorins
+          <span className="font-medium text-foreground">Översikt</span> avgör om kategorins
           aktiviteter visas i kalendern på startsidan för hela organisationen (t.ex. Event ja,
           Styrelse &amp; VD nej).
         </p>
@@ -2162,7 +2269,7 @@ function CategoryManagerModal({
                 </select>
                 <label
                   className="inline-flex shrink-0 cursor-pointer items-center gap-1 text-[11px] text-foreground-muted"
-                  title="Visa kategorins aktiviteter i kalendern på Hemmaplan"
+                  title="Visa kategorins aktiviteter i kalendern på Översikt"
                 >
                   <input
                     type="checkbox"
@@ -2171,7 +2278,7 @@ function CategoryManagerModal({
                     onChange={(e) => toggleHome(c, e.target.checked)}
                     className="accent-brand"
                   />
-                  Hemmaplan
+                  Översikt
                 </label>
                 <span
                   className="w-12 shrink-0 text-right text-[11px] text-foreground-subtle"
@@ -2241,7 +2348,7 @@ function CategoryManagerModal({
               onChange={(e) => setNewShowOnHome(e.target.checked)}
               className="accent-brand"
             />
-            Visa i kalendern på Hemmaplan
+            Visa i kalendern på Översikt
           </label>
           {previewKey ? (
             <p className="mt-1.5 text-[11px] text-foreground-subtle">

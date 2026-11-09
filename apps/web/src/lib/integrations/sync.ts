@@ -1,13 +1,17 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 import { escFilter } from '@/lib/pb-filter';
-import { getSuperuserPb, loadCredentials } from './credentials';
+import { getSuperuserPb, loadCredentialsResult } from './credentials';
+import { describeCredentialFailure } from './credential-errors';
 import { getHandler } from './registry';
+import { describeRegistryParts, type RegistryPartId } from './company-registry/parts';
+import { registrySyncStatus, summarizeRegistrySkips } from './company-registry/sync-errors';
 import type {
   CompanyRegistryHandler,
   IntegrationHandler,
   NormalizedRecord,
   RegistrySyncResult,
+  SyncContext,
   SyncResult
 } from './types';
 
@@ -110,11 +114,13 @@ function summarizeRegistry(
   providerSlug: string,
   startupsUpdated: number,
   financialsUpserted: number,
-  skipped: number
+  skipped: number,
+  ownershipWritten = 0
 ): string {
   const parts = [
     `${startupsUpdated} bolag uppdaterade, ${financialsUpserted} årsrader synkade`
   ];
+  if (ownershipWritten > 0) parts.push(`${ownershipWritten} ägarrader`);
   if (skipped > 0) parts.push(`${skipped} hoppade över`);
   return `${providerSlug}: ${parts.join(', ')}`;
 }
@@ -160,6 +166,17 @@ async function runRecordsSync(
   return { created, updated, skipped, fetchError };
 }
 
+/** "· Valda delar: Grunddata, Bokslut" i audit-sammanfattningen (PII-fri). */
+function partsNote(parts: RegistryPartId[] | undefined): string {
+  return parts && parts.length > 0 ? ` · Valda delar: ${describeRegistryParts(parts)}` : '';
+}
+
+/** Valfria inställningar för en synk. */
+export interface SyncOptions {
+  /** Bolagsregister: datadelar att hämta (§ 11.8). Utelämnat = alla. */
+  parts?: RegistryPartId[];
+}
+
 // Registry-providers (Allabolag etc.) skip integration_records and
 // write directly to startups + startup_financials. The orchestrator
 // still records an integration_sync_runs row for audit (CLAUDE.md
@@ -168,28 +185,45 @@ async function runRecordsSync(
 async function runRegistrySync(
   handler: CompanyRegistryHandler,
   creds: Record<string, string>,
-  ctx: { tenantId: string; tenantIntegrationId: string }
+  ctx: SyncContext
 ): Promise<{
   startupsUpdated: number;
   financialsUpserted: number;
+  ownershipWritten: number;
   skipped: number;
   fetchError: string | null;
+  skipSummary: string;
+  startupsTotal: number;
 }> {
   try {
     const result = await handler.syncRegistry(creds, ctx);
-    const firstError = result.perStartupErrors?.[0]?.error;
+    // Orsaken per bolag sparas i synk-loggen — annars syns bara "partial"/
+    // "failed" utan förklaring. Meddelandena är PII-fria (sökväg + orsak).
+    const skipSummary = summarizeRegistrySkips(result.perStartupErrors ?? [], result.startupsTotal);
+    if (skipSummary) {
+      console.warn('[integrations:sync] registry startups skipped', {
+        provider: handler.slug,
+        summary: skipSummary
+      });
+    }
     return {
       startupsUpdated: result.startupsUpdated,
       financialsUpserted: result.financialsUpserted,
+      ownershipWritten: result.ownershipWritten ?? 0,
       skipped: result.skipped,
-      fetchError: result.skipped > 0 && firstError ? null : null
+      fetchError: null,
+      skipSummary,
+      startupsTotal: result.startupsTotal ?? result.startupsUpdated + result.skipped
     };
   } catch (err) {
     return {
       startupsUpdated: 0,
       financialsUpserted: 0,
+      ownershipWritten: 0,
       skipped: 0,
-      fetchError: toError(err)
+      fetchError: toError(err),
+      skipSummary: '',
+      startupsTotal: 0
     };
   }
 }
@@ -201,7 +235,8 @@ async function runRegistrySync(
 export async function runRegistrySyncForStartup(
   tenantIntegrationId: string,
   startupId: string,
-  triggeredBy: string
+  triggeredBy: string,
+  options: SyncOptions = {}
 ): Promise<SyncResult> {
   const startedAt = new Date();
   const startedIso = startedAt.toISOString();
@@ -290,10 +325,9 @@ export async function runRegistrySyncForStartup(
     };
   }
 
-  const creds = await loadCredentials(tenantIntegrationId);
-  if (!creds) {
-    const errorMessage =
-      'Inloggningsuppgifter saknas eller kunde inte dekrypteras.';
+  const loaded = await loadCredentialsResult(tenantIntegrationId);
+  if (!loaded.ok) {
+    const errorMessage = describeCredentialFailure(loaded.reason);
     if (syncRunId) {
       try {
         await adminPb.collection('integration_sync_runs').update(syncRunId, {
@@ -321,8 +355,8 @@ export async function runRegistrySyncForStartup(
   let fetchError: string | null = null;
   try {
     result = await handler.syncSingleStartup(
-      creds,
-      { tenantId, tenantIntegrationId },
+      loaded.value,
+      { tenantId, tenantIntegrationId, parts: options.parts },
       startupId
     );
   } catch (err) {
@@ -330,11 +364,16 @@ export async function runRegistrySyncForStartup(
     result = { startupsUpdated: 0, financialsUpserted: 0, skipped: 0 };
   }
 
+  // Ett bolag: handlern fångar bolagets fel i perStartupErrors i stället för
+  // att kasta. Kunde bolaget inte hämtas alls (skipped) är synken misslyckad
+  // och orsaken ska fram till bolagskortet — inte svälja som "Synk klar".
+  const startupError = result.perStartupErrors?.[0]?.error;
+  if (!fetchError && result.skipped > 0) fetchError = startupError || 'Bolaget kunde inte synkas.';
   const finishedAt = new Date();
   const durationMs = finishedAt.getTime() - startedAt.getTime();
   const status: SyncResult['status'] = fetchError
     ? 'failed'
-    : result.skipped > 0
+    : startupError
       ? 'partial'
       : 'success';
   const summary = fetchError
@@ -343,8 +382,9 @@ export async function runRegistrySyncForStartup(
         providerSlug,
         result.startupsUpdated,
         result.financialsUpserted,
-        result.skipped
-      );
+        result.skipped,
+        result.ownershipWritten ?? 0
+      ) + partsNote(options.parts);
 
   if (syncRunId) {
     try {
@@ -355,7 +395,7 @@ export async function runRegistrySyncForStartup(
         records_created: result.financialsUpserted,
         records_updated: result.startupsUpdated,
         records_skipped: result.skipped,
-        error_message: fetchError || ''
+        error_message: (fetchError || startupError || '').slice(0, 500)
       });
     } catch {
       /* ignore */
@@ -378,14 +418,16 @@ export async function runRegistrySyncForStartup(
     recordsCreated: result.financialsUpserted,
     recordsUpdated: result.startupsUpdated,
     recordsSkipped: result.skipped,
-    errorMessage: fetchError || undefined,
-    durationMs
+    errorMessage: fetchError || startupError || undefined,
+    durationMs,
+    companiesFetched: 1
   };
 }
 
 export async function runSync(
   tenantIntegrationId: string,
-  triggeredBy: string
+  triggeredBy: string,
+  options: SyncOptions = {}
 ): Promise<SyncResult> {
   const startedAt = new Date();
   const startedIso = startedAt.toISOString();
@@ -473,9 +515,9 @@ export async function runSync(
     };
   }
 
-  const creds = await loadCredentials(tenantIntegrationId);
-  if (!creds) {
-    const errorMessage = 'Inloggningsuppgifter saknas eller kunde inte dekrypteras.';
+  const loaded = await loadCredentialsResult(tenantIntegrationId);
+  if (!loaded.ok) {
+    const errorMessage = describeCredentialFailure(loaded.reason);
     if (syncRunId) {
       try {
         await adminPb.collection('integration_sync_runs').update(syncRunId, {
@@ -502,24 +544,30 @@ export async function runSync(
   let created = 0;
   let updated = 0;
   let skipped = 0;
+  let ownershipWritten = 0;
   let fetchError: string | null = null;
+  let skipSummary = '';
+  let companiesFetched: number | undefined;
 
   const kind = handler.kind ?? 'records';
   if (kind === 'company_registry') {
     const result = await runRegistrySync(
       handler as CompanyRegistryHandler,
-      creds,
-      { tenantId, tenantIntegrationId }
+      loaded.value,
+      { tenantId, tenantIntegrationId, parts: options.parts }
     );
     fetchError = result.fetchError;
     created = result.financialsUpserted;
     updated = result.startupsUpdated;
     skipped = result.skipped;
+    ownershipWritten = result.ownershipWritten;
+    skipSummary = result.skipSummary;
+    companiesFetched = result.startupsTotal;
   } else {
     const result = await runRecordsSync(
       adminPb,
       handler as Extract<IntegrationHandler, { kind?: 'records' }>,
-      creds,
+      loaded.value,
       tenantId,
       tenantIntegrationId,
       providerSlug
@@ -534,14 +582,22 @@ export async function runSync(
   const durationMs = finishedAt.getTime() - startedAt.getTime();
   const status: SyncResult['status'] = fetchError
     ? 'failed'
-    : skipped > 0
-      ? 'partial'
-      : 'success';
+    : kind === 'company_registry'
+      ? registrySyncStatus({
+          startupsUpdated: updated,
+          financialsUpserted: created,
+          ownershipWritten,
+          skipped
+        })
+      : skipped > 0
+        ? 'partial'
+        : 'success';
   const summary = fetchError
     ? `${providerSlug}: synk misslyckades`
     : kind === 'company_registry'
-      ? summarizeRegistry(providerSlug, updated, created, skipped)
+      ? summarizeRegistry(providerSlug, updated, created, skipped, ownershipWritten)
       : summarize(providerSlug, created, updated, skipped);
+  const summaryWithParts = kind === 'company_registry' ? summary + partsNote(options.parts) : summary;
 
   if (syncRunId) {
     try {
@@ -552,7 +608,7 @@ export async function runSync(
         records_created: created,
         records_updated: updated,
         records_skipped: skipped,
-        error_message: fetchError || ''
+        error_message: (fetchError || skipSummary || '').slice(0, 500)
       });
     } catch (err) {
       console.error('[integrations:sync] failed to close sync_run', {
@@ -566,7 +622,7 @@ export async function runSync(
     await adminPb.collection('tenant_integrations').update(tenantIntegrationId, {
       last_sync_at: finishedAt.toISOString(),
       last_sync_status: status,
-      last_sync_summary: summary.slice(0, 500)
+      last_sync_summary: summaryWithParts.slice(0, 500)
     });
   } catch (err) {
     console.error('[integrations:sync] failed to update tenant_integration', {
@@ -581,7 +637,8 @@ export async function runSync(
     recordsCreated: created,
     recordsUpdated: updated,
     recordsSkipped: skipped,
-    errorMessage: fetchError || undefined,
+    errorMessage: fetchError || skipSummary || undefined,
+    companiesFetched,
     durationMs
   };
 }

@@ -5,6 +5,7 @@ import {
   persistConnectorOAuthResult,
   verifyAndParseOAuthState
 } from '@/lib/ai/connector-state';
+import { relativeRedirectInit } from '@/lib/relative-redirect';
 
 // OAuth callback för MCP-connectors som kräver per-användare-auth.
 //
@@ -19,6 +20,13 @@ import {
 //  5. Redirectar till connector-chatten.
 //
 // CLAUDE.md § 10.3 / 10.5 punkt 5: state-verifiering + tenant-isolation.
+//
+// Redirects är RELATIVA: `request.url` är i standalone-containern bind-
+// adressen http://0.0.0.0:3000 (se lib/relative-redirect.ts).
+
+function back(path: string): NextResponse {
+  return new NextResponse(null, relativeRedirectInit(path, 303));
+}
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -27,33 +35,22 @@ export async function GET(request: NextRequest) {
   const errorParam = searchParams.get('error');
 
   if (errorParam) {
-    return NextResponse.redirect(
-      new URL(
-        `/integrationer?error=${encodeURIComponent('OAuth-flowet avbröts: ' + errorParam)}`,
-        request.url
-      )
-    );
+    return back(`/integrationer?error=${encodeURIComponent('OAuth-flowet avbröts: ' + errorParam)}`);
   }
 
   if (!state || !code) {
-    return NextResponse.redirect(
-      new URL('/integrationer?error=' + encodeURIComponent('Saknar state eller code i OAuth-callback.'), request.url)
-    );
+    return back('/integrationer?error=' + encodeURIComponent('Saknar state eller code i OAuth-callback.'));
   }
 
   const payload = verifyAndParseOAuthState(state);
   if (!payload) {
-    return NextResponse.redirect(
-      new URL('/integrationer?error=' + encodeURIComponent('OAuth-state är ogiltig eller har utgått.'), request.url)
-    );
+    return back('/integrationer?error=' + encodeURIComponent('OAuth-state är ogiltig eller har utgått.'));
   }
 
   const currentUser = await getCurrentUser();
   if (!currentUser || currentUser.id !== payload.uid || currentUser.tenant !== payload.tid) {
     // Förmodligen sessionen utgått eller någon försöker hijacka flowet.
-    return NextResponse.redirect(
-      new URL('/login?next=/integrationer', request.url)
-    );
+    return back('/login?next=/integrationer');
   }
 
   let token: Record<string, unknown>;
@@ -61,12 +58,7 @@ export async function GET(request: NextRequest) {
     token = await completeConnectorOAuth(payload.cid, code);
   } catch (err) {
     console.error('[oauth-callback] exchange failed', err);
-    return NextResponse.redirect(
-      new URL(
-        `/integrationer?error=${encodeURIComponent('Kunde inte växla OAuth-code mot token.')}`,
-        request.url
-      )
-    );
+    return back(`/integrationer?error=${encodeURIComponent('Kunde inte växla OAuth-code mot token.')}`);
   }
 
   const pb = await getServerPb();
@@ -80,15 +72,8 @@ export async function GET(request: NextRequest) {
     });
   } catch (err) {
     console.error('[oauth-callback] persist failed', err);
-    return NextResponse.redirect(
-      new URL(
-        `/integrationer?error=${encodeURIComponent('Kunde inte spara OAuth-token.')}`,
-        request.url
-      )
-    );
+    return back(`/integrationer?error=${encodeURIComponent('Kunde inte spara OAuth-token.')}`);
   }
 
-  return NextResponse.redirect(
-    new URL(`/integrationer/connectors/mcp/${encodeURIComponent(payload.cid)}`, request.url)
-  );
+  return back(`/integrationer/connectors/mcp/${encodeURIComponent(payload.cid)}`);
 }

@@ -24,14 +24,16 @@ import {
   SEARCH_STRATEGY_GUIDANCE,
   DOMAIN_GLOSSARY,
   AUTHORING_GUIDANCE,
+  WRITE_HONESTY_GUIDANCE,
   CHAT_WRITE_ACTIONS_GUIDANCE,
   WEB_SEARCH_GUIDANCE,
   WEB_SEARCH_OFF_HINT
 } from '@/lib/ai/guidance';
 import { buildChatTools, buildMemoryRecallBlock } from '@/lib/ai/tools';
+import { makeToolResolver, scopeTools } from '@/lib/ai/tool-scope';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from '@/lib/ai/web';
 import { STYLE_REMINDER } from '@/lib/ai/staff-chat';
-import { hasRole } from '@/lib/rbac';
+import { canRunTool, hasRole } from '@/lib/rbac';
 import { logAiUsage } from '@/lib/ai/usage';
 import type { Actor } from '@/lib/core/write';
 import type { Role, WebSourceKey } from '@platform/shared';
@@ -71,6 +73,7 @@ interface AgentRecord {
   category: string;
   tenant: string;
   requires_startup?: boolean;
+  roles_allowed?: string[];
   web_sources?: unknown;
 }
 
@@ -162,7 +165,9 @@ const STAFF_TOOL_GUIDANCE =
   '- `memory_read` / `memory_write`: ditt tvärsessions-minne (per tenant). När ' +
   'personalen RÄTTAR dig eller lär dig en bestående regel ("räkna inte lån som ' +
   'investeringar", "Bolag X heter numera Y") — spara det med `memory_write` ' +
-  '(kort `key`, tydlig `content`) så att det gäller även i framtida samtal. ' +
+  '(kort `key`, tydlig `content` och ALLTID en `category`: terminologi | ' +
+  'datatolkning | arbetssatt | bolag | portfolj | processer | ovrigt) så att det ' +
+  'gäller även i framtida samtal och personalen får överblick per kategori. ' +
   'Lagra ALDRIG personuppgifter i minnet, bara generella regler/slutsatser. ' +
   'Inlärt minne injiceras automatiskt i din kontext; använd `memory_read` för ' +
   'fler detaljer.\n\n' +
@@ -367,7 +372,19 @@ export async function sendChatMessage(
   if (options.agentId) {
     try {
       const t = await pb.collection('tools').getOne<AgentRecord>(options.agentId);
-      if (t.tenant === user.tenant && t.active) {
+      // § 9.5: samma behörighet som i /toolbox — en observer eller en
+      // bolagsmedlem får inte låna en agents systemprompt/kunskapsbas genom
+      // att välja den i chatten.
+      const allowed = canRunTool(
+        user.roles,
+        {
+          active: t.active,
+          roles_allowed: (Array.isArray(t.roles_allowed) ? t.roles_allowed : []) as Role[],
+          requires_startup: Boolean(t.requires_startup)
+        },
+        { isLinkedStartup: false }
+      );
+      if (t.tenant === user.tenant && t.active && allowed) {
         const webKeys = normalizeWebKeys(t.web_sources);
         const ctx: Record<string, unknown> = {};
         if (webKeys.length > 0) {
@@ -477,16 +494,16 @@ async function runStaffChatWithTools(
 ): Promise<ChatActionResult> {
   let collections: Awaited<ReturnType<typeof getExposedCollections>> = [];
   let schemaSummary = '';
+  // Skopad schema-sammanfattning (§ 28.4): fältlistor bara för kärnset +
+  // kollektioner relevanta för de senaste användarturerna; övriga som
+  // kompakt namnindex (describe_collection täcker detaljerna).
+  const scopeText = userMessages
+    .filter((m) => m.role === 'user')
+    .slice(-3)
+    .map((m) => m.content)
+    .join('\n');
   try {
     collections = await getExposedCollections();
-    // Skopad schema-sammanfattning (§ 28.4): fältlistor bara för kärnset +
-    // kollektioner relevanta för de senaste användarturerna; övriga som
-    // kompakt namnindex (describe_collection täcker detaljerna).
-    const scopeText = userMessages
-      .filter((m) => m.role === 'user')
-      .slice(-3)
-      .map((m) => m.content)
-      .join('\n');
     schemaSummary = buildScopedSchemaSummary(
       collections,
       selectRelevantCollections(collections, scopeText)
@@ -512,7 +529,12 @@ async function runStaffChatWithTools(
   };
 
   // "Webbkällor" = riktig internetsökning (`web_search`, § 9.8) utöver RSS-blocket.
-  const tools = buildChatTools(collections, { actor, includeMemory: true, includeWebSearch });
+  // Skopad verktygsyta (§ 28.4, `tool-scope.ts`) — samma som trådchatten.
+  const fullTools = buildChatTools(collections, { actor, includeMemory: true, includeWebSearch });
+  const tools = scopeTools(
+    fullTools,
+    [scopeText, userMessages.filter((m) => m.role === 'assistant').at(-1)?.content ?? '', agentBlock ?? ''].join('\n')
+  );
 
   const today = new Date().toISOString().slice(0, 10);
   const identityBlock =
@@ -556,6 +578,7 @@ async function runStaffChatWithTools(
       tools,
       toolContext: { pb, tenantId: user.tenant, collections, actor },
       maxIterations: MAX_TOOL_ITERATIONS,
+      resolveTool: makeToolResolver(fullTools),
       onUsage: (u) =>
         logAiUsage(pb, {
           tenant: user.tenant,

@@ -1,11 +1,13 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 import { sanitizePersonnummer } from '@/lib/import/crm-excel';
+import { describePbError, pbFieldErrors } from '@/lib/pb-error';
 import {
   ORG_POST_KIND_LABELS,
   canEditOrgPost,
   coerceOrgPostMedia,
   isOrgPostAudience,
+  ORG_POST_AUDIENCES,
   isOrgPostKind,
   orgPostHomePath,
   validateOrgPostInput,
@@ -100,6 +102,21 @@ function toPayload(v: ReturnType<typeof validateOrgPostInput>): Record<string, u
   };
 }
 
+/**
+ * PB:s fältfel i klartext (SDK:ns `err.message` är alltid det intetsägande
+ * "Failed to create record."). Ett avvisat `audience`-värde betyder att
+ * instansen saknar migration 1700000171 — säg det, i stället för att låta
+ * chatten gissa (§ 24.4/§ 30.4-invarianten: PB-schemadrift ska synas).
+ */
+function describeOrgPostWriteError(err: unknown, fallback: string): string {
+  const message = describePbError(err, fallback);
+  const audienceError = pbFieldErrors(err).audience;
+  if (audienceError) {
+    return `${message} — PocketBase-schemat saknar troligen målgruppsvärdet (kör migration 1700000171 eller setup-via-api.mjs).`;
+  }
+  return message;
+}
+
 export async function createOrgPost(
   pb: PocketBase,
   actor: Actor,
@@ -119,7 +136,10 @@ export async function createOrgPost(
   }
   const audience = params.audience ?? 'staff';
   if (!isOrgPostAudience(audience)) {
-    return fail('INVALID_VALUE', "Okänd målgrupp — använd 'staff' eller 'all'.");
+    return fail(
+      'INVALID_VALUE',
+      `Okänd målgrupp '${String(params.audience)}'. Giltiga: ${ORG_POST_AUDIENCES.join(', ')} (staff = teamet, all = teamet och bolagen, startups = bara bolagen).`
+    );
   }
 
   const v = validateOrgPostInput({
@@ -147,7 +167,7 @@ export async function createOrgPost(
       })
     );
   } catch (err) {
-    return fail('DB_ERROR', err instanceof Error ? err.message : 'Kunde inte skapa inlägget.');
+    return fail('DB_ERROR', describeOrgPostWriteError(err, 'Kunde inte skapa inlägget.'));
   }
 
   await logAgentAction(pb, {
@@ -244,7 +264,7 @@ export async function updateOrgPostFields(
       client.collection(ORG_POSTS_WRITE_COLLECTION).update(id, payload)
     );
   } catch (err) {
-    return fail('DB_ERROR', err instanceof Error ? err.message : 'Kunde inte uppdatera inlägget.');
+    return fail('DB_ERROR', describeOrgPostWriteError(err, 'Kunde inte uppdatera inlägget.'));
   }
 
   await logAgentAction(pb, {

@@ -1,10 +1,13 @@
 'use server';
 
 import { redirect } from 'next/navigation';
+import { integrationsCatalogHref } from '@/lib/integrations/access';
 import { revalidatePath } from 'next/cache';
+import { invalidateOutlookCache } from '@/lib/overview/aggregate';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { getAppProvider } from '@/lib/app-integrations/registry';
 import { buildAuthorizeUrl } from '@/lib/app-integrations/oauth';
+import { appIntegrationCallbackUrl } from '@/lib/app-integrations/app-url';
 import {
   findIntegrationRow,
   disconnectIntegration
@@ -14,18 +17,6 @@ import {
  * Server actions för per-user OAuth-integrationer. Provider-agnostiska
  * — den specifika providern slås upp via `getAppProvider(slug)`.
  */
-
-function publicAppUrl(): string {
-  return (
-    process.env.NEXT_PUBLIC_APP_URL ||
-    process.env.APP_URL ||
-    'http://localhost:3000'
-  ).replace(/\/$/, '');
-}
-
-function callbackUrl(slug: string): string {
-  return `${publicAppUrl()}/api/app-integrations/${slug}/callback`;
-}
 
 /**
  * Bygger authorize-URL:en och redirectar användaren till providerns
@@ -69,7 +60,7 @@ export async function connectAppIntegrationAction(input: {
     provider,
     userId: user.id,
     tenantId: user.tenant,
-    redirectUri: callbackUrl(input.provider)
+    redirectUri: appIntegrationCallbackUrl(input.provider)
   });
   return { redirectTo: url };
 }
@@ -101,8 +92,12 @@ export async function disconnectAppIntegrationAction(input: {
   if (!row) return { error: 'Ingen koppling hittades.' };
 
   await disconnectIntegration(pb, row.id);
+  // Agenda-cachen på "Mina uppgifter" (§ 40) får inte visa möten efter
+  // återkallat samtycke (GDPR art. 7.3).
+  if (input.provider === 'outlook_calendar') invalidateOutlookCache(user.id);
 
   revalidatePath('/integrationer');
+  revalidatePath('/installningar/integrationer');
   revalidatePath(`/integrationer/${input.provider.replace(/_/g, '-')}`);
   revalidatePath('/chatt');
   return {};
@@ -113,8 +108,10 @@ export async function disconnectAppIntegrationFormAction(formData: FormData): Pr
   const provider = String(formData.get('provider') || '').trim();
   if (!provider) return;
   const result = await disconnectAppIntegrationAction({ provider });
+  const user = await requireUser();
+  const back = integrationsCatalogHref(user.roles);
   if (result.error) {
-    redirect('/integrationer?error=' + encodeURIComponent(result.error));
+    redirect(back + '?error=' + encodeURIComponent(result.error));
   }
-  redirect('/integrationer');
+  redirect(back);
 }

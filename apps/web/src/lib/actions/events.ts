@@ -1,11 +1,23 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { escFilter } from '@/lib/pb-filter';
-import { parseDateTimeInput } from '@platform/shared';
+import { getRecordInTenant } from '@/lib/core/write/helpers';
+import { createSurvey } from '@/lib/core/write/surveys';
+import { recomputeEventCounters } from '@/lib/events/counters';
+import { listSurveyTemplates } from '@/lib/surveys/store';
+import {
+  isEventSignupStage,
+  isEventType,
+  defaultEvaluationTemplateRef,
+  isStarterTemplateRef,
+  normalizeEventRsvpSettings,
+  parseDateTimeInput
+} from '@platform/shared';
 import type {
   Role,
   EventSignup,
@@ -17,28 +29,35 @@ import type {
 
 const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach'];
 
-const VALID_EVENT_TYPES: EventType[] = [
-  'pitch',
-  'conference',
-  'matching',
-  'hack',
-  'mingle',
-  'workshop',
-  'other'
-];
 const VALID_EVENT_STATUS: EventStatus[] = ['planned', 'live', 'completed', 'cancelled'];
-const VALID_SIGNUP_STAGES: EventSignupStage[] = [
-  'signup',
-  'attended',
-  'meeting',
-  'application',
-  'admitted'
-];
+
+/** Svarssidans inställningar ur formuläret (§ 55.11) — normaliseras i @platform/shared. */
+function rsvpSettingsFromForm(formData: FormData) {
+  return normalizeEventRsvpSettings({
+    plus_ones_max: formData.get('rsvp_plus_ones_max'),
+    ask_diet: formData.get('rsvp_ask_diet') === 'on',
+    custom_question: formData.get('rsvp_custom_question'),
+    capacity: formData.get('rsvp_capacity'),
+    waitlist: formData.get('rsvp_waitlist') === 'on',
+    remind_unanswered_days: formData.get('rsvp_remind_unanswered_days'),
+    remind_confirmed_days: formData.get('rsvp_remind_confirmed_days')
+  });
+}
+
+export type EventCreateWarning = 'arshjul' | 'utvardering';
 
 export type EventActionState = {
   error?: string;
   eventId?: string;
   signupId?: string;
+  /**
+   * Icke-blockerande varningar efter att eventet skapats: `arshjul` =
+   * kopplingen kunde inte sparas (migration 1700000194), `utvardering` =
+   * utkastet till utvärdering kunde inte skapas (§ 53.3).
+   */
+  warnings?: EventCreateWarning[];
+  /** Antal deltagare som markerades närvarande. */
+  updated?: number;
 };
 
 export async function createEventAction(
@@ -52,8 +71,8 @@ export async function createEventAction(
   const name = String(formData.get('name') || '').trim();
   if (!name) return { error: 'Namn krävs.' };
 
-  const typeRaw = String(formData.get('type') || 'other') as EventType;
-  const type = VALID_EVENT_TYPES.includes(typeRaw) ? typeRaw : 'other';
+  const typeRaw = String(formData.get('type') || 'other');
+  const type: EventType = isEventType(typeRaw) ? typeRaw : 'other';
   const statusRaw = String(formData.get('status') || 'planned') as EventStatus;
   const status = VALID_EVENT_STATUS.includes(statusRaw) ? statusRaw : 'planned';
 
@@ -75,6 +94,24 @@ export async function createEventAction(
   const description = String(formData.get('description') || '').trim();
   const accent = String(formData.get('accent') || '').trim() || 'cyan';
 
+  // Årshjulsaktiviteten eventet genomför (§ 53). Tenant-verifierad — ett id
+  // från klienten litas aldrig på; en okänd referens är ett fel, aldrig ett
+  // tyst fristående event.
+  const wheelItemRaw = String(formData.get('wheel_item') || '').trim();
+  let wheelItem = '';
+  if (wheelItemRaw) {
+    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(wheelItemRaw)) return { error: 'Ogiltig årshjulsaktivitet.' };
+    const row = await getRecordInTenant<{ id: string; tenant?: string }>(
+      pb,
+      { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Role[] },
+      'annual_wheel_items',
+      wheelItemRaw,
+      'id,tenant'
+    );
+    if (!row) return { error: 'Årshjulsaktiviteten hittades inte.' };
+    wheelItem = row.id;
+  }
+
   try {
     const record = await pb.collection(PB_COLLECTIONS.events).create({
       tenant: user.tenant,
@@ -86,16 +123,98 @@ export async function createEventAction(
       location: location || null,
       description: description || null,
       accent,
+      rsvp_settings: rsvpSettingsFromForm(formData),
+      ...(wheelItem ? { wheel_item: wheelItem } : {}),
       signups_count: 0,
       attended_count: 0,
       leads_count: 0,
       admitted_count: 0
     });
-    revalidatePath('/events');
-    return { eventId: String(record.id) };
+    revalidatePath('/inflode/events');
+    const eventId = String(record.id);
+    const warnings: EventCreateWarning[] = [];
+    // PB släpper okända fält tyst (§ 24.4) — saknas kopplingen på den skapade
+    // posten körs instansen utan migration 1700000194.
+    if (wheelItem && !record.wheel_item) warnings.push('arshjul');
+    const evaluation = await createEvaluationDraft(
+      pb,
+      user,
+      { id: eventId, name, type },
+      String(formData.get('evaluation') || 'auto')
+    );
+    if (!evaluation.ok) warnings.push('utvardering');
+    return { eventId, warnings };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte skapa event.' };
   }
+}
+
+/**
+ * Utvärdering som UTKAST för ett event (§ 53.3): från vald mall (egen eller
+ * `starter:<nyckel>`), eller — med `auto` — tenantens egen mall för
+ * eventtypen, annars Movexums standardmall för typen. Skapas via det delade
+ * skrivlagret (tenant-verifierad mall och källa, audit) och alltid
+ * opublicerad: en människa granskar, publicerar och schemalägger utskicket.
+ * `ok: false` när något gick fel, så att eventet ändå skapas och staff ser en
+ * varning.
+ */
+async function createEvaluationDraft(
+  pb: Awaited<ReturnType<typeof getServerPb>>,
+  user: Awaited<ReturnType<typeof requireUser>>,
+  event: { id: string; name: string; type: EventType },
+  choice: string
+): Promise<{ ok: boolean; surveyId: string | null }> {
+  if (choice === 'none') return { ok: true, surveyId: null };
+  const templates = await listSurveyTemplates(pb, user.tenant);
+  const templateId =
+    choice === 'auto'
+      ? defaultEvaluationTemplateRef(templates, event.type)
+      : isStarterTemplateRef(choice)
+        ? choice
+        : (templates.find((t) => t.id === choice)?.id ?? null);
+  if (!templateId) return { ok: false, surveyId: null };
+  const res = await createSurvey(
+    pb,
+    { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Role[] },
+    { name: `Utvärdering: ${event.name}`.slice(0, 160), templateId, linkKind: 'event', linkId: event.id }
+  );
+  if (!res.ok) {
+    console.error('[events] evaluation draft failed', { code: res.code });
+    return { ok: false, surveyId: null };
+  }
+  revalidatePath('/inflode/utvardering');
+  return { ok: true, surveyId: res.value.surveyId };
+}
+
+/**
+ * "Skapa utvärdering" på inbjudningssidan (§ 53.3/§ 53.5): utkast från vald
+ * mall, kopplat till eventet. Skickar vidare till byggaren.
+ */
+export async function createEventEvaluationAction(formData: FormData) {
+  const user = await requireUser();
+  if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) redirect('/inflode');
+  const pb = await getServerPb();
+  const eventId = String(formData.get('event') || '');
+  const ev = /^[a-zA-Z0-9_-]{1,64}$/.test(eventId)
+    ? await getRecordInTenant<{ id: string; tenant?: string; name?: string; type?: string }>(
+        pb,
+        { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles as Role[] },
+        'incubator_events',
+        eventId,
+        'id,tenant,name,type'
+      )
+    : null;
+  if (!ev) redirect('/inflode/inbjudningar');
+  const res = await createEvaluationDraft(
+    pb,
+    user,
+    { id: ev.id, name: ev.name || 'Event', type: isEventType(ev.type) ? ev.type : 'other' },
+    String(formData.get('evaluation') || 'auto')
+  );
+  if (!res.surveyId) redirect(`/inflode/inbjudningar/${ev.id}?fel=utvardering`);
+  revalidatePath(`/inflode/inbjudningar/${ev.id}`);
+  revalidatePath(`/inflode/events/${ev.id}`);
+  redirect(`/inflode/utvardering/${res.surveyId}`);
 }
 
 export async function addSignupAction(
@@ -122,8 +241,12 @@ export async function addSignupAction(
 
   const email = String(formData.get('email') || '').trim();
   const organization = String(formData.get('organization') || '').trim();
-  const stageRaw = String(formData.get('stage') || 'signup') as EventSignupStage;
-  const stage = VALID_SIGNUP_STAGES.includes(stageRaw) ? stageRaw : 'signup';
+  const stageRaw = String(formData.get('stage') || 'signup');
+  const stage: EventSignupStage = isEventSignupStage(stageRaw) ? stageRaw : 'signup';
+  if (email && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+    return { error: 'Ogiltig e-postadress.' };
+  }
+  if (name.length > 200 || organization.length > 200) return { error: 'Namn och organisation får vara högst 200 tecken.' };
   const notes = String(formData.get('notes') || '').trim();
 
   try {
@@ -137,8 +260,8 @@ export async function addSignupAction(
       notes: notes || null
     });
     await recomputeEventCounters(pb, user.tenant, event);
-    revalidatePath('/events');
-    revalidatePath(`/events/${event}`);
+    revalidatePath('/inflode/events');
+    revalidatePath(`/inflode/events/${event}`);
     return { signupId: String(record.id) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte spara anmälan.' };
@@ -151,7 +274,7 @@ export async function moveSignupStageAction(
 ): Promise<EventActionState> {
   const user = await requireUser();
   if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Åtkomst nekad.' };
-  if (!VALID_SIGNUP_STAGES.includes(nextStage)) return { error: 'Ogiltigt steg.' };
+  if (!isEventSignupStage(nextStage)) return { error: 'Ogiltigt steg.' };
 
   const pb = await getServerPb();
   let signup: EventSignup;
@@ -165,38 +288,61 @@ export async function moveSignupStageAction(
   try {
     await pb.collection(PB_COLLECTIONS.eventSignups).update(signupId, { stage: nextStage });
     await recomputeEventCounters(pb, user.tenant, signup.event);
-    revalidatePath('/events');
-    revalidatePath(`/events/${signup.event}`);
+    revalidatePath('/inflode/events');
+    revalidatePath(`/inflode/events/${signup.event}`);
     return { signupId };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte uppdatera anmälan.' };
   }
 }
 
-async function recomputeEventCounters(
-  pb: Awaited<ReturnType<typeof getServerPb>>,
-  tenant: string,
-  eventId: string
-) {
+/**
+ * Markerar alla som står som "Anmäld" som närvarande — snabbvägen efter ett
+ * event där alla anmälda kom. Senare steg (möte, ansökan, antagen) rörs inte.
+ */
+export async function markSignupsAttendedAction(eventId: string): Promise<EventActionState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, STAFF_ROLES)) return { error: 'Åtkomst nekad.' };
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(eventId)) return { error: 'Event hittades inte.' };
+  const pb = await getServerPb();
+
   try {
-    const all = await pb.collection(PB_COLLECTIONS.eventSignups).getFullList<EventSignup>({
-      filter: `tenant = "${escFilter(tenant)}" && event = "${escFilter(eventId)}"`,
-      fields: 'id,stage'
-    });
-    const counts = {
-      signups_count: all.length,
-      attended_count: all.filter((s) =>
-        ['attended', 'meeting', 'application', 'admitted'].includes(s.stage)
-      ).length,
-      leads_count: all.filter((s) => ['meeting', 'application', 'admitted'].includes(s.stage))
-        .length,
-      admitted_count: all.filter((s) => s.stage === 'admitted').length
-    };
-    await pb.collection(PB_COLLECTIONS.events).update(eventId, counts);
+    const ev = await pb
+      .collection(PB_COLLECTIONS.events)
+      .getOne<{ tenant: string }>(eventId, { fields: 'id,tenant' });
+    if (ev.tenant !== user.tenant) return { error: 'Åtkomst nekad.' };
   } catch {
-    /* ignore */
+    return { error: 'Event hittades inte.' };
   }
+
+  let pending: { id: string }[] = [];
+  try {
+    pending = await pb.collection(PB_COLLECTIONS.eventSignups).getFullList<{ id: string }>({
+      filter: pb.filter('tenant = {:t} && event = {:e} && stage = "signup"', { t: user.tenant, e: eventId }),
+      fields: 'id'
+    });
+  } catch {
+    return { error: 'Kunde inte läsa deltagarlistan.' };
+  }
+
+  let updated = 0;
+  for (const s of pending) {
+    try {
+      await pb.collection(PB_COLLECTIONS.eventSignups).update(s.id, { stage: 'attended' });
+      updated += 1;
+    } catch {
+      /* räknas som ej uppdaterad — rapporteras nedan */
+    }
+  }
+  await recomputeEventCounters(pb, user.tenant, eventId);
+  revalidatePath('/inflode/events');
+  revalidatePath(`/inflode/events/${eventId}`);
+  if (updated < pending.length) {
+    return { error: `${pending.length - updated} av ${pending.length} kunde inte markeras. Försök igen.`, updated };
+  }
+  return { eventId, updated };
 }
+
 
 export async function updateEventAction(
   id: string,
@@ -218,8 +364,8 @@ export async function updateEventAction(
   const name = String(formData.get('name') || '').trim();
   if (!name) return { error: 'Namn krävs.' };
 
-  const typeRaw = String(formData.get('type') || event.type) as EventType;
-  const type = VALID_EVENT_TYPES.includes(typeRaw) ? typeRaw : event.type;
+  const typeRaw = String(formData.get('type') || event.type);
+  const type: EventType = isEventType(typeRaw) ? typeRaw : event.type;
   const statusRaw = String(formData.get('status') || event.status) as EventStatus;
   const status = VALID_EVENT_STATUS.includes(statusRaw) ? statusRaw : event.status;
 
@@ -250,10 +396,11 @@ export async function updateEventAction(
       ends_at: endsAt ? endsAt.toISOString() : null,
       location: location || null,
       description: description || null,
-      accent
+      accent,
+      rsvp_settings: rsvpSettingsFromForm(formData)
     });
-    revalidatePath('/events');
-    revalidatePath(`/events/${id}`);
+    revalidatePath('/inflode/events');
+    revalidatePath(`/inflode/events/${id}`);
     return { eventId: id };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte uppdatera event.' };
@@ -282,7 +429,7 @@ export async function deleteEventAction(id: string): Promise<EventActionState> {
       await pb.collection(PB_COLLECTIONS.eventSignups).delete(s.id);
     }
     await pb.collection(PB_COLLECTIONS.events).delete(id);
-    revalidatePath('/events');
+    revalidatePath('/inflode/events');
     return { eventId: id };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte radera event.' };
@@ -312,8 +459,8 @@ export async function deleteEventSignupAction(signupId: string): Promise<EventAc
   try {
     await pb.collection(PB_COLLECTIONS.eventSignups).delete(signupId);
     await recomputeEventCounters(pb, user.tenant, signup.event);
-    revalidatePath('/events');
-    revalidatePath(`/events/${signup.event}`);
+    revalidatePath('/inflode/events');
+    revalidatePath(`/inflode/events/${signup.event}`);
     return { signupId };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Kunde inte radera anmälan.' };

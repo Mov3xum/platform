@@ -109,6 +109,14 @@ export async function listImportableCollections(): Promise<ImportCollection[]> {
       });
     }
 
+    // Bara kollektioner som kan tenant-isoleras: direkt `tenant`-fält eller en
+    // `startup`-relation (barnkollektioner, verifieras per rad i importen).
+    // Globala referenstabeller (de_minimis_regelverk, integration_providers,
+    // compass_lead_sources …) är plattformsbreda — en tenant-admin får aldrig
+    // skriva dem via importen.
+    const hasStartupLink = mappable.some((f) => f.name === 'startup' && f.type === 'relation');
+    if (!hasTenant && !hasStartupLink) continue;
+
     out.push({ name: c.name, fields: mappable, hasTenant });
   }
 

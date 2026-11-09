@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser, getServerPb } from '@/lib/auth.server';
+import { hasRole } from '@/lib/rbac';
+import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import {
   createConversation,
   createLead,
@@ -12,8 +14,10 @@ import { PREVIEW_SOURCE_KEY, type Attribution } from '@/lib/compass/types';
 import {
   attachAiSummary,
   buildSubmissionEntries,
+  leadFieldsFromContact,
   moduleWantsLead,
-  parseContactPreference
+  parseContactPreference,
+  parseContactSubmission
 } from '@/lib/compass/lead-capture';
 
 export const runtime = 'nodejs';
@@ -23,6 +27,8 @@ interface SubmitBody {
   answers: Record<string, string | string[]>;
   attribution?: Attribution;
   contact_preference?: string;
+  /** Avsnittet "Dina uppgifter" (§ 23.11) — valideras mot modulens konfiguration. */
+  contact?: unknown;
 }
 
 /** Tar emot svaren från ModuleWizard (inloggad admin-preview) och skapar lead + conversation. */
@@ -35,6 +41,17 @@ export async function POST(
   if (!user) {
     return NextResponse.json({ error: 'Login krävs' }, { status: 401 });
   }
+  // Intern förhandsgranskning: samma krets som modul-admin (§ 23.1). Utan
+  // rollkontroll kunde varje inloggad (även bolagsmedlem/observer) skapa
+  // staff-only leads och driva AI-sammanställningar.
+  if (!hasRole(user.roles, ['admin', 'incubator_lead', 'coach'])) {
+    return NextResponse.json({ error: 'Saknar behörighet.' }, { status: 403 });
+  }
+  const rlKey = `inflode-submit:${user.id}`;
+  if ((await checkRateLimit(rlKey, 30)).blocked) {
+    return NextResponse.json({ error: 'För många förfrågningar. Försök igen om en stund.' }, { status: 429 });
+  }
+  await recordFailure(rlKey, 5 * 60 * 1000);
   let body: SubmitBody;
   try {
     body = (await req.json()) as SubmitBody;
@@ -62,7 +79,9 @@ export async function POST(
 
   // Delad whitelist-mappning (dataminimering, GDPR § 5) — samma som publika
   // flödet, ingen divergerande kopia.
-  const leadPayload = mapAnswersToLead(answers);
+  const contact = parseContactSubmission(mod, body.contact);
+  if (contact.error) return NextResponse.json({ error: contact.error }, { status: 400 });
+  const leadPayload = { ...mapAnswersToLead(answers), ...leadFieldsFromContact(contact.values) };
   const attribution = pickAttribution(body.attribution);
 
   // Steg 4-valet: modulen kan vara konfigurerad att INTE skapa lead.
@@ -97,7 +116,7 @@ export async function POST(
 
   // AI-sammanställning av det inskickade (best-effort — blockerar aldrig).
   const entries = buildSubmissionEntries(questions, answers);
-  await attachAiSummary(pb, user.tenant, lead, entries, mod.name);
+  await attachAiSummary(pb, user.tenant, lead, entries, mod.name, undefined, { userId: user.id });
 
   return NextResponse.json({ ok: true, leadId: lead.id });
 }

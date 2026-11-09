@@ -1,0 +1,333 @@
+'use client';
+
+import { useActionState, useEffect } from 'react';
+import { logRegistryDiagnostics } from '@/lib/integrations/company-registry/console-diagnostics';
+import {
+  previewRegistryLookupAction,
+  type RegistryLookupState
+} from '@/lib/actions/integrations';
+import {
+  RegistryPartsPicker,
+  useRegistryPartSelection
+} from '@/components/integrations/RegistryPartsPicker';
+import {
+  REGISTRY_PART_META,
+  type RegistryPartId
+} from '@/lib/integrations/company-registry/parts';
+import { formatRegistryCost, type RegistryPricing } from '@/lib/integrations/company-registry/pricing';
+
+interface Props {
+  providerSlug: string;
+  providerName: string;
+  registryParts: RegistryPartId[];
+  partEndpoints?: Partial<Record<RegistryPartId, string>>;
+  /** Prislista (§ 11.8) — kostnaden visas innan uppslaget görs. */
+  pricing?: RegistryPricing;
+  pricingHref?: string;
+}
+
+const initialState: RegistryLookupState = {};
+
+function sek(v?: number) {
+  return typeof v === 'number' ? `${v.toLocaleString('sv-SE')} kr` : '–';
+}
+
+function pct(v?: number) {
+  return typeof v === 'number' ? `${v.toLocaleString('sv-SE')} %` : undefined;
+}
+
+const OWNER_KIND_LABEL: Record<string, string> = {
+  company: 'Bolag',
+  person: 'Fysisk person',
+  public_body: 'Offentlig/akademi',
+  investor: 'Investerare',
+  other: 'Okänd'
+};
+
+const CONTROL_LABEL: Record<string, string> = {
+  shares: 'ägande',
+  votes: 'rösträtt',
+  board: 'styrelse/ledning',
+  agreement: 'avtal/stadgar',
+  other: 'annan kontrollgrund'
+};
+
+// "Testa mot org-nr" (§ 11.8): hämtar och visar vad providern tolkade för ett
+// bolag UTAN att skriva något. Syftet är att verifiera fältmappningen mot en
+// riktig leverantörsrespons innan portföljen synkas — därför visas även
+// normaliserarens PII-fria noteringar om vad som saknades.
+export function RegistryLookupForm({ providerSlug, providerName, registryParts, partEndpoints, pricing, pricingHref }: Props) {
+  const [state, formAction, pending] = useActionState(previewRegistryLookupAction, initialState);
+  const c = state.company;
+  // Felsökning mot live: hela svaret + noteringarna i DevTools-konsolen.
+  useEffect(() => {
+    if (!state.company && !state.error) return;
+    logRegistryDiagnostics({
+      title: `${providerName}: Testa mot org-nr`,
+      error: state.error,
+      notes: state.company ? [{ label: state.company.name || state.company.org_nr, notes: state.company.notes }] : [],
+      data: state.company
+        ? {
+            'Begärda delar': state.requestedParts,
+            'Hämtade delar': state.company.fetchedParts,
+            'Inga uppgifter hos leverantören (404)': state.company.noRecordParts,
+            Kostnad: state.cost,
+            'Tolkat svar': state.company
+          }
+        : undefined
+    });
+  }, [state, providerName]);
+  const showPicker = registryParts.length > 1;
+  const selection = useRegistryPartSelection(providerSlug, registryParts);
+  const nothingSelected = showPicker && selection.selected.length === 0;
+  // Visa bara sektioner för delar som begärdes — en del som inte valdes har
+  // inte anropats och ska inte se ut som ett tomt svar.
+  const asked = state.requestedParts ?? registryParts;
+  const askedOwnership = asked.includes('group_structure') || asked.includes('beneficial_owners');
+
+  return (
+    <section className="rounded-2xl border border-default bg-surface px-5 py-5">
+      <h2 className="text-[14px] font-semibold text-foreground">Testa mot org-nr</h2>
+      <p className="mt-1 text-[12px] text-foreground-muted">
+        Hämtar ett bolag från {providerName} och visar exakt vad som skulle skrivas till
+        bolagskortet — utan att spara något. Fungerar för vilket svenskt aktiebolag som
+        helst, även bolag som inte finns i plattformen. Kör detta på ett känt bolag innan du
+        synkar hela portföljen.
+      </p>
+      <form action={formAction} className="mt-3 flex flex-col gap-3">
+        <input type="hidden" name="provider_slug" value={providerSlug} />
+        {showPicker && (
+          <RegistryPartsPicker
+            supported={registryParts}
+            selected={selection.selected}
+            onToggle={selection.toggle}
+            onSetAll={selection.setAll}
+            endpoints={partEndpoints}
+            providerName={providerName}
+            hint="Bara de valda API:erna anropas. Inget sparas."
+            disabled={pending}
+            pricing={pricing}
+            companies={1}
+            costContext="Ett bolag — det org-nr du anger."
+            pricingHref={pricingHref}
+          />
+        )}
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-wider text-foreground-muted">
+              Organisationsnummer
+            </span>
+            <input
+              name="org_nr"
+              placeholder="559572-8790"
+              className="mt-1 block w-48 rounded-xl border border-default bg-canvas px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-movexum-pastell-lila dark:focus:ring-movexum-morklila"
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={pending || nothingSelected}
+            className="rounded-xl border border-strong px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-canvas-subtle disabled:cursor-wait disabled:opacity-60"
+          >
+            {pending ? 'Hämtar…' : 'Hämta'}
+          </button>
+        </div>
+      </form>
+
+      {state.error && (
+        <p className="mt-3 rounded-xl bg-movexum-pastell-orange px-3 py-2 text-xs text-movexum-morkorange dark:bg-movexum-morkorange/30 dark:text-movexum-pastell-orange">
+          {state.error}
+        </p>
+      )}
+
+      {c && state.cost && (
+        <p className="mt-3 rounded-xl border border-default bg-canvas-subtle px-3 py-2 text-[12px] text-foreground mx-tnum">
+          <span className="font-semibold">Detta uppslag kostade:</span> {state.cost.parts.length}{' '}
+          {state.cost.parts.length === 1 ? 'del' : 'delar'} = {formatRegistryCost(state.cost)} (uppskattning enligt angivna
+          priser — {providerName}s faktura är facit).
+        </p>
+      )}
+
+      {c && (
+        <div className="mt-4 space-y-4 text-[13px]">
+          {asked.includes('basic') && (
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
+                Grunddata {c.name ? `— ${c.name}` : ''}
+              </p>
+              <dl className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-2">
+                {Object.entries(c.startup).length === 0 && (
+                  <dd className="text-foreground-muted">Inga fält kunde tolkas.</dd>
+                )}
+                {Object.entries(c.startup).map(([k, v]) => (
+                  <div key={k} className="flex justify-between gap-3 border-b border-default py-1">
+                    <dt className="text-foreground-subtle">{k}</dt>
+                    <dd className="text-right text-foreground">{String(v)}</dd>
+                  </div>
+                ))}
+              </dl>
+              {c.sni && c.sni.length > 0 && (
+                <p className="mt-2 text-[12.5px] text-foreground">
+                  <span className="font-semibold text-foreground-subtle">SNI-koder: </span>
+                  {c.sni.map((x, i) => (
+                    <span key={x.code} className="mx-tnum">
+                      {i > 0 ? ' · ' : ''}
+                      {x.code}
+                      {x.text ? ` ${x.text}` : ''}
+                      {x.primary && c.sni!.length > 1 ? ' (huvudsaklig)' : ''}
+                    </span>
+                  ))}
+                </p>
+              )}
+              {c.isPersonal && (
+                <p className="mt-2 text-xs text-foreground-muted">
+                  Enskild firma — org-nr är ett personnummer och exkluderas ur AI-kontexten.
+                </p>
+              )}
+            </div>
+          )}
+
+          {asked.includes('financials') && (
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
+                Bokslut ({c.financials.length} år)
+              </p>
+              {c.financials.length === 0 ? (
+                <p className="mt-1 text-foreground-muted">Inga årsrader i svaret.</p>
+              ) : (
+                <div className="mt-2 overflow-x-auto rounded-xl border border-default">
+                  <table className="w-full text-[12px]">
+                    <thead className="bg-canvas-subtle text-left text-foreground-subtle">
+                      <tr>
+                        <th className="px-3 py-2 font-medium">År</th>
+                        <th className="px-3 py-2 font-medium">Omsättning</th>
+                        <th className="px-3 py-2 font-medium">Anställda</th>
+                        <th className="px-3 py-2 font-medium">Balansomslutning</th>
+                        <th className="px-3 py-2 font-medium">Eget kapital</th>
+                        <th className="px-3 py-2 font-medium">Utdelning</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {c.financials.map((f) => (
+                        <tr key={f.year} className="border-t border-default">
+                          <td className="px-3 py-2 font-medium text-foreground">{f.year}</td>
+                          <td className="px-3 py-2 text-foreground-muted">{sek(f.revenue_sek)}</td>
+                          <td className="px-3 py-2 text-foreground-muted">{f.employees ?? '–'}</td>
+                          <td className="px-3 py-2 text-foreground-muted">{sek(f.balance_sheet_sek)}</td>
+                          <td className="px-3 py-2 text-foreground-muted">{sek(f.equity_sek)}</td>
+                          <td className="px-3 py-2 text-foreground-muted">
+                            {f.dividend_reported ? sek(f.dividend_sek ?? 0) : '–'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {askedOwnership && (
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
+                Ägarbild ({c.ownership.length} rader)
+              </p>
+              {c.ownership.length === 0 ? (
+                <p className="mt-1 text-foreground-muted">
+                  Inga ägare/innehav i svaret (fristående bolag, eller källan levererar ingen ägarbild).
+                </p>
+              ) : (
+                <ul className="mt-2 divide-y divide-default rounded-xl border border-default">
+                  {c.ownership.map((o, i) => (
+                    <li key={i} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                      <span className="text-foreground">
+                        <span className="mr-2 rounded-md bg-canvas-muted px-1.5 py-0.5 text-[10.5px] font-medium text-foreground-muted">
+                          {o.direction === 'owner' ? 'Ägare' : 'Innehav'}
+                        </span>
+                        {o.owner_kind === 'person' ? o.person_name || 'Fysisk person (namn saknas i svaret)' : o.name || o.org_nr || 'Okänd'}
+                        <span className="ml-2 text-foreground-subtle">
+                          {OWNER_KIND_LABEL[o.owner_kind] || o.owner_kind}
+                          {o.indirect ? ' · indirekt' : ''}
+                          {o.part ? ` · ${REGISTRY_PART_META[o.part].label}` : ''}
+                        </span>
+                      </span>
+                      <span className="text-foreground-muted">
+                        {pct(o.capital_pct) ||
+                          (typeof o.pct_min === 'number' && typeof o.pct_max === 'number'
+                            ? `${o.pct_min}–${o.pct_max} %`
+                            : '–')}
+                        {o.control_basis ? ` · ${CONTROL_LABEL[o.control_basis] || o.control_basis}` : ''}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {asked.includes('owner_engagements') && (
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
+                Ägarnas andra bolag ({c.ownerEngagements?.length ?? 0} huvudmän)
+              </p>
+              {!c.ownerEngagements || c.ownerEngagements.length === 0 ? (
+                <p className="mt-1 text-foreground-muted">Inga fysiska huvudmän att söka (se noteringarna).</p>
+              ) : (
+                <div className="mt-2 space-y-2">
+                  {c.ownerEngagements.map((p, i) => (
+                    <div key={i} className="rounded-xl border border-default">
+                      <p className="bg-canvas-subtle px-3 py-1.5 text-[12.5px] font-semibold text-foreground">
+                        {p.person_name || 'Huvudman (namn saknas i svaret)'}
+                        <span className="ml-2 font-normal text-foreground-muted">
+                          {p.status === 'ok'
+                            ? `${p.companies.length} andra bolag`
+                            : p.status === 'none'
+                              ? 'inga andra bolag i registret'
+                              : `kunde inte sökas: ${p.reason ?? 'okänt fel'}`}
+                        </span>
+                      </p>
+                      {p.companies.length > 0 && (
+                        <ul className="divide-y divide-default">
+                          {p.companies.map((co, j) => (
+                            <li key={j} className="flex flex-wrap justify-between gap-2 px-3 py-1.5 text-[12px]">
+                              <span className="text-foreground">
+                                {co.name || '–'}
+                                {co.org_nr ? <span className="ml-2 text-foreground-subtle mx-tnum">{co.org_nr}</span> : null}
+                                <span className="block text-foreground-muted mx-tnum">
+                                  {co.basic?.sni?.length
+                                    ? `SNI ${co.basic.sni.map((x) => `${x.code}${x.text ? ` ${x.text}` : ''}`).join(' · ')}`
+                                    : co.note || 'SNI-kod saknas'}
+                                </span>
+                              </span>
+                              <span className="text-foreground-muted mx-tnum">
+                                {pct(co.capital_pct) ||
+                                  (typeof co.pct_min === 'number' && typeof co.pct_max === 'number' ? `${co.pct_min}–${co.pct_max} %` : '–')}
+                                {co.control_basis ? ` · ${CONTROL_LABEL[co.control_basis] || co.control_basis}` : ''}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {c.notes.length > 0 && (
+            <div className="rounded-xl border border-default bg-canvas-subtle px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground-subtle">
+                Noteringar från tolkningen
+              </p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[12px] text-foreground-muted">
+                {c.notes.map((n, i) => (
+                  <li key={i}>{n}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
