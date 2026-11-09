@@ -3,6 +3,7 @@
 // Dokumentation hanteras numera i en egen panel (MissionDocuments, § 29).
 // Server-komponent. Stage-knappar och form använder server actions.
 
+import Link from 'next/link';
 import { Chip, Avatar, Meta, Icon } from '@/components/proto';
 import { advanceStageFormAction, updateMissionStatusFormAction } from '@/lib/actions/missions';
 import type { Mission, MissionStage, MissionStatus } from '@platform/shared';
@@ -93,9 +94,17 @@ export function MissionFlow({ mission, currentUserId, canAdvance }: {
           <Chip variant={statusVariant(mission.status)} mono dot>
             {STATUS_LABELS[mission.status]}
           </Chip>
+          {/* Teamkortet (/uppdrag/<id>) bär tavlan, dokumentationen,
+              kommentarerna och Aktiviteter & mål (§ 29.4, § 29.8) — flödesvyn
+              är bara en översikt, så vägen dit ska alltid synas. */}
+          <Link href={`/uppdrag/${mission.id}`} className="mx-btn mx-sm">
+            Öppna teamkortet <Icon name="arrow" size={12} />
+          </Link>
         </div>
         <h2 className="mx-disp" style={{ fontSize: 22, fontWeight: 500, letterSpacing: -0.3 }}>
-          {mission.title}
+          <Link href={`/uppdrag/${mission.id}`} className="hover:underline" style={{ color: 'inherit' }}>
+            {mission.title}
+          </Link>
         </h2>
         {mission.description && (
           <p className="mx-t-13 mx-muted mx-mt-2" style={{ lineHeight: 1.5 }}>
