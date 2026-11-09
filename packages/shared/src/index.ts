@@ -1978,6 +1978,7 @@ export interface OrgKnowledgeChunk {
 }
 export * from './kth-irl';
 export * from './excellence-irl';
+export * from './program-stages';
 
 export * from './user-activity';
 export * from './howspace';
