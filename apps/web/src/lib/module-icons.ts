@@ -24,6 +24,7 @@ export const MODULE_ICONS: Record<string, string> = {
   events: 'spark',
   community: 'people',
   education: 'cap',
+  howspace: 'globe',
   rapporter: 'doc',
   agenter: 'bolt',
   insights: 'graph',
