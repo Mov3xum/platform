@@ -1265,6 +1265,9 @@ const REQUIRED_APP_FIELDS = [
   // Meriter ur avslutade team (§ 29.7, migration 1700000179): utan fältet
   // tappas behovet på nya team tyst och meriterna blir alltid 0.
   { collection: 'missions', fields: ['needed_tags'] },
+  // Team → aktiviteter → mål (§ 29.8, migration 1700000212): utan fälten
+  // "sparas" teamets aktiviteter tyst bort och målen på teamkortet blir tomma.
+  { collection: 'missions', fields: ['wheel_items', 'events'] },
   // Stödcheckar (§ 46, migrationer 1700000168/170): uppföljningskort länkas via
   // tasks.support_check_application; bokföringsspåren länkar tillbaka till ansökan.
   { collection: 'tasks', fields: ['support_check_application'] },

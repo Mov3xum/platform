@@ -1154,6 +1154,10 @@ export interface Mission {
   artifacts_json: MissionArtifact[];
   /** Hashtags teamet sattes ihop för (§ 29.7, migration 1700000179) — meriter ur avslutade team. */
   needed_tags?: string[];
+  /** Årshjulsposter teamet arbetar med (§ 29.8, migration 1700000212) — målen härleds ur dem. */
+  wheel_items?: string[];
+  /** Event teamet arbetar med (§ 29.8, migration 1700000212). */
+  events?: string[];
   accent?: string;
   created: string;
   updated: string;
@@ -1869,6 +1873,7 @@ export * from './followup-rules';
 export * from './metrics';
 export * from './goals';
 export * from './goal-activities';
+export * from './mission-activities';
 export * from './goals-import';
 export {
   SURVEY_TEMPLATES as COMPASS_SURVEY_TEMPLATES,

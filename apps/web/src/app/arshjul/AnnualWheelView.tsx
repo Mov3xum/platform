@@ -85,6 +85,8 @@ import {
 import type { AssignableResource } from '@/lib/assignments/types';
 import type { ActivityIndicatorOption } from '@/lib/goals/activities';
 import { ActivityGoalPanel } from '@/components/activities/ActivityGoalPanel';
+import { LinkedTeams } from '@/components/missions/LinkedTeams';
+import type { MissionRef } from '@/lib/missions/activities.server';
 import {
   createAnnualWheelCategoryAction,
   createAnnualWheelItemAction,
@@ -130,6 +132,8 @@ interface Props {
   goalOptions?: ActivityIndicatorOption[];
   /** Event som genomför respektive post (wheel_item → event). */
   eventsByItem?: Record<string, { id: string; name: string }[]>;
+  /** Tvärfunktionella team som arbetar med respektive post (§ 29.8). */
+  teamsByItem?: Record<string, MissionRef[]>;
 }
 
 interface FormState {
@@ -207,7 +211,8 @@ export function AnnualWheelView({
   readNotice = null,
   openItemId = null,
   goalOptions = [],
-  eventsByItem = {}
+  eventsByItem = {},
+  teamsByItem = {}
 }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -1063,18 +1068,26 @@ export function AnnualWheelView({
           goalPanel={(() => {
             const saved = form.id ? items.find((i) => i.id === form.id) : undefined;
             if (!saved) return null;
+            const teams = teamsByItem[saved.id] ?? [];
             return (
-              <ActivityGoalPanel
-                kind="annual_wheel"
-                id={saved.id}
-                options={goalOptions}
-                selected={saved.goal_indicators ?? []}
-                plannedParticipants={saved.planned_participants ?? null}
-                outcome={isActivityOutcome(saved.outcome_verdict) ? saved.outcome_verdict : null}
-                completedAt={saved.completed_at}
-                viaEvents={eventsByItem[saved.id]}
-                canEdit={canEdit}
-              />
+              <>
+                {teams.length > 0 ? (
+                  <div className="border-b border-default pb-3">
+                    <LinkedTeams teams={teams} compact />
+                  </div>
+                ) : null}
+                <ActivityGoalPanel
+                  kind="annual_wheel"
+                  id={saved.id}
+                  options={goalOptions}
+                  selected={saved.goal_indicators ?? []}
+                  plannedParticipants={saved.planned_participants ?? null}
+                  outcome={isActivityOutcome(saved.outcome_verdict) ? saved.outcome_verdict : null}
+                  completedAt={saved.completed_at}
+                  viaEvents={eventsByItem[saved.id]}
+                  canEdit={canEdit}
+                />
+              </>
             );
           })()}
         />

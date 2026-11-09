@@ -20,6 +20,8 @@ import { FollowUpSurveys } from '@/components/surveys/FollowUpSurveys';
 import { getRecordInTenant } from '@/lib/core/write/helpers';
 import { listActivityIndicatorOptions } from '@/lib/goals/activities';
 import { ActivityGoalPanel } from '@/components/activities/ActivityGoalPanel';
+import { LinkedTeams } from '@/components/missions/LinkedTeams';
+import { loadMissionsForActivity } from '@/lib/missions/activities.server';
 import {
   rsvpOpen,
   eventSeatsTaken,
@@ -115,6 +117,8 @@ export default async function EventDetailPage({
       )
     : null;
   const goalOptions = await listActivityIndicatorOptions(pb, user.tenant);
+  // Team som arbetar med eventet (§ 29.8) — läses med användarens token.
+  const linkedTeams = await loadMissionsForActivity(pb, user.tenant, 'event', event.id);
 
   const funnelData = eventSignupFunnel(signups).map((f) => ({
     ...f,
@@ -394,6 +398,11 @@ export default async function EventDetailPage({
 
       <SectionHead title="Mål & genomförande" label="verksamhetsplan" />
       <Card style={{ padding: 16 }}>
+        {linkedTeams.length > 0 ? (
+          <div className="mb-4 border-b border-default pb-3">
+            <LinkedTeams teams={linkedTeams} />
+          </div>
+        ) : null}
         <ActivityGoalPanel
           kind="event"
           id={event.id}

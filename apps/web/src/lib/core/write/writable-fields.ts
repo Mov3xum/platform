@@ -139,6 +139,21 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
   // Event (§ 53.4): samma koppling/plan/utfall som årshjulsposterna, för
   // eventansvariga (createRule-kretsen). Agenten skapar event men rör inte målen.
   incubator_events: activityGoalFields(EVENT_MANAGE),
+  // Team → aktiviteter (§ 29.8): vilka årshjulsposter/event ett
+  // tvärfunktionellt team arbetar med. Målen härleds ur aktiviteterna (§ 53.4)
+  // och är därmed verksamhetsplanens siffror — kopplingen görs av en människa
+  // på teamkortet (dessutom krävs ledning eller teamets lead, prövas i
+  // skrivlagret). Agenten skapar uppdrag som utkast men rör inte kopplingen.
+  missions: {
+    wheel_items: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Teamets aktiviteter kopplas av en människa på teamkortet.' }
+    },
+    events: {
+      user: { kind: 'roles', roles: STAFF_FULL },
+      agent: { kind: 'deny', reason: 'Teamets aktiviteter kopplas av en människa på teamkortet.' }
+    }
+  },
   // Startupkompassens intag-moduler (§ 23, § 31). Ren modulkonfiguration —
   // ingen besökardata, ingen PII. Publiceringsfälten (`is_active`,
   // `public_url_enabled`) är MEDVETET agent-nekade: att lägga ut en modul

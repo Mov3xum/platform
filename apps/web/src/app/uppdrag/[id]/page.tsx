@@ -25,6 +25,9 @@ import { TeamCompetencePanel, type TeamMemberView } from './TeamCompetencePanel'
 import { MissionTaskBoard } from './MissionTaskBoard';
 import { MissionDocuments, type MissionDocView } from './MissionDocuments';
 import { FollowUpSurveys } from '@/components/surveys/FollowUpSurveys';
+import { MissionActivitiesPanel } from '@/components/missions/MissionActivitiesPanel';
+import { listMissionActivityOptions, loadMissionActivities } from '@/lib/missions/activities.server';
+import { stockholmDateKey } from '@platform/shared';
 import {
   loadCompetenceTagVocabulary,
   loadStaffProfiles,
@@ -237,6 +240,14 @@ export default async function MissionDetailPage({
     /* fail-soft: ej migrerat schema → tom lista */
   }
 
+  // ── Aktiviteter & mål (§ 29.8): teamets årshjulsposter/event + målen de
+  // bidrar till, härledda ur aktiviteternas kopplingar (§ 53.4). Valen för
+  // pickern läses bara när läsaren får koppla. Allt med användarens token.
+  const activitiesView = await loadMissionActivities(pb, user.tenant, mission);
+  const activityOptions = ctx.canEdit
+    ? await listMissionActivityOptions(pb, user.tenant, activitiesView.activities)
+    : [];
+
   // Team-medlemmar med kompetenser (för panelen)
   const usersByIdLabel = new Map(users.map((u) => [u.id, u.label]));
   const teamMembers: TeamMemberView[] = participantsForUi.map((p) => {
@@ -353,6 +364,15 @@ export default async function MissionDetailPage({
               canManage={boardCanManage}
             />
           </section>
+          <MissionActivitiesPanel
+            missionId={mission.id}
+            activities={activitiesView.activities}
+            goals={activitiesView.goals}
+            options={activityOptions}
+            notice={activitiesView.notice}
+            today={stockholmDateKey(new Date())}
+            canEdit={ctx.canEdit}
+          />
           <MissionComments
             missionId={mission.id}
             comments={comments}

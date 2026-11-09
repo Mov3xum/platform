@@ -441,6 +441,16 @@ function mapRow(
     }
 
     case 'missions': {
+      // Team → aktiviteter (§ 29.8): kopplingen ändrades på teamkortet.
+      if (row.field === 'activities') {
+        const n = (Number(after.wheel_items) || 0) + (Number(after.events) || 0);
+        return {
+          title: `Team: "${str(after.title) || 'utan titel'}" kopplades till ${n} aktivitet${n === 1 ? '' : 'er'}`,
+          detail: Array.isArray(after.activities) ? after.activities.filter(Boolean).slice(0, 4).join(', ') || undefined : undefined,
+          href: row.record_id ? `/uppdrag/${row.record_id}` : '/uppdrag',
+          icon: 'target'
+        };
+      }
       const startupName = str(after.startup_name);
       return {
         title: `Nytt uppdrag: "${str(after.title) || 'utan titel'}"`,

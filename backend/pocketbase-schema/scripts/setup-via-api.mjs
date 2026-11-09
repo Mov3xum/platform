@@ -5708,6 +5708,18 @@ await patchCollection('goal_indicators', [
     ]);
   }
 }
+// Migration 1700000212 (§ 29.8): team → aktiviteter — årshjulsposter och event
+// teamet arbetar med (målen härleds ur aktiviteterna, § 53.4). Mål-
+// kollektionernas id slås upp på NAMN (§ 30.4 p. 1) — ligger därför här,
+// efter att annual_wheel_items och incubator_events skapats ovan.
+{
+  const wheelCol = await pb.collections.getOne('annual_wheel_items');
+  const eventsCol = await pb.collections.getOne('incubator_events');
+  await patchCollection('missions', [
+    { name: 'wheel_items', type: 'relation', required: false, collectionId: wheelCol.id, cascadeDelete: false, minSelect: 0, maxSelect: 50 },
+    { name: 'events', type: 'relation', required: false, collectionId: eventsCol.id, cascadeDelete: false, minSelect: 0, maxSelect: 50 }
+  ]);
+}
 // Migration 1700000161: goals.kind (övergripande/personligt) + owner_user —
 // ensureCollection lägger bara till fält på en NY collection.
 await patchCollection('goals', [
