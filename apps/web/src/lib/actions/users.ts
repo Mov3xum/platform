@@ -5,7 +5,7 @@ import type PocketBase from 'pocketbase';
 import { type Role } from '@platform/shared';
 import { requireUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { getSuperuserPb } from '@/lib/integrations/credentials';
+import { getSuperuserPb, SUPERUSER_MISSING_MESSAGE } from '@/lib/integrations/credentials';
 import {
   assignableRolesFor,
   canManageUser,
@@ -92,7 +92,7 @@ export async function createUserAction(
       status: 'error',
       message:
         suResult.reason === 'missing_credentials'
-          ? 'Serverfel: superuser-credentials saknas. Kontakta administratören.'
+          ? SUPERUSER_MISSING_MESSAGE
           : 'Serverfel: kunde inte autentisera superuser.'
     };
   }
@@ -244,7 +244,7 @@ export async function updateUserStartupLinkAction(
       status: 'error',
       message:
         suResult.reason === 'missing_credentials'
-          ? 'Serverfel: superuser-credentials saknas. Kontakta administratören.'
+          ? SUPERUSER_MISSING_MESSAGE
           : 'Serverfel: kunde inte autentisera superuser.'
     };
   }
@@ -354,7 +354,7 @@ async function loadManagedTarget(
       ok: false,
       message:
         suResult.reason === 'missing_credentials'
-          ? 'Serverfel: superuser-credentials saknas. Kontakta administratören.'
+          ? SUPERUSER_MISSING_MESSAGE
           : 'Serverfel: kunde inte autentisera superuser.'
     };
   }

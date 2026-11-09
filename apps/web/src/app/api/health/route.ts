@@ -3,6 +3,7 @@ import { describePbUrlSource, getServerPbUrl } from '@/lib/pb-url';
 import { probePocketBase, probeSummary } from '@/lib/pb-health';
 import { resolveSender, senderAddress } from '@/lib/mail-sender';
 import { isEmailConfigured, resendKeyLooksValid } from '@/lib/email';
+import { describeSuperuserConfig } from '@/lib/integrations/credentials';
 
 // Driftdiagnos för web-appen (publik, undantagen auth-redirect + force-https i
 // middleware). Svarar vilken PocketBase-adress servern resolvat för sin miljö
@@ -44,6 +45,12 @@ export async function GET(): Promise<NextResponse> {
         link_secret_set: Boolean((process.env.MOVEXUM_UNSUBSCRIBE_SECRET ?? process.env.MOVEXUM_INTEGRATION_KEY ?? '').trim()),
         app_url_set: Boolean((process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? '').trim())
       },
+      // Superuser-paret för web-appen (users-skrivningar, publika kompass-
+      // sidor, superuser-reserv § 21.3). `configured: false` = "Skapa
+      // användare" svarar "superuser-credentials saknas": sätt
+      // POCKETBASE_SUPERUSER_EMAIL/PASSWORD på web-appen i Coolify + omdeploy.
+      // Bara om paret finns och via vilket namn — aldrig värden.
+      superuser: describeSuperuserConfig(),
       checked_at: new Date().toISOString()
     },
     { status: ok ? 200 : 503, headers: { 'cache-control': 'no-store' } }

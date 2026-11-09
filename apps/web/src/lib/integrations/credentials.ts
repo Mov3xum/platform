@@ -79,12 +79,44 @@ async function authenticateSuperuser(email: string, password: string): Promise<S
   return { ok: false, reason: 'auth_failed' };
 }
 
+/**
+ * Finns superuser-credentials i DEN HÄR containerns miljö? PII-/secret-fri:
+ * svarar bara om paret är satt och via vilket namn. Visas i `/api/health`
+ * (§ 7) så "superuser-credentials saknas" går att skilja från fel lösenord
+ * utan containeråtkomst. Incident 2026-11-09: "Skapa användare" i produktion
+ * svarade "superuser-credentials saknas" — GitHub-secreten
+ * `PB_SU_PASSWORD_PRODUCTION` läses bara av CI-workflows och når aldrig
+ * web-containern; `POCKETBASE_SUPERUSER_EMAIL/PASSWORD` måste sättas på
+ * web-appen i Coolify (per miljö) följt av omdeploy.
+ */
+export function describeSuperuserConfig(
+  env: NodeJS.ProcessEnv = process.env
+): { configured: boolean; via: 'POCKETBASE_SUPERUSER_*' | 'PB_SU_*' | null } {
+  const primary = Boolean(env.POCKETBASE_SUPERUSER_EMAIL && env.POCKETBASE_SUPERUSER_PASSWORD);
+  if (primary) return { configured: true, via: 'POCKETBASE_SUPERUSER_*' };
+  const legacy = Boolean(env.PB_SU_EMAIL && env.PB_SU_PASSWORD);
+  if (legacy) return { configured: true, via: 'PB_SU_*' };
+  return { configured: false, via: null };
+}
+
+/**
+ * Felmeddelande till staff när superuser-paret saknas. Namnger nycklarna och
+ * var de sätts — "kontakta administratören" gav ingen ledtråd om att det var
+ * web-appens Coolify-env, inte PocketBase eller GitHub, som saknade dem.
+ */
+export const SUPERUSER_MISSING_MESSAGE =
+  'Serverfel: superuser-credentials saknas i web-appen. Sätt POCKETBASE_SUPERUSER_EMAIL och ' +
+  'POCKETBASE_SUPERUSER_PASSWORD på web-appen i Coolify för den här miljön och deploya om ' +
+  '(kontrollera med /api/health → superuser.configured).';
+
 export async function getSuperuserPb(): Promise<SuperuserPbResult> {
   const email =
     process.env.POCKETBASE_SUPERUSER_EMAIL || process.env.PB_SU_EMAIL;
   const password =
     process.env.POCKETBASE_SUPERUSER_PASSWORD || process.env.PB_SU_PASSWORD;
   if (!email || !password) {
+    // PII-fri logg: bara att paret saknas (aldrig värden) — syns i containerloggen.
+    console.error('[superuser] credentials missing in web-app env (POCKETBASE_SUPERUSER_EMAIL/PASSWORD)');
     return { ok: false, reason: 'missing_credentials' };
   }
 
