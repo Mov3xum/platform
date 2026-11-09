@@ -3,7 +3,7 @@
 import { actionErrorMessage } from '@/lib/action-error';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useMemo, useState, useTransition } from 'react';
+import { useEffect, useMemo, useState, useTransition } from 'react';
 import {
   CONTACT_CATEGORIES,
   CONTACT_CATEGORY_LABELS,
@@ -12,6 +12,7 @@ import {
   type ContactCategory, type ContactEmailStatus, CONTACT_EMAIL_STATUS_LABELS } from '@platform/shared';
 import { Icon } from '@/components/proto';
 import { changeContactGroupMembersAction } from '@/lib/actions/contact-groups';
+import { setContactCategoryAction } from '@/lib/actions/contacts';
 import { CategoryChip, Initials, Notice, OwnerChip, btnGhost, btnPrimary, inputClass } from './ui';
 
 /** Serialiserad kontaktrad för klientlistan — INGA kontaktuppgifter (e-post/telefon) skickas till listan. */
@@ -49,13 +50,79 @@ function norm(s: string): string {
   return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
 
+/**
+ * Kategorikolumnen i listan (§ 45.9). Ledningen får en dropdown och sätter
+ * kategorin direkt på raden — optimistiskt, återställs om servern nekar;
+ * övrig personal ser chipen. Säkerhetsgränsen är server-actionen.
+ */
+function CategoryCell({
+  contact,
+  editable,
+  onError
+}: {
+  contact: BrowserContact;
+  editable: boolean;
+  onError: (text: string) => void;
+}) {
+  const router = useRouter();
+  const [value, setValue] = useState<ContactCategory | ''>(contact.category ?? '');
+  const [pending, startTransition] = useTransition();
+  useEffect(() => {
+    setValue(contact.category ?? '');
+  }, [contact.category]);
+
+  if (!editable) return <CategoryChip category={contact.category} />;
+
+  const name = contactDisplayName(contact);
+  return (
+    <select
+      value={value}
+      disabled={pending}
+      aria-label={`Kategori för ${name}`}
+      title="Kategori (bara ledningen ändrar här)"
+      onChange={(e) => {
+        const next = e.target.value as ContactCategory | '';
+        const prev = value;
+        setValue(next);
+        startTransition(async () => {
+          let res: Awaited<ReturnType<typeof setContactCategoryAction>>;
+          try {
+            res = await setContactCategoryAction(contact.id, next);
+          } catch (err) {
+            res = { error: actionErrorMessage(err, 'Kategorin kunde inte sparas. Ladda om sidan och försök igen.') };
+          }
+          if (res.error) {
+            setValue(prev);
+            onError(`${name}: ${res.error}`);
+            return;
+          }
+          router.refresh();
+        });
+      }}
+      className={`${inputClass} w-auto max-w-[180px] py-1 text-xs ${
+        value
+          ? 'border-transparent bg-movexum-pastell-lila font-semibold text-movexum-morklila dark:bg-movexum-morklila/40 dark:text-movexum-pastell-lila'
+          : 'text-foreground-subtle'
+      }`}
+    >
+      <option value="">Ingen kategori</option>
+      {CONTACT_CATEGORIES.map((c) => (
+        <option key={c} value={c}>
+          {CONTACT_CATEGORY_LABELS[c]}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 export function ContactsBrowser({
   contacts,
   owners,
   meId,
   groups: groupList = [],
   initialGroup = '',
-  canEdit = false
+  canEdit = false,
+  canSetCategory = false
 }: {
   contacts: BrowserContact[];
   owners: BrowserOwner[];
@@ -63,6 +130,8 @@ export function ContactsBrowser({
   groups?: BrowserGroup[];
   initialGroup?: string;
   canEdit?: boolean;
+  /** Ledningen (admin/incubator_lead) sätter kategori direkt i listan; övriga ser chipen. */
+  canSetCategory?: boolean;
 }) {
   const router = useRouter();
   const [q, setQ] = useState('');
@@ -290,13 +359,12 @@ export function ContactsBrowser({
                       )}
                       <Link
                         href={`/kontakter/${c.id}`}
-                        className="flex min-w-0 flex-1 flex-wrap items-center gap-3 px-4 py-3 transition hover:bg-canvas-subtle"
+                        className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 transition hover:bg-canvas-subtle"
                       >
                         <Initials name={name} />
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="font-medium text-foreground">{name}</span>
-                            <CategoryChip category={c.category} />
                             {c.emailStatus && (
                               <span
                                 className="inline-flex rounded-full bg-movexum-pastell-orange px-2 py-0.5 text-[11px] font-semibold text-movexum-morkorange"
@@ -338,7 +406,11 @@ export function ContactsBrowser({
                             </span>
                           )}
                         </div>
-                        <div className="flex flex-wrap items-center gap-1">
+                      </Link>
+                      {/* Kategori + ägare ligger utanför länken så dropdownen kan användas utan att raden öppnas. */}
+                      <div className="flex shrink-0 items-center gap-2 py-3 pr-2">
+                        <CategoryCell contact={c} editable={canSetCategory} onError={(text) => setMessage({ kind: 'error', text })} />
+                        <div className="hidden flex-wrap items-center gap-1 md:flex">
                           {c.owners.length === 0 ? (
                             <span className="text-[11px] text-foreground-subtle">Ingen ägare</span>
                           ) : (
@@ -350,6 +422,12 @@ export function ContactsBrowser({
                             <span className="text-[11px] text-foreground-subtle">+{c.owners.length - 3}</span>
                           )}
                         </div>
+                      </div>
+                      <Link
+                        href={`/kontakter/${c.id}`}
+                        aria-label={`Öppna ${name}`}
+                        className="flex items-center self-stretch pr-4 pl-1 text-foreground-subtle transition hover:text-foreground"
+                      >
                         <Icon name="chevron" size={14} />
                       </Link>
                     </li>

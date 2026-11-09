@@ -7889,6 +7889,20 @@ i inbjudningarnas dropdown (§ 53.5).
 - **GDPR/AI:** gruppen bär inga personuppgifter (namn/beskrivning
   personnummer-saneras ändå). Ingen ny AI-väg; riskklass n/a.
 
+### 45.9 Kategori direkt i listan — ledningens snabbväg (2026-11-09)
+
+Ledningen (admin/incubator_lead) sätter en kontakts **kategori** med en
+dropdown direkt på raden i `/kontakter` (`CategoryCell` i
+`ContactsBrowser.tsx`), så hela boken kan kategoriseras på en gång utan att
+öppna varje kontaktkort. Övrig personal ser kategorin som chip och ändrar den
+på kontaktkortet som förut. Server-actionen `setContactCategoryAction`
+(`lib/actions/contacts.ts`) kräver `CONTACT_BOOK_ADMIN_ROLES` och går genom
+`updateContactFields` (whitelist, `normalizeContactCategory`, audit i
+`agent_actions`) — klienten är aldrig gränsen. Valet sparas optimistiskt och
+återställs med felet synligt om servern nekar. Kategori och ägare ligger
+utanför radens länk så dropdownen kan användas utan att kortet öppnas. Inga
+nya fält eller datavägar; riskklass n/a.
+
 ## 46. Stödcheckar — digital ansökan, bedömning, finansiering & bokföring
 
 ### 46.1 Översikt

@@ -12,7 +12,7 @@ import {
   listContacts,
   listStaffUsers
 } from '@/lib/contacts/data';
-import { CONTACT_BOOK_ROLES } from '@platform/shared';
+import { CONTACT_BOOK_ADMIN_ROLES, CONTACT_BOOK_ROLES } from '@platform/shared';
 import { ContactsBrowser, type BrowserContact } from './ContactsBrowser';
 import { GdprBanner, Notice, btnGhost, btnPrimary } from './ui';
 
@@ -23,6 +23,8 @@ export default async function KontakterPage({ searchParams }: { searchParams: Pr
   const user = await requireUser();
   if (!canAccessModuleForUser(user.roles, 'kontakter', user.enabledModules)) redirect('/hem');
   const canEdit = hasRole(user.roles, [...CONTACT_BOOK_ROLES]);
+  // Kategori direkt i listan är ledningens snabbväg (§ 45.9); övriga ser chipen.
+  const canSetCategory = hasRole(user.roles, [...CONTACT_BOOK_ADMIN_ROLES]);
   const pb = await getServerPb();
 
   const [contacts, staff, pending, myPending, links, groupRes] = await Promise.all([
@@ -122,6 +124,7 @@ export default async function KontakterPage({ searchParams }: { searchParams: Pr
             groups={groupRes.groups.map((g) => ({ id: g.id, name: g.name }))}
             initialGroup={typeof grupp === 'string' ? grupp : ''}
             canEdit={canEdit}
+            canSetCategory={canSetCategory}
           />
         )}
         <GdprBanner />
