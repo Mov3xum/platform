@@ -119,6 +119,34 @@ export function canDeleteImpact(roles: readonly Role[] | undefined): boolean {
   return (roles ?? []).some((r) => IMPACT_DELETE_ROLES.includes(r));
 }
 
+/**
+ * Bolagsmedlemmens åtkomst (CLAUDE.md § 56, 2026-11-09): en `startup_member`
+ * får arbeta med analysen för det EGNA bolaget (`users.linked_startups`) —
+ * driva stegen, svara på frågor, ladda upp underlag — men aldrig skapa nya
+ * bolag, byta bolagsuppgifter/ansvarig eller ta bort analysen. Koden är
+ * gränsen; PB-RLS speglar (migration 1700000213).
+ */
+export interface StartupScopedUser {
+  roles: readonly Role[] | undefined;
+  linkedStartups?: readonly string[];
+}
+
+export function isLinkedStartupMember(user: StartupScopedUser, startupId: string | null | undefined): boolean {
+  if (!startupId) return false;
+  if (!(user.roles ?? []).includes('startup_member')) return false;
+  return (user.linkedStartups ?? []).includes(startupId);
+}
+
+/** Får driva analysen för just detta bolag: Movexum-personal eller länkad bolagsmedlem. */
+export function canWorkOnImpactCompany(user: StartupScopedUser, startupId: string | null | undefined): boolean {
+  return canManageImpact(user.roles) || isLinkedStartupMember(user, startupId);
+}
+
+/** Får läsa analysen för just detta bolag: staff/observer eller länkad bolagsmedlem. */
+export function canViewImpactCompany(user: StartupScopedUser, startupId: string | null | undefined): boolean {
+  return canReadImpact(user.roles) || isLinkedStartupMember(user, startupId);
+}
+
 // ─── Etiketter (originalets ordalydelser) ───────────────────────────────────
 
 export const IMPACT_COMPANY_STATUS_LABELS: Record<ImpactCompanyStatus, string> = {

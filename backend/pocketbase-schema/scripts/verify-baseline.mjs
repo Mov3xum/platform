@@ -462,7 +462,22 @@ const MUST_SCOPE_TO_MEMBER = [
   'screening_requests',
   // Studenter & talang (§ 54): bolaget ser sina egna behov och intressen.
   'talent_needs',
-  'talent_interests'
+  'talent_interests',
+  // Impact Navigator (§ 56) och Export Lab (§ 58), migration 1700000213:
+  // bolagsmedlemmen läser och driver det EGNA bolagets analys (direkt
+  // `startup` eller via `assessment.startup`).
+  'sustainability_assessments',
+  'sustainability_gap_questions',
+  'sustainability_materiality_overrides',
+  'sustainability_update_events',
+  'sustainability_documents',
+  'sustainability_ai_jobs',
+  'export_assessments',
+  'export_gap_questions',
+  'export_market_reviews',
+  'export_update_events',
+  'export_documents',
+  'export_ai_jobs'
 ];
 
 const MUST_BE_STAFF_OR_OBSERVER = [
@@ -534,24 +549,6 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   // Ärenden i Bedömning excellens (§ 51.10, migration 1700000200) — internt
   // statsstödsunderlag per bolag → staff/observer-only.
   'screening_cases',
-  // Hållbarhetsanalysen (§ 56, migration 1700000206): personalverktyg utan
-  // bolagsmedlemsyta — analyser, frågor, dokumenttext och AI-körningar är
-  // internt underlag → staff/observer-only.
-  'sustainability_assessments',
-  'sustainability_gap_questions',
-  'sustainability_materiality_overrides',
-  'sustainability_update_events',
-  'sustainability_documents',
-  'sustainability_ai_jobs',
-  // Export Lab (§ 58, migration 1700000210): personalverktyg utan
-  // bolagsmedlemsyta — exportprofiler, planer, frågor, dokumenttext och
-  // AI-körningar är internt underlag → staff/observer-only.
-  'export_assessments',
-  'export_gap_questions',
-  'export_market_reviews',
-  'export_update_events',
-  'export_documents',
-  'export_ai_jobs',
   // Studentprofiler (§ 54, migration 1700000201): privatpersoners uppgifter —
   // bolaget ser dem BARA anonymiserat via kod, aldrig via RLS.
   'student_profiles',

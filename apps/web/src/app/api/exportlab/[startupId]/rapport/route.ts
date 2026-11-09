@@ -4,7 +4,7 @@ import { canAccessModuleForUser } from '@/lib/rbac';
 import { phaseLabels } from '@/lib/labels';
 import { getExportCompany, latestCompletePlan, listExportAssessments } from '@/lib/export-lab/data';
 import { buildExportPlanPdf, exportPlanFilename } from '@/lib/export-lab/report-pdf';
-import { canReadExportLab, type StartupPhase } from '@platform/shared';
+import { canViewExportCompany, type StartupPhase } from '@platform/shared';
 
 /** Exportera exportplanen som PDF (CLAUDE.md § 58). Senaste färdiga planen; läser med användarens token (RLS staff/observer) + modulgrinden. */
 export const runtime = 'nodejs';
@@ -15,9 +15,11 @@ const ID_RE = /^[a-zA-Z0-9_-]{6,64}$/;
 export async function GET(_request: Request, context: { params: Promise<{ startupId: string }> }): Promise<Response> {
   const user = await getCurrentUser();
   if (!user) return new NextResponse('Ej inloggad.', { status: 401 });
-  if (!canAccessModuleForUser(user.roles, 'exportlab', user.enabledModules) || !canReadExportLab(user.roles)) return new NextResponse('Åtkomst nekad.', { status: 403 });
+  if (!canAccessModuleForUser(user.roles, 'exportlab', user.enabledModules)) return new NextResponse('Åtkomst nekad.', { status: 403 });
   const { startupId } = await context.params;
   if (!ID_RE.test(startupId)) return new NextResponse('Rapport saknas.', { status: 404 });
+  // Staff/observer för alla bolag, bolagsmedlem för sitt eget (§ 58).
+  if (!canViewExportCompany(user, startupId)) return new NextResponse('Åtkomst nekad.', { status: 403 });
 
   const pb = await getServerPb();
   const company = await getExportCompany(pb, user.tenant, startupId);

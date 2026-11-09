@@ -3277,7 +3277,10 @@ list/view; createRules orörda; `:each ?=` per § 21.3):
   list/view scopas till den egna tenanten (`@request.auth.tenant = id`).
 - **Medlem-scopade (egen-bolag) tillagda:** `agreement_signatures`,
   `de_minimis_units`/`de_minimis_unit_orgnr` (via `unit.startup`)/`de_minimis_stod`,
-  `event_signups` (sitt-bolags + inbjuden `user`).
+  `event_signups` (sitt-bolags + inbjuden `user`). **2026-11 (migration
+  1700000213):** Impact Navigators och Export Labs tolv kollektioner
+  (`sustainability_*`/`export_*`; frågor, justeringar och marknadsval via
+  `assessment.startup`) — se § 56/§ 58.
 - **Staff/observer-only tillagda:** `contacts` (PII inkl. art. 9 `gender`),
   `service_time_entries`, `startup_service_costs`,
   `startup_readiness_assessments`, `startup_state_aid_periods`,
@@ -3467,7 +3470,8 @@ Låset förnyas inte — `fn` måste bli klar inom TTL (15 s).
 
 En ren `startup_member` ska **inte** se samma vyer som Movexum-personal.
 Bolagsmedlemmen får en egen, kortare rail med bara det som rör det egna
-bolaget under inkubatorprogrammet. Railen har exakt fem rubriker:
+bolaget under inkubatorprogrammet. Railen har sju rubriker (fem
+ursprungliga + Impact Navigator och Export Lab sedan 2026-11):
 
 1. **Min översikt** (`/min-oversikt`) — information om inkubatorprogrammet och
    Movexum, bolagsstatus, de minimis-status, egna uppgifter ("nödvändiga
@@ -3481,7 +3485,11 @@ bolaget under inkubatorprogrammet. Railen har exakt fem rubriker:
    dokument som blivit output av aktiviteter (utbildningsdokument), plus
    medlemmens egna genererade/uppladdade filer.
 4. **De minimis** (`/de-minimis`) — befintlig modul (§ 20).
-5. **Community** (`/inflode/community`) — platshållare för co-startup-interaktion ("bara
+5. **Impact Navigator** (`/impactnavigator`) — bolagets egen
+   hållbarhetsanalys (§ 56); medlemmen landar direkt i sitt bolag.
+6. **Export Lab** (`/exportlab`) — bolagets egen internationaliseringsanalys
+   (§ 58); samma mönster.
+7. **Community** (`/inflode/community`) — platshållare för co-startup-interaktion ("bara
    rubriken för nu"). Alumni-/partnerdatan är staff/observer-only (§ 21).
 
 ### 22.2 Implementation
@@ -6576,7 +6584,8 @@ roll**:
   saknas i sidmenyn. Skriv därför en idempotent datamigration som lägger till
   id:t i befintliga listor för de roller vars standard innehåller det
   (precedens: **1700000174** för `projekt`/`checkar`, **1700000177** för
-  `onskemal`, **1700000180** för `min_profil` — union, tar aldrig bort,
+  `onskemal`, **1700000180** för `min_profil`, **1700000214** för
+  `impactnavigator`/`exportlab` till `startup_member` — union, tar aldrig bort,
   rör inte `null`). Ingen spegling i `setup-via-api.mjs` (data, inte schema).
 - **Säkerhetsgräns oförändrad:** `canAccessModuleForUser(roles, id,
   enabledModules)` = `canAccessModule` (rollen, `rolesAllowed`) **och**
@@ -10763,16 +10772,42 @@ kodkarta: `docs/integrations/impact-navigator.md`.
   PB v0.23.4:s tysta regel-nekande; PB:s fältfel svaras i klartext). Filproxy
   `/api/impactnavigator/documents/[id]/file` (protected, tenant-scopad).
   Importerade dokument har text men ingen fil (originalen låg i Vercel Blob).
-- **RLS (§ 21.3):** list/view staff/observer; create pinnar tenant +
-  skapare (§ 21.8; bara tenant där källan saknar skapare — frågor,
-  AI-körningar); update Movexum-personal; delete ledning. Bolagsmedlemmar
-  har ingen yta. `sustainability_documents` + `sustainability_ai_jobs`
+- **RLS (§ 21.3):** list/view staff/observer ELLER länkad bolagsmedlem
+  (`linked_startups:each ?= startup`, för frågor/justeringar via
+  `assessment.startup`); create pinnar tenant + skapare (§ 21.8; bara
+  tenant där källan saknar skapare — frågor, AI-körningar); update
+  Movexum-personal eller länkad medlem; delete ledning (medlemmen raderar
+  bara egna uppladdade dokument). Member-scopet kom med migration
+  **1700000213** (var staff/observer-only i 1700000206) och ligger i
+  `MUST_SCOPE_TO_MEMBER` i `verify-baseline.mjs`. `sustainability_documents` + `sustainability_ai_jobs`
   **denylistade för AI-chatten** (`redaction.ts`, fritext ur
   tredjepartsmaterial); analyser/frågor/justeringar/uppdateringar läsbara
   under RLS + fältmaskning. Speglat i `setup-via-api.mjs` (defs +
   `FORCE_CREATE_RULES` + `startups`-patch; self-relationen via
   `patchCollection`), asserterat i `verify-baseline.mjs` (must-exist,
   `MUST_BE_STAFF_OR_OBSERVER`, `REQUIRED_APP_FIELDS`, `AI_DENYLIST`).
+- **Bolagsmedlemmens åtkomst (2026-11, beslut: "ska vara åtkomstbar för
+  startup-rollen").** En länkad `startup_member` **läser och driver analysen
+  för sitt eget bolag**: kör stegen, granskar väsentligheten, besvarar
+  kompletteringsfrågor, laddar upp och tar bort egna dokument, skriver
+  anteckningar och uppdaterar bolagets hållbarhetsresa. Medlemmen kan INTE
+  skapa nya bolag (`/impactnavigator/ny` låser "befintligt bolagskort" till
+  det egna via `allowNewCompany={false}`), inte ändra bolagsuppgifter
+  (fas/bransch/ansvarig — `updateCompanyDetailsAction` godtar bara
+  `journeyText` från medlem; inställningssidan är läs-läge), inte radera
+  analysen och ser varken portföljlistan eller `/jamfor` (redirect).
+  Landningssidan skickar medlemmen direkt till sitt bolags dashboard (eller
+  `ny?startup=<eget>` när ingen analys finns; utan länkat bolag →
+  `/min-oversikt`). Gränsen är de rena, enhetstestade hjälparna
+  `canWorkOnImpactCompany`/`canViewImpactCompany` (`@platform/shared`
+  impact-navigator.ts: staff-roll ELLER `isLinkedStartupMember`) som
+  server-actions (`requireWorker(startupId)`), skalet (`notFound` för annat
+  bolag), API-routerna (documents, file, rapport) och sidorna alla använder —
+  klienten är aldrig gränsen, RLS (ovan) är den hårda. Modulen ligger i
+  `MEMBER_RAIL` (§ 22) och i `DEFAULT_MODULES_BY_ROLE.startup_member`;
+  migration **1700000214** backfillar den i sparade sidmenyer (§ 36.3). AI-
+  flödet och riskklassen är oförändrade (samma körningar, samma banner,
+  människa-i-loopen); `agent_actions`-audit bär medlemmens id som aktör.
 - **Utseende (2026-11):** modulen bär originalets GRÖNA accent och
   sidomeny — inom profilen: Movexum grön/mörkgrön/ljusgrön/pastell grön
   (`components/impact/ui.ts`), aldrig emerald/stone; fokusringar § 3.4;
@@ -10899,9 +10934,18 @@ domänmodell, egna promptar och Movexums BLÅ toner (zon `export`,
   (`EXPORT_LAB_AI_MOCK_MODE=true`, eller automatiskt utan `MISTRAL_API_KEY`
   utanför produktion); tidsgräns/omförsök per steg via
   `EXPORT_LAB_<STEG>_TIMEOUT_MS`/`_MAX_RETRIES`.
-- **RLS (§ 21.3):** list/view staff/observer på alla sex kollektionerna;
-  create pinnar tenant + skapare (§ 21.8); update Movexum-personal; delete
-  ledning. Bolagsmedlemmar har ingen yta. `export_documents` + `export_ai_jobs`
+- **RLS (§ 21.3):** list/view staff/observer ELLER länkad bolagsmedlem på
+  alla sex kollektionerna (frågor och marknadsval via `assessment.startup`);
+  create pinnar tenant + skapare (§ 21.8); update Movexum-personal eller
+  länkad medlem; delete ledning (medlemmen raderar bara egna dokument).
+  Member-scopet kom med migration **1700000213**. **Bolagsmedlemmens
+  åtkomst (2026-11)** speglar § 56 exakt: medlemmen driver analysen för sitt
+  eget bolag (steg, marknadsval, gapsvar, egna dokument, ambition/önskade
+  marknader via `updateExportCompanyDetailsAction`), men skapar inte bolag,
+  ändrar inte fas/ansvarig, raderar inte analysen och ser inte portföljen;
+  gränsen är `canWorkOnExportCompany`/`canViewExportCompany`
+  (`export-lab.ts`, samma `isLinkedStartupMember`), modulen ligger i
+  `MEMBER_RAIL` och backfillas av **1700000214**. `export_documents` + `export_ai_jobs`
   **denylistade för AI-chatten** (`redaction.ts`); profiler/planer/frågor är
   läsbara under RLS + fältmaskning.
 - **GDPR § 5 / riskklass:** bolagsdata, ingen individbedömning; all fritext

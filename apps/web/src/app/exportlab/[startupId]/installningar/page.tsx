@@ -3,6 +3,7 @@ import { ExportCompanyShell, loadExportCompanyContext } from '@/lib/export-lab/s
 import { latestCompletePlan, listExportAssignableStaff } from '@/lib/export-lab/data';
 import { exportHref } from '@/lib/export-lab/tabs';
 import { btnSecondary, eyebrow } from '@/components/exportlab/ui';
+import { canManageExportLab } from '@platform/shared';
 import { CompanySettingsForm } from './CompanySettingsForm';
 
 export const dynamic = 'force-dynamic';
@@ -10,7 +11,9 @@ export const dynamic = 'force-dynamic';
 export default async function CompanySettingsPage({ params }: { params: Promise<{ startupId: string }> }) {
   const { startupId } = await params;
   const ctx = await loadExportCompanyContext(startupId);
-  const staff = ctx.canManage ? await listExportAssignableStaff(ctx.pb, ctx.user.tenant) : [];
+  // Bolagsuppgifter, fas och ansvarig ändras av personal — en bolagsmedlem ser dem bara (§ 58).
+  const canEditDetails = canManageExportLab(ctx.user.roles);
+  const staff = canEditDetails ? await listExportAssignableStaff(ctx.pb, ctx.user.tenant) : [];
   const hasPlan = Boolean(latestCompletePlan(ctx.assessments));
 
   return (
@@ -28,7 +31,7 @@ export default async function CompanySettingsPage({ params }: { params: Promise<
             </Link>
           ) : null}
         </div>
-        <CompanySettingsForm company={ctx.company} staff={staff} canManage={ctx.canManage} canDelete={ctx.canDelete} versions={ctx.assessments.length} />
+        <CompanySettingsForm company={ctx.company} staff={staff} canManage={canEditDetails} canDelete={ctx.canDelete} versions={ctx.assessments.length} />
       </div>
     </ExportCompanyShell>
   );

@@ -4748,12 +4748,20 @@ await ensureCollection({
 // källan saknar skapare); update Movexum-personal; delete ledning.
 // `sustainability_documents` + `sustainability_ai_jobs` är denylistade för AI.
 // Enum-värden MÅSTE spegla scripts/lib/sustainability-import.mjs.
-const SUST_RULES = (createRule) => ({
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+// Migration 1700000213 (2026-11-09): bolagsmedlemmar får läsa och arbeta med
+// det EGNA bolagets analys (§ 21.3: `:each ?=`; `scope` = `startup` eller
+// `assessment.startup` där kollektionen saknar eget startup-fält). Dokument får
+// dessutom tas bort av den länkade medlem som laddade upp dem. Koden
+// (`canWorkOnImpactCompany`/`canWorkOnExportCompany`) är primär gräns.
+const SUST_MEMBER = (scope) => `(@request.auth.roles:each ?= "startup_member" && @request.auth.linked_startups:each ?= ${scope})`;
+const SUST_RULES = (createRule, scope = 'startup', memberDeletesOwn = null) => ({
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || ${SUST_MEMBER(scope)})`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || ${SUST_MEMBER(scope)})`,
   createRule,
-  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_EACH} || ${SUST_MEMBER(scope)})`,
+  deleteRule: memberDeletesOwn
+    ? `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_LEAD_EACH} || (${SUST_MEMBER(scope)} && ${memberDeletesOwn} = @request.auth.id))`
+    : `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
 });
 const SUST_CREATE_PINNED = (field) => `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.${field} = @request.auth.id`;
 const SUST_CREATE_TENANT = `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant`;
@@ -4822,7 +4830,7 @@ await ensureCollection({
     'CREATE INDEX idx_sustainability_gap_questions_assessment ON sustainability_gap_questions (assessment)',
     "CREATE UNIQUE INDEX idx_sustainability_gap_questions_external ON sustainability_gap_questions (tenant, external_id) WHERE external_id != ''"
   ],
-  ...SUST_RULES(SUST_CREATE_TENANT)
+  ...SUST_RULES(SUST_CREATE_TENANT, 'assessment.startup')
 });
 
 await ensureCollection({
@@ -4844,7 +4852,7 @@ await ensureCollection({
     'CREATE INDEX idx_sustainability_overrides_assessment ON sustainability_materiality_overrides (assessment)',
     "CREATE UNIQUE INDEX idx_sustainability_overrides_external ON sustainability_materiality_overrides (tenant, external_id) WHERE external_id != ''"
   ],
-  ...SUST_RULES(SUST_CREATE_PINNED('created_by'))
+  ...SUST_RULES(SUST_CREATE_PINNED('created_by'), 'assessment.startup')
 });
 
 await ensureCollection({
@@ -4911,7 +4919,7 @@ await ensureCollection({
     'CREATE INDEX idx_sustainability_documents_assessment ON sustainability_documents (assessment)',
     "CREATE UNIQUE INDEX idx_sustainability_documents_external ON sustainability_documents (tenant, external_id) WHERE external_id != ''"
   ],
-  ...SUST_RULES(SUST_CREATE_PINNED('uploaded_by'))
+  ...SUST_RULES(SUST_CREATE_PINNED('uploaded_by'), 'startup', 'uploaded_by')
 });
 
 await ensureCollection({
@@ -4994,7 +5002,7 @@ await ensureCollection({
     { name: 'answer_text', type: 'text', required: false, max: 10000 }
   ],
   indexes: ['CREATE INDEX idx_export_gap_questions_assessment ON export_gap_questions (assessment)'],
-  ...SUST_RULES(SUST_CREATE_TENANT)
+  ...SUST_RULES(SUST_CREATE_TENANT, 'assessment.startup')
 });
 
 await ensureCollection({
@@ -5013,7 +5021,7 @@ await ensureCollection({
     SUST_USER('created_by')
   ],
   indexes: ['CREATE INDEX idx_export_market_reviews_assessment ON export_market_reviews (assessment)'],
-  ...SUST_RULES(SUST_CREATE_PINNED('created_by'))
+  ...SUST_RULES(SUST_CREATE_PINNED('created_by'), 'assessment.startup')
 });
 
 await ensureCollection({
@@ -5070,7 +5078,7 @@ await ensureCollection({
     { name: 'extraction_warning', type: 'text', required: false, max: 500 }
   ],
   indexes: ['CREATE INDEX idx_export_documents_startup ON export_documents (startup)', 'CREATE INDEX idx_export_documents_assessment ON export_documents (assessment)'],
-  ...SUST_RULES(SUST_CREATE_PINNED('uploaded_by'))
+  ...SUST_RULES(SUST_CREATE_PINNED('uploaded_by'), 'startup', 'uploaded_by')
 });
 
 await ensureCollection({
