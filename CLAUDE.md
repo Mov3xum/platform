@@ -9766,6 +9766,20 @@ team (TMRL), affär (BRL), IPR (IPRL), finansiering (FRL), teknik (TRL)**.
   `/startups/<id>/utveckling#irl`.
 - **Riskklass (EU AI Act):** n/a — mänsklig bedömning + deterministisk
   presentation, ingen AI-inferens.
+- **Portföljöversikten (`/startups`, 2026-11) läser IRL härifrån.** IRL-
+  snittet, tabellens IRL-kolumn och raden **Per programsteg** (Formation ·
+  Incubation · Acceleration · Alumni) hämtas ALLTID ur bolagens KTH IRL-
+  bedömningar — samma rad per bolag som bolagskortets radar visar som
+  senaste (`irlAverageByStartup`/`summarizeProgramStages` i den rena,
+  enhetstestade `packages/shared/src/program-stages.ts`); `startups.irl_level`
+  är bara reserv i tabellen när ett bolag saknar bedömning. Stegen mappar
+  faserna (`PROGRAM_STAGE_PHASES`: inflöde/lead/Boost Chamber ⇒ Formation,
+  prescale/acceleration ⇒ Acceleration; `paus` står utanför och räknas
+  separat) och länkar till kortvyn (`/startups/inkubator?stage=<steg>`).
+  Sprint X-medelvärdena ("Medelvärden — 4 axlar") och status-chipsen är
+  borttagna från översikten. Läsningen går med användarens token (RLS
+  § 21.7: medlem ⇒ tom lista ⇒ reservvärdet); kapning/läsfel visas som
+  banner (§ 33.4). Ingen ny dataväg; riskklass n/a.
 
 
 ---

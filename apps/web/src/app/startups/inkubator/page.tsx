@@ -4,7 +4,14 @@ import { redirect } from 'next/navigation';
 import { listForTenant } from '@/lib/pb.server';
 import { requireUser } from '@/lib/auth.server';
 import { canAccessModule, hasRole } from '@/lib/rbac';
-import { ALL_PHASES, type StartupPhase } from '@platform/shared';
+import {
+  ALL_PHASES,
+  PROGRAM_STAGES,
+  PROGRAM_STAGE_LABEL,
+  PROGRAM_STAGE_PHASES,
+  type ProgramStage,
+  type StartupPhase
+} from '@platform/shared';
 import { phaseLabels, type StartupStatus } from '@/lib/labels';
 import { PageShell } from '@/components/PageShell';
 import { Icon } from '@/components/proto';
@@ -26,10 +33,19 @@ interface StartupRecord {
   expand?: { coaches?: { id: string; name: string }[] };
 }
 
-function buildFilter(q?: string, phase?: string, status?: string): string | undefined {
+function isProgramStage(v: string | undefined): v is ProgramStage {
+  return Boolean(v) && (PROGRAM_STAGES as readonly string[]).includes(String(v));
+}
+
+function buildFilter(q?: string, phase?: string, status?: string, stage?: string): string | undefined {
   const parts: string[] = [];
   if (q) parts.push(`name ~ "${escFilter(q)}"`);
   if (phase && ALL_PHASES.includes(phase as StartupPhase)) parts.push(`phase = "${phase}"`);
+  // Programsteg från portföljöversikten (§ 52/program-stages): faserna
+  // kommer ur den fasta listan, aldrig ur URL:en.
+  else if (isProgramStage(stage)) {
+    parts.push(`(${PROGRAM_STAGE_PHASES[stage].map((p) => `phase = "${p}"`).join(' || ')})`);
+  }
   if (status && ALLOWED_STATUS.has(status as StartupStatus)) parts.push(`status = "${status}"`);
   return parts.length > 0 ? parts.join(' && ') : undefined;
 }
@@ -50,7 +66,7 @@ function toCardData(s: StartupRecord): StartupCardData {
 export default async function InkubatorPage({
   searchParams
 }: {
-  searchParams: Promise<{ q?: string; phase?: string; status?: string; view?: string }>;
+  searchParams: Promise<{ q?: string; phase?: string; status?: string; stage?: string; view?: string }>;
 }) {
   const user = await requireUser();
   if (!canAccessModule(user.roles, 'startups')) redirect('/dashboard');
@@ -58,13 +74,14 @@ export default async function InkubatorPage({
   const canCreate = hasRole(user.roles, ['admin', 'incubator_lead', 'coach']);
   const params = await searchParams;
   const view = params.view === 'list' ? 'list' : 'kanban';
-  const hasFilters = Boolean(params.q || params.phase || params.status);
+  const stage = isProgramStage(params.stage) ? params.stage : undefined;
+  const hasFilters = Boolean(params.q || params.phase || params.status || stage);
 
   let items: StartupRecord[] = [];
   let loadFailed = false;
   try {
     const result = await listForTenant<StartupRecord>('startups', {
-      filter: buildFilter(params.q, params.phase, params.status),
+      filter: buildFilter(params.q, params.phase, params.status, stage),
       sort: 'name',
       perPage: 300,
       expand: 'coaches'
@@ -89,7 +106,7 @@ export default async function InkubatorPage({
 
   const qs = (next: Record<string, string | undefined>) => {
     const sp = new URLSearchParams();
-    const merged = { q: params.q, phase: params.phase, status: params.status, view, ...next };
+    const merged = { q: params.q, phase: params.phase, status: params.status, stage, view, ...next };
     for (const [k, v] of Object.entries(merged)) if (v) sp.set(k, v);
     const s = sp.toString();
     return s ? `/startups/inkubator?${s}` : '/startups/inkubator';
@@ -132,6 +149,7 @@ export default async function InkubatorPage({
       <div className="py-6">
         <form method="get" className="mb-5 flex flex-wrap items-center gap-2 rounded-xl border border-default bg-surface p-2.5">
           <input type="hidden" name="view" value={view} />
+          {stage && <input type="hidden" name="stage" value={stage} />}
           <input
             name="q"
             defaultValue={params.q ?? ''}
@@ -143,8 +161,8 @@ export default async function InkubatorPage({
             defaultValue={params.phase ?? ''}
             className="rounded-lg border border-default bg-canvas-subtle px-3 py-1.5 text-[13px] text-foreground"
           >
-            <option value="">Alla faser</option>
-            {ALL_PHASES.map((p) => (
+            <option value="">{stage ? `Alla faser i ${PROGRAM_STAGE_LABEL[stage]}` : 'Alla faser'}</option>
+            {(stage ? PROGRAM_STAGE_PHASES[stage] : ALL_PHASES).map((p) => (
               <option key={p} value={p}>
                 {phaseLabels[p]}
               </option>
