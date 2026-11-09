@@ -351,7 +351,13 @@ Ingen PII, inga secrets (URL:en finns redan i klientbundeln). Svaret bär
 `pocketbase.resolved_via` = vilken env-nyckel som gav URL:en; `fallback:*`
 eller `NEXT_PUBLIC_POCKETBASE_URL` i produktion betyder att
 `POCKETBASE_URL_PRODUCTION` saknas/felstavad på web-appen (eller att
-`MOVEXUM_ENV` inte är `production`, då läses `_STAGING`-paret).
+`MOVEXUM_ENV` inte är `production`, då läses `_STAGING`-paret). Svaret bär
+även `superuser.configured`/`via` (`describeSuperuserConfig`, aldrig värden):
+`false` betyder att `POCKETBASE_SUPERUSER_EMAIL/PASSWORD` saknas på
+web-appen i Coolify för den miljön — då felar "Skapa användare", rollbyten
+och alla superuser-reserver med "superuser-credentials saknas i web-appen"
+(incident 2026-11-09, produktion). GitHub-secreten `PB_SU_PASSWORD_PRODUCTION`
+når bara CI, aldrig containern.
 **Runtime, inte build-time:** Next.js inlinar `process.env.NEXT_PUBLIC_*`
 vid bygget (även i serverbundlar), så `pb-url.ts` läser alla nycklar via
 beräknad nyckel (`readEnv`) — ett värde satt i Coolify vinner därmed alltid
