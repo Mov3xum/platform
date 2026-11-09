@@ -12,7 +12,7 @@ import { ImpactStatusChip } from '@/components/impact/chips';
 import { ImpactSideNav } from '@/components/impact/ImpactSideNav';
 import { Icon } from '@/components/proto/Icon';
 import { btnPrimary, btnSecondary, noticeWarn } from '@/components/impact/ui';
-import { canDeleteImpact, canManageImpact, type StartupPhase } from '@platform/shared';
+import { canDeleteImpact, canViewImpactCompany, canWorkOnImpactCompany, type StartupPhase } from '@platform/shared';
 import { getImpactCompany, latestCompleteAssessment, listAssessments, type ImpactAssessment, type ImpactCompany } from './data';
 import { IMPACT_PAGES, impactHref, impactReportHref } from './tabs';
 import { CrumbLabels } from '@/components/proto/CrumbLabels';
@@ -31,11 +31,14 @@ export interface ImpactCompanyContext {
 export async function loadImpactCompanyContext(startupId: string): Promise<ImpactCompanyContext> {
   const user = await requireUser();
   if (!canAccessModuleForUser(user.roles, 'impactnavigator', user.enabledModules)) redirect('/hem');
+  // Bolagsmedlem når bara det egna bolaget (§ 56; RLS på `startups` ger
+  // dessutom tomt för andra bolag — koden är den uttryckliga gränsen).
+  if (!canViewImpactCompany(user, startupId)) notFound();
   const pb = await getServerPb();
   const company = await getImpactCompany(pb, user.tenant, startupId);
   if (!company) notFound();
   const assessments = await listAssessments(pb, user.tenant, startupId);
-  return { user, pb, company, assessments: assessments.items, assessmentsError: assessments.error, canManage: canManageImpact(user.roles), canDelete: canDeleteImpact(user.roles) };
+  return { user, pb, company, assessments: assessments.items, assessmentsError: assessments.error, canManage: canWorkOnImpactCompany(user, startupId), canDelete: canDeleteImpact(user.roles) };
 }
 
 /**

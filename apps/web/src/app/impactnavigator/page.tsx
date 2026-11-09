@@ -11,7 +11,7 @@ import { AiNoticeBanner } from '@/components/impact/AiNoticeBanner';
 import { AutoSubmitSelect } from '@/components/impact/AutoSubmitSelect';
 import { btnPrimary, btnSecondary, eyebrowAccent, inputClass, labelClass, noticeWarn } from '@/components/impact/ui';
 import { Icon } from '@/components/proto/Icon';
-import { ALL_PHASES, IMPACT_LEVELS, IMPACT_LEVEL_LABELS, canDeleteImpact, canManageImpact, isImpactLevel, type StartupPhase } from '@platform/shared';
+import { ALL_PHASES, IMPACT_LEVELS, IMPACT_LEVEL_LABELS, canDeleteImpact, canManageImpact, canReadImpact, isImpactLevel, type StartupPhase } from '@platform/shared';
 import { DeleteCompanyButton } from './DeleteCompanyButton';
 
 export const dynamic = 'force-dynamic';
@@ -30,6 +30,15 @@ const NOT_ASSESSED = 'NOT_ASSESSED';
 export default async function ImpactNavigatorPage({ searchParams }: { searchParams: Promise<{ q?: string; phase?: string; analysis?: string }> }) {
   const user = await requireUser();
   if (!canAccessModuleForUser(user.roles, 'impactnavigator', user.enabledModules)) redirect('/hem');
+  // En bolagsmedlem har ingen portföljlista — hen landar direkt i det egna
+  // bolagets analys, eller i startformuläret om ingen analys finns ännu (§ 56).
+  if (!canReadImpact(user.roles)) {
+    const own = user.linkedStartups[0];
+    if (!own) redirect('/min-oversikt');
+    const ownPb = await getServerPb();
+    const { latest } = await listImpactCompanies(ownPb, user.tenant);
+    redirect(latest.has(own) ? `/impactnavigator/${own}` : `/impactnavigator/ny?startup=${encodeURIComponent(own)}`);
+  }
   const query = await searchParams;
   const q = (query.q ?? '').trim().slice(0, 120);
   const phase = (ALL_PHASES as readonly string[]).includes(query.phase ?? '') ? (query.phase as StartupPhase) : undefined;

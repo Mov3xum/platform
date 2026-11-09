@@ -49,7 +49,7 @@ export const DEFAULT_MODULES_BY_ROLE: Record<Role, readonly string[]> = {
     'idag', 'inkorg', 'mina_aktiviteter', 'arshjul', 'filer',
     'mal', 'startups', 'kontakter', 'talang', 'de_minimis', 'impactnavigator', 'exportlab', 'checkar', 'projekt', 'events', 'community', 'onskemal'
   ],
-  startup_member: ['min_oversikt', 'mina_aktiviteter', 'filer', 'de_minimis', 'checkar', 'community']
+  startup_member: ['min_oversikt', 'mina_aktiviteter', 'filer', 'de_minimis', 'impactnavigator', 'exportlab', 'checkar', 'community']
 };
 
 /**

@@ -7,7 +7,7 @@ import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { describePbError } from '@/lib/pb-error';
 import { logAgentAction } from '@/lib/core/write';
 import { DOCUMENTS, getAssessment, getGapQuestion, getImpactCompany } from '@/lib/impact/data';
-import { canManageImpact, isImpactUploadStage } from '@platform/shared';
+import { canWorkOnImpactCompany, isImpactUploadStage } from '@platform/shared';
 
 /**
  * Ladda upp underlag till Impact Navigator (CLAUDE.md § 56). Route handler
@@ -57,8 +57,6 @@ const ID_RE = /^[a-zA-Z0-9_-]{6,64}$/;
 export async function POST(request: Request): Promise<Response> {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'Ej inloggad.' }, { status: 401 });
-  if (!canManageImpact(user.roles)) return NextResponse.json({ error: 'Åtkomst nekad.' }, { status: 403 });
-
   const rateKey = `impact-doc:${user.id}`;
   const limited = await checkRateLimit(rateKey, RATE_MAX_PER_USER);
   if (limited.blocked) {
@@ -84,6 +82,8 @@ export async function POST(request: Request): Promise<Response> {
   const gapQuestionId = String(form.get('gap_question_id') ?? '').trim();
   const stage = String(form.get('stage') ?? 'full_information');
   if (!ID_RE.test(startupId)) return NextResponse.json({ error: 'Ogiltigt bolag.' }, { status: 400 });
+  // Personal för alla bolag, bolagsmedlem bara för sitt eget (§ 56).
+  if (!canWorkOnImpactCompany(user, startupId)) return NextResponse.json({ error: 'Åtkomst nekad.' }, { status: 403 });
   if (!isImpactUploadStage(stage)) return NextResponse.json({ error: 'Ogiltigt steg.' }, { status: 400 });
 
   const pb = await getServerPb();

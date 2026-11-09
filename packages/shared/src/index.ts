@@ -1480,6 +1480,8 @@ export const MEMBER_RAIL: { id: string; label: string }[] = [
   { id: 'mina_aktiviteter', label: 'Aktiviteter' },
   { id: 'filer', label: 'Filer' },
   { id: 'de_minimis', label: 'De minimis' },
+  { id: 'impactnavigator', label: 'Impact Navigator' },
+  { id: 'exportlab', label: 'Export Lab' },
   { id: 'community', label: 'Community' }
 ];
 
@@ -1668,7 +1670,7 @@ export const coreModules: ModuleDefinition[] = [
     title: 'Impact Navigator',
     description:
       'AI-stödd hållbarhetsanalys per bolag (CLAUDE.md § 56): väsentliga ESG-aspekter, kompletteringsfrågor, slutanalys med risker, möjligheter och greenwashing-risker, samt versionerade uppdateringar. Beslutsstöd för coachen — människan granskar väsentligheten och slutanalysen.',
-    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer', 'startup_member'],
     route: '/impactnavigator'
   },
   {
@@ -1676,7 +1678,7 @@ export const coreModules: ModuleDefinition[] = [
     title: 'Export Lab',
     description:
       'AI-stödd internationaliseringsanalys per bolag (CLAUDE.md § 58): exportprofil och marknadsurval (Uppsala, Born Global, CAGE), informationsgap, en första exportplan med inträdesform, regelverk, kulturell spelbok och affärsförutsättningar per marknad — kopplad till bolagets KTH IRL. Beslutsstöd för coachen — människan granskar marknaderna och planen.',
-    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer', 'startup_member'],
     route: '/exportlab'
   },
   {

@@ -19,6 +19,7 @@ import {
   type ImpactDashboard,
   type StartupPhase
 } from '@platform/shared';
+import { canReadImpact } from '@platform/shared';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,6 +60,8 @@ interface CompareRow {
 export default async function ComparePage({ searchParams }: { searchParams: Promise<{ sort?: string; dir?: string }> }) {
   const user = await requireUser();
   if (!canAccessModuleForUser(user.roles, 'impactnavigator', user.enabledModules)) redirect('/hem');
+  // Jämförelsen är portföljbred — bolagsmedlemmar (som bara ser sitt eget bolag) skickas till sin analys (§ 56).
+  if (!canReadImpact(user.roles)) redirect('/impactnavigator');
   const query = await searchParams;
   const sort = parseSortKey(query.sort);
   const dir = parseSortDir(query.dir);
