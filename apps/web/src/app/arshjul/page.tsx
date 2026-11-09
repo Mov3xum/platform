@@ -13,6 +13,7 @@ import { ensureAnnualWheelSchema, unrepairableDriftMessage } from '@/lib/annual-
 import { PageShell } from '@/components/PageShell';
 import { AnnualWheelView } from './AnnualWheelView';
 import { listActivityIndicatorOptions } from '@/lib/goals/activities';
+import { loadMissionsByActivity } from '@/lib/missions/activities.server';
 import type { AnnualWheelItem, Role } from '@platform/shared';
 
 export const dynamic = 'force-dynamic';
@@ -145,8 +146,10 @@ export default async function ArshjulPage({
 
   // Mål & genomförande (§ 53.4): indikatorer att koppla till och event som
   // genomför posterna. Fail-soft — utan migrationerna blir båda tomma.
-  const [goalOptions, linkedEvents] = await Promise.all([
+  const [goalOptions, teamsByItem, linkedEvents] = await Promise.all([
     listActivityIndicatorOptions(pb, user.tenant),
+    // Team som arbetar med posterna (§ 29.8) — visas i dialogen, fail-soft.
+    loadMissionsByActivity(pb, user.tenant, 'annual_wheel'),
     pb
       .collection('incubator_events')
       .getFullList<{ id: string; name?: string; wheel_item?: string }>({
@@ -182,6 +185,7 @@ export default async function ArshjulPage({
         openItemId={openItemId}
         goalOptions={goalOptions}
         eventsByItem={eventsByItem}
+        teamsByItem={teamsByItem}
       />
     </PageShell>
   );

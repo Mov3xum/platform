@@ -5247,6 +5247,57 @@ samma dag).**
 
 ---
 
+### 29.8 Team → aktiviteter → mål (2026-11)
+
+Ett tvärfunktionellt team kopplas till **en eller flera aktiviteter** —
+årshjulsposter (§ 30) och/eller event (§ 53) — som i sin tur bidrar till
+**ett eller flera mål** via sina målindikatorer (§ 53.4). Kedjan är
+`missions → aktiviteter → goal_indicators → goals`; teamet lagrar **aldrig
+en egen kopia av målen**, de härleds ur aktiviteterna vid varje läsning så
+inget kan divergera. Panelen **Aktiviteter & mål** på teamkortet
+(`/uppdrag/<id>`) visar aktiviteterna med utfall (planerad / försenad /
+enligt plan / under plan / inställd) och målen de bidrar till, grupperade
+per mål → indikator → "via <aktivitet>". Eventsidan och årshjulets dialog
+visar omvänt vilka team som arbetar med aktiviteten.
+
+| Fil | Syfte |
+|-----|-------|
+| `backend/pocketbase-schema/migrations/1700000212_extend_missions_activities.js` | `missions.wheel_items` (→ `annual_wheel_items`) + `missions.events` (→ `incubator_events`), multi ≤ 50, ingen cascade |
+| `packages/shared/src/mission-activities.ts` (+ `.test.ts`) | REN: nycklar (`aw:<id>`/`ev:<id>`), `splitMissionActivityKeys`, tak, `deriveMissionGoals` (aktiviteter + indikatorer → mål, varje aktivitet en gång per indikator), `summarizeMissionActivities`, sortering |
+| `apps/web/src/lib/core/write/mission-activities.ts` | Skrivlagret `setMissionActivities`: fält-policy + ledning/utfärdare, tenant-verifiering per aktivitet, återläsning mot schema-drift, audit |
+| `apps/web/src/lib/missions/activities.server.ts` | Läsvägen (användarens token): `loadMissionActivities` (event ärver årshjulspostens indikatorer, § 53.4-regeln), `listMissionActivityOptions`, `loadMissionsForActivity`/`loadMissionsByActivity` (omvänd riktning) |
+| `apps/web/src/components/missions/{MissionActivitiesPanel,LinkedTeams}.tsx` | Panelen på teamkortet; chipsen "Team som arbetar med aktiviteten" på eventsidan och i årshjulets dialog |
+
+- **Relationen ligger på teamet** (`wheel_items`/`events`), så en aktivitet
+  kan ha flera team och ett team flera aktiviteter; omvänd läsning filtrerar
+  med `~` på multi-relationen (§ 21.3, aldrig `?=`). En raderad aktivitet
+  nollställs bara i listan (`cascadeDelete: false`); en kopplad aktivitet som
+  inte kan läsas rapporteras som banner, aldrig som "inga aktiviteter".
+- **Behörighet:** koppla = Movexum-personal (`writable-fields.ts`,
+  `missions.wheel_items`/`events`) OCH samma redigeringsrätt som teamkortet
+  (ledning eller teamets utfärdare — speglar `getMissionContext().canEdit`);
+  prövas i skrivlagret, klienten är aldrig gränsen. Läsning via användarens
+  token → § 21-RLS på `missions`, aktiviteterna och målen. **Agenten är
+  nekad** (`agent: deny`): den kan skapa uppdrag som utkast (§ 33) men
+  kopplingen till verksamhetsplanens aktiviteter görs av en människa.
+- **Utfallet och planen ägs av aktiviteten** (§ 53.4) — teamkortet visar dem
+  bara. Markera genomförd/inställd på eventsidan eller i årshjulets dialog;
+  målen i `/mal` räknas därifrån som förut.
+- **Audit:** `agent_actions` (`collection = 'missions'`, `field =
+  'activities'`, PII-fritt: teamets titel, aktiviteternas titlar, antal) →
+  Bolagsnytt/`/aktivitet` "Team: "X" kopplades till N aktiviteter" med länk
+  till teamkortet.
+- **Schema-drift (§ 24.4):** posten läses tillbaka efter skrivning; saknas
+  fälten svarar skrivlagret med ett fel som namnger migration 1700000212.
+  Speglat i `setup-via-api.mjs` (`patchCollection('missions', …)` efter att
+  aktivitetskollektionerna skapats, id på namn § 30.4), asserterat i
+  `verify-baseline.mjs` (`REQUIRED_APP_FIELDS`).
+- **GDPR/riskklass:** relationer mellan verksamhetsdata, ingen PII, ingen
+  AI-inferens → n/a. Inga nya fält i `lib/ai/context.ts`; `missions` är
+  oförändrat läsbar för `query_collection` under RLS.
+
+---
+
 ## 30. Årshjul — Movexums verksamhetskalender (manuell + chatt-styrd)
 
 ### 30.1 Översikt
