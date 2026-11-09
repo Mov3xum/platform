@@ -17,10 +17,14 @@ import {
 } from '@/lib/core/write';
 import { readTableFile } from '@/lib/import/table-file';
 import {
+  CONTACT_BOOK_ADMIN_ROLES,
   CONTACT_BOOK_ROLES,
+  CONTACT_CATEGORY_LABELS,
   dedupeContactImportRows,
+  isContactCategory,
   parseContactImportRows,
   type ContactImportRow,
+  type ContactCategory,
   type ContactRequestDecision,
   type Role
 } from '@platform/shared';
@@ -121,6 +125,36 @@ export async function updateContactAction(_prev: ContactActionState, fd: FormDat
   if (!result.ok) return { error: result.error };
   revalidate(id);
   return { ok: true, id, path: result.value.path, notice: 'Kontakten sparades.' };
+}
+
+/**
+ * Snabbändring av kategori direkt i kontaktlistan (§ 45.9). Bara ledningen
+ * (admin/incubator_lead) — övrig personal ser kategorin men ändrar den på
+ * kontaktkortet. Går genom samma skrivlager som formuläret (whitelist,
+ * validering, audit), så regeln kan inte divergera.
+ */
+export async function setContactCategoryAction(
+  contactId: string,
+  category: string
+): Promise<ContactActionState> {
+  const user = await requireUser();
+  if (!hasRole(user.roles, [...CONTACT_BOOK_ADMIN_ROLES])) {
+    return { error: 'Bara ledningen kan ändra kategori direkt i listan. Öppna kontaktkortet för att redigera.' };
+  }
+  const id = typeof contactId === 'string' ? contactId.trim() : '';
+  if (!id) return { error: 'Kontakt-id saknas.' };
+  const raw = typeof category === 'string' ? category.trim() : '';
+  if (raw && !isContactCategory(raw)) return { error: 'Kategorin är ogiltig.' };
+  const value = raw as ContactCategory | '';
+  const pb = await getServerPb();
+  const result = await updateContactFields(pb, actorOf(user), id, { category: value });
+  if (!result.ok) return { error: result.error };
+  revalidate(id);
+  return {
+    ok: true,
+    id,
+    notice: value ? `Kategorin sattes till ${CONTACT_CATEGORY_LABELS[value]}.` : 'Kategorin togs bort.'
+  };
 }
 
 export async function deleteContactAction(_prev: ContactActionState, fd: FormData): Promise<ContactActionState> {
