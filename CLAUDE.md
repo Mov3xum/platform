@@ -1366,7 +1366,7 @@ och kan renderas av samma UI oavsett leverantör.
 | Provider  | Residency | Riskklass     | Anteckning |
 |-----------|-----------|---------------|------------|
 | Brevo     | FR (EU)   | Minimal       | Ingen AI. Endast aggregerade metrics synkas — inga e-postadresser. |
-| Howspace  | FI (EU)   | Begränsad     | AI-insights faller under art. 50 (transparenskrav). Vi synkar bara aggregerad statistik. |
+| Howspace  | FI (EU)   | Begränsad     | AI-insights faller under art. 50 (transparenskrav). Vi synkar bara workspace-metadata + aggregerad deltagarstatistik (inga namn/e-post), visade på sidan `/howspace` (§ 59). Partner API:t saknar publik dokumentation — bas-URL/sökvägar är överstyrbara och svaren tolkas tolerant. Personalens inloggning sker med SSO direkt mot Howspace (Entra ID), inte via plattformen. |
 | Allabolag | SE        | Minimal       | Publik bolagsdata (org-nr, bolagsform, kommun, årsredovisningar). Ingen AI, inga personuppgifter för aktiebolag. För enskild firma exkluderas org-nr från AI-prompts (§ 9.3). **Status: implemented (stub)** — handler-skelettet skriver direkt till `startups`-registerfält och `startup_financials` (idempotent via unique-index `(startup, year)`). Produktion kräver leverantörsval via `MOVEXUM_ALLABOLAG_PROVIDER`-env (`mock`/`bolagsverket`/`roaring`/`creditsafe`); utan satt env returnerar handler ett tydligt fel. |
 | Roaring   | SE (EU)   | Begränsad     | **Implementerad (2026-09, § 11.8).** Grunddata (inkl. SNI-koder), årsredovisningsposter (omsättning, anställda, **balansomslutning, eget kapital**), koncernstruktur, verklig huvudman och — bara vid uppslag — ägarnas andra bolag (verklig huvudman per person, § 51.11). Ingen AI. Verklig huvudman är personuppgifter hos leverantören — vi läser dem transient och lagrar BARA andel/kontrollintervall + kontrollgrund (fast vokabulär) per person, aldrig namn/personnummer/födelsedatum. De anonyma raderna är **pseudonymiserade personuppgifter** (ett fåmansbolag med en ägare på 75–100 % är indirekt identifierbart mot det publika registret), inte "inga personuppgifter" — DPIA-bedömning + DPA med Roaring AB och kontroll att licensen täcker ändamålet (åtkomsten till registret över verkliga huvudmän är begränsad efter EU-domstolens dom C-37/20) krävs före produktion. |
 | Bolagsverket | SE (myndighet) | Minimal | **Implementerad (2026-09, § 11.8).** API för värdefulla datamängder (kostnadsfritt, OAuth2): officiellt namn, bolagsform, registreringsdatum, SNI, status, säte. Ingen ägarbild, inga bokslutsposter. Primärkälla för grunddata. |
@@ -10906,3 +10906,66 @@ domänmodell, egna promptar och Movexums BLÅ toner (zon `export`,
   uppföljningsmotorn (§ 40) för planens åtgärder. Trösklarna i
   `EXPORT_IRL_GATES` är en arbetshypotes att justera när Movexum samlat
   erfarenhet.
+
+---
+
+## 59. Howspace — egen sida med direktlänkar och SSO (2026-11)
+
+`/howspace` (modul `howspace`, "Innehåll"-railen bredvid Utbildning; staff +
+observer) samlar Movexums workspaces i Howspace (finskt, EU — program,
+workshops, kohort-lärande) på en sida: deltagarstatistik, senaste synk och
+**ett klick in i rätt workspace**. Själva arbetet sker i Howspace, som öppnas
+i egen flik. Sidan läser det Howspace-integrationen (§ 11.3) synkat till
+`integration_records` med användarens token (RLS § 21: staff/observer).
+
+**Två beslut som styr designen (2026-11-09):**
+- **Inloggningen löses med SSO mot Howspace, inte av plattformen.** Howspace
+  stödjer SAML2/OIDC (Entra ID, Google, Okta …) + SCIM; Movexum kör
+  Microsoft. Entra ID konfigureras i Howspaces Account Manager (Settings →
+  Single Sign-On) — därefter är varje länk från plattformen inloggad med ett
+  klick. Plattformen är ingen identitetsleverantör (PocketBase e-post/
+  lösenord) och ska inte bli en för detta. `HOWSPACE_APP_URL` (Coolify, t.ex.
+  `https://movexum.howspace.com`; default `https://app.howspace.com`) är
+  landningsadressen för knappen "Öppna Howspace" och för workspace-länkar utan
+  egen URL; valideras mot https + `*.howspace.com`.
+- **Ingen inbäddning (iframe).** Vår CSP sätter `frame-src 'none'` (§ 10.3),
+  de flesta SaaS förbjuder att bli inramade, och tredjepartskakor i iframes
+  gör inloggningen opålitlig i Safari/Chrome. Sidan är en startpunkt, inte ett
+  skal runt Howspace.
+
+**Kritiska filer:**
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/howspace.ts` (+ `.test.ts`) | REN: tolerant tolkning av leverantörens svar (`extractHowspaceList`, `parseHowspaceWorkspace`, `parseHowspaceStats` — kandidatlistor, bara räknare), säkra länkar (`safeHowspaceUrl`: https + `*.howspace.com`), sammanslagning till sidans rader (`buildHowspaceWorkspaceViews`), statusetiketter |
+| `apps/web/src/lib/integrations/providers/howspace/{client,normalize,handler}.ts` (+ `normalize.test.ts`) | Providern: bas-URL ur credential-fältet `base_url` → env `HOWSPACE_API_BASE_URL` → default, allowlist via `assertAllowedBaseUrl`; sökvägar env-överstyrbara (`HOWSPACE_ME_PATH`, `HOWSPACE_WORKSPACES_PATH`, `HOWSPACE_STATS_PATH` med `{id}`); ett 200-svar utan tolkbara workspaces är ett FEL (aldrig tyst tom synk); statistik fail-soft per workspace |
+| `apps/web/src/lib/howspace/data.ts` | Enda läsvägen (`loadHowspaceOverview`, bundna filter, fail-soft med `notices`) |
+| `apps/web/src/app/howspace/page.tsx` | Sidan: kort per workspace med Deltagare/Aktiva + "Öppna i Howspace", rail med status/SSO-not/administration, tydliga lägen "inte anslutet" / "inga workspaces synkade" med länk till `/integrationer/howspace` för ledningen |
+| `backend/pocketbase-schema/migrations/1700000213_update_howspace_provider.js` | Katalogtexten rättad (den gamla lovade "post-summaries" som aldrig byggts); upsert på slug |
+| `backend/pocketbase-schema/migrations/1700000214_backfill_enabled_modules_howspace.js` | Backfill av `users.enabled_modules` (§ 36.3-läxan) |
+
+**Driftsättning (det som inte är kod):** (1) bekräfta med Howspace att
+paketet täcker Partner API (ingår i vissa paket, annars tillägg med
+månadsavgift) och SSO; hämta API-nyckel, API-URL och dokumentation från
+kontots API-sida; DPA (A.5.19). (2) Inställningar → Integrationer → Howspace:
+klistra in token (+ API-URL om den avviker), "Testa anslutning", "Synka nu".
+Svarar leverantören 404 pekar felet på att stämma av sökvägarna mot kontots
+dokumentation — sätt `HOWSPACE_*_PATH` i Coolify i stället för att ändra kod.
+(3) Entra ID-SSO i Howspace Account Manager. **Nästa steg (inte byggt):**
+koppla workspace ↔ bolag och visa på bolagskortet; bocken "Howspace-inbjuden"
+i programchecklistan så målet "100 % av bolagen i Howspace" räknas i
+metrikregistret (§ 41); "Bjud in bolaget till workspace" via API från
+bolagskortet — ett NYTT dataflöde (bolagsmedlemmars e-post till Howspace) som
+kräver § 11.4-notering, mänskligt klick per inbjudan och aldrig synk av
+medlemslistor tillbaka (implementationsplanen § 3.7).
+
+**Regelefterlevnad.** GDPR § 5: bara workspace-metadata och räknare lagras
+(`normalize.ts` whitelistar payload; `parseHowspaceStats` läser aldrig
+deltagarlistor); inga nya fält i `lib/ai/context.ts`. Riskklass oförändrad
+(Howspace = begränsad, § 11.3; sidan själv har ingen AI). RLS: inga nya
+kollektioner — `integration_records`/`tenant_integrations` är redan
+staff/observer-scopade; rollgrind `canAccessModuleForUser` på sidan. Länkar
+till Howspace renderas bara när de är https under `howspace.com`
+(`rel="noopener noreferrer"`). Migrationer 1700000213–214 är nya,
+oföränderliga filnummer; ingen schemaändring → ingen spegling i
+`setup-via-api.mjs`/`verify-baseline.mjs`.

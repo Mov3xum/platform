@@ -1435,7 +1435,7 @@ export interface ModuleGroup {
 export const RAIL_GROUPS: ModuleGroup[] = [
   { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'mal', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
   { label: 'Portfölj', modules: ['startups', 'kontakter', 'talang', 'de_minimis', 'bedomning_excellens', 'impactnavigator', 'exportlab', 'checkar', 'projekt', 'upphandlingar', 'investerare'] },
-  { label: 'Innehåll', modules: ['education', 'rapporter'] },
+  { label: 'Innehåll', modules: ['education', 'howspace', 'rapporter'] },
   { label: 'System', modules: ['agenter', 'kunskapsbas', 'onskemal', 'installningar', 'min_profil'] }
 ];
 
@@ -1693,6 +1693,17 @@ export const coreModules: ModuleDefinition[] = [
     description: 'Spår per Sprint X-axel: finansiering, hållbarhet, internationalisering, team.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'startup_member'],
     route: '/education'
+  },
+  {
+    // Howspace (CLAUDE.md § 59) — Movexums workspaces i Howspace samlade på
+    // en sida med ett klick in i rätt workspace (SSO mot Howspace). Läser
+    // det integrationen synkat (integration_records, staff/observer-RLS).
+    id: 'howspace',
+    title: 'Howspace',
+    description:
+      'Era workspaces i Howspace (program, workshops, kohort-lärande) med deltagarstatistik och direktlänkar. Inloggningen sker med SSO direkt mot Howspace.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/howspace'
   },
   {
     id: 'rapporter',
@@ -1969,3 +1980,4 @@ export * from './kth-irl';
 export * from './excellence-irl';
 
 export * from './user-activity';
+export * from './howspace';
