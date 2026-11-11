@@ -142,6 +142,10 @@ export interface InflowNotificationFields {
   kommun?: string;
   referralChannel?: string;
   teamMembers?: string;
+  /** Hemsida, övrig information och antal bilagor (§ 23.12). Filerna mejlas aldrig. */
+  website?: string;
+  otherInfo?: string;
+  attachments?: string;
   /** AI-sammanställning av det inskickade (migration 1700000125). */
   aiSummary?: string;
   /** Direktlänk till leadet i /inflode/leads/<id> (om APP-URL är satt). */
@@ -221,9 +225,12 @@ export async function sendInflowNotification(
                 ${row('E-post', fields.email)}
                 ${row('Telefon', fields.phone)}
                 ${row('Organisation', fields.organization)}
+                ${row('Hemsida', fields.website)}
                 ${row('Kommun', fields.kommun)}
                 ${row('Kontaktväg', fields.referralChannel)}
                 ${row('Övriga teammedlemmar', fields.teamMembers)}
+                ${row('Övrig information', fields.otherInfo)}
+                ${row('Bilagor', fields.attachments)}
                 ${row('Kategori', fields.ideaCategory)}
                 ${row('Idé / sammanfattning', fields.ideaSummary)}
                 ${row('Kontaktpreferens', fields.contactPreference)}

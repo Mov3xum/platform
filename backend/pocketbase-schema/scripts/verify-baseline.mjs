@@ -35,6 +35,7 @@ pb.autoCancellation(false);
 const COMPASS_COLLECTIONS = new Set([
   'compass_lead_sources',
   'compass_leads',
+  'compass_lead_attachments',
   'compass_conversations',
   'compass_messages',
   'compass_modules',
@@ -223,6 +224,7 @@ async function verifyCollectionsExist() {
     // buggen upptäcks först av en användare). Se diagnose-migrations.mjs.
     'compass_lead_sources',
     'compass_leads',
+    'compass_lead_attachments',
     'compass_conversations',
     'compass_messages',
     'compass_modules',
@@ -653,7 +655,7 @@ function verifyImmutableCollections(collections) {
 // ingen användarsession, och ett intresse får aldrig förfalskas av ett bolag.
 // Användaraktivitet (§ 57, migration 1700000209): bara servern skriver raderna
 // (en användare ska inte kunna PATCH:a sin egen eller någon annans aktivitet).
-const MUST_BE_SERVER_CREATE_ONLY = ['notifications', 'student_profiles', 'talent_interests', 'user_activity'];
+const MUST_BE_SERVER_CREATE_ONLY = ['notifications', 'student_profiles', 'talent_interests', 'user_activity', 'compass_lead_attachments'];
 const MUST_BE_OWNER_ONLY = ['notifications', 'notification_preferences'];
 
 function verifyNotificationRules(collections) {
@@ -798,6 +800,7 @@ const AI_DENYLIST = new Set([
   'student_profiles', 'talent_interests',
   'sustainability_documents', 'sustainability_ai_jobs',
   'export_documents', 'export_ai_jobs',
+  'compass_lead_attachments',
   'user_activity'
 ]);
 
@@ -1183,6 +1186,9 @@ async function verifyHealthEndpoint() {
  * obligatoriskt i schemat → varje create svarar 400.
  */
 const REQUIRED_APP_FIELDS = [
+  // Startupkompassen (§ 23.12, migration 1700000215): hemsida + övrig info —
+  // utan fälten "sparas" besökarens uppgifter tyst bort.
+  { collection: 'compass_leads', fields: ['website', 'other_info'] },
   // Önskemål & buggar (§ 49, migration 1700000208): testare + återkoppling —
   // utan fälten "pekas testaren ut" tyst bort och återkopplingen försvinner.
   { collection: 'feedback_items', fields: ['tester', 'test_note', 'tested_at'] },

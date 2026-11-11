@@ -2768,7 +2768,10 @@ await ensureCollection({
     { name: 'founder_gender', type: 'select', required: false, maxSelect: 1, values: ['kvinna', 'man', 'mixat_team', 'vill_inte_ange'] },
     { name: 'team_members', type: 'text', required: false, max: 2000 },
     { name: 'kommun', type: 'text', required: false, max: 80 },
-    { name: 'referral_channel', type: 'text', required: false, max: 60 }
+    { name: 'referral_channel', type: 'text', required: false, max: 60 },
+    // Hemsida + övrig information (migration 1700000215, § 23.12).
+    { name: 'website', type: 'text', required: false, max: 300 },
+    { name: 'other_info', type: 'text', required: false, max: 3000 }
   ],
   indexes: [
     'CREATE INDEX idx_compass_leads_tenant_status ON compass_leads (tenant, status)',
@@ -2805,6 +2808,50 @@ await ensureCollection({
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`,
   createRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`
+});
+
+// Bilagor från en publik intag-modul (migration 1700000215, § 23.12). Bara
+// servern skapar (createRule null); filen är protected och serveras via den
+// tenant-scopade proxyn /api/inflode/leads/[id]/attachments/[aid].
+await ensureCollection({
+  id: 'compass_lead_attachments_collection',
+  name: 'compass_lead_attachments',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'lead', type: 'relation', required: false, collectionId: 'compass_leads_collection', cascadeDelete: true, minSelect: 0, maxSelect: 1 },
+    { name: 'module_slug', type: 'text', required: false, max: 100 },
+    { name: 'session_hash', type: 'text', required: false, max: 64 },
+    {
+      name: 'file', type: 'file', required: true, maxSelect: 1, maxSize: 26214400, protected: true,
+      mimeTypes: [
+        'application/pdf',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/vnd.ms-powerpoint',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-excel',
+        'image/png',
+        'image/jpeg',
+        'image/webp'
+      ]
+    },
+    { name: 'filename', type: 'text', required: false, max: 200 },
+    { name: 'mime', type: 'text', required: false, max: 120 },
+    { name: 'size_bytes', type: 'number', required: false, min: 0 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_compass_lead_att_lead ON compass_lead_attachments (lead)',
+    'CREATE INDEX idx_compass_lead_att_session ON compass_lead_attachments (tenant, module_slug, session_hash)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`,
+  createRule: null,
+  updateRule: null,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`
 });
 

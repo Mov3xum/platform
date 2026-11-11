@@ -1,6 +1,7 @@
 import 'server-only';
 import { contactValueLabel } from '@platform/shared';
 import { sendInflowNotification } from '@/lib/email';
+import { countLeadAttachments } from './attachments';
 import {
   CONTACT_PREFERENCE_LABEL,
   FLOW_TYPE_LABEL,
@@ -37,6 +38,13 @@ export function resolveInflowRecipients(module: Pick<CompassModule, 'notify_emai
  * (inkl. saknad RESEND_API_KEY / saknade mottagare) så att intag-flödet aldrig
  * felar för att notisen inte gick fram.
  */
+/** "2 filer — öppna leadet för att ladda ned" (filerna skickas aldrig i mejlet). */
+async function attachmentLine(lead: Lead): Promise<string | undefined> {
+  const n = await countLeadAttachments(lead.tenant, lead.id);
+  if (n === 0) return undefined;
+  return `${n} ${n === 1 ? 'fil' : 'filer'} — öppna leadet för att ladda ned`;
+}
+
 export async function notifyNewInflow(module: CompassModule, lead: Lead): Promise<void> {
   try {
     const recipients = resolveInflowRecipients(module);
@@ -62,6 +70,9 @@ export async function notifyNewInflow(module: CompassModule, lead: Lead): Promis
       kommun: contactValueLabel('kommun', lead.kommun),
       referralChannel: contactValueLabel('referral_channel', lead.referral_channel),
       teamMembers: lead.team_members,
+      website: lead.website,
+      otherInfo: lead.other_info,
+      attachments: await attachmentLine(lead),
       aiSummary: lead.ai_summary,
       leadUrl
     });

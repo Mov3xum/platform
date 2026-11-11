@@ -14,7 +14,7 @@ import {
   leadFieldsFromContact,
   moduleWantsLead,
   parseContactPreference,
-  parseContactSubmission
+  parsePublicContactSubmission
 } from '@/lib/compass/lead-capture';
 import { notifyNewInflow } from '@/lib/compass/notify';
 import { getPublicModuleQuestions, mapAnswersToLead, pickAttribution, resolvePublicModule } from '@/lib/compass/public';
@@ -80,7 +80,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   const answers = body.answers && typeof body.answers === 'object' ? body.answers : {};
   // Avsnittet "Dina uppgifter" (§ 23.11). Klienten är aldrig gränsen — samma
   // kontroll som i avslutsformuläret.
-  const parsed = parseContactSubmission(module, body.contact);
+  const parsed = await parsePublicContactSubmission(module, body.contact, {
+    tenant,
+    moduleSlug: slug,
+    sessionToken: body.sessionToken
+  });
   const contact = parsed.values;
   const missing = missingClosingField({ questions, answers, contact, config: parsed.config });
   if (missing) return NextResponse.json({ error: missing }, { status: 400 });

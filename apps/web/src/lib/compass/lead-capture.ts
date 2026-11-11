@@ -13,6 +13,7 @@ import { createConversation, createLead, findConversationBySession, patchConvers
 import { assertWithinAiBudget } from '@/lib/ai/budget.server';
 import { logAiUsage } from '@/lib/ai/usage';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
+import { countSessionAttachments, linkSessionAttachments } from './attachments';
 import type { CompassModule, CompassQuestion, ContactPreference, Lead } from './types';
 
 /* ────────────────────────────────────────────────────────────────────
@@ -44,11 +45,38 @@ export function moduleWantsLead(module: Pick<CompassModule, 'create_lead' | 'pur
  */
 export function parseContactSubmission(
   module: Pick<CompassModule, 'flow_type' | 'contact_fields' | 'require_email' | 'require_phone' | 'require_organization'>,
-  raw: unknown
+  raw: unknown,
+  opts: { attachmentCount?: number } = {}
 ): { config: ContactSectionConfig; values: ContactValues; error: string | null } {
   const config = contactSectionForModule(module);
-  const values = cleanContactValues(raw, config);
-  return { config, values, error: missingContactField(values, config) };
+  // Antalet bilagor tas ALDRIG från klienten (§ 23.12): publika routar räknar
+  // sessionens uppladdade filer i databasen. Utan räkning (admin-preview, som
+  // inte laddar upp) hoppas bilagekravet över.
+  const rec = raw && typeof raw === 'object' ? { ...(raw as Record<string, unknown>) } : {};
+  if (opts.attachmentCount !== undefined) rec.attachments = String(opts.attachmentCount);
+  const values = cleanContactValues(rec, config);
+  const effective =
+    opts.attachmentCount === undefined && config.attachments === 'required'
+      ? { ...config, attachments: 'optional' as const }
+      : config;
+  return { config, values, error: missingContactField(values, effective) };
+}
+
+/**
+ * `parseContactSubmission` för de publika routarna: räknar sessionens
+ * bilagor server-side först (bara när modulen visar bilagefältet).
+ */
+export async function parsePublicContactSubmission(
+  module: Pick<CompassModule, 'flow_type' | 'contact_fields' | 'require_email' | 'require_phone' | 'require_organization'>,
+  raw: unknown,
+  ctx: { tenant: string; moduleSlug: string; sessionToken?: string | null }
+): Promise<{ config: ContactSectionConfig; values: ContactValues; error: string | null }> {
+  const config = contactSectionForModule(module);
+  const attachmentCount =
+    config.attachments === 'hidden'
+      ? 0
+      : await countSessionAttachments(ctx.tenant, ctx.moduleSlug, ctx.sessionToken);
+  return parseContactSubmission(module, raw, { attachmentCount });
 }
 
 /**
@@ -66,6 +94,8 @@ export function leadFieldsFromContact(values: ContactValues): Partial<Lead> {
   if (values.team_members) out.team_members = values.team_members;
   if (values.kommun) out.kommun = values.kommun;
   if (values.referral_channel) out.referral_channel = values.referral_channel;
+  if (values.website) out.website = values.website;
+  if (values.other_info) out.other_info = values.other_info;
   return out;
 }
 
@@ -184,6 +214,7 @@ export async function finalizeLead(
     const updated = await updateLead(pb, tenant, existing.lead, patch);
     if (updated) {
       await patchConversation(pb, existing.id, { status: 'completed' });
+      await linkSessionAttachments(tenant, input.moduleSlug, token, updated.id);
       return { lead: updated, created: false };
     }
     // Leadet försvann (raderat av personal) — skapa ett nytt nedan.
@@ -195,5 +226,7 @@ export async function finalizeLead(
   } else {
     await createConversation(pb, tenant, { moduleSlug: input.moduleSlug, sessionToken: token ?? undefined, leadId: lead.id });
   }
+  // Bilagor som laddats upp under flödet (§ 23.12) följer med leadet.
+  await linkSessionAttachments(tenant, input.moduleSlug, token, lead.id);
   return { lead, created: true };
 }

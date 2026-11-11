@@ -206,7 +206,7 @@ export const LEAD_LIST_FIELDS =
 
 /** Fälten CSV-exporten skriver (speglar kolumnerna i /api/inflode/leads/export). */
 export const LEAD_EXPORT_FIELDS =
-  'id,created,name,email,phone,organization,status,completion,score,source_key,landing_module,idea_category,idea_summary,quiz_result_bucket,quiz_score,utm_source,utm_medium,utm_campaign,converted_startup,converted_at,consent_at';
+  'id,created,name,email,phone,organization,status,completion,score,source_key,landing_module,idea_category,idea_summary,quiz_result_bucket,quiz_score,utm_source,utm_medium,utm_campaign,converted_startup,converted_at,consent_at,website,kommun,referral_channel';
 
 /** Största sidstorlek en listvy får begära (PB:s eget tak är 1000). */
 const LEAD_LIST_MAX_PER_PAGE = 200;

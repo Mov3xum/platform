@@ -1,13 +1,17 @@
 'use client';
 
+import { useRef, useState } from 'react';
 import {
+  CONTACT_ATTACHMENT_ACCEPT,
+  CONTACT_ATTACHMENT_MAX_FILES,
   CONTACT_FIELD_META,
   FOUNDER_GENDER_OPTIONS,
   KOMMUN_OPTIONS,
   REFERRAL_CHANNEL_OPTIONS,
   visibleContactFields,
   type ContactFieldKey,
-  type ContactSectionConfig
+  type ContactSectionConfig,
+  validateContactAttachment
 } from '@platform/shared';
 
 interface Props {
@@ -18,6 +22,23 @@ interface Props {
   title?: string;
   /** Visa rubrik + ingress (chattens avslutssteg har en egen). */
   heading?: boolean;
+  /**
+   * Bilagor (§ 23.12): publika flöden laddar upp direkt till
+   * `/api/public/m/<slug>/attachments` med flödets sessionstoken. Saknas
+   * (admin-förhandsgranskning) visas en not i stället för filväljaren.
+   */
+  attachmentUpload?: { endpoint: string; sessionToken: string; consent?: boolean };
+}
+
+interface UploadedFile {
+  id: string;
+  filename: string;
+  size: number;
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
+  return `${(n / (1024 * 1024)).toLocaleString('sv-SE', { maximumFractionDigits: 1 })} MB`;
 }
 
 const OPTIONS_BY_FIELD: Partial<Record<ContactFieldKey, readonly { value: string; label: string }[]>> = {
@@ -40,7 +61,14 @@ const INPUT_TYPE: Partial<Record<ContactFieldKey, string>> = {
  * quizets kontaktsteg och formulärets sista steg — ingen divergerande kopia.
  * Valideringen (`missingContactField`) körs av föräldern och server-side.
  */
-export function ContactSection({ config, values, onChange, title = 'Dina uppgifter', heading = true }: Props) {
+export function ContactSection({
+  config,
+  values,
+  onChange,
+  title = 'Dina uppgifter',
+  heading = true,
+  attachmentUpload
+}: Props) {
   const fields = visibleContactFields(config);
   if (fields.length === 0) return null;
   return (
@@ -91,6 +119,39 @@ export function ContactSection({ config, values, onChange, title = 'Dina uppgift
             </label>
           );
         }
+        if (key === 'attachments') {
+          return (
+            <div className="mx-label" key={key}>
+              {label}
+              {hint}
+              {attachmentUpload ? (
+                <AttachmentField
+                  upload={attachmentUpload}
+                  onCount={(n) => onChange('attachments', n > 0 ? String(n) : '')}
+                />
+              ) : (
+                <span className="mx-t-xs mx-muted" style={{ display: 'block', marginTop: 6 }}>
+                  Bilagor laddas upp i den publicerade modulen — inte i förhandsgranskningen.
+                </span>
+              )}
+            </div>
+          );
+        }
+        if (key === 'other_info') {
+          return (
+            <label className="mx-label" key={key}>
+              {label}
+              <textarea
+                className="mx-textarea"
+                style={{ marginTop: 4, minHeight: 96 }}
+                value={value}
+                maxLength={meta.max}
+                onChange={(e) => onChange(key, e.target.value)}
+              />
+              {hint}
+            </label>
+          );
+        }
         if (key === 'team_members') {
           return (
             <label className="mx-label" key={key}>
@@ -112,17 +173,181 @@ export function ContactSection({ config, values, onChange, title = 'Dina uppgift
             {label}
             <input
               type={INPUT_TYPE[key] || 'text'}
+              inputMode={key === 'website' ? 'url' : undefined}
+              placeholder={key === 'website' ? 'www.exempel.se' : undefined}
               className="mx-input"
               style={{ marginTop: 4 }}
               value={value}
               maxLength={meta.max}
-              autoComplete={key === 'name' ? 'name' : key === 'email' ? 'email' : key === 'phone' ? 'tel' : undefined}
+              autoComplete={
+                key === 'name' ? 'name' : key === 'email' ? 'email' : key === 'phone' ? 'tel' : key === 'website' ? 'url' : undefined
+              }
               onChange={(e) => onChange(key, e.target.value)}
             />
             {hint}
           </label>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * Filväljare för bilagor (pitch deck m.m., § 23.12). Varje fil laddas upp
+ * direkt vid val; servern validerar typ/storlek igen och nycklar filen på
+ * sessionen. Filerna kopplas till leadet först när flödet skickas in.
+ */
+function AttachmentField({
+  upload,
+  onCount
+}: {
+  upload: { endpoint: string; sessionToken: string; consent?: boolean };
+  onCount: (n: number) => void;
+}) {
+  const [files, setFiles] = useState<UploadedFile[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  function update(next: UploadedFile[]) {
+    setFiles(next);
+    onCount(next.length);
+  }
+
+  async function uploadAll(list: FileList | File[]) {
+    setError(null);
+    let current = files;
+    for (const file of Array.from(list)) {
+      if (current.length >= CONTACT_ATTACHMENT_MAX_FILES) {
+        setError(`Du kan bifoga högst ${CONTACT_ATTACHMENT_MAX_FILES} filer.`);
+        break;
+      }
+      const checked = validateContactAttachment({ name: file.name, type: file.type, size: file.size });
+      if (!checked.ok) {
+        setError(`${file.name}: ${checked.error}`);
+        continue;
+      }
+      setBusy(true);
+      try {
+        const body = new FormData();
+        body.set('file', file);
+        body.set('sessionToken', upload.sessionToken);
+        if (upload.consent) body.set('consent', 'true');
+        const res = await fetch(upload.endpoint, { method: 'POST', body });
+        const data = (await res.json().catch(() => ({}))) as {
+          id?: string;
+          filename?: string;
+          size?: number;
+          error?: string;
+        };
+        if (!res.ok || !data.id) {
+          throw new Error(data.error || `Uppladdningen misslyckades (HTTP ${res.status}).`);
+        }
+        current = [...current, { id: data.id, filename: data.filename || file.name, size: data.size ?? file.size }];
+        update(current);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Uppladdningen misslyckades.');
+      } finally {
+        setBusy(false);
+      }
+    }
+  }
+
+  async function remove(id: string) {
+    setError(null);
+    try {
+      const res = await fetch(upload.endpoint, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, sessionToken: upload.sessionToken })
+      });
+      if (!res.ok && res.status !== 404) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error || 'Filen kunde inte tas bort.');
+      }
+      update(files.filter((f) => f.id !== id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Filen kunde inte tas bort.');
+    }
+  }
+
+  const full = files.length >= CONTACT_ATTACHMENT_MAX_FILES;
+
+  return (
+    <div style={{ marginTop: 6, display: 'grid', gap: 8, fontWeight: 400 }}>
+      {files.length > 0 && (
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 6 }}>
+          {files.map((f) => (
+            <li
+              key={f.id}
+              className="mx-flex mx-items-c mx-gap-2 mx-t-13"
+              style={{ padding: '8px 10px', borderRadius: 10, border: '1px solid var(--mx-line)' }}
+            >
+              <span aria-hidden>📎</span>
+              <span style={{ wordBreak: 'break-all', flex: 1 }}>{f.filename}</span>
+              <span className="mx-t-xs mx-muted">{formatBytes(f.size)}</span>
+              <button
+                type="button"
+                className="mx-btn"
+                onClick={() => void remove(f.id)}
+                aria-label={`Ta bort ${f.filename}`}
+              >
+                Ta bort
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {!full && (
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOver(false);
+            if (!busy && e.dataTransfer.files.length) void uploadAll(e.dataTransfer.files);
+          }}
+          style={{
+            padding: '14px 12px',
+            borderRadius: 12,
+            border: `1px dashed ${dragOver ? 'var(--mx-accent, currentColor)' : 'var(--mx-line-strong)'}`,
+            textAlign: 'center'
+          }}
+        >
+          <button
+            type="button"
+            className="mx-btn"
+            disabled={busy}
+            onClick={() => inputRef.current?.click()}
+          >
+            {busy ? 'Laddar upp …' : files.length ? 'Bifoga fler filer' : 'Välj filer att bifoga'}
+          </button>
+          <span className="mx-t-xs mx-muted" style={{ display: 'block', marginTop: 4 }}>
+            eller dra och släpp här · högst {CONTACT_ATTACHMENT_MAX_FILES} filer
+          </span>
+          <input
+            ref={inputRef}
+            type="file"
+            multiple
+            accept={CONTACT_ATTACHMENT_ACCEPT}
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const list = e.target.files;
+              if (list && list.length) void uploadAll(list);
+              e.target.value = '';
+            }}
+          />
+        </div>
+      )}
+      {error && (
+        <span className="mx-t-12" role="alert" style={{ color: 'var(--movexum-morkorange)' }}>
+          {error}
+        </span>
+      )}
     </div>
   );
 }

@@ -140,6 +140,15 @@ export function ChatClosingForm({ config, moduleSlug, sessionToken, consent, att
         config={config.contactSection}
         values={contact}
         heading={false}
+        attachmentUpload={
+          config.apiBase.startsWith('/api/public/')
+            ? {
+                endpoint: `${config.apiBase}/${encodeURIComponent(moduleSlug)}/attachments`,
+                sessionToken,
+                consent
+              }
+            : undefined
+        }
         onChange={(key, value) => setContact((c) => ({ ...c, [key]: value }))}
       />
 
