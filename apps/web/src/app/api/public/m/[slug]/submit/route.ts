@@ -13,7 +13,7 @@ import {
   leadFieldsFromContact,
   moduleWantsLead,
   parseContactPreference,
-  parseContactSubmission
+  parsePublicContactSubmission
 } from '@/lib/compass/lead-capture';
 import { notifyNewInflow } from '@/lib/compass/notify';
 import { storeSurveyResponse } from '@/lib/compass/survey';
@@ -108,7 +108,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   }
 
   // Avsnittet "Dina uppgifter" (§ 23.11): klienten är aldrig gränsen.
-  const contact = parseContactSubmission(module, body.contact);
+  const contact = await parsePublicContactSubmission(module, body.contact, {
+    tenant,
+    moduleSlug: slug,
+    sessionToken: body.sessionToken
+  });
   if (contact.error) return NextResponse.json({ error: contact.error }, { status: 400 });
 
   const leadPayload = { ...mapAnswersToLead(answers), ...leadFieldsFromContact(contact.values) };

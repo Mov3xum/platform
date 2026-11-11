@@ -39,6 +39,7 @@ test('denylist håller ute auth-, credential- och privat-innehåll-kollektioner'
     'support_check_revisions', // signeringsbevis (§46)
     'support_check_comments', // kompletteringspunkter (§46)
     'support_check_documents', // bilagor (§46)
+    'compass_lead_attachments', // bilagor från idébärare (§23.12)
     'compass_responses', // råa enkät-/intagssvar per fråga — bara aggregatet når målstyrningen (§43)
     'startup_screenings', // statsstödsbedömningar på bolagskortet (§51.6)
     'screening_requests', // begäran om komplettering med grundaruppgifter (§51.6)

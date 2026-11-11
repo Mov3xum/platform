@@ -4202,6 +4202,61 @@ formuläret hade inget avslutssteg alls.
   `/inflode/analysis` och k-anonym könsfördelning per period — nästa steg när
   underlaget finns.
 
+### 23.12 Hemsida, övrig information och bilagor i "Dina uppgifter" (2026-11-11)
+
+**Behov (inflödesansvarig).** De mer drivna idébärarna har ofta ett pitch
+deck eller annat underlag de vill bifoga, en hemsida och lite extra att
+berätta som inte ryms i frågorna. Avsnittet "Dina uppgifter" (§ 23.11) har
+därför tre nya fält, konfigurerbara per modul i steg 4 som de övriga
+(Visas inte / Frivillig / Obligatorisk):
+
+| Fält | Lagras | Regler |
+|------|--------|--------|
+| `website` — Hemsida | `compass_leads.website` (text ≤ 300) | `normalizeWebsite`: `https://` läggs till när protokoll saknas, bara http(s) med en värd med punkt, inga inloggningsuppgifter i adressen; ogiltigt ⇒ som om inget angetts. Visas som länk (`rel="noopener noreferrer nofollow"`) i lead-vyn, i notismejlet och i CSV-exporten. |
+| `other_info` — Övrig information | `compass_leads.other_info` (text ≤ 3000) | Fritext, radbrytningar behålls, personnummer-saneras. Lead-vyn + notismejlet; inte i exporten. |
+| `attachments` — Bilagor | `compass_lead_attachments` (ny kollektion) | PDF, PowerPoint, Word, Excel, PNG/JPG/WebP; högst 5 filer à 25 MB (`validateContactAttachment`, `CONTACT_ATTACHMENT_*`). |
+
+- **Källa av sanning:** `packages/shared/src/compass-contact.ts` (nycklar,
+  metadata, `normalizeWebsite`, `validateContactAttachment`,
+  `cleanAttachmentFilename`; enhetstestat). `CONTACT_SECTION_DEFAULT` visar
+  alla tre som frivilliga i nya intag-moduler. Migration **1700000215**
+  lägger till dem som frivilliga i befintliga intag-moduler med lagrad
+  konfiguration (bara när nyckeln saknas — ett uttryckligt val rörs aldrig);
+  legacy-moduler och enkäter rörs inte.
+- **Uppladdningsflödet:** besökaren laddar upp direkt vid val (knapp eller
+  dra-och-släpp) till `POST /api/public/m/<slug>/attachments` (route handler,
+  § 18.2-mönstret; `DELETE` tar bort en fil före inskick). Routen resolvar
+  modulen på slugen, härleder tenant FRÅN modulen, kräver att modulen sparar
+  lead och visar bilagefältet, tillämpar samtyckesgrinden, rate-limitar per
+  IP (20/10 min) och validerar typ/storlek (PB:s `mimeTypes` sniffar dessutom
+  innehållet). Filen nycklas på flödets sessionstoken — bara **SHA-256-hashen**
+  (`session_hash`) lagras — och kopplas till leadet i `finalizeLead`
+  (`linkSessionAttachments`) när flödet slutförs. Okopplade filer (besökaren
+  slutförde aldrig) gallras av `retention_tick` efter 2 dygn
+  (`MOVEXUM_RETENTION_COMPASS_UNLINKED_ATTACHMENTS_DAYS`).
+- **"Bilagor krävs" räknas server-side:** `parsePublicContactSubmission`
+  räknar sessionens filer i databasen innan valideringen — klientens siffra
+  litas aldrig på. Admin-förhandsgranskningen laddar inte upp (fältet visar
+  en not) och kravet hoppas över där.
+- **Personalen:** lead-vyn (`/inflode/leads/<id>`) listar bilagorna med
+  storlek; nedladdning via den tenant-scopade proxyn
+  `/api/inflode/leads/<id>/attachments/<aid>` (admin/incubator_lead/coach,
+  bilagan måste höra till leadet, alltid `Content-Disposition: attachment` —
+  besökarens fil körs aldrig på appens origin). Notismejlet säger hur många
+  filer som bifogats; filerna mejlas aldrig.
+- **`compass_lead_attachments`:** `tenant` (cascade), `lead` (cascade, tomt
+  tills slutförande), `module_slug`, `session_hash`, `file` (**protected**),
+  `filename`, `mime`, `size_bytes`, autodate. list/view/delete =
+  kompass-personal i tenanten; **create/update = null** (bara servern).
+  Speglat i `setup-via-api.mjs`, asserterat i `verify-baseline.mjs`
+  (must-exist, `MUST_BE_SERVER_CREATE_ONLY`, AI-denylist,
+  `compass_leads.website/other_info` i `REQUIRED_APP_FIELDS`).
+- **GDPR § 5 / AI:** bilagorna är tredjepartsmaterial som kan bära
+  personuppgifter — **denylistade för AI** (`redaction.ts`), extraheras inte
+  och når aldrig AI-sammanställningen. Filnamn loggas aldrig. Rättslig grund
+  oförändrad (berättigat intresse + samtyckesgrinden); cascade via lead/tenant
+  ger art. 17. Riskklass oförändrad — ingen ny AI-funktion.
+
 ## 24. AI-sorterat filarkiv — ämnes-/bolagsmappar (/filer)
 
 ### 24.1 Översikt

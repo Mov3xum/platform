@@ -198,6 +198,15 @@ export function ModuleWizard({
         <ContactSection
           config={contactSection}
           values={contact}
+          attachmentUpload={
+            trackProgress
+              ? {
+                  endpoint: `${apiBase}/${encodeURIComponent(moduleSlug)}/attachments`,
+                  sessionToken: progressTracker.sessionToken,
+                  consent
+                }
+              : undefined
+          }
           onChange={(key, value) => setContact((c) => ({ ...c, [key]: value }))}
         />
       ) : (

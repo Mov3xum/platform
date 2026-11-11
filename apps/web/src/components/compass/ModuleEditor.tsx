@@ -571,6 +571,17 @@ export function ModuleEditor({
                               Vinnovas statistik, aldrig i bedömningen.
                             </span>
                           )}
+                          {key === 'attachments' && (
+                            <span className="mx-t-xs mx-muted" style={{ display: 'block', fontWeight: 400 }}>
+                              Pitch deck, affärsplan m.m. — PDF, PowerPoint, Word, Excel eller bild, högst
+                              5 filer à 25 MB. Filerna syns på leadet och kan laddas ned av personalen.
+                            </span>
+                          )}
+                          {key === 'other_info' && (
+                            <span className="mx-t-xs mx-muted" style={{ display: 'block', fontWeight: 400 }}>
+                              Fritextruta där idébäraren kan lägga till det som inte fått plats i frågorna.
+                            </span>
+                          )}
                         </td>
                         <td style={{ padding: '6px 0', whiteSpace: 'nowrap' }}>
                           {CONTACT_FIELD_MODES.filter((m) => !(meta.neverRequired && m === 'required')).map(
@@ -599,7 +610,7 @@ export function ModuleEditor({
               </table>
               <span className="mx-t-xs mx-muted" style={{ display: 'block', marginTop: 6 }}>
                 Kön, kommun och kontaktväg är fasta val. Övriga teammedlemmar är en fritextruta
-                (namn + e-post). Kön på grundare och teammedlemmar når aldrig AI-analysen och
+                (namn + e-post). Hemsidan kontrolleras som en webbadress. Kön på grundare och teammedlemmar når aldrig AI-analysen och
                 exporteras inte per lead.
               </span>
             </div>

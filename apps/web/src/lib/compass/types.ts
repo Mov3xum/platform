@@ -141,6 +141,9 @@ export interface Lead {
   team_members?: string;
   kommun?: string;
   referral_channel?: string;
+  /** Hemsida (normaliserad http(s)) och övrig information (migration 1700000215, § 23.12). */
+  website?: string;
+  other_info?: string;
   /**
    * Vad besökaren gjorde (migration 1700000192, § 23.10): pågående, slutförd
    * eller avbruten. Saknat = slutförd. Skilt från `status` (personalens

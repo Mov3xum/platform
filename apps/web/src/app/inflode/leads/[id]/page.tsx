@@ -13,6 +13,7 @@ import {
 import { ConfirmSubmitButton } from '@/components/ConfirmSubmitButton';
 import { getLead, listAssignableStaff, listLeadSources, listModules } from '@/lib/compass/store';
 import { normalizeLeadCompletion } from '@/lib/compass/completion';
+import { listLeadAttachments } from '@/lib/compass/attachments';
 import {
   CONTACT_PREFERENCE_LABEL,
   LEAD_STATUS_LABEL,
@@ -56,11 +57,12 @@ export default async function LeadDetailPage({
     redirect('/inflode');
   }
   const pb = await getServerPb();
-  const [lead, sources, modules, staff] = await Promise.all([
+  const [lead, sources, modules, staff, attachments] = await Promise.all([
     getLead(pb, user.tenant, id),
     listLeadSources(pb),
     listModules(pb, user.tenant),
-    listAssignableStaff(pb, user.tenant)
+    listAssignableStaff(pb, user.tenant),
+    listLeadAttachments(pb, user.tenant, id)
   ]);
   if (!lead) notFound();
   const source = sources.find((s) => s.key === lead.source_key);
@@ -170,12 +172,53 @@ export default async function LeadDetailPage({
               <Field label="E-post" value={lead.email} mono />
               <Field label="Telefon" value={lead.phone} mono />
               <Field label="Organisation" value={lead.organization} />
+              <div>
+                <div className="mx-label">Hemsida</div>
+                {lead.website && /^https?:\/\//i.test(lead.website) ? (
+                  <a
+                    href={lead.website}
+                    target="_blank"
+                    rel="noopener noreferrer nofollow"
+                    className="mx-t-13 mx-fw-6"
+                    style={{ wordBreak: 'break-all' }}
+                  >
+                    {lead.website}
+                  </a>
+                ) : (
+                  <div className="mx-muted mx-t-13">—</div>
+                )}
+              </div>
               <Field label="Kommuntillhörighet" value={contactValueLabel('kommun', lead.kommun)} />
               <Field
                 label="Hur hen kom i kontakt med Movexum"
                 value={contactValueLabel('referral_channel', lead.referral_channel)}
               />
               <Field label="Övriga teammedlemmar" value={lead.team_members} multiline />
+              <Field label="Övrig information" value={lead.other_info} multiline />
+              <div>
+                <div className="mx-label">Bilagor</div>
+                {attachments.length === 0 ? (
+                  <div className="mx-muted mx-t-13">—</div>
+                ) : (
+                  <ul style={{ listStyle: 'none', margin: '4px 0 0', padding: 0, display: 'grid', gap: 6 }}>
+                    {attachments.map((a) => (
+                      <li key={a.id} className="mx-flex mx-items-c mx-gap-2 mx-t-13">
+                        <Icon name="paperclip" size={14} />
+                        <a
+                          href={`/api/inflode/leads/${lead.id}/attachments/${a.id}`}
+                          className="mx-fw-6"
+                          style={{ wordBreak: 'break-all' }}
+                        >
+                          {a.filename || a.file}
+                        </a>
+                        {typeof a.size_bytes === 'number' && a.size_bytes > 0 && (
+                          <span className="mx-mono mx-t-xs mx-muted">{formatBytes(a.size_bytes)}</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
               {lead.founder_gender && (
                 <div>
                   <div className="mx-label">Kön på grundare</div>
@@ -630,6 +673,11 @@ export default async function LeadDetailPage({
       </div>
     </div>
   );
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
+  return `${(n / (1024 * 1024)).toLocaleString('sv-SE', { maximumFractionDigits: 1 })} MB`;
 }
 
 function Field({
