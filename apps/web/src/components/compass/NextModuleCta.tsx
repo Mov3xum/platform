@@ -1,6 +1,8 @@
 'use client';
 
 import type { NextModuleLink } from '@/lib/compass/types';
+import { COMPASS_LANG_PARAM } from '@platform/shared';
+import { useCompassLocale } from './locale';
 
 interface Props {
   next: NextModuleLink;
@@ -12,6 +14,11 @@ interface Props {
 // att ett flöde slutförts (quiz/formulär) eller under en chatt. Länkar vidare
 // till nästa publika modul på /m/<slug>.
 export function NextModuleCta({ next, prompt }: Props) {
+  const { locale, t } = useCompassLocale();
+  // Engelska följer med till nästa modul — den modulen visar engelska om
+  // dess version är publicerad, annars svenska (§ 23.13).
+  const href = `/m/${encodeURIComponent(next.slug)}${locale === 'en' ? `?${COMPASS_LANG_PARAM}=en` : ''}`;
+  const label = locale === 'en' && next.labelEn ? next.labelEn : next.label;
   return (
     <div
       style={{
@@ -26,11 +33,11 @@ export function NextModuleCta({ next, prompt }: Props) {
       }}
     >
       <div className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6">
-        {prompt || 'Nästa steg'}
+        {prompt || t.nextStep}
       </div>
       <div>
-        <a href={`/m/${encodeURIComponent(next.slug)}`} className="mx-btn mx-primary mx-lg">
-          {next.label} <span aria-hidden>→</span>
+        <a href={href} className="mx-btn mx-primary mx-lg">
+          {label} <span aria-hidden>→</span>
         </a>
       </div>
     </div>

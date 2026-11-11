@@ -4,7 +4,8 @@ import {
   resolvePublicModule,
   getPublicModuleQuestions,
   mapAnswersToLead,
-  pickAttribution
+  pickAttribution,
+  visitorLocale
 } from '@/lib/compass/public';
 import {
   attachAiSummary,
@@ -39,6 +40,8 @@ interface SubmitBody {
   subject?: string;
   /** Sessionstoken (§ 23.10) — slutför det pågående leadet i stället för att skapa ett nytt. */
   sessionToken?: string;
+  /** Besökarens språk (§ 23.13) — gäller bara när engelskan är publicerad. */
+  lang?: string;
 }
 
 // Högra (proxy-tillagda) XFF-värdet — det vänstra är klientstyrt och lät en
@@ -111,7 +114,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   const contact = await parsePublicContactSubmission(module, body.contact, {
     tenant,
     moduleSlug: slug,
-    sessionToken: body.sessionToken
+    sessionToken: body.sessionToken,
+    locale: visitorLocale(module, body.lang).locale
   });
   if (contact.error) return NextResponse.json({ error: contact.error }, { status: 400 });
 

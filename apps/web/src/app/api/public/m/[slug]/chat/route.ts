@@ -15,7 +15,8 @@ import {
   buildModuleChatSystemPrompt,
   getPublicModuleQuestions,
   pickAttribution,
-  resolvePublicModule
+  resolvePublicModule,
+  visitorLocale
 } from '@/lib/compass/public';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import type { Attribution } from '@/lib/compass/types';
@@ -35,6 +36,8 @@ interface ChatBody {
   sessionToken?: string;
   attribution?: Attribution;
   consent?: boolean;
+  /** Besökarens språk (§ 23.13) — gäller bara när engelskan är publicerad. */
+  lang?: string;
 }
 
 function isValidMessage(m: unknown): m is CompassChatMessage {
@@ -149,7 +152,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
       systemPrompt,
       model: module.model,
       maxExchanges: module.max_exchanges,
-      assistantName: module.chat_persona || module.name
+      assistantName: module.chat_persona || module.name,
+      locale: visitorLocale(module, body.lang).locale
     });
   } catch (err) {
     if (err instanceof MistralError && err.status === 429) {

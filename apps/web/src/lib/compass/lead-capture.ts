@@ -5,6 +5,7 @@ import {
   contactSectionForModule,
   isSurveyModule,
   missingContactField,
+  type CompassLocale,
   type ContactSectionConfig,
   type ContactValues
 } from '@platform/shared';
@@ -46,7 +47,7 @@ export function moduleWantsLead(module: Pick<CompassModule, 'create_lead' | 'pur
 export function parseContactSubmission(
   module: Pick<CompassModule, 'flow_type' | 'contact_fields' | 'require_email' | 'require_phone' | 'require_organization'>,
   raw: unknown,
-  opts: { attachmentCount?: number } = {}
+  opts: { attachmentCount?: number; locale?: CompassLocale } = {}
 ): { config: ContactSectionConfig; values: ContactValues; error: string | null } {
   const config = contactSectionForModule(module);
   // Antalet bilagor tas ALDRIG från klienten (§ 23.12): publika routar räknar
@@ -59,7 +60,7 @@ export function parseContactSubmission(
     opts.attachmentCount === undefined && config.attachments === 'required'
       ? { ...config, attachments: 'optional' as const }
       : config;
-  return { config, values, error: missingContactField(values, effective) };
+  return { config, values, error: missingContactField(values, effective, opts.locale) };
 }
 
 /**
@@ -69,14 +70,14 @@ export function parseContactSubmission(
 export async function parsePublicContactSubmission(
   module: Pick<CompassModule, 'flow_type' | 'contact_fields' | 'require_email' | 'require_phone' | 'require_organization'>,
   raw: unknown,
-  ctx: { tenant: string; moduleSlug: string; sessionToken?: string | null }
+  ctx: { tenant: string; moduleSlug: string; sessionToken?: string | null; locale?: CompassLocale }
 ): Promise<{ config: ContactSectionConfig; values: ContactValues; error: string | null }> {
   const config = contactSectionForModule(module);
   const attachmentCount =
     config.attachments === 'hidden'
       ? 0
       : await countSessionAttachments(ctx.tenant, ctx.moduleSlug, ctx.sessionToken);
-  return parseContactSubmission(module, raw, { attachmentCount });
+  return parseContactSubmission(module, raw, { attachmentCount, locale: ctx.locale });
 }
 
 /**

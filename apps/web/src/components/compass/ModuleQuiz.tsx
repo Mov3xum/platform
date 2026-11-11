@@ -13,6 +13,7 @@ import { NextModuleCta } from './NextModuleCta';
 import { ContactPreferencePicker } from './ContactPreferencePicker';
 import { ContactSection } from './ContactSection';
 import { useFlowProgress } from './useFlowProgress';
+import { useCompassLocale } from './locale';
 import { resolveNextQuestionIndex } from '@/lib/compass/question-flow';
 
 interface Props {
@@ -51,6 +52,7 @@ export function ModuleQuiz({
   subject,
   trackProgress
 }: Props) {
+  const { locale, t } = useCompassLocale();
   const [step, setStep] = useState(0);
   // Besökta steg (för "Tillbaka") — hopplogik (next_key) kan skippa frågor,
   // så step-1 är inte alltid den fråga besökaren faktiskt såg senast.
@@ -80,7 +82,7 @@ export function ModuleQuiz({
   const progress = total === 0 ? 0 : Math.round((100 * Math.min(step, total)) / total);
 
   if (total === 0) {
-    return <p className="mx-muted mx-t-13">Det här quizet har inga frågor publicerade ännu.</p>;
+    return <p className="mx-muted mx-t-13">{t.noQuestionsQuiz}</p>;
   }
 
   // ── Resultatskärm ────────────────────────────────────────────────────────
@@ -101,9 +103,9 @@ export function ModuleQuiz({
     const showNextBox = Boolean(nextModule && !(bucketCta && ctaIsInternalModuleLink));
     return (
       <div style={{ display: 'grid', gap: 16 }}>
-        <div className="mx-mono mx-t-xs mx-t-up mx-muted">{successMessage || 'Ditt resultat'}</div>
+        <div className="mx-mono mx-t-xs mx-t-up mx-muted">{successMessage || t.yourResult}</div>
         <div className="mx-disp" style={{ fontSize: 26, fontWeight: 700, lineHeight: 1.2 }}>
-          {b?.title || 'Tack för dina svar!'}
+          {b?.title || t.thanksForAnswers}
         </div>
         {b?.body && (
           <p className="mx-t-13" style={{ lineHeight: 1.6, maxWidth: 560 }}>
@@ -120,7 +122,7 @@ export function ModuleQuiz({
             }}
           >
             <div className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6" style={{ marginBottom: 8 }}>
-              Nästa steg
+              {t.nextStep}
             </div>
             <ul style={{ margin: 0, paddingLeft: 18, display: 'grid', gap: 6 }}>
               {b.tips.map((t, i) => (
@@ -138,11 +140,11 @@ export function ModuleQuiz({
             </a>
           )}
           <button type="button" className="mx-btn" onClick={downloadResult} disabled={downloading}>
-            {downloading ? 'Skapar PDF…' : '↓ Ladda ner mitt resultat (PDF)'}
+            {downloading ? t.creatingPdf : t.downloadResult}
           </button>
         </div>
         {showNextBox && nextModule && (
-          <NextModuleCta next={nextModule} prompt="Fortsätt till nästa steg" />
+          <NextModuleCta next={nextModule} prompt={t.continueNext} />
         )}
         {error && (
           <div
@@ -170,21 +172,21 @@ export function ModuleQuiz({
         headers: { 'Content-Type': 'application/json' },
         // Bara modul + resultatprofil — servern hämtar texterna ur modulens
         // lagrade result_buckets (klientens text renderas aldrig i PDF:en).
-        body: JSON.stringify({ slug: moduleSlug, bucketKey: b?.key ?? '' })
+        body: JSON.stringify({ slug: moduleSlug, bucketKey: b?.key ?? '', lang: locale })
       });
-      if (!res.ok) throw new Error(`Servern svarade ${res.status}`);
+      if (!res.ok) throw new Error(t.serverStatus(res.status));
       const blob = await res.blob();
       const today = new Date().toISOString().slice(0, 10);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `startupkompassen-resultat-${today}.pdf`;
+      a.download = locale === 'en' ? `startupkompassen-result-${today}.pdf` : `startupkompassen-resultat-${today}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch {
-      setError('Kunde inte skapa PDF:en. Försök igen.');
+      setError(t.pdfFailed);
     } finally {
       setDownloading(false);
     }
@@ -210,18 +212,19 @@ export function ModuleQuiz({
           consent,
           contact_preference: contactPreference || undefined,
           subject: subject || undefined,
-          sessionToken: trackProgress ? progressTracker.sessionToken : undefined
+          sessionToken: trackProgress ? progressTracker.sessionToken : undefined,
+          lang: locale
         })
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error || `Servern svarade ${res.status}`);
+        throw new Error(data.error || t.serverStatus(res.status));
       }
       progressTracker.markDone();
       const data = (await res.json()) as QuizResult;
       setResult({ bucket: data.bucket ?? null, score: data.score ?? 0 });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Något gick fel');
+      setError(err instanceof Error ? err.message : t.somethingWrong);
     } finally {
       setSubmitting(false);
     }
@@ -234,7 +237,7 @@ export function ModuleQuiz({
       const q = questions[step];
       const value = q ? answers[q.key] : undefined;
       if (q?.required && (value === undefined || value === '' || (Array.isArray(value) && value.length === 0))) {
-        setError('Välj ett svar för att gå vidare.');
+        setError(t.pickAnswer);
         return;
       }
       setError(null);
@@ -250,7 +253,7 @@ export function ModuleQuiz({
     }
 
     // Kontaktsteg — samma validering som server-side (klienten är aldrig gränsen).
-    const missing = missingContactField(cleanContactValues(contact, contactSection), contactSection);
+    const missing = missingContactField(cleanContactValues(contact, contactSection), contactSection, locale);
     if (missing) {
       setError(missing);
       return;
@@ -263,7 +266,7 @@ export function ModuleQuiz({
     <form onSubmit={onSubmit} style={{ display: 'grid', gap: 16 }}>
       {/* Progress */}
       <div className="mx-flex mx-items-c mx-gap-2 mx-mono mx-t-xs mx-muted mx-t-up">
-        <span>{onContactStep ? 'Snart klar' : `Fråga ${step + 1} av ${total}`}</span>
+        <span>{onContactStep ? t.almostDone : t.questionOf(step + 1, total)}</span>
         <span className="mx-grow" />
         <span>{progress}%</span>
       </div>
@@ -329,10 +332,10 @@ export function ModuleQuiz({
             setError(null);
           }}
         >
-          ← Tillbaka
+          {t.back}
         </button>
         <button type="submit" className="mx-btn mx-primary" disabled={submitting}>
-          {onContactStep ? (submitting ? 'Beräknar…' : 'Visa mitt resultat →') : 'Nästa →'}
+          {onContactStep ? (submitting ? t.calculating : t.showResult) : t.next}
         </button>
       </div>
     </form>

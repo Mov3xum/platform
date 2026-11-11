@@ -1,11 +1,11 @@
 import { clientIpFromRequest } from '@/lib/client-ip';
 import { buildQuizResultPdf } from '@/lib/compass/result-pdf';
-import { getPublicTenantBranding, resolvePublicModule } from '@/lib/compass/public';
+import { getPublicTenantBranding, resolvePublicModule, visitorLocale } from '@/lib/compass/public';
 import { getCompassStaffTenant } from '@/lib/compass/staff-viewer';
 import type { CompassModule } from '@/lib/compass/types';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
-import { isResultBucketArray } from '@platform/shared';
+import { applyCompassModuleTranslation, isResultBucketArray, translateResultBucket } from '@platform/shared';
 import type PocketBase from 'pocketbase';
 
 export const runtime = 'nodejs';
@@ -24,6 +24,8 @@ const BUCKET_KEY_RE = /^[A-Za-z0-9_.-]{1,80}$/;
 interface ResultPdfBody {
   slug?: unknown;
   bucketKey?: unknown;
+  /** Besökarens språk (§ 23.13) — engelska bara när den är publicerad. */
+  lang?: unknown;
 }
 
 // Högra (proxy-tillagda) XFF-värdet — det vänstra är klientstyrt och lät en
@@ -98,10 +100,17 @@ export async function POST(req: Request) {
   const { pb, module } = resolved;
 
   const buckets = isResultBucketArray(module.result_buckets) ? module.result_buckets : [];
-  const bucket = bucketKey ? buckets.find((b) => b.key === bucketKey) : undefined;
-  if (bucketKey && !bucket) return new Response('Resultatprofilen hittades inte.', { status: 404 });
+  const found = bucketKey ? buckets.find((b) => b.key === bucketKey) : undefined;
+  if (bucketKey && !found) return new Response('Resultatprofilen hittades inte.', { status: 404 });
+  // Texterna kommer fortfarande BARA ur modulens lagrade data — nu ur den
+  // publicerade engelska versionen när besökaren valt engelska (§ 23.13).
+  const { locale, texts } = visitorLocale(module, payload.lang);
+  const bucket = texts ? translateResultBucket(found, texts) : found;
+  const visibleModule = texts ? applyCompassModuleTranslation(module, texts) : module;
 
-  const title = (bucket?.title || '').trim().slice(0, 200) || 'Tack för dina svar!';
+  const title =
+    (bucket?.title || '').trim().slice(0, 200) ||
+    (locale === 'en' ? 'Thank you for your answers!' : 'Tack för dina svar!');
   const tips = Array.isArray(bucket?.tips)
     ? bucket.tips
         .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
@@ -115,7 +124,8 @@ export async function POST(req: Request) {
       title,
       body: bucket?.body ? String(bucket.body).slice(0, 4000) : undefined,
       tips,
-      moduleName: (module.welcome_title || module.name || '').slice(0, 200) || undefined,
+      moduleName: (visibleModule.welcome_title || visibleModule.name || '').slice(0, 200) || undefined,
+      locale,
       brandName: branding.name ? branding.name.slice(0, 120) : undefined
     });
     const today = new Date().toISOString().slice(0, 10);

@@ -4257,6 +4257,80 @@ därför tre nya fält, konfigurerbara per modul i steg 4 som de övriga
   oförändrad (berättigat intresse + samtyckesgrinden); cascade via lead/tenant
   ger art. 17. Riskklass oförändrad — ingen ny AI-funktion.
 
+### 23.13 Engelsk version av publika moduler — språkknapp Svenska/English (2026-11-11)
+
+**Behov.** Idébeskrivningsmodulen (och andra intag-moduler) behövs på
+engelska. Varje publik modul (`/m/<slug>`) kan nu ha en **granskad engelsk
+version**; när den är publicerad visas en tydlig språkknapp
+**🌐 Svenska | English** uppe till höger i sidhuvudet (alla mallar, även
+mobil). Valet är en vanlig länk (`?lang=en`, övriga parametrar som UTM och
+`?om=` bevaras) och följer med till en kedjad nästa modul.
+
+- **Två lager.** *Gränssnittet* (steg, knappar, samtyckesgrind, kontakt-
+  avsnittet, kontaktpreferens, bilagor, felmeddelanden, chattens fasta
+  texter, resultat-/sammanfattnings-PDF och sammanfattningsmejlet) har fasta
+  sv/en-ordböcker (`COMPASS_UI` i `packages/shared/src/compass-i18n.ts`,
+  `CONTACT_FIELD_META_EN`/`CONTACT_OPTION_LABEL_EN` i `compass-contact.ts`;
+  testet låser att ordböckerna har samma nycklar). Komponenterna läser
+  språket ur `CompassLocaleProvider` (`components/compass/locale.tsx`) —
+  default svenska, så admin-förhandsgranskning och intern testchatt är
+  oförändrade. *Modulens innehåll* (namn, eyebrow, rubrik, ingress, målgrupp,
+  startsida, samtycke, chattens första meddelande, tack, frågor + hjälptext +
+  svarsalternativ, resultatprofiler) lagras i
+  `compass_modules.translations` (json, migration **1700000216**):
+  `{ en: { enabled, texts: { <nyckel>: text }, sources: { <nyckel>: hash } } }`.
+  Nycklarna härleds ur modulen (`compassTranslatableEntries`: `m.<fält>`,
+  `q.<fråge-id>.prompt|help|c.<värde>`, `b.<profil>.title|body|tip.<n>|cta`).
+  En tom engelsk text faller tillbaka på svenskan.
+- **Svaren lagras på värdet** — bara etiketterna byts. Lead, quiz-
+  poängsättning, hopplogik och statistik påverkas inte av språket; personalen
+  ser frågorna på svenska i lead-vyn och AI-sammanställningen.
+- **Människa-i-loopen (§ 10.1, art. 14).** Steget **"Engelska"** (steg 5 i
+  modul-editorn, `TranslationEditor`): svensk källa bredvid engelskt fält,
+  "Översätt med AI" (Mistral medium → large → small, EU; bara saknade/ändrade
+  texter) eller "Översätt allt på nytt", status per text (Saknas / Svenskan
+  ändrad / Klar / Ej sparad / AI-FÖRSLAG), och **"Spara engelska"** med
+  kryssrutan *Publicera den engelska versionen*. AI-förslaget sparas ALDRIG
+  automatiskt (`suggestModuleTranslationAction` returnerar bara texter);
+  `saveModuleTranslationAction` sparar bara nycklar som finns i modulen nu och
+  hashar varje källa (`compassSourceHash`, FNV-1a) så en senare ändring av
+  svenskan märks "Svenskan ändrad". Publicering kräver minst en text.
+  Förhandsgranskningen (`/inflode/m/<slug>?lang=en`) visar utkastet före
+  publicering.
+- **En grind för publika ytor:** `publishedEnglishTexts(raw, locale)` /
+  `visitorLocale(module, body.lang)` (`lib/compass/public.ts`) — engelska BARA
+  när besökaren bett om det OCH versionen är publicerad; annars svenska och
+  ingen språkknapp. Sida, metadata, quiz-resultat (`translateResultBucket`),
+  resultat-PDF (texter fortsatt bara ur modulens lagrade data, § 21.8),
+  chattens avslutssteg, sammanfattningen (sparar `visitor_language` på
+  konversationen så `/summary-pdf` renderar rätt språk) och mejlet.
+- **AI-chatten på engelska:** `intakeReply({ locale: 'en' })` lägger
+  `ENGLISH_REPLY_RULE` SIST i systemprompten (modulens svenska prompt kan inte
+  ta bort den) — assistenten svarar på engelska och översätter frågebanken
+  när den ställer frågorna; sammanfattningen till besökaren skrivs på
+  engelska.
+- **Följdfix:** den publika chattens avslutssteg fick tidigare inga frågor
+  (sidan hämtade bara frågor för formulär/quiz), så en chattmodul med
+  obligatoriska frågor kunde inte slutföras; nu hämtas frågorna för alla
+  flöden.
+- **Audit/feed:** sparande loggas i `agent_actions` (`field = 'translations'`,
+  PII-fritt: modulnamn, publicerad, antal texter) → "den engelska versionen
+  ändrades" i `/aktivitet`. AI-förslagens tokens loggas i `ai_usage_events`
+  (surface `suggestions`) och prövar månadstaket (§ 9.6).
+- **Regelefterlevnad:** riskklass **begränsad** för AI-översättningen
+  (personalens egna marknadstexter, isolerad prompt där texten är data,
+  människan granskar och publicerar); språkknappen och ordböckerna n/a.
+  Ingen PII (modulens egna texter); inga nya fält i `lib/ai/context.ts`.
+  RBAC: admin/incubator_lead/coach (samma krets som modul-admin), tenant
+  verifieras, superuser-fallback bara vid PB v0.23.4:s tysta regel-nekande.
+  Schema-drift: sparandet läser tillbaka posten och namnger migrationen om
+  fältet saknas; speglat i `setup-via-api.mjs`, asserterat i
+  `verify-baseline.mjs` (`REQUIRED_APP_FIELDS`).
+- **Inte byggt:** fler språk än engelska (modellen tar fler nycklar under
+  `translations`, men UI och ordböcker finns bara för sv/en), engelska
+  serverfel i sällsynta vägar (rate-limit/sessionsfel svarar fortfarande på
+  svenska), bilageuppladdningens serverfel och ett språkfält på leadet.
+
 ## 24. AI-sorterat filarkiv — ämnes-/bolagsmappar (/filer)
 
 ### 24.1 Översikt

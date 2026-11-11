@@ -2,7 +2,15 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { getPublicPbUrl } from '@/lib/pb-url';
-import { contactSectionForModule, sortCompassQuestions, type ContactSectionConfig } from '@platform/shared';
+import {
+  contactSectionForModule,
+  normalizeCompassTranslations,
+  parseCompassLocale,
+  publishedEnglishTexts,
+  type CompassLocale,
+  sortCompassQuestions,
+  type ContactSectionConfig
+} from '@platform/shared';
 import { moduleWantsLead } from './lead-capture';
 import type { CompassModule, CompassQuestion, NextModuleLink } from './types';
 
@@ -105,6 +113,19 @@ export function toPublicModule(m: CompassModule): PublicCompassModule {
   };
 }
 
+/**
+ * Besökarens språk i de publika routarna (§ 23.13): `en` bara när klienten
+ * bett om det OCH modulen har en publicerad (granskad) engelsk version —
+ * annars svenska. `texts` = de engelska texterna (null på svenska).
+ */
+export function visitorLocale(
+  module: Pick<CompassModule, 'translations'>,
+  rawLang: unknown
+): { locale: CompassLocale; texts: Record<string, string> | null } {
+  const texts = publishedEnglishTexts(module.translations, parseCompassLocale(rawLang));
+  return { locale: texts ? 'en' : 'sv', texts };
+}
+
 export interface ResolvedPublicModule {
   pb: PocketBase;
   module: CompassModule;
@@ -177,7 +198,12 @@ export async function getNextModuleLink(
     // inte tyst brytas bara för att public_slug-fältet lämnats tomt.
     const slug = next.public_slug || next.slug;
     if (!slug) return null;
-    return { slug, label: next.welcome_title || next.name };
+    // Engelsk knapptext när nästa modul har en publicerad engelsk version (§ 23.13).
+    const en = normalizeCompassTranslations(next.translations).en;
+    const labelEn = en?.enabled
+      ? (next.welcome_title && en.texts['m.welcome_title']) || en.texts['m.name'] || undefined
+      : undefined;
+    return { slug, label: next.welcome_title || next.name, labelEn };
   } catch {
     return null;
   }
