@@ -22,6 +22,8 @@ interface ChatRequestBody {
   messages: CompassChatMessage[];
   moduleSlug?: string;
   sessionToken?: string;
+  /** Förhandsgranskning på engelska (§ 23.13). */
+  lang?: string;
 }
 
 function isValidMessage(m: unknown): m is CompassChatMessage {
@@ -109,7 +111,14 @@ export async function POST(req: Request) {
 
   let reply;
   try {
-    reply = await intakeReply(history, { systemPrompt, model, maxExchanges, assistantName });
+    reply = await intakeReply(history, {
+      systemPrompt,
+      model,
+      maxExchanges,
+      assistantName,
+      // Förhandsgranskning på engelska (§ 23.13) — personalen testar före publicering.
+      locale: body.lang === 'en' ? 'en' : 'sv'
+    });
   } catch (err) {
     if (err instanceof MistralError) {
       if (err.status === 429) {

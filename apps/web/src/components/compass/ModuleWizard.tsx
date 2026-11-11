@@ -14,6 +14,7 @@ import { ContactPreferencePicker } from './ContactPreferencePicker';
 import { ContactSection } from './ContactSection';
 import { resolveNextQuestionIndex } from '@/lib/compass/question-flow';
 import { useFlowProgress } from './useFlowProgress';
+import { useCompassLocale } from './locale';
 
 interface Props {
   moduleSlug: string;
@@ -52,6 +53,7 @@ export function ModuleWizard({
   trackProgress,
   contactSection
 }: Props) {
+  const { locale, t } = useCompassLocale();
   const [step, setStep] = useState(0);
   // Besökta steg (för "Tillbaka") — hopplogik (next_key) kan skippa frågor,
   // så step-1 är inte alltid den fråga besökaren faktiskt såg senast.
@@ -79,7 +81,7 @@ export function ModuleWizard({
   const progress = steps === 0 ? 0 : Math.round((100 * (step + (done ? 1 : 0))) / steps);
 
   if (total === 0) {
-    return <p className="mx-muted mx-t-13">Den här modulen har inga frågor publicerade ännu.</p>;
+    return <p className="mx-muted mx-t-13">{t.noQuestionsWizard}</p>;
   }
 
   if (done) {
@@ -89,19 +91,19 @@ export function ModuleWizard({
           className="mx-disp"
           style={{ fontSize: 24, fontWeight: 600, marginBottom: 12 }}
         >
-          Tack — vi har dina svar.
+          {t.thanksAnswers}
         </div>
         <p className="mx-muted mx-t-13" style={{ maxWidth: 460, margin: '0 auto' }}>
-          {successMessage || 'En människa från Movexum tittar på din ansökan och hör av sig inom 3 arbetsdagar.'}
+          {successMessage || t.thanksDefault}
         </p>
         {redirectUrl && (
           <p className="mx-mono mx-t-xs mx-muted" style={{ marginTop: 12 }}>
-            Du skickas vidare till <a href={redirectUrl}>{redirectUrl}</a>…
+            {t.redirecting} <a href={redirectUrl}>{redirectUrl}</a>…
           </p>
         )}
         {!redirectUrl && nextModule && (
           <div style={{ maxWidth: 460, margin: '20px auto 0' }}>
-            <NextModuleCta next={nextModule} prompt="Fortsätt till nästa steg" />
+            <NextModuleCta next={nextModule} prompt={t.continueNext} />
           </div>
         )}
       </div>
@@ -112,7 +114,7 @@ export function ModuleWizard({
     e.preventDefault();
     if (onContactStep) {
       // Samma validering som server-side (klienten är aldrig gränsen).
-      const missing = missingContactField(cleanContactValues(contact, contactSection), contactSection);
+      const missing = missingContactField(cleanContactValues(contact, contactSection), contactSection, locale);
       if (missing) {
         setError(missing);
         return;
@@ -121,7 +123,7 @@ export function ModuleWizard({
       if (!q) return;
       const value = answers[q.key];
       if (q.required && (value === undefined || value === '' || (Array.isArray(value) && value.length === 0))) {
-        setError('Det här fältet är obligatoriskt.');
+        setError(t.requiredField);
         return;
       }
       setError(null);
@@ -149,14 +151,15 @@ export function ModuleWizard({
           consent,
           contact_preference: contactPreference || undefined,
           subject: subject || undefined,
-          sessionToken: trackProgress ? progressTracker.sessionToken : undefined
+          sessionToken: trackProgress ? progressTracker.sessionToken : undefined,
+          lang: locale
         })
       });
       if (!res.ok) {
         // Visa serverns riktiga felmeddelande (t.ex. "kunde inte sparas") i
         // stället för en naken statuskod — lead-garantin ska synas (§ 23.6).
         const data = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error || `Servern svarade ${res.status}`);
+        throw new Error(data.error || t.serverStatus(res.status));
       }
       progressTracker.markDone();
       setDone(true);
@@ -166,7 +169,7 @@ export function ModuleWizard({
         }, 1500);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Något gick fel');
+      setError(err instanceof Error ? err.message : t.somethingWrong);
     } finally {
       setSubmitting(false);
     }
@@ -185,7 +188,7 @@ export function ModuleWizard({
     <form onSubmit={onSubmit} style={{ display: 'grid', gap: 16 }}>
       {/* Progress */}
       <div className="mx-flex mx-items-c mx-gap-2 mx-mono mx-t-xs mx-muted mx-t-up">
-        <span>{onContactStep ? 'Snart klar' : `Fråga ${step + 1} av ${total}`}</span>
+        <span>{onContactStep ? t.almostDone : t.questionOf(step + 1, total)}</span>
         <span className="mx-grow" />
         <span>{progress}%</span>
       </div>
@@ -258,10 +261,10 @@ export function ModuleWizard({
             setError(null);
           }}
         >
-          ← Tillbaka
+          {t.back}
         </button>
         <button type="submit" className="mx-btn mx-primary" disabled={submitting}>
-          {isLast ? (submitting ? 'Skickar…' : 'Skicka in →') : 'Nästa →'}
+          {isLast ? (submitting ? t.submitting : t.submit) : t.next}
         </button>
       </div>
     </form>

@@ -2951,7 +2951,10 @@ await ensureCollection({
     { name: 'anonymous', type: 'bool', required: false },
     // Avsnittet "Dina uppgifter" (migration 1700000208, § 23.11): läge per
     // kontaktfält (hidden/optional/required). Saknat ⇒ legacy-booleanerna.
-    { name: 'contact_fields', type: 'json', required: false, maxSize: 4000 }
+    { name: 'contact_fields', type: 'json', required: false, maxSize: 4000 },
+    // Engelsk version (migration 1700000216, § 23.13): granskade översättningar
+    // av besökartexterna. Format i packages/shared/src/compass-i18n.ts.
+    { name: 'translations', type: 'json', required: false, maxSize: 1000000 }
   ],
   indexes: [
     'CREATE UNIQUE INDEX idx_compass_modules_tenant_slug ON compass_modules (tenant, slug)',

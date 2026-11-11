@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
 import { clientIpFromRequest } from '@/lib/client-ip';
-import { isSurveyModule } from '@platform/shared';
+import { isSurveyModule, translateResultBucket } from '@platform/shared';
 import { storeSurveyResponse } from '@/lib/compass/survey';
 import {
   resolvePublicModule,
   getPublicModuleQuestions,
-  pickAttribution
+  pickAttribution,
+  visitorLocale
 } from '@/lib/compass/public';
 import {
   attachAiSummary,
@@ -38,6 +39,8 @@ interface QuizBody {
   contact_preference?: string;
   /** Sessionstoken (§ 23.10) — slutför det pågående leadet i stället för att skapa ett nytt. */
   sessionToken?: string;
+  /** Besökarens språk (§ 23.13) — gäller bara när engelskan är publicerad. */
+  lang?: string;
 }
 
 // Högra (proxy-tillagda) XFF-värdet — det vänstra är klientstyrt och lät en
@@ -77,11 +80,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     return NextResponse.json({ error: 'Samtycke krävs.' }, { status: 400 });
   }
 
+  // Besökarens språk (§ 23.13): felmeddelanden + resultatprofilen på
+  // engelska. Leadet (staff-data) behåller den svenska profiltiteln.
+  const { locale, texts } = visitorLocale(module, body.lang);
+
   // Avsnittet "Dina uppgifter" (§ 23.11): klienten är aldrig gränsen.
   const contact = await parsePublicContactSubmission(module, body.contact, {
     tenant,
     moduleSlug: slug,
-    sessionToken: body.sessionToken
+    sessionToken: body.sessionToken,
+    locale
   });
   if (contact.error) return NextResponse.json({ error: contact.error }, { status: 400 });
   const contactFields = leadFieldsFromContact(contact.values);
@@ -96,6 +104,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   const score = scoreQuiz(quizQuestions, body.answers || {});
   const buckets = isResultBucketArray(module.result_buckets) ? module.result_buckets : [];
   const bucket = resolveBucket(score, buckets);
+  const visitorBucket = texts ? translateResultBucket(bucket, texts) : bucket;
 
   // ENKÄT (§ 43): svaren lagras per fråga mot subjektet — inget lead. Fela
   // högt om lagringen misslyckas (svaren får inte tyst försvinna).
@@ -112,13 +121,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
         { status: 500 }
       );
     }
-    return NextResponse.json({ bucket, score: score.total });
+    return NextResponse.json({ bucket: visitorBucket, score: score.total });
   }
 
   // Steg 4-valet: modulen kan vara konfigurerad att INTE skapa lead — visa
   // bara resultatet i så fall.
   if (!moduleWantsLead(module)) {
-    return NextResponse.json({ bucket, score: score.total });
+    return NextResponse.json({ bucket: visitorBucket, score: score.total });
   }
 
   // Bevara utfallet som en lead (människa-i-loopen följer upp). Kontaktfält är
@@ -165,5 +174,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
 
   await notifyNewInflow(module, { ...lead, ai_summary: aiSummary ?? lead.ai_summary });
 
-  return NextResponse.json({ bucket, score: score.total });
+  return NextResponse.json({ bucket: visitorBucket, score: score.total });
 }

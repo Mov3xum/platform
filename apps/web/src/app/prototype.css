@@ -1268,6 +1268,60 @@ select.mx-input:focus {
   border: 1px solid rgba(214, 126, 71, 0.22);
 }
 
+/* Språkväxlare Svenska/English (§ 23.13) — tydlig segmentknapp i sidhuvudet. */
+.mx-compass-topbar-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.mx-compass-lang {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--mx-r-pill);
+  background: var(--mx-paper);
+  border: 1px solid var(--mx-line-strong);
+  box-shadow: 0 1px 2px rgba(18, 18, 18, 0.06);
+}
+.mx-compass-lang-ico {
+  display: inline-flex;
+  padding: 0 4px 0 7px;
+  color: var(--mx-ink-soft);
+}
+.mx-compass-lang a {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 13px;
+  border-radius: var(--mx-r-pill);
+  font-family: var(--mx-ui);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--mx-ink);
+  text-decoration: none;
+  line-height: 1;
+}
+.mx-compass-lang a:hover { background: var(--mx-paper-2); }
+.mx-compass-lang a:focus-visible { outline: 2px solid var(--mx-accent, #002c40); outline-offset: 2px; }
+.mx-compass-lang a[aria-current='true'] {
+  background: var(--mx-accent, #002c40);
+  color: #fff;
+}
+.mx-compass-landing[data-layout='cover'] .mx-compass-lang {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.3);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+.mx-compass-landing[data-layout='cover'] .mx-compass-lang-ico,
+.mx-compass-landing[data-layout='cover'] .mx-compass-lang a { color: #fff; }
+.mx-compass-landing[data-layout='cover'] .mx-compass-lang a:hover { background: rgba(255, 255, 255, 0.16); }
+.mx-compass-landing[data-layout='cover'] .mx-compass-lang a[aria-current='true'] {
+  background: #fff;
+  color: var(--mx-ink);
+}
+
 /* Media (bild/video) — samma element i alla mallar, mallen bestämmer form. */
 .mx-compass-media { margin: 0; width: 100%; height: 100%; }
 .mx-compass-media-el {

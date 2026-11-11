@@ -1,7 +1,7 @@
 import { clientIpFromRequest } from '@/lib/client-ip';
 import { isValidChatSessionToken } from '@/lib/compass/chat-lead';
 import { buildChatSummaryPdf, readStoredSummary } from '@/lib/compass/chat-summary';
-import { resolvePublicModule } from '@/lib/compass/public';
+import { resolvePublicModule, visitorLocale } from '@/lib/compass/public';
 import { findConversationBySession } from '@/lib/compass/store';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 
@@ -43,17 +43,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     return new Response('Sammanfattningen finns inte ännu — avsluta samtalet först.', { status: 404 });
   }
 
+  const texts = visitorLocale(module, stored.locale).texts;
   const pdf = await buildChatSummaryPdf({
-    moduleName: module.name,
+    moduleName: (texts && texts['m.name']) || module.name,
     summary: stored.summary,
     answers: stored.answers,
-    accent: module.theme_color
+    accent: module.theme_color,
+    locale: stored.locale
   });
   return new Response(new Uint8Array(pdf), {
     status: 200,
     headers: {
       'Content-Type': 'application/pdf',
-      'Content-Disposition': 'attachment; filename="sammanfattning.pdf"',
+      'Content-Disposition': `attachment; filename="${stored.locale === 'en' ? 'summary' : 'sammanfattning'}.pdf"`,
       'Cache-Control': 'private, no-store'
     }
   });

@@ -1,7 +1,17 @@
 import type { Metadata } from 'next';
 import { cache } from 'react';
 import { notFound } from 'next/navigation';
-import { SURVEY_SUBJECT_PARAM, isValidSurveySubjectId } from '@platform/shared';
+import {
+  COMPASS_LANG_PARAM,
+  SURVEY_SUBJECT_PARAM,
+  applyCompassModuleTranslation,
+  applyCompassQuestionTranslation,
+  hasPublishedEnglish,
+  isValidSurveySubjectId,
+  parseCompassLocale,
+  publishedEnglishTexts,
+  type CompassLocale
+} from '@platform/shared';
 import { PublicModuleLayout } from '@/components/compass/PublicModuleLayout';
 import {
   resolvePublicModule,
@@ -21,15 +31,31 @@ const brandingOnce = cache((pb: Parameters<typeof getPublicTenantBranding>[0], t
   getPublicTenantBranding(pb, tenant)
 );
 
+/** Samma sida på ett annat språk — övriga parametrar (UTM, `?om=`) bevaras. */
+function languageHref(slug: string, sp: Record<string, string | string[] | undefined>, lang: CompassLocale): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(sp)) {
+    if (key === COMPASS_LANG_PARAM || value === undefined) continue;
+    for (const v of Array.isArray(value) ? value : [value]) params.append(key, v);
+  }
+  if (lang === 'en') params.set(COMPASS_LANG_PARAM, 'en');
+  const qs = params.toString();
+  return `/m/${encodeURIComponent(slug)}${qs ? `?${qs}` : ''}`;
+}
+
 export async function generateMetadata({
-  params
+  params,
+  searchParams
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }): Promise<Metadata> {
   const { slug } = await params;
+  const sp = await searchParams;
   const resolved = await resolveOnce(slug);
   if (!resolved) return { title: 'Sidan finns inte' };
-  const m = resolved.module;
+  const texts = publishedEnglishTexts(resolved.module.translations, parseCompassLocale(sp[COMPASS_LANG_PARAM]));
+  const m = texts ? applyCompassModuleTranslation(resolved.module, texts) : resolved.module;
   // Fliktiteln bär avsändaren (modulens egen eyebrow, annars tenantens
   // namn) — inte produktnamnet "Startupkompassen" (2026-11).
   const branding = await brandingOnce(resolved.pb, resolved.tenant);
@@ -63,24 +89,34 @@ export default async function PublicModulePage({
   const resolved = await resolveOnce(slug);
   if (!resolved) notFound();
 
-  const { pb, module, tenant } = resolved;
-  const [questions, branding, nextModule] = await Promise.all([
-    module.flow_type === 'chat'
-      ? Promise.resolve([])
-      : getPublicModuleQuestions(pb, module.id),
+  const { pb, module: swedishModule, tenant } = resolved;
+  // Engelska (§ 23.13): bara när besökaren valt det OCH personalen publicerat
+  // en granskad engelsk version — annars svenska, och ingen språkknapp.
+  const texts = publishedEnglishTexts(swedishModule.translations, parseCompassLocale(sp[COMPASS_LANG_PARAM]));
+  const locale: CompassLocale = texts ? 'en' : 'sv';
+  const visibleModule = texts ? applyCompassModuleTranslation(swedishModule, texts) : swedishModule;
+  // Frågorna behövs även för chatten (avslutsstegets obligatoriska frågor, § 23.10).
+  const [swedishQuestions, branding, nextModule] = await Promise.all([
+    getPublicModuleQuestions(pb, swedishModule.id),
     brandingOnce(pb, tenant),
-    getNextModuleLink(pb, module)
+    getNextModuleLink(pb, swedishModule)
   ]);
+  const questions = texts ? applyCompassQuestionTranslation(swedishQuestions, texts) : swedishQuestions;
+  const languageLinks = hasPublishedEnglish(swedishModule.translations)
+    ? { sv: languageHref(slug, sp, 'sv'), en: languageHref(slug, sp, 'en') }
+    : null;
 
   // Bara den vitlistade publika projektionen når klienten — hela posten
   // (intern beskrivning, systemprompt, notis-e-post …) stannar på servern.
   return (
     <PublicModuleLayout
-      module={toPublicModule(module)}
+      module={toPublicModule(visibleModule)}
       questions={questions}
       branding={branding}
       nextModule={nextModule}
       subject={subject}
+      locale={locale}
+      languageLinks={languageLinks}
     />
   );
 }

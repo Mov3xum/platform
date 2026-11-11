@@ -269,6 +269,11 @@ export interface CompassModule {
   /** Quiz-resultatprofiler (flow_type === 'quiz'). */
   result_buckets?: ResultBucket[];
   /**
+   * Engelsk version (migration 1700000216, § 23.13): `{ en: { enabled, texts,
+   * sources } }` — tolkas av `normalizeCompassTranslations`. Saknat ⇒ ingen.
+   */
+  translations?: unknown;
+  /**
    * Nästa modul i kedjan (relation→compass_modules, migration 1700000124).
    * När satt erbjuds besökaren att fortsätta till den modulen efter att den
    * här slutförts. Pekar alltid på en modul i samma tenant (verifieras i
@@ -321,6 +326,8 @@ export interface NextModuleLink {
   slug: string;
   /** Visningsnamn på "fortsätt"-knappen. */
   label: string;
+  /** Engelskt visningsnamn när nästa modul har en publicerad engelsk version (§ 23.13). */
+  labelEn?: string;
 }
 
 export interface Attribution {

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { clientIpFromRequest } from '@/lib/client-ip';
-import { isSurveyModule } from '@platform/shared';
+import { applyCompassQuestionTranslation, isSurveyModule } from '@platform/shared';
 import { AiBudgetExceededError, assertWithinAiBudget } from '@/lib/ai/budget.server';
 import { logAiUsage } from '@/lib/ai/usage';
 import { sendChatSummaryEmail } from '@/lib/email';
@@ -17,7 +17,13 @@ import {
   parsePublicContactSubmission
 } from '@/lib/compass/lead-capture';
 import { notifyNewInflow } from '@/lib/compass/notify';
-import { getPublicModuleQuestions, mapAnswersToLead, pickAttribution, resolvePublicModule } from '@/lib/compass/public';
+import {
+  getPublicModuleQuestions,
+  mapAnswersToLead,
+  pickAttribution,
+  resolvePublicModule,
+  visitorLocale
+} from '@/lib/compass/public';
 import { findConversationBySession, listMessages, patchConversation } from '@/lib/compass/store';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import type { Attribution } from '@/lib/compass/types';
@@ -38,6 +44,8 @@ interface CompleteBody {
   send_summary?: boolean;
   attribution?: Attribution;
   consent?: boolean;
+  /** Besökarens språk (§ 23.13) — gäller bara när engelskan är publicerad. */
+  lang?: string;
 }
 
 /**
@@ -77,19 +85,33 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   }
 
   const questions = await getPublicModuleQuestions(pb, module.id);
+  // Besökarens språk (§ 23.13): felmeddelanden, sammanfattningen och dess
+  // fråge-etiketter på engelska. Leadet får de svenska etiketterna (staff).
+  const { locale, texts } = visitorLocale(module, body.lang);
+  const visitorQuestions = texts ? applyCompassQuestionTranslation(questions, texts) : questions;
+  const visitorModuleName = (texts && texts['m.name']) || module.name;
   const answers = body.answers && typeof body.answers === 'object' ? body.answers : {};
   // Avsnittet "Dina uppgifter" (§ 23.11). Klienten är aldrig gränsen — samma
   // kontroll som i avslutsformuläret.
   const parsed = await parsePublicContactSubmission(module, body.contact, {
     tenant,
     moduleSlug: slug,
-    sessionToken: body.sessionToken
+    sessionToken: body.sessionToken,
+    locale
   });
   const contact = parsed.values;
-  const missing = missingClosingField({ questions, answers, contact, config: parsed.config });
+  const missing = missingClosingField({ questions: visitorQuestions, answers, contact, config: parsed.config, locale });
   if (missing) return NextResponse.json({ error: missing }, { status: 400 });
   if (body.send_summary && !contact.email) {
-    return NextResponse.json({ error: 'Ange en e-postadress för att få sammanfattningen skickad.' }, { status: 400 });
+    return NextResponse.json(
+      {
+        error:
+          locale === 'en'
+            ? 'Enter an email address to receive the summary.'
+            : 'Ange en e-postadress för att få sammanfattningen skickad.'
+      },
+      { status: 400 }
+    );
   }
 
   const conversation = await findConversationBySession(pb, tenant, slug, body.sessionToken);
@@ -100,12 +122,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     (m): m is { role: 'user' | 'assistant'; content: string } => m.role !== 'system'
   );
   const closingEntries = buildSubmissionEntries(closingQuestions(questions), answers);
+  // Samma svar med besökarens fråge-etiketter — det besökaren själv läser.
+  const visitorEntries = texts
+    ? buildSubmissionEntries(closingQuestions(visitorQuestions), answers)
+    : closingEntries;
 
   // Sammanfattning till besökaren (best-effort; fallback = sista assistentsvaret).
   let summary: string | null = null;
   try {
     await assertWithinAiBudget(pb, tenant);
-    const res = await summarizeChatForVisitor(history, closingEntries, module.name);
+    const res = await summarizeChatForVisitor(history, visitorEntries, visitorModuleName, locale);
     if (res.usage) {
       await logAiUsage(pb, {
         tenant,
@@ -123,14 +149,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   }
   if (!summary) {
     const lastAssistant = [...history].reverse().find((m) => m.role === 'assistant');
-    summary = lastAssistant?.content.trim() || 'Tack för samtalet! Movexum återkommer gärna om nästa steg.';
+    summary =
+      lastAssistant?.content.trim() ||
+      (locale === 'en'
+        ? 'Thank you for the conversation! Movexum will be happy to get back to you about next steps.'
+        : 'Tack för samtalet! Movexum återkommer gärna om nästa steg.');
   }
-  const summaryAnswers = summaryAnswersFromEntries(closingEntries);
+  const summaryAnswers = summaryAnswersFromEntries(visitorEntries);
   // Sammanfattningen + avslutssvaren bor på konversationen (staff-only RLS)
   // så PDF-nedladdningen bygger på SERVERNS data, aldrig klientens text.
   await patchConversation(pb, conversation.id, {
     status: 'completed',
-    extracted_data: { visitor_summary: summary, closing_answers: summaryAnswers }
+    extracted_data: { visitor_summary: summary, closing_answers: summaryAnswers, visitor_language: locale }
   });
 
   let leadId: string | undefined;
@@ -166,16 +196,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   if (body.send_summary && contact.email) {
     try {
       const pdf = await buildChatSummaryPdf({
-        moduleName: module.name,
+        moduleName: visitorModuleName,
         summary,
         answers: summaryAnswers,
-        accent: module.theme_color
+        accent: module.theme_color,
+        locale
       });
       await sendChatSummaryEmail(contact.email, {
-        moduleName: module.name,
+        moduleName: visitorModuleName,
         summary,
         answers: summaryAnswers,
-        pdf
+        pdf,
+        locale
       });
       emailed = true;
     } catch (err) {

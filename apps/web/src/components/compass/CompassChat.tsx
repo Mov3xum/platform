@@ -5,6 +5,7 @@ import type { Attribution, NextModuleLink } from '@/lib/compass/types';
 import { ChatClosingForm, type ChatClosingConfig, type ChatClosingResult } from './ChatClosingForm';
 import { NextModuleCta } from './NextModuleCta';
 import { useFlowProgress } from './useFlowProgress';
+import { useCompassLocale } from './locale';
 
 interface Msg {
   role: 'user' | 'assistant';
@@ -49,14 +50,9 @@ function readAttribution(): Attribution {
   };
 }
 
-/**
- * Hälsningen bär assistentens namn (modulens "Assistentens namn", annars
- * modulens namn) — aldrig ett hårdkodat produktnamn. Modulens egen
- * `intro_message` vinner när den är satt.
- */
-function defaultGreeting(name: string): string {
-  return `Hej! Jag är ${name}. Berätta gärna lite om idén du går och funderar på — vad försöker du lösa, och för vem?`;
-}
+// Hälsningen bär assistentens namn (modulens "Assistentens namn", annars
+// modulens namn) — aldrig ett hårdkodat produktnamn (`t.greeting`). Modulens
+// egen `intro_message` vinner när den är satt.
 
 export function CompassChat({
   initialAssistantMessage,
@@ -70,8 +66,9 @@ export function CompassChat({
   closing,
   nextModule
 }: Props) {
+  const { locale, t } = useCompassLocale();
   const [messages, setMessages] = useState<Msg[]>(() => [
-    { role: 'assistant', content: initialAssistantMessage || defaultGreeting(title) }
+    { role: 'assistant', content: initialAssistantMessage || t.greeting(title) }
   ]);
   const [input, setInput] = useState('');
   const [pending, setPending] = useState(false);
@@ -118,20 +115,20 @@ export function CompassChat({
       const res = await fetch(`${closing.apiBase}/${encodeURIComponent(moduleSlug)}/summary-pdf`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionToken })
+        body: JSON.stringify({ sessionToken, lang: locale })
       });
       if (!res.ok) throw new Error(await res.text());
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'sammanfattning.pdf';
+      a.download = locale === 'en' ? 'summary.pdf' : 'sammanfattning.pdf';
       document.body.appendChild(a);
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
     } catch {
-      setError('Kunde inte skapa PDF:en. Försök igen.');
+      setError(t.pdfFailed);
     } finally {
       setDownloading(false);
     }
@@ -158,20 +155,21 @@ export function CompassChat({
           moduleSlug,
           sessionToken,
           attribution,
-          consent
+          consent,
+          lang: locale
         })
       });
       if (!res.ok) {
         // Servern skickar vänliga, svenska felmeddelanden (rate limit,
         // Mistral-överbelastning m.m.) — visa dem i stället för rå statuskod.
         const data = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error || `Servern svarade ${res.status}`);
+        throw new Error(data.error || t.serverStatus(res.status));
       }
       const data = (await res.json()) as { reply?: string };
-      if (!data.reply) throw new Error('Ingen replik från servern');
+      if (!data.reply) throw new Error(t.noReply);
       setMessages((m) => [...m, { role: 'assistant', content: data.reply ?? '' }]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Något gick fel');
+      setError(err instanceof Error ? err.message : t.somethingWrong);
     } finally {
       setPending(false);
     }
@@ -185,7 +183,7 @@ export function CompassChat({
         <div style={{ minWidth: 0 }}>
           <div className="mx-disp mx-fw-6 mx-t-13">{title}</div>
           <div className="mx-mono mx-t-xs mx-muted mx-t-up">
-            Mistral · Le Chat · EU-suveränt
+            {t.chatProvider}
           </div>
         </div>
         <span className="mx-grow" />
@@ -194,7 +192,7 @@ export function CompassChat({
             className="mx-chip mx-mono"
             style={{ background: 'var(--mx-cyan-tint-2)', color: '#002c40' }}
           >
-            AI-ASSISTENT
+            {t.aiBadge}
           </span>
         )}
       </div>
@@ -211,7 +209,7 @@ export function CompassChat({
             <div className="mx-chat-mini" aria-hidden>
               {avatarInitial}
             </div>
-            <div className="mx-bubble bot" aria-label="Assistenten skriver">
+            <div className="mx-bubble bot" aria-label={t.typing}>
               <span className="mx-chat-typing">
                 <i />
                 <i />
@@ -236,11 +234,10 @@ export function CompassChat({
         {stage === 'done' && closingResult && (
           <div className="mx-chat-card" style={{ display: 'grid', gap: 12 }}>
             <div className="mx-disp mx-fw-6" style={{ fontSize: 18 }}>
-              Tack — vi har dina uppgifter.
+              {t.thanksDetails}
             </div>
             <p className="mx-muted mx-t-13" style={{ margin: 0, lineHeight: 1.55 }}>
-              {closing?.successMessage ||
-                'En människa från Movexum tittar på det du berättat och hör av sig om du bett om det.'}
+              {closing?.successMessage || t.chatThanksDefault}
             </p>
             {closingResult.summary && (
               <div className="mx-t-13" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
@@ -249,23 +246,23 @@ export function CompassChat({
             )}
             <div className="mx-t-xs mx-muted">
               {closingResult.emailed && closingResult.email
-                ? `Sammanfattningen är skickad till ${closingResult.email}.`
+                ? t.summarySent(closingResult.email)
                 : closingResult.emailError
-                  ? `Sammanfattningen kunde inte mejlas (${closingResult.emailError}) — ladda ner den i stället.`
+                  ? t.summaryEmailFailed(closingResult.emailError)
                   : null}
             </div>
             <div className="mx-flex mx-items-c mx-gap-2 mx-wrap">
               <button type="button" className="mx-btn mx-primary" onClick={downloadSummary} disabled={downloading}>
-                {downloading ? 'Skapar PDF…' : 'Ladda ner sammanfattning (PDF)'}
+                {downloading ? t.creatingPdf : t.downloadSummary}
               </button>
             </div>
-            <div className="mx-t-xs mx-muted">Genererat av AI – verifiera innan delning.</div>
-            {nextModule && <NextModuleCta next={nextModule} prompt="Klar? Gå vidare till nästa steg." />}
+            <div className="mx-t-xs mx-muted">{t.aiDisclaimer}</div>
+            {nextModule && <NextModuleCta next={nextModule} prompt={t.doneContinue} />}
           </div>
         )}
         {stage === 'chat' && !closing && reachedLimit && !pending && (
           <div className="mx-t-xs mx-muted" style={{ textAlign: 'center', padding: '8px 0' }}>
-            Samtalet är avslutat — tack för att du delade din idé.
+            {t.chatEndedThanks}
           </div>
         )}
       </div>
@@ -279,26 +276,26 @@ export function CompassChat({
             className="mx-btn"
             style={{ flex: 'none', borderRadius: 'var(--mx-r-pill)' }}
             onClick={() => setStage('closing')}
-            title="Avsluta samtalet och lämna dina uppgifter"
+            title={t.finishChatTitle}
           >
-            Avsluta
+            {t.finishChat}
           </button>
         )}
         <input
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={reachedLimit ? 'Samtalet är avslutat' : 'Skriv ditt svar…'}
+          placeholder={reachedLimit ? t.inputEnded : t.inputPlaceholder}
           className="mx-input"
           disabled={pending || reachedLimit}
-          aria-label="Ditt meddelande"
+          aria-label={t.inputAria}
         />
         <button
           type="submit"
           className="mx-btn mx-primary mx-chat-send"
           disabled={pending || reachedLimit || input.trim().length === 0}
         >
-          Skicka →
+          {t.send}
         </button>
       </form>
       )}

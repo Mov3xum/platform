@@ -3,8 +3,14 @@ import { PublicModuleRunner } from './PublicModuleRunner';
 import { moduleHeroImageUrl, moduleHeroVideoUrl } from '@/lib/compass/media';
 import type { CompassQuestion, NextModuleLink } from '@/lib/compass/types';
 import type { PublicCompassModule, PublicTenantBranding } from '@/lib/compass/public';
-import { COMPASS_LAYOUT_META, normalizeCompassLayout } from '@platform/shared';
-import type { CompassLayout } from '@platform/shared';
+import {
+  COMPASS_LAYOUT_META,
+  COMPASS_LOCALES,
+  COMPASS_LOCALE_LABEL,
+  compassUi,
+  normalizeCompassLayout
+} from '@platform/shared';
+import type { CompassLayout, CompassLocale } from '@platform/shared';
 
 interface Props {
   module: PublicCompassModule;
@@ -13,13 +19,15 @@ interface Props {
   nextModule: NextModuleLink | null;
   /** Enkätens subjekt ur `?om=<id>` (§ 43), redan validerat av sidan. */
   subject?: string | null;
+  /** Språket sidan renderas på (§ 23.13) — `en` bara när engelskan är publicerad. */
+  locale?: CompassLocale;
+  /**
+   * Länkar för språkväxlaren (samma sida på svenska resp. engelska, övriga
+   * parametrar bevarade). Null ⇒ modulen har ingen publicerad engelsk
+   * version och växlaren visas inte.
+   */
+  languageLinks?: Record<CompassLocale, string> | null;
 }
-
-const FLOW_WORD: Record<string, string> = {
-  chat: 'AI-chatt',
-  quiz: 'Quiz',
-  wizard: 'Formulär'
-};
 
 /**
  * Den publika modulsidans presentationsskal (CLAUDE.md § 23.7 "Mallar").
@@ -31,7 +39,17 @@ const FLOW_WORD: Record<string, string> = {
  * eller lead-garantin. All styling bor i prototype.css under
  * "Startupkompassen — publik landningssida" och nycklas på `data-layout`.
  */
-export function PublicModuleLayout({ module, questions, branding, nextModule, subject }: Props) {
+export function PublicModuleLayout({
+  module,
+  questions,
+  branding,
+  nextModule,
+  subject,
+  locale = 'sv',
+  languageLinks = null
+}: Props) {
+  const t = compassUi(locale);
+  const FLOW_WORD = t.flowWord;
   const layout: CompassLayout = normalizeCompassLayout(module.layout);
   const meta = COMPASS_LAYOUT_META[layout];
   const hasTenantLogo = Boolean(branding.logoLightUrl || branding.logoDarkUrl);
@@ -76,7 +94,30 @@ export function PublicModuleLayout({ module, questions, branding, nextModule, su
           logoDarkUrl={branding.logoDarkUrl}
         />
       </span>
-      {module.target_audience && <span className="mx-compass-aud">{module.target_audience}</span>}
+      <div className="mx-compass-topbar-end">
+        {module.target_audience && <span className="mx-compass-aud">{module.target_audience}</span>}
+        {languageLinks && (
+          <nav className="mx-compass-lang" aria-label={`${t.language} / ${locale === 'en' ? 'Språk' : 'Language'}`}>
+            <span className="mx-compass-lang-ico" aria-hidden>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+              </svg>
+            </span>
+            {COMPASS_LOCALES.map((l) => (
+              <a
+                key={l}
+                href={languageLinks[l]}
+                hrefLang={l}
+                lang={l}
+                aria-current={l === locale ? 'true' : undefined}
+              >
+                {COMPASS_LOCALE_LABEL[l]}
+              </a>
+            ))}
+          </nav>
+        )}
+      </div>
     </header>
   );
 
@@ -138,15 +179,14 @@ export function PublicModuleLayout({ module, questions, branding, nextModule, su
         questions={questions}
         nextModule={nextModule}
         subject={subject}
+        locale={locale}
       />
     </section>
   );
 
   const foot = (
     <footer className="mx-compass-foot">
-      {isChat
-        ? 'Drivs av Mistral / Le Chat (EU-suveränt) · Genererat av AI – verifiera innan delning'
-        : 'Dina svar hanteras inom EU och delas aldrig vidare.'}
+      {isChat ? t.footChat : t.footForm}
     </footer>
   );
 
@@ -155,7 +195,7 @@ export function PublicModuleLayout({ module, questions, branding, nextModule, su
   // ── Heltäckande ──────────────────────────────────────────────────────────
   if (layout === 'cover') {
     return (
-      <main className="mx-compass-landing" data-layout="cover" style={style}>
+      <main lang={locale} className="mx-compass-landing" data-layout="cover" style={style}>
         <div className="mx-compass-cover-bg" aria-hidden>
           {media}
           <div className="mx-compass-cover-veil" />
@@ -177,7 +217,7 @@ export function PublicModuleLayout({ module, questions, branding, nextModule, su
   // ── Bild till vänster / höger ────────────────────────────────────────────
   if (layout === 'split_left' || layout === 'split_right') {
     return (
-      <main className="mx-compass-landing" data-layout={layout} style={style}>
+      <main lang={locale} className="mx-compass-landing" data-layout={layout} style={style}>
         <div className="mx-compass-wrap">
           {topbar}
           <div className="mx-compass-stage">
@@ -196,7 +236,7 @@ export function PublicModuleLayout({ module, questions, branding, nextModule, su
   // ── Färgpanel ────────────────────────────────────────────────────────────
   if (layout === 'panel') {
     return (
-      <main className="mx-compass-landing" data-layout="panel" style={style}>
+      <main lang={locale} className="mx-compass-landing" data-layout="panel" style={style}>
         <div className="mx-compass-wrap">
           {topbar}
           <div className="mx-compass-stage">
@@ -216,7 +256,7 @@ export function PublicModuleLayout({ module, questions, branding, nextModule, su
   // ── Minimal ──────────────────────────────────────────────────────────────
   if (layout === 'minimal') {
     return (
-      <main className="mx-compass-landing" data-layout="minimal" style={style}>
+      <main lang={locale} className="mx-compass-landing" data-layout="minimal" style={style}>
         <div className="mx-compass-wrap">
           {topbar}
           <div className="mx-compass-stage">
@@ -233,7 +273,7 @@ export function PublicModuleLayout({ module, questions, branding, nextModule, su
 
   // ── Klassisk (default) ───────────────────────────────────────────────────
   return (
-    <main className="mx-compass-landing" data-layout="classic" style={style}>
+    <main lang={locale} className="mx-compass-landing" data-layout="classic" style={style}>
       <div className="mx-compass-wrap">
         {topbar}
         <div className="mx-compass-stage">
