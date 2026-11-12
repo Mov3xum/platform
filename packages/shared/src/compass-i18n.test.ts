@@ -4,15 +4,14 @@ import {
   COMPASS_UI,
   applyCompassModuleTranslation,
   applyCompassQuestionTranslation,
-  buildStoredCompassTranslation,
+  compassEntriesToTranslate,
+  mergeCompassTranslation,
   compassSourceHash,
   compassTranslatableEntries,
   compassTranslationEntryState,
-  hasPublishedEnglish,
   normalizeCompassTranslations,
   parseCompassLocale,
-  publishedEnglishTexts,
-  summarizeCompassTranslation,
+  storedEnglishTexts,
   translateResultBucket
 } from './compass-i18n.ts';
 import { missingContactField, CONTACT_SECTION_DEFAULT, contactOptionText } from './compass-contact.ts';
@@ -91,37 +90,49 @@ test('translateResultBucket: nyckel/länk orörda', () => {
   assert.equal(translateResultBucket(null, {}), null);
 });
 
-test('build + state: källändring markeras, borttagna nycklar rensas', () => {
+test('merge + state: källändring översätts om, borttagna nycklar rensas', () => {
   const entries = compassTranslatableEntries(module, questions);
-  const stored = buildStoredCompassTranslation(
-    entries,
-    { 'm.welcome_title': '  Tell us  ', 'q.gone.prompt': 'Old', 'm.name': '' },
-    { enabled: true }
-  );
+  const stored = mergeCompassTranslation(entries, undefined, {
+    'm.welcome_title': '  Tell us  ',
+    'q.gone.prompt': 'Old',
+    'm.name': ''
+  });
   assert.deepEqual(Object.keys(stored.texts), ['m.welcome_title']);
   assert.equal(stored.texts['m.welcome_title'], 'Tell us');
-  assert.equal(stored.enabled, true);
   const title = entries.find((e) => e.key === 'm.welcome_title')!;
   assert.equal(compassTranslationEntryState(title, stored), 'ok');
   assert.equal(compassTranslationEntryState({ ...title, source: 'Ny svensk rubrik' }, stored), 'stale');
   const body = entries.find((e) => e.key === 'm.welcome_body')!;
   assert.equal(compassTranslationEntryState(body, stored), 'missing');
-  const sum = summarizeCompassTranslation(entries, stored);
-  assert.equal(sum.translated, 1);
-  assert.equal(sum.missing, entries.length - 1);
+  assert.equal(compassEntriesToTranslate(entries, stored).length, entries.length - 1);
+  assert.equal(compassEntriesToTranslate(entries, undefined).length, entries.length);
 });
 
-test('publicering kräver minst en text', () => {
-  const stored = buildStoredCompassTranslation([], {}, { enabled: true });
-  assert.equal(stored.enabled, false);
+test('merge: en text som inte översattes nu behåller sin gamla hash (förblir stale)', () => {
+  const entries = compassTranslatableEntries(module, questions);
+  const first = mergeCompassTranslation(entries, undefined, { 'm.welcome_title': 'Tell us', 'm.name': 'Idea' });
+  // Svenskan ändras; nästa körning översätter bara namnet.
+  const changed = entries.map((e) => (e.key === 'm.welcome_title' ? { ...e, source: 'Ny rubrik' } : e));
+  const second = mergeCompassTranslation(changed, first, { 'm.name': 'Idea description' });
+  assert.equal(second.texts['m.name'], 'Idea description');
+  assert.equal(second.texts['m.welcome_title'], 'Tell us', 'äldre engelska visas under tiden');
+  const title = changed.find((e) => e.key === 'm.welcome_title')!;
+  assert.equal(compassTranslationEntryState(title, second), 'stale');
+  assert.deepEqual(
+    compassEntriesToTranslate(changed, second).map((e) => e.key).includes('m.welcome_title'),
+    true
+  );
+  // När den översatts är allt klart.
+  const third = mergeCompassTranslation(changed, second, { 'm.welcome_title': 'New title' });
+  assert.equal(compassTranslationEntryState(title, third), 'ok');
 });
 
-test('normalize: tolerant mot skräp, publiceringsgrinden', () => {
+test('normalize: tolerant mot skräp; äldre format med enabled läses', () => {
   assert.deepEqual(normalizeCompassTranslations(null), {});
   assert.deepEqual(normalizeCompassTranslations('inte json'), {});
   const raw = {
     en: {
-      enabled: true,
+      enabled: false,
       texts: { 'm.name': 'Idea', 'bad key': 'x', 'q.q1.prompt': 42 },
       sources: { 'm.name': compassSourceHash('Idébeskrivning'), 'm.x': 'ZZZ' }
     }
@@ -129,12 +140,9 @@ test('normalize: tolerant mot skräp, publiceringsgrinden', () => {
   const n = normalizeCompassTranslations(raw);
   assert.deepEqual(n.en?.texts, { 'm.name': 'Idea' });
   assert.deepEqual(Object.keys(n.en?.sources ?? {}), ['m.name']);
-  assert.equal(hasPublishedEnglish(raw), true);
-  assert.equal(hasPublishedEnglish({ en: { enabled: false, texts: { 'm.name': 'Idea' } } }), false);
-  assert.equal(hasPublishedEnglish({ en: { enabled: true, texts: {} } }), false);
-  assert.deepEqual(publishedEnglishTexts(raw, 'en'), { 'm.name': 'Idea' });
-  assert.equal(publishedEnglishTexts(raw, 'sv'), null);
-  assert.equal(publishedEnglishTexts({ en: { enabled: false, texts: { 'm.name': 'Idea' } } }, 'en'), null);
+  assert.deepEqual(storedEnglishTexts(raw, 'en'), { 'm.name': 'Idea' });
+  assert.equal(storedEnglishTexts(raw, 'sv'), null);
+  assert.deepEqual(storedEnglishTexts(null, 'en'), {}, 'ännu inte översatt ⇒ svenska texter med engelskt gränssnitt');
 });
 
 test('compassSourceHash är deterministisk', () => {

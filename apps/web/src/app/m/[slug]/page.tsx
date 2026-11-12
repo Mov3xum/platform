@@ -6,13 +6,12 @@ import {
   SURVEY_SUBJECT_PARAM,
   applyCompassModuleTranslation,
   applyCompassQuestionTranslation,
-  hasPublishedEnglish,
   isValidSurveySubjectId,
   parseCompassLocale,
-  publishedEnglishTexts,
   type CompassLocale
 } from '@platform/shared';
 import { PublicModuleLayout } from '@/components/compass/PublicModuleLayout';
+import { ensureEnglishTexts } from '@/lib/compass/auto-translate';
 import {
   resolvePublicModule,
   getPublicModuleQuestions,
@@ -30,6 +29,22 @@ const resolveOnce = cache((slug: string) => resolvePublicModule(slug));
 const brandingOnce = cache((pb: Parameters<typeof getPublicTenantBranding>[0], tenant: string) =>
   getPublicTenantBranding(pb, tenant)
 );
+
+const questionsOnce = cache((pb: Parameters<typeof getPublicModuleQuestions>[0], moduleId: string) =>
+  getPublicModuleQuestions(pb, moduleId)
+);
+/**
+ * Engelska (§ 23.13): modulen översätts automatiskt första gången någon
+ * väljer English och sparas på modulen. En gång per request — metadata och
+ * sida delar resultatet (annars skulle den andra översätta om på den ännu
+ * inte omlästa modulen).
+ */
+const englishOnce = cache(async (slug: string): Promise<Record<string, string>> => {
+  const resolved = await resolveOnce(slug);
+  if (!resolved) return {};
+  const questions = await questionsOnce(resolved.pb, resolved.module.id);
+  return ensureEnglishTexts(resolved.pb, resolved.module, questions, resolved.tenant);
+});
 
 /** Samma sida på ett annat språk — övriga parametrar (UTM, `?om=`) bevaras. */
 function languageHref(slug: string, sp: Record<string, string | string[] | undefined>, lang: CompassLocale): string {
@@ -54,7 +69,7 @@ export async function generateMetadata({
   const sp = await searchParams;
   const resolved = await resolveOnce(slug);
   if (!resolved) return { title: 'Sidan finns inte' };
-  const texts = publishedEnglishTexts(resolved.module.translations, parseCompassLocale(sp[COMPASS_LANG_PARAM]));
+  const texts = parseCompassLocale(sp[COMPASS_LANG_PARAM]) === 'en' ? await englishOnce(slug) : null;
   const m = texts ? applyCompassModuleTranslation(resolved.module, texts) : resolved.module;
   // Fliktiteln bär avsändaren (modulens egen eyebrow, annars tenantens
   // namn) — inte produktnamnet "Startupkompassen" (2026-11).
@@ -90,21 +105,18 @@ export default async function PublicModulePage({
   if (!resolved) notFound();
 
   const { pb, module: swedishModule, tenant } = resolved;
-  // Engelska (§ 23.13): bara när besökaren valt det OCH personalen publicerat
-  // en granskad engelsk version — annars svenska, och ingen språkknapp.
-  const texts = publishedEnglishTexts(swedishModule.translations, parseCompassLocale(sp[COMPASS_LANG_PARAM]));
-  const locale: CompassLocale = texts ? 'en' : 'sv';
-  const visibleModule = texts ? applyCompassModuleTranslation(swedishModule, texts) : swedishModule;
+  // Språkknappen finns på alla moduler; English översätts automatiskt.
+  const locale: CompassLocale = parseCompassLocale(sp[COMPASS_LANG_PARAM]);
   // Frågorna behövs även för chatten (avslutsstegets obligatoriska frågor, § 23.10).
-  const [swedishQuestions, branding, nextModule] = await Promise.all([
-    getPublicModuleQuestions(pb, swedishModule.id),
+  const [swedishQuestions, branding, nextModule, texts] = await Promise.all([
+    questionsOnce(pb, swedishModule.id),
     brandingOnce(pb, tenant),
-    getNextModuleLink(pb, swedishModule)
+    getNextModuleLink(pb, swedishModule),
+    locale === 'en' ? englishOnce(slug) : Promise.resolve(null)
   ]);
+  const visibleModule = texts ? applyCompassModuleTranslation(swedishModule, texts) : swedishModule;
   const questions = texts ? applyCompassQuestionTranslation(swedishQuestions, texts) : swedishQuestions;
-  const languageLinks = hasPublishedEnglish(swedishModule.translations)
-    ? { sv: languageHref(slug, sp, 'sv'), en: languageHref(slug, sp, 'en') }
-    : null;
+  const languageLinks = { sv: languageHref(slug, sp, 'sv'), en: languageHref(slug, sp, 'en') };
 
   // Bara den vitlistade publika projektionen når klienten — hela posten
   // (intern beskrivning, systemprompt, notis-e-post …) stannar på servern.

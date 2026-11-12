@@ -77,7 +77,6 @@ const MONTH_NAMES = [
 const FIELD_LABELS: Record<string, string> = {
   groups: 'grupper',
   question_order: 'frågornas ordning',
-  translations: 'den engelska versionen',
   screening_facts: 'de manuella svaren i Bedömning excellens',
   title: 'titeln',
   month: 'månaden',

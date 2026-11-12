@@ -10,14 +10,15 @@
  *    resultatprofiler) — författat på svenska av personalen. Den engelska
  *    versionen lagras på modulen (`compass_modules.translations.en`) som en
  *    PLATT karta nyckel → text, där nycklarna härleds ur modulen
- *    (`compassTranslatableEntries`). Personalen fyller i den (AI-förslag +
- *    granskning) och publicerar den; först då visas språkknappen publikt.
- *    AI-text visas aldrig för besökare ogranskad (§ 10.1).
+ *    (`compassTranslatableEntries`). Den översätts AUTOMATISKT (Mistral, EU)
+ *    första gången en besökare väljer English och sparas på modulen — det
+ *    finns inget redaktörssteg. Språkknappen visas på alla moduler, och den
+ *    engelska sidan säger att texten är maskinöversatt (art. 50).
  *
  * Varje översatt text bär en hash av den svenska källan
- * (`sources[nyckel]`) så editorn kan säga vilka texter som ändrats sedan
- * översättningen ("behöver ses över"). En nyckel utan engelsk text faller
- * tillbaka på svenskan — sidan går aldrig sönder.
+ * (`sources[nyckel]`) så en ändrad svensk text översätts om vid nästa
+ * engelska visning. En nyckel utan engelsk text faller tillbaka på svenskan
+ * — sidan går aldrig sönder.
  *
  * Ren modul: ingen IO, inga beroenden — delas av server, klient och test.
  */
@@ -44,14 +45,11 @@ export function parseCompassLocale(value: unknown): CompassLocale {
 // ── Lagring ────────────────────────────────────────────────────────────────
 
 export interface StoredCompassTranslation {
-  /** Publicerad = språkknappen visas på den publika sidan. */
-  enabled: boolean;
   /** Nyckel → engelsk text. */
   texts: Record<string, string>;
   /** Nyckel → hash av den svenska källan när texten sparades. */
   sources: Record<string, string>;
   updated_at?: string;
-  updated_by?: string;
 }
 
 export interface CompassTranslations {
@@ -106,18 +104,11 @@ export function normalizeCompassTranslations(raw: unknown): CompassTranslations 
   );
   return {
     en: {
-      enabled: e.enabled === true && Object.keys(texts).length > 0,
       texts,
       sources,
-      updated_at: typeof e.updated_at === 'string' ? e.updated_at.slice(0, 40) : undefined,
-      updated_by: typeof e.updated_by === 'string' ? e.updated_by.slice(0, 40) : undefined
+      updated_at: typeof e.updated_at === 'string' ? e.updated_at.slice(0, 40) : undefined
     }
   };
-}
-
-/** Är den engelska versionen publicerad (språkknappen visas)? */
-export function hasPublishedEnglish(raw: unknown): boolean {
-  return normalizeCompassTranslations(raw).en?.enabled === true;
 }
 
 /**
@@ -151,43 +142,10 @@ export const COMPASS_TRANSLATABLE_MODULE_FIELDS = [
 
 export type CompassTranslatableModuleField = (typeof COMPASS_TRANSLATABLE_MODULE_FIELDS)[number];
 
-const MODULE_FIELD_LABEL: Record<CompassTranslatableModuleField, string> = {
-  name: 'Modulens namn',
-  hero_eyebrow: 'Liten text ovanför rubriken',
-  welcome_title: 'Rubrik',
-  welcome_body: 'Ingress',
-  target_audience: 'Målgrupp (visas i sidhuvudet)',
-  start_page_title: 'Startsidans rubrik',
-  start_page_body: 'Startsidans text',
-  consent_note: 'Samtyckestext',
-  intro_message: 'Chattens första meddelande',
-  success_message: 'Tack-meddelande'
-};
-
-const MULTILINE_MODULE_FIELDS = new Set<CompassTranslatableModuleField>([
-  'welcome_body',
-  'start_page_body',
-  'consent_note',
-  'intro_message',
-  'success_message'
-]);
-
-export type CompassTranslationGroup = 'page' | 'questions' | 'results';
-
-export const COMPASS_TRANSLATION_GROUP_LABEL: Record<CompassTranslationGroup, string> = {
-  page: 'Sidan',
-  questions: 'Frågor',
-  results: 'Resultatprofiler'
-};
-
 export interface CompassTranslationEntry {
   key: string;
-  group: CompassTranslationGroup;
-  /** Vad texten är (svensk etikett i editorn). */
-  label: string;
   /** Den svenska källan. */
   source: string;
-  multiline: boolean;
 }
 
 /** Minsta modulform som behövs för att räkna fram nycklarna. */
@@ -203,8 +161,6 @@ export interface TranslatableQuestion {
   choices?: { value: string; label: string }[] | null;
 }
 
-const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
-
 /**
  * Alla texter i modulen som besökaren ser, med stabila nycklar:
  * `m.<fält>`, `q.<frågans id>.prompt|help`, `q.<id>.c.<svarsvärde>`,
@@ -216,56 +172,25 @@ export function compassTranslatableEntries(
   questions: TranslatableQuestion[]
 ): CompassTranslationEntry[] {
   const out: CompassTranslationEntry[] = [];
-  const push = (e: CompassTranslationEntry) => {
-    if (e.source.trim()) out.push({ ...e, source: e.source.trim() });
+  const push = (key: string, source: unknown) => {
+    const text = typeof source === 'string' ? source.trim() : '';
+    if (text) out.push({ key, source: text });
   };
-  for (const field of COMPASS_TRANSLATABLE_MODULE_FIELDS) {
-    push({
-      key: `m.${field}`,
-      group: 'page',
-      label: MODULE_FIELD_LABEL[field],
-      source: String(module[field] ?? ''),
-      multiline: MULTILINE_MODULE_FIELDS.has(field)
-    });
-  }
-  questions.forEach((q, i) => {
-    const n = `Fråga ${i + 1}`;
-    push({ key: `q.${q.id}.prompt`, group: 'questions', label: n, source: q.prompt || '', multiline: false });
-    push({
-      key: `q.${q.id}.help`,
-      group: 'questions',
-      label: `${n} · hjälptext`,
-      source: q.help_text || '',
-      multiline: true
-    });
+  for (const field of COMPASS_TRANSLATABLE_MODULE_FIELDS) push(`m.${field}`, module[field]);
+  for (const q of questions) {
+    push(`q.${q.id}.prompt`, q.prompt);
+    push(`q.${q.id}.help`, q.help_text);
     for (const c of q.choices ?? []) {
       if (!c || typeof c.value !== 'string') continue;
-      push({
-        key: `q.${q.id}.c.${c.value}`,
-        group: 'questions',
-        label: `${n} · svarsalternativ`,
-        source: c.label || '',
-        multiline: false
-      });
+      push(`q.${q.id}.c.${c.value}`, c.label);
     }
-  });
+  }
   for (const b of module.result_buckets ?? []) {
     if (!b || typeof b.key !== 'string') continue;
-    const n = `Profil "${clip(b.title || b.key, 40)}"`;
-    push({ key: `b.${b.key}.title`, group: 'results', label: `${n} · rubrik`, source: b.title || '', multiline: false });
-    push({ key: `b.${b.key}.body`, group: 'results', label: `${n} · text`, source: b.body || '', multiline: true });
-    (b.tips ?? []).forEach((tip, i) => {
-      push({
-        key: `b.${b.key}.tip.${i}`,
-        group: 'results',
-        label: `${n} · nästa steg ${i + 1}`,
-        source: typeof tip === 'string' ? tip : '',
-        multiline: false
-      });
-    });
-    if (b.cta?.label) {
-      push({ key: `b.${b.key}.cta`, group: 'results', label: `${n} · knapptext`, source: b.cta.label, multiline: false });
-    }
+    push(`b.${b.key}.title`, b.title);
+    push(`b.${b.key}.body`, b.body);
+    (b.tips ?? []).forEach((tip, i) => push(`b.${b.key}.tip.${i}`, tip));
+    push(`b.${b.key}.cta`, b.cta?.label);
   }
   return out;
 }
@@ -284,54 +209,44 @@ export function compassTranslationEntryState(
   return 'ok';
 }
 
-export interface CompassTranslationSummary {
-  total: number;
-  translated: number;
-  missing: number;
-  stale: number;
-}
-
-export function summarizeCompassTranslation(
+/** Texter som saknar engelska eller vars svenska källa ändrats. */
+export function compassEntriesToTranslate(
   entries: CompassTranslationEntry[],
   stored: Pick<StoredCompassTranslation, 'texts' | 'sources'> | undefined
-): CompassTranslationSummary {
-  const summary: CompassTranslationSummary = { total: entries.length, translated: 0, missing: 0, stale: 0 };
-  for (const e of entries) {
-    const state = compassTranslationEntryState(e, stored);
-    if (state === 'missing') summary.missing++;
-    else {
-      summary.translated++;
-      if (state === 'stale') summary.stale++;
-    }
-  }
-  return summary;
+): CompassTranslationEntry[] {
+  return entries.filter((e) => compassTranslationEntryState(e, stored) !== 'ok');
 }
 
 /**
- * Bygger det som sparas: bara nycklar som finns i modulen nu (texter för
- * borttagna frågor rensas), varje text med hashen av sin nuvarande svenska
- * källa — så "ändrad sedan översättningen" nollställs när personalen sparar.
+ * Slår ihop nya översättningar med de sparade. Bara nycklar som finns i
+ * modulen nu behålls (texter för borttagna frågor rensas). En ny text får
+ * hashen av sin nuvarande svenska källa; en text som INTE översattes nu
+ * behåller sin gamla hash — är källan ändrad förblir den "stale" och
+ * översätts vid nästa försök, och den äldre engelskan visas under tiden.
  */
-export function buildStoredCompassTranslation(
+export function mergeCompassTranslation(
   entries: CompassTranslationEntry[],
-  texts: Record<string, unknown>,
-  meta: { enabled: boolean; updatedAt?: string; updatedBy?: string }
+  stored: Pick<StoredCompassTranslation, 'texts' | 'sources'> | undefined,
+  fresh: Record<string, unknown>,
+  updatedAt?: string
 ): StoredCompassTranslation {
-  const outTexts: Record<string, string> = {};
+  const texts: Record<string, string> = {};
   const sources: Record<string, string> = {};
   for (const e of entries) {
-    const clean = cleanTranslationText(texts[e.key]);
-    if (!clean) continue;
-    outTexts[e.key] = clean;
-    sources[e.key] = compassSourceHash(e.source);
+    const next = cleanTranslationText(fresh[e.key]);
+    if (next) {
+      texts[e.key] = next;
+      sources[e.key] = compassSourceHash(e.source);
+      continue;
+    }
+    const prev = stored?.texts[e.key];
+    if (prev) {
+      texts[e.key] = prev;
+      const hash = stored?.sources[e.key];
+      if (hash) sources[e.key] = hash;
+    }
   }
-  return {
-    enabled: meta.enabled && Object.keys(outTexts).length > 0,
-    texts: outTexts,
-    sources,
-    updated_at: meta.updatedAt,
-    updated_by: meta.updatedBy
-  };
+  return { texts, sources, updated_at: updatedAt };
 }
 
 // ── Tillämpa ───────────────────────────────────────────────────────────────
@@ -393,20 +308,21 @@ export function translateResultBucket<B extends ResultBucket | null | undefined>
 }
 
 /**
- * De engelska texterna när besökaren valt engelska OCH versionen är
- * publicerad — annars null (svenska visas). Den enda grinden för publika
- * ytor (sida, quiz-resultat, resultat-PDF).
+ * De sparade engelska texterna när besökaren valt engelska — annars null
+ * (svenska visas). En nyckel som ännu inte översatts faller tillbaka på
+ * svenskan i `apply…`-funktionerna.
  */
-export function publishedEnglishTexts(raw: unknown, locale: CompassLocale): Record<string, string> | null {
+export function storedEnglishTexts(raw: unknown, locale: CompassLocale): Record<string, string> | null {
   if (locale !== 'en') return null;
-  const en = normalizeCompassTranslations(raw).en;
-  return en?.enabled ? en.texts : null;
+  return normalizeCompassTranslations(raw).en?.texts ?? {};
 }
 
 // ── Gränssnittet ───────────────────────────────────────────────────────────
 
 export interface CompassUiStrings {
   language: string;
+  /** Visas på den engelska sidan — texten är maskinöversatt (art. 50). */
+  autoTranslated: string;
   beforeWeStart: string;
   /** Startsidans rubrik när modulen inte angett någon. */
   startPageTitle: string;
@@ -491,6 +407,7 @@ export interface CompassUiStrings {
 export const COMPASS_UI: Record<CompassLocale, CompassUiStrings> = {
   sv: {
     language: 'Språk',
+    autoTranslated: 'Automatiskt översatt från svenska med AI.',
     beforeWeStart: 'Innan vi börjar',
     startPageTitle: 'Innan du börjar',
     dataHandling: 'Så hanterar vi dina uppgifter',
@@ -585,6 +502,7 @@ export const COMPASS_UI: Record<CompassLocale, CompassUiStrings> = {
   },
   en: {
     language: 'Language',
+    autoTranslated: 'Automatically translated from Swedish by AI.',
     beforeWeStart: 'Before we start',
     startPageTitle: 'Before you start',
     dataHandling: 'How we handle your information',

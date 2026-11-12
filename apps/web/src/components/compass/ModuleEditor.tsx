@@ -7,7 +7,6 @@ import { QuestionsManager } from './QuestionsManager';
 import { ResultBucketsEditor } from './ResultBucketsEditor';
 import { HeroMediaUploader } from './HeroMediaUploader';
 import { LayoutPicker } from './LayoutPicker';
-import { TranslationEditor } from './TranslationEditor';
 import { COMPASS_LAYOUT_META, normalizeCompassLayout,
   COMPASS_PURPOSES,
   COMPASS_PURPOSE_LABELS,
@@ -119,12 +118,8 @@ export function ModuleEditor({
     { key: 'look', label: 'Utseende & mall' },
     { key: 'questions', label: flowType === 'chat' ? 'Samtal & frågor' : 'Frågor' },
     { key: 'audience', label: 'Målgrupp & uppgifter' },
-    { key: 'english', label: 'Engelska' },
     { key: 'finish', label: 'Efter slutförande' }
   ];
-  // Index per steg — steg 5 "Engelska" (§ 23.13) ligger utanför formuläret.
-  const ENGLISH_STEP = 4;
-  const FINISH_STEP = 5;
   const isLast = step === steps.length - 1;
 
   return (
@@ -633,7 +628,7 @@ export function ModuleEditor({
           </Step>
 
           {/* ── Steg 5: Efter slutförande ───────────────────────────────── */}
-          <Step active={step === FINISH_STEP}>
+          <Step active={step === 4}>
             <label className="mx-label">
               Tack-meddelande
               <textarea
@@ -769,15 +764,6 @@ export function ModuleEditor({
             </div>
           </Step>
         </form>
-
-        {/* ── Steg 5: Engelska (utanför formuläret — sparas med egen knapp) ── */}
-        <div style={{ display: step === ENGLISH_STEP ? 'grid' : 'none' }}>
-          <TranslationEditor
-            module={mod}
-            questions={questions}
-            publicPath={isPublished ? `/m/${encodeURIComponent(mod.public_slug || mod.slug)}` : null}
-          />
-        </div>
 
         {/* ── Steg 3: Frågor (utanför formuläret — sparas direkt per fråga) ── */}
         <div style={{ display: step === 2 ? 'grid' : 'none', gap: 16 }}>

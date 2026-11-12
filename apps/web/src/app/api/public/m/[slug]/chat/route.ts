@@ -36,7 +36,7 @@ interface ChatBody {
   sessionToken?: string;
   attribution?: Attribution;
   consent?: boolean;
-  /** Besökarens språk (§ 23.13) — gäller bara när engelskan är publicerad. */
+  /** Besökarens språk (§ 23.13): `en` ⇒ engelska, annars svenska. */
   lang?: string;
 }
 

@@ -19,12 +19,11 @@ interface Props {
   nextModule: NextModuleLink | null;
   /** Enkätens subjekt ur `?om=<id>` (§ 43), redan validerat av sidan. */
   subject?: string | null;
-  /** Språket sidan renderas på (§ 23.13) — `en` bara när engelskan är publicerad. */
+  /** Språket sidan renderas på (§ 23.13). */
   locale?: CompassLocale;
   /**
    * Länkar för språkväxlaren (samma sida på svenska resp. engelska, övriga
-   * parametrar bevarade). Null ⇒ modulen har ingen publicerad engelsk
-   * version och växlaren visas inte.
+   * parametrar bevarade). Null ⇒ växlaren visas inte.
    */
   languageLinks?: Record<CompassLocale, string> | null;
 }
@@ -187,6 +186,7 @@ export function PublicModuleLayout({
   const foot = (
     <footer className="mx-compass-foot">
       {isChat ? t.footChat : t.footForm}
+      {locale === 'en' && <> · {t.autoTranslated}</>}
     </footer>
   );
 

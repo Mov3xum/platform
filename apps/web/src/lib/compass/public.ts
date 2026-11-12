@@ -6,7 +6,7 @@ import {
   contactSectionForModule,
   normalizeCompassTranslations,
   parseCompassLocale,
-  publishedEnglishTexts,
+  storedEnglishTexts,
   type CompassLocale,
   sortCompassQuestions,
   type ContactSectionConfig
@@ -114,16 +114,17 @@ export function toPublicModule(m: CompassModule): PublicCompassModule {
 }
 
 /**
- * Besökarens språk i de publika routarna (§ 23.13): `en` bara när klienten
- * bett om det OCH modulen har en publicerad (granskad) engelsk version —
- * annars svenska. `texts` = de engelska texterna (null på svenska).
+ * Besökarens språk i de publika routarna (§ 23.13): `en` när klienten bett
+ * om det — annars svenska. `texts` = modulens sparade engelska texter (null
+ * på svenska). Routarna översätter aldrig själva: sidan /m/<slug> har redan
+ * gjort det (`ensureEnglishTexts`) innan besökaren kan skicka något.
  */
 export function visitorLocale(
   module: Pick<CompassModule, 'translations'>,
   rawLang: unknown
 ): { locale: CompassLocale; texts: Record<string, string> | null } {
-  const texts = publishedEnglishTexts(module.translations, parseCompassLocale(rawLang));
-  return { locale: texts ? 'en' : 'sv', texts };
+  const locale = parseCompassLocale(rawLang);
+  return { locale, texts: storedEnglishTexts(module.translations, locale) };
 }
 
 export interface ResolvedPublicModule {
@@ -198,9 +199,10 @@ export async function getNextModuleLink(
     // inte tyst brytas bara för att public_slug-fältet lämnats tomt.
     const slug = next.public_slug || next.slug;
     if (!slug) return null;
-    // Engelsk knapptext när nästa modul har en publicerad engelsk version (§ 23.13).
+    // Engelsk knapptext när nästa modul redan översatts (§ 23.13) — annars
+    // svenskan (översätts när besökaren kommer dit).
     const en = normalizeCompassTranslations(next.translations).en;
-    const labelEn = en?.enabled
+    const labelEn = en
       ? (next.welcome_title && en.texts['m.welcome_title']) || en.texts['m.name'] || undefined
       : undefined;
     return { slug, label: next.welcome_title || next.name, labelEn };

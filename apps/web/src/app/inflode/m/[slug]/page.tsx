@@ -11,10 +11,12 @@ import {
   applyCompassModuleTranslation,
   applyCompassQuestionTranslation,
   contactSectionForModule,
-  normalizeCompassTranslations,
-  parseCompassLocale
+  parseCompassLocale,
+  storedEnglishTexts
 } from '@platform/shared';
 import { CompassLocaleProvider } from '@/components/compass/locale';
+import { ensureEnglishTexts } from '@/lib/compass/auto-translate';
+import { getSuperuserPb } from '@/lib/integrations/credentials';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,14 +34,22 @@ export default async function ModulePage({
   const swedishModule = await getModuleBySlug(pb, user.tenant, slug);
   if (!swedishModule) notFound();
 
-  // Förhandsgranskning på engelska (§ 23.13): personalen ser UTKASTET även
-  // innan det publicerats — `?lang=en`.
-  const draft = normalizeCompassTranslations(swedishModule.translations).en;
-  const hasEnglish = Boolean(draft && Object.keys(draft.texts).length > 0);
-  const locale = hasEnglish && parseCompassLocale(sp.lang) === 'en' ? 'en' : 'sv';
-  const texts = locale === 'en' && draft ? draft.texts : null;
+  // Förhandsgranskning på engelska (§ 23.13, `?lang=en`): samma automatiska
+  // översättning som den publika sidan — och den sparas, så första
+  // besökaren slipper vänta. Sparandet kräver superusern (roll + tenant är
+  // verifierade ovan); utan den visas det som redan finns översatt.
+  const locale = parseCompassLocale(sp.lang);
+  const allQuestions = await listQuestionsForModule(pb, swedishModule.id);
+  let texts: Record<string, string> | null = null;
+  if (locale === 'en') {
+    const su = await getSuperuserPb();
+    texts = su.ok
+      ? await ensureEnglishTexts(su.pb, swedishModule, allQuestions, user.tenant)
+      : storedEnglishTexts(swedishModule.translations, 'en');
+  }
   const mod = texts ? applyCompassModuleTranslation(swedishModule, texts) : swedishModule;
-  const swedishQuestions = mod.flow_type === 'chat' ? [] : await listQuestionsForModule(pb, mod.id);
+  // Chatten ställer frågorna själv — förhandsgranskningen renderar dem inte.
+  const swedishQuestions = swedishModule.flow_type === 'chat' ? [] : allQuestions;
   const questions = texts ? applyCompassQuestionTranslation(swedishQuestions, texts) : swedishQuestions;
 
   return (
@@ -53,14 +63,12 @@ export default async function ModulePage({
             <Link href="/inflode" className="mx-btn">
               <Icon name="arrow" size={13} /> Översikt
             </Link>
-            {hasEnglish && (
-              <Link
-                href={locale === 'en' ? `/inflode/m/${encodeURIComponent(slug)}` : `/inflode/m/${encodeURIComponent(slug)}?lang=en`}
-                className="mx-btn"
-              >
-                <Icon name="globe" size={13} /> {locale === 'en' ? 'Svenska' : 'English'}
-              </Link>
-            )}
+            <Link
+              href={locale === 'en' ? `/inflode/m/${encodeURIComponent(slug)}` : `/inflode/m/${encodeURIComponent(slug)}?lang=en`}
+              className="mx-btn"
+            >
+              <Icon name="globe" size={13} /> {locale === 'en' ? 'Svenska' : 'English'}
+            </Link>
             <Chip variant={mod.flow_type === 'chat' ? 'cyan' : 'default'} mono>
               {FLOW_TYPE_LABEL[mod.flow_type].toUpperCase()}
             </Chip>

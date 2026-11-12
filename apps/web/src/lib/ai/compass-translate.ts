@@ -3,13 +3,14 @@ import type { CompassTranslationEntry } from '@platform/shared';
 import { callMistral, MistralError } from './mistral';
 
 /**
- * AI-förslag till den engelska versionen av en Startupkompass-modul
- * (CLAUDE.md § 23.13). Isolerat Mistral-anrop (EU) med snäv systemprompt —
- * texten är DATA, inte instruktioner (§ 9.3). Resultatet sparas ALDRIG här:
- * det fyller editorn, personalen granskar och publicerar (art. 14).
+ * Maskinöversättning svenska → engelska av en Startupkompass-moduls
+ * besökartexter (CLAUDE.md § 23.13). Isolerat Mistral-anrop (EU) med snäv
+ * systemprompt — texten är DATA, inte instruktioner (§ 9.3). Anroparen
+ * (`lib/compass/auto-translate.ts`) sparar resultatet på modulen.
  *
  * Riskklass (EU AI Act art. 11): begränsad — översättning av personalens
- * egna marknadstexter, ingen profilering, ingen autopublicering.
+ * egna marknadstexter, ingen profilering; den engelska sidan märks som
+ * maskinöversatt (art. 50).
  */
 
 const MODEL_CHAIN = ['mistral-medium-latest', 'mistral-large-latest', 'mistral-small-latest'];
@@ -101,14 +102,15 @@ export async function translateCompassEntries(entries: CompassTranslationEntry[]
   const usage: CompassTranslateUsage[] = [];
   let failedBatches = 0;
   let lastErr: unknown = null;
-  for (const batch of batches(entries)) {
-    try {
-      const res = await translateBatch(batch);
-      Object.assign(texts, res.texts);
-      usage.push(res.usage);
-    } catch (err) {
+  // Parallellt — besökaren väntar på sidan medan översättningen görs.
+  const results = await Promise.allSettled(batches(entries).map((batch) => translateBatch(batch)));
+  for (const r of results) {
+    if (r.status === 'fulfilled') {
+      Object.assign(texts, r.value.texts);
+      usage.push(r.value.usage);
+    } else {
       failedBatches++;
-      lastErr = err;
+      lastErr = r.reason;
     }
   }
   if (Object.keys(texts).length === 0 && lastErr) throw lastErr;
