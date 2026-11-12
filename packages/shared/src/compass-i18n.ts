@@ -321,7 +321,7 @@ export function storedEnglishTexts(raw: unknown, locale: CompassLocale): Record<
 
 export interface CompassUiStrings {
   language: string;
-  /** Visas på den engelska sidan — texten är maskinöversatt (art. 50). */
+  /** Visas på den engelska sidan — texten är maskinöversatt, svenskan är originalet. */
   autoTranslated: string;
   beforeWeStart: string;
   /** Startsidans rubrik när modulen inte angett någon. */
@@ -407,7 +407,7 @@ export interface CompassUiStrings {
 export const COMPASS_UI: Record<CompassLocale, CompassUiStrings> = {
   sv: {
     language: 'Språk',
-    autoTranslated: 'Automatiskt översatt från svenska med AI.',
+    autoTranslated: 'Automatiskt översatt från svenska.',
     beforeWeStart: 'Innan vi börjar',
     startPageTitle: 'Innan du börjar',
     dataHandling: 'Så hanterar vi dina uppgifter',
@@ -502,7 +502,7 @@ export const COMPASS_UI: Record<CompassLocale, CompassUiStrings> = {
   },
   en: {
     language: 'Language',
-    autoTranslated: 'Automatically translated from Swedish by AI.',
+    autoTranslated: 'Automatically translated from Swedish.',
     beforeWeStart: 'Before we start',
     startPageTitle: 'Before you start',
     dataHandling: 'How we handle your information',

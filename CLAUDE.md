@@ -4332,8 +4332,11 @@ granskning och publicering; det togs bort).
   språkväxling av personalens EGNA, redan publicerade texter (inget nytt
   innehåll, inga beslut, ingen profilering), svaren lagras på värdet så en
   svag översättning aldrig påverkar lead eller poäng, och den engelska sidan
-  säger i sidfoten **"Automatically translated from Swedish by AI."**
-  (`COMPASS_UI.autoTranslated`, EU AI Act art. 50). Riskklass **begränsad**.
+  säger i sidfoten **"Automatically translated from Swedish."**
+  (`COMPASS_UI.autoTranslated` — samma upplysning som en vanlig
+  maskinöversatt webbsida ger; ordet "AI" står medvetet inte med, beslut av
+  maintainer 2026-11-12. Översättning ändrar inte textens innebörd och faller
+  under undantaget i EU AI Act art. 50.2). Riskklass **begränsad**.
   Samtyckestexten (`consent_note`) maskinöversätts också — den svenska är
   den gällande; behövs en juridiskt granskad engelsk text får ett
   redaktörsfält läggas tillbaka för just den. Ingen PII (modulens egna
