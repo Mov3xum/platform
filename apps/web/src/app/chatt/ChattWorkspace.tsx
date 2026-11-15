@@ -12,7 +12,12 @@ import DashboardChat, {
 import { Icon } from '@/components/proto/Icon';
 import MeetingMode, { type MeetingInitial } from '@/components/meeting/MeetingMode';
 import type { ChatAttachment } from '@/lib/ai/chat-input';
-import type { GeneratedFileRef, MeetingRequestRef, ToolRunMessage } from '@platform/shared';
+import type {
+  AgentActivityStep,
+  GeneratedFileRef,
+  MeetingRequestRef,
+  ToolRunMessage
+} from '@platform/shared';
 import {
   listResumableMeetingsAction,
   type ResumableMeeting
@@ -61,6 +66,9 @@ function readStoredModel(): string {
 
 // Ett köat meddelande med all info som behövs för att köra det senare.
 type QueuedTurn = { id: string; text: string; opts: SubmitOpts; displayText: string };
+
+// Ett `step`-event från /api/chat/stream (AgentLoopStep, serialiserat).
+type StepEvent = AgentActivityStep & { phase: 'start' | 'end'; id: string };
 
 // Körtillstånd PER TRÅD — flera trådar kan ha varsin pågående turn samtidigt.
 // Turer i olika trådar är oberoende server-side (varje turn laddar och sparar
@@ -313,10 +321,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
     }
   }
 
-  function applyStep(
-    threadId: string,
-    ev: { phase: 'start' | 'end'; id: string; label: string; ok?: boolean }
-  ) {
+  function applyStep(threadId: string, ev: StepEvent) {
     updateConv(threadId, (c) => {
       // Ett verktygssteg startar → ev. text som strömmats innan dess var en
       // inledning före verktygsanropet, inte slutsvaret. Nolla den löpande
@@ -324,12 +329,21 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
       const liveText = ev.phase === 'start' ? '' : c.liveText;
       if (ev.phase === 'start') {
         if (c.liveSteps.some((s) => s.id === ev.id)) return { ...c, liveText };
-        return { ...c, liveText, liveSteps: [...c.liveSteps, { id: ev.id, label: ev.label, running: true }] };
+        return {
+          ...c,
+          liveText,
+          liveSteps: [
+            ...c.liveSteps,
+            { id: ev.id, tool: ev.tool, label: ev.label, detail: ev.detail, running: true }
+          ]
+        };
       }
       return {
         ...c,
         liveText,
-        liveSteps: c.liveSteps.map((s) => (s.id === ev.id ? { ...s, running: false, ok: ev.ok } : s))
+        liveSteps: c.liveSteps.map((s) =>
+          s.id === ev.id ? { ...s, running: false, ok: ev.ok, result: ev.result, ms: ev.ms } : s
+        )
       };
     });
   }
@@ -416,7 +430,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
             continue;
           }
           if (ev.type === 'step') {
-            applyStep(threadId, ev as unknown as { phase: 'start' | 'end'; id: string; label: string; ok?: boolean });
+            applyStep(threadId, ev as unknown as StepEvent);
           } else if (ev.type === 'token') {
             const delta = ev.delta;
             if (typeof delta === 'string' && delta) {

@@ -55,6 +55,7 @@ import {
 import { renderDocument, validateDocumentSpec } from '@/lib/documents';
 import { validateChart, validateKpis } from '@/lib/documents/validate';
 import { renderInlineVisual } from './visuals';
+import { describeStepArgs } from './step-detail';
 import { getTemplate, listTemplateSummaries, TEMPLATE_IDS } from '@/lib/documents/templates';
 import { saveGeneratedFile } from '@/lib/documents/save';
 import {
@@ -2337,17 +2338,21 @@ const DOC_LABELS: Record<string, string> = {
   pdf: 'PDF'
 };
 
+// Okänd kollektion → visa kollektionsnamnet (schema, inte data) i stället för
+// ett generiskt "uppgifterna", så användaren ser vad agenten faktiskt läser.
 function collectionLabel(name: string): string {
-  return COLLECTION_LABELS[name] || 'uppgifterna';
+  if (COLLECTION_LABELS[name]) return COLLECTION_LABELS[name];
+  return /^[a-z_][a-z0-9_]{0,63}$/.test(name) ? name : 'uppgifterna';
 }
 
 /**
  * Översätter ett tool-call till en kort svensk etikett för aktivitetsspåret
- * ("Läser bolagen", "Skapar PowerPoint"). Skriven så det låter som en kollega
- * som berättar vad den gör, inte en databasoperation. PII-fri per design: bara
- * verktygsnamn + kollektion/dokumenttyp läses, aldrig filter eller värden.
+ * ("Läser bolagen", "Skapar PowerPoint") plus en detaljrad om HUR steget körs
+ * ("summa av amount_sek per startup · filter på date", se `step-detail.ts`).
+ * PII-fri per design: bara verktygsnamn, kollektion/dokumenttyp och fältnamn
+ * läses — aldrig filtervärden, sökfrågor eller fältdata.
  */
-export function describeToolCall(call: MistralToolCall): { tool: string; label: string } {
+export function describeToolCall(call: MistralToolCall): { tool: string; label: string; detail?: string } {
   let args: Record<string, unknown> = {};
   try {
     args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
@@ -2355,136 +2360,127 @@ export function describeToolCall(call: MistralToolCall): { tool: string; label: 
     /* etikett faller tillbaka på verktygsnamnet */
   }
   const name = call.function.name;
+  return { tool: name, label: toolCallLabel(name, args), detail: describeStepArgs(name, args) };
+}
+
+function toolCallLabel(name: string, args: Record<string, unknown>): string {
   const coll = typeof args.collection === 'string' ? args.collection : '';
   switch (name) {
     case 'query_collection':
-      return { tool: name, label: `Läser ${collectionLabel(coll)}` };
+      return `Läser ${collectionLabel(coll)}`;
     case 'count_collection':
-      return { tool: name, label: `Räknar ${collectionLabel(coll)}` };
+      return `Räknar ${collectionLabel(coll)}`;
     case 'search_records':
-      return { tool: name, label: `Letar i ${collectionLabel(coll)}` };
+      return `Letar i ${collectionLabel(coll)}`;
     case 'describe_collection':
-      return { tool: name, label: `Tittar närmare på ${collectionLabel(coll)}` };
+      return `Tittar närmare på ${collectionLabel(coll)}`;
     case 'aggregate_collection':
-      return { tool: name, label: `Sammanställer ${collectionLabel(coll)}` };
+      return `Sammanställer ${collectionLabel(coll)}`;
     case 'search_knowledge':
-      return { tool: name, label: 'Söker i kunskapsbasen' };
+      return 'Söker i kunskapsbasen';
     case 'read_knowledge_document':
-      return {
-        tool: name,
-        label: args.query || args.document_id ? 'Läser kunskapsdokument' : 'Bläddrar i kunskapsbasen'
-      };
+      return args.query || args.document_id ? 'Läser kunskapsdokument' : 'Bläddrar i kunskapsbasen';
     case 'search_my_files':
-      return { tool: name, label: 'Söker i dina filer' };
+      return 'Söker i dina filer';
     case 'read_my_file':
-      return {
-        tool: name,
-        label: args.query || args.file_id ? 'Läser en av dina filer' : 'Bläddrar i dina filer'
-      };
+      return args.query || args.file_id ? 'Läser en av dina filer' : 'Bläddrar i dina filer';
     case 'web_search':
       // Etiketten är medvetet utan sökfrågan (steg-etiketter är PII-fria, § 17.8).
-      return { tool: name, label: 'Söker på internet' };
+      return 'Söker på internet';
     case 'update_startup_field':
-      return { tool: name, label: 'Uppdaterar bolagsuppgift' };
+      return 'Uppdaterar bolagsuppgift';
     case 'create_startup_activity':
-      return { tool: name, label: 'Loggar aktivitet' };
+      return 'Loggar aktivitet';
     case 'update_activity_field':
-      return { tool: name, label: 'Uppdaterar aktivitet' };
+      return 'Uppdaterar aktivitet';
     case 'create_annual_wheel_item':
-      return { tool: name, label: 'Lägger till i årshjulet' };
+      return 'Lägger till i årshjulet';
     case 'update_annual_wheel_item':
-      return { tool: name, label: 'Uppdaterar årshjulet' };
+      return 'Uppdaterar årshjulet';
     case 'create_compass_module':
-      return { tool: name, label: 'Skapar modul i Startupkompassen' };
+      return 'Skapar modul i Startupkompassen';
     case 'add_compass_question':
-      return { tool: name, label: 'Lägger till en fråga i modulen' };
+      return 'Lägger till en fråga i modulen';
     case 'update_compass_module_field':
-      return { tool: name, label: 'Uppdaterar modulen' };
+      return 'Uppdaterar modulen';
     case 'create_workshop':
-      return { tool: name, label: 'Skapar workshop-utkast' };
+      return 'Skapar workshop-utkast';
     case 'create_survey':
-      return { tool: name, label: 'Skapar enkät under Utvärdering' };
+      return 'Skapar enkät under Utvärdering';
     case 'assign_workshop':
-      return { tool: name, label: 'Tilldelar workshop' };
+      return 'Tilldelar workshop';
     case 'assign_education_document':
-      return { tool: name, label: 'Tilldelar utbildningsdokument' };
+      return 'Tilldelar utbildningsdokument';
     case 'create_task':
-      return { tool: name, label: 'Skapar kanban-kort' };
+      return 'Skapar kanban-kort';
     case 'move_task':
-      return { tool: name, label: 'Flyttar kanban-kort' };
+      return 'Flyttar kanban-kort';
     case 'create_event':
-      return { tool: name, label: 'Bokar event' };
+      return 'Bokar event';
     case 'create_mission':
-      return { tool: name, label: 'Skapar uppdrags-utkast' };
+      return 'Skapar uppdrags-utkast';
     case 'register_de_minimis_support':
-      return { tool: name, label: 'Registrerar de minimis-stöd' };
+      return 'Registrerar de minimis-stöd';
     case 'add_startup_kpi':
-      return { tool: name, label: 'Registrerar KPI' };
+      return 'Registrerar KPI';
     case 'add_capital_round':
-      return { tool: name, label: 'Registrerar kapital' };
+      return 'Registrerar kapital';
     case 'schedule_agent':
-      return { tool: name, label: 'Schemalägger agent' };
+      return 'Schemalägger agent';
     case 'create_startup_note':
-      return { tool: name, label: 'Skriver anteckning' };
+      return 'Skriver anteckning';
     case 'create_org_post': {
       const kind = typeof args.kind === 'string' ? args.kind : '';
-      return {
-        tool: name,
-        label:
-          kind === 'training'
-            ? 'Lägger upp internutbildning'
-            : kind === 'instruction'
-              ? 'Skriver instruktion'
-              : 'Skriver på anslagstavlan'
-      };
+      return kind === 'training'
+        ? 'Lägger upp internutbildning'
+        : kind === 'instruction'
+          ? 'Skriver instruktion'
+          : 'Skriver på anslagstavlan';
     }
     case 'update_org_post':
-      return { tool: name, label: 'Uppdaterar inlägg på dashboarden' };
+      return 'Uppdaterar inlägg på dashboarden';
     case 'create_contact':
-      return { tool: name, label: 'Lägger till kontakt i kontaktboken' };
+      return 'Lägger till kontakt i kontaktboken';
     case 'update_contact_field':
-      return { tool: name, label: 'Uppdaterar kontakt' };
+      return 'Uppdaterar kontakt';
     case 'request_contact_use':
-      return { tool: name, label: 'Skickar förfrågan till kontaktägaren' };
+      return 'Skickar förfrågan till kontaktägaren';
     case 'decide_contact_request':
-      return { tool: name, label: 'Avgör förfrågan om kontakt' };
+      return 'Avgör förfrågan om kontakt';
     case 'create_procurement':
-      return { tool: name, label: 'Registrerar upphandling' };
+      return 'Registrerar upphandling';
     case 'create_procurement_calloff':
-      return { tool: name, label: 'Registrerar avrop' };
+      return 'Registrerar avrop';
     case 'update_procurement_calloff':
-      return { tool: name, label: 'Uppdaterar avrop' };
+      return 'Uppdaterar avrop';
     case 'create_funding_project':
-      return { tool: name, label: 'Skapar finansieringsprojekt' };
+      return 'Skapar finansieringsprojekt';
     case 'create_support_check_type':
-      return { tool: name, label: 'Skapar checktyp' };
+      return 'Skapar checktyp';
     case 'create_support_check_application':
-      return { tool: name, label: 'Skapar ansökningsutkast' };
+      return 'Skapar ansökningsutkast';
     case 'create_goal':
-      return { tool: name, label: 'Lägger till verksamhetsmål' };
+      return 'Lägger till verksamhetsmål';
     case 'add_goal_indicator':
-      return { tool: name, label: 'Lägger till indikator' };
+      return 'Lägger till indikator';
     case 'set_goal_status':
-      return { tool: name, label: 'Rapporterar målstatus' };
+      return 'Rapporterar målstatus';
     case 'request_approval':
-      return { tool: name, label: 'Ber om ditt godkännande' };
+      return 'Ber om ditt godkännande';
     case 'start_meeting':
-      return { tool: name, label: 'Förbereder mötesläget' };
+      return 'Förbereder mötesläget';
     case 'memory_read':
-      return { tool: name, label: 'Läser minnet' };
+      return 'Läser minnet';
     case 'memory_write':
-      return { tool: name, label: 'Sparar i minnet' };
+      return 'Sparar i minnet';
     case 'generate_document': {
       const kind = typeof args.kind === 'string' ? args.kind : '';
-      return { tool: name, label: `Skapar ${DOC_LABELS[kind] || 'dokument'}` };
+      return `Skapar ${DOC_LABELS[kind] || 'dokument'}`;
     }
     case 'render_visual':
-      return {
-        tool: name,
-        label: args.chart ? 'Ritar diagram' : 'Tar fram nyckeltalskort'
-      };
+      return args.chart ? 'Ritar diagram' : 'Tar fram nyckeltalskort';
     default:
-      return { tool: name, label: 'Arbetar' };
+      return 'Arbetar';
   }
 }
 

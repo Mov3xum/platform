@@ -3,6 +3,7 @@ import type PocketBase from 'pocketbase';
 import {
   callMistralWithFallback,
   type MistralMessage,
+  type MistralToolCall,
   type MistralToolDefinition
 } from './mistral';
 import {
@@ -23,6 +24,7 @@ import {
   summarizeReceiptsForModel
 } from './write-receipt';
 import { runToolCallsOrdered } from './tool-dispatch-order';
+import { summarizeStepResult } from './step-detail';
 import type { AgentActionReceipt } from '@platform/shared';
 
 // Hur många gånger modellen får anropa verktyg och få tillbaka resultat
@@ -50,7 +52,13 @@ export interface AgentLoopStep {
   id: string; // tool_call-id
   tool: string;
   label: string;
+  /** Hur steget körs (fältnamn, aggregat, sortering) — PII-fritt, se step-detail.ts. */
+  detail?: string;
   ok?: boolean; // bara phase === 'end'
+  /** Vad steget gav (antal rader/träffar) — bara phase === 'end'. */
+  result?: string;
+  /** Verktygsanropets körtid i ms — bara phase === 'end'. */
+  ms?: number;
 }
 
 export interface RunAgentLoopOptions {
@@ -209,62 +217,78 @@ export async function runAgentLoop(
     // inte säkerhets- eller RBAC-garantierna.
     const descs = toolCalls.map((call) => describeToolCall(call));
     toolCalls.forEach((call, i) =>
-      options.onStep?.({ phase: 'start', id: call.id, tool: descs[i].tool, label: descs[i].label })
-    );
-    const toolResults = await runToolCallsOrdered(
-      toolCalls,
-      async (call, index): Promise<ToolResult> => {
-        const key = `${call.function.name}|${call.function.arguments ?? ''}`;
-        const previous = seenCalls.get(key);
-        if (previous) {
-          // Kör INTE om — returnera det tidigare resultatet med en tydlig
-          // instruktion så modellen slutar loopa på samma anrop.
-          return {
-            ...previous,
-            repeated: true,
-            warning:
-              'Du har redan kört EXAKT detta verktygsanrop i denna tur — detta är ' +
-              'samma resultat igen. Upprepa det inte: ändra angreppssätt (annan ' +
-              'kollektion, annat filter/sort, describe_collection för giltiga fält) ' +
-              'eller svara användaren nu utifrån det du redan hittat.'
-          };
-        }
-        const result = await dispatchToolCall(call, options.toolContext);
-        seenCalls.set(key, result);
-        if (isWriteTool(call.function.name)) {
-          let args: Record<string, unknown> = {};
-          try {
-            args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
-          } catch {
-            /* kvittot klarar sig utan argument */
-          }
-          const receipt = buildActionReceipt({
-            tool: call.function.name,
-            label: descs[index]?.label ?? call.function.name,
-            args,
-            result
-          });
-          if (receipt) receipts.push(receipt);
-          // Ett misslyckat skrivanrop får en EXPLICIT instruktion: rätta och
-          // försök igen, eller redovisa felet — påstå aldrig att det utfördes.
-          // Utan den behandlade modellen `ok:false` som en bagatell.
-          if (!result.ok) {
-            return { ...result, warning: [result.warning, FAILED_WRITE_WARNING].filter(Boolean).join(' ') };
-          }
-        }
-        return result;
-      },
-      { isSequential: (call) => isWriteTool(call.function.name) }
-    );
-    toolCalls.forEach((call, i) => {
-      const toolResult = toolResults[i];
       options.onStep?.({
-        phase: 'end',
+        phase: 'start',
         id: call.id,
         tool: descs[i].tool,
         label: descs[i].label,
-        ok: toolResult.ok
+        detail: descs[i].detail
+      })
+    );
+    const executeCall = async (call: MistralToolCall, index: number): Promise<ToolResult> => {
+      const key = `${call.function.name}|${call.function.arguments ?? ''}`;
+      const previous = seenCalls.get(key);
+      if (previous) {
+        // Kör INTE om — returnera det tidigare resultatet med en tydlig
+        // instruktion så modellen slutar loopa på samma anrop.
+        return {
+          ...previous,
+          repeated: true,
+          warning:
+            'Du har redan kört EXAKT detta verktygsanrop i denna tur — detta är ' +
+            'samma resultat igen. Upprepa det inte: ändra angreppssätt (annan ' +
+            'kollektion, annat filter/sort, describe_collection för giltiga fält) ' +
+            'eller svara användaren nu utifrån det du redan hittat.'
+        };
+      }
+      const result = await dispatchToolCall(call, options.toolContext);
+      seenCalls.set(key, result);
+      if (isWriteTool(call.function.name)) {
+        let args: Record<string, unknown> = {};
+        try {
+          args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+        } catch {
+          /* kvittot klarar sig utan argument */
+        }
+        const receipt = buildActionReceipt({
+          tool: call.function.name,
+          label: descs[index]?.label ?? call.function.name,
+          args,
+          result
+        });
+        if (receipt) receipts.push(receipt);
+        // Ett misslyckat skrivanrop får en EXPLICIT instruktion: rätta och
+        // försök igen, eller redovisa felet — påstå aldrig att det utfördes.
+        // Utan den behandlade modellen `ok:false` som en bagatell.
+        if (!result.ok) {
+          return { ...result, warning: [result.warning, FAILED_WRITE_WARNING].filter(Boolean).join(' ') };
+        }
+      }
+      return result;
+    };
+    // Steget rapporteras klart så fort JUST det anropet är färdigt (inte när
+    // hela turens parallella läsningar är klara) — aktivitetsspåret visar då
+    // verklig progress, med resultatstorlek och körtid per steg.
+    const runCall = async (call: MistralToolCall, index: number): Promise<ToolResult> => {
+      const startedAt = Date.now();
+      const result = await executeCall(call, index);
+      options.onStep?.({
+        phase: 'end',
+        id: call.id,
+        tool: descs[index].tool,
+        label: descs[index].label,
+        detail: descs[index].detail,
+        ok: result.ok,
+        result: summarizeStepResult(call.function.name, result),
+        ms: Date.now() - startedAt
       });
+      return result;
+    };
+    const toolResults = await runToolCallsOrdered(toolCalls, runCall, {
+      isSequential: (call) => isWriteTool(call.function.name)
+    });
+    toolCalls.forEach((call, i) => {
+      const toolResult = toolResults[i];
       toolCallsMade++;
       conversation.push({
         role: 'tool',
