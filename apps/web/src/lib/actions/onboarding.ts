@@ -1,9 +1,9 @@
 'use server';
 
 import PocketBase from 'pocketbase';
+import { getSuperuserPbOrNull } from '@/lib/integrations/credentials';
 import { revalidatePath } from 'next/cache';
 import { getServerPb, getCurrentUser, requireUser } from '@/lib/auth.server';
-import { getServerPbUrl } from '@/lib/pb-url';
 import { hasRole } from '@/lib/rbac';
 import { escFilter } from '@/lib/pb-filter';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
@@ -19,7 +19,6 @@ import {
 
 const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
 const DELETE_ROLES: Role[] = ['admin', 'incubator_lead'];
-const PB_URL = getServerPbUrl();
 
 export interface OnboardingFlowActionState {
   flowId?: string;
@@ -47,21 +46,8 @@ function statusOf(err: unknown): number | undefined {
 // skrivningar, och bolagsmedlemmens progress-skrivning sker bara efter att vi
 // verifierat medlemskapet i koden.
 async function getSuperuserPb(): Promise<PocketBase | null> {
-  const email = process.env.POCKETBASE_SUPERUSER_EMAIL || process.env.PB_SU_EMAIL;
-  const password = process.env.POCKETBASE_SUPERUSER_PASSWORD || process.env.PB_SU_PASSWORD;
-  if (!email || !password) {
-    console.error('[onboarding] superuser credentials missing');
-    return null;
-  }
-  const pb = new PocketBase(PB_URL);
-  pb.autoCancellation(false);
-  try {
-    await pb.collection('_superusers').authWithPassword(email, password);
-    return pb;
-  } catch {
-    console.error('[onboarding] superuser auth failed');
-    return null;
-  }
+  // Cachad (§ 21.8: PB rate-limitar superuser-inloggning).
+  return getSuperuserPbOrNull();
 }
 
 // Skriv via app-user-klienten först; faller tillbaka på superuser vid 400/403

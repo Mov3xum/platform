@@ -1,6 +1,7 @@
 'use server';
 
 import { cookies, headers } from 'next/headers';
+import { pbAuthGateHeaders } from '@/lib/pb-auth-gate';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { clientIpFromHeaders } from '@/lib/client-ip';
@@ -97,7 +98,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     const pb = new PocketBase(pbUrl);
 
     try {
-      await pb.collection('users').authWithPassword(email, password, { expand: 'tenant' });
+      await pb.collection('users').authWithPassword(email, password, { expand: 'tenant', headers: pbAuthGateHeaders() });
     } catch (err: unknown) {
       const e = err as PbError;
       console.error('[loginAction] PocketBase auth failed', { status: e.status, message: e.message, data: e.data });
@@ -238,7 +239,7 @@ export async function requestPasswordResetAction(
   const pb = new PocketBase(pbUrl);
 
   try {
-    await pb.collection('users').requestPasswordReset(email);
+    await pb.collection('users').requestPasswordReset(email, { headers: pbAuthGateHeaders() });
   } catch (err: unknown) {
     const e = err as PbError;
     if (!e.status) {

@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { NextResponse } from 'next/server';
+import { getSuperuserPbOrNull } from '@/lib/integrations/credentials';
 import PocketBase from 'pocketbase';
 import { getCurrentUser, getServerPb } from '@/lib/auth.server';
-import { getServerPbUrl } from '@/lib/pb-url';
 import { hasRole } from '@/lib/rbac';
 import { recordActivity } from '@/lib/actions/record-activity';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
@@ -26,21 +26,8 @@ const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
 // superuser om app-användarens egen skrivning avvisas (samma mönster som
 // education_documents §18.3 / PB v0.23 rule-eval).
 async function getSuperuserPb(): Promise<PocketBase | null> {
-  const email = process.env.POCKETBASE_SUPERUSER_EMAIL || process.env.PB_SU_EMAIL;
-  const password = process.env.POCKETBASE_SUPERUSER_PASSWORD || process.env.PB_SU_PASSWORD;
-  if (!email || !password) {
-    console.error('[agreements] superuser credentials missing');
-    return null;
-  }
-  const pb = new PocketBase(getServerPbUrl());
-  pb.autoCancellation(false);
-  try {
-    await pb.collection('_superusers').authWithPassword(email, password);
-    return pb;
-  } catch {
-    console.error('[agreements] superuser auth failed');
-    return null;
-  }
+  // Cachad (§ 21.8: PB rate-limitar superuser-inloggning).
+  return getSuperuserPbOrNull();
 }
 
 function statusOf(err: unknown): number | undefined {

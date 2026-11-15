@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import PocketBase from 'pocketbase';
+import { pbAuthGateHeaders } from '@/lib/pb-auth-gate';
 import { AUTH_COOKIE } from '@/lib/auth.server';
 import { getServerPbUrl } from '@/lib/pb-url';
 import { describeLoginInfraError, probePocketBase, probeSummary } from '@/lib/pb-health';
@@ -76,7 +77,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const pb = new PocketBase(pbUrl);
 
   try {
-    await pb.collection('users').authWithPassword(email, password, { expand: 'tenant' });
+    await pb.collection('users').authWithPassword(email, password, { expand: 'tenant', headers: pbAuthGateHeaders() });
   } catch (err: unknown) {
     const e = err as PbError;
     console.error('[api/auth/login] PocketBase auth failed', {

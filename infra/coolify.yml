@@ -28,6 +28,10 @@ services:
     environment:
       POCKETBASE_ENCRYPTION_KEY: ${POCKETBASE_ENCRYPTION_KEY:-}
       APP_ADMIN_INITIAL_PASSWORD: ${APP_ADMIN_INITIAL_PASSWORD:-}
+      # Auth-gate (CLAUDE.md § 21.8): när satt släpper PB bara igenom
+      # användarinloggning med samma värde i X-Movexum-Auth-Gate (webbappen).
+      # Sätt den på web FÖRST, sedan här.
+      MOVEXUM_PB_AUTH_GATE_SECRET: ${MOVEXUM_PB_AUTH_GATE_SECRET:-}
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/api/health"]
       interval: 30s
@@ -97,6 +101,8 @@ services:
       RESEND_REPLY_TO: ${RESEND_REPLY_TO:-}
       MOVEXUM_INFLOW_EMAIL: ${MOVEXUM_INFLOW_EMAIL:-}
       MOVEXUM_UNSUBSCRIBE_SECRET: ${MOVEXUM_UNSUBSCRIBE_SECRET:-}
+      # Auth-gate mot PocketBase (§ 21.8) — samma värde som på PB-resursen.
+      MOVEXUM_PB_AUTH_GATE_SECRET: ${MOVEXUM_PB_AUTH_GATE_SECRET:-}
       APP_URL: ${APP_URL:-}
       # Superuser-credentials krävs för fallback-skapande av records när
       # PB:s createRule failar transient (se workshops.ts). Sätt

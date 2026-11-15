@@ -1,8 +1,8 @@
 'use server';
 
 import PocketBase from 'pocketbase';
+import { getSuperuserPbOrNull } from '@/lib/integrations/credentials';
 import { getServerPb, requireUser } from '@/lib/auth.server';
-import { getServerPbUrl } from '@/lib/pb-url';
 import { hasRole } from '@/lib/rbac';
 import { revalidatePath } from 'next/cache';
 import {
@@ -25,7 +25,6 @@ import {
 const COLLECTION = 'agent_memory';
 const MAX_KEY = 200;
 const MAX_CONTENT = 8000;
-const PB_URL = getServerPbUrl();
 
 export type AgentMemoryActionState = {
   error?: string;
@@ -86,17 +85,8 @@ async function verifyCategoryPersisted(
 }
 
 async function getSuperuserPb(): Promise<PocketBase | null> {
-  const email = process.env.POCKETBASE_SUPERUSER_EMAIL || process.env.PB_SU_EMAIL;
-  const password = process.env.POCKETBASE_SUPERUSER_PASSWORD || process.env.PB_SU_PASSWORD;
-  if (!email || !password) return null;
-  const pb = new PocketBase(PB_URL);
-  pb.autoCancellation(false);
-  try {
-    await pb.collection('_superusers').authWithPassword(email, password);
-    return pb;
-  } catch {
-    return null;
-  }
+  // Cachad (§ 21.8: PB rate-limitar superuser-inloggning).
+  return getSuperuserPbOrNull();
 }
 
 /** Verifierar att en post finns i användarens tenant innan mutation. */

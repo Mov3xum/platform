@@ -171,6 +171,7 @@ jobs:
           PB_SU_EMAIL: ${{ secrets.PB_SU_EMAIL_STAGING || secrets.PB_SU_EMAIL }}
           PB_SU_PASSWORD: ${{ secrets.PB_SU_PASSWORD_STAGING || secrets.PB_SU_PASSWORD }}
           APP_USER_PASSWORD: ${{ secrets.APP_USER_PASSWORD_STAGING || secrets.APP_USER_PASSWORD }}
+          MOVEXUM_PB_AUTH_GATE_SECRET: ${{ secrets.MOVEXUM_PB_AUTH_GATE_SECRET_STAGING || secrets.MOVEXUM_PB_AUTH_GATE_SECRET }}
           NODE_TLS_REJECT_UNAUTHORIZED: '0'
         run: |
           set -euo pipefail
@@ -205,6 +206,7 @@ jobs:
           PB_SU_PASSWORD: ${{ secrets.PB_SU_PASSWORD_STAGING || secrets.PB_SU_PASSWORD }}
           APP_USER_EMAIL: ${{ secrets.APP_USER_EMAIL_STAGING || secrets.APP_USER_EMAIL }}
           APP_USER_PASSWORD: ${{ secrets.APP_USER_PASSWORD_STAGING || secrets.APP_USER_PASSWORD }}
+          MOVEXUM_PB_AUTH_GATE_SECRET: ${{ secrets.MOVEXUM_PB_AUTH_GATE_SECRET_STAGING || secrets.MOVEXUM_PB_AUTH_GATE_SECRET }}
           NODE_TLS_REJECT_UNAUTHORIZED: '0'
         run: |
           set -euo pipefail

@@ -25,7 +25,13 @@
 
 import PocketBase from 'pocketbase';
 import { authenticateSuperuserWithRetry } from './lib/pb-auth-retry.mjs';
-import { SECURITY_RULES, PROTECTED_FILE_FIELDS } from './security-rules.mjs';
+import {
+  SECURITY_RULES,
+  PROTECTED_FILE_FIELDS,
+  withMoveLocks,
+  desiredRateLimits,
+  hasSuperuserRateLimit
+} from './security-rules.mjs';
 
 const PB_URL_RAW = process.env.PB_URL;
 const SU_EMAIL = process.env.PB_SU_EMAIL;
@@ -194,15 +200,36 @@ async function ensureCollection(definition, { allowDefer = true } = {}) {
     ...definition,
     fields: await normalizeFields(definition.fields, definition.name)
   };
+  // De härdade reglerna (§ 21.8, SECURITY_RULES) och flyttlåsen gäller redan
+  // här. Tidigare skrev varje sync först definitionens lösare regler (t.ex.
+  // tools.updateRule utan rollkrav) och rättade dem först i sista steget — ett
+  // fönster på några sekunder per deploy där sårbarheten var öppen.
+  // Härdade createRules gäller också direkt (FORCE_CREATE_RULES-passen sätter
+  // dem igen senare; övriga createRules lämnas åt dem).
+  const hardened = SECURITY_RULES[definition.name] || {};
+  for (const key of ['listRule', 'viewRule', 'createRule', 'updateRule', 'deleteRule']) {
+    if (Object.prototype.hasOwnProperty.call(hardened, key)) normalizedDefinition[key] = hardened[key];
+  }
+  if ((definition.type ?? 'base') === 'base') {
+    const defFieldNames = (normalizedDefinition.fields || []).map((f) => f?.name).filter(Boolean);
+    normalizedDefinition.updateRule = withMoveLocks(normalizedDefinition.updateRule, defFieldNames);
+  }
 
   try {
     const existing = await findExistingCollection(definition);
     if (existing) {
+      const existingNames = (existing.fields || []).map((f) => f.name);
       const desiredRules = {
         listRule: normalizedDefinition.listRule ?? null,
         viewRule: normalizedDefinition.viewRule ?? null,
         createRule: normalizedDefinition.createRule ?? null,
-        updateRule: normalizedDefinition.updateRule ?? null,
+        updateRule:
+          existing.type === 'base'
+            ? withMoveLocks(normalizedDefinition.updateRule ?? null, [
+                ...existingNames,
+                ...(normalizedDefinition.fields || []).map((f) => f?.name).filter(Boolean)
+              ]) ?? null
+            : normalizedDefinition.updateRule ?? null,
         deleteRule: normalizedDefinition.deleteRule ?? null
       };
       const needsRuleSync =
@@ -599,8 +626,10 @@ const USERS_SELF_UPDATE_RULE =
   '@request.auth.id = id && ' + USERS_LOCKED_SELF_UPDATE_FIELDS.map((f) => `@request.body.${f}:isset = false`).join(' && ');
 const TENANT_DIRECT = '@request.auth.tenant = tenant';
 const TENANT_VIA_STARTUP = '@request.auth.tenant = startup.tenant';
-const TENANTS_UPDATE_RULE =
-  '@request.auth.id != "" && (@request.auth.roles:each ?= "admin" || (@request.auth.roles:each ?= "incubator_lead" && @request.auth.tenant = id))';
+// Bara den egna tenanten, även för admin (§ 21.8) — samma som SECURITY_RULES.
+// Tidigare lät den här regeln en admin ändra VILKEN tenant som helst under
+// tiden mellan collection-def-steget och säkerhetssteget i varje sync.
+const TENANTS_UPDATE_RULE = SECURITY_RULES.tenants.updateRule;
 const STAFF_ROLES =
   '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead" || @request.auth.roles:each ?= "coach")';
 const STAFF_OR_LEAD =
@@ -6595,7 +6624,11 @@ for (const [collectionName, rules] of Object.entries(SECURITY_RULES)) {
     throw err;
   }
   const patch = {};
-  for (const [key, value] of Object.entries(rules)) {
+  const fieldNames = (collection.fields || []).map((f) => f.name);
+  for (const [key, raw] of Object.entries(rules)) {
+    // Flyttlåsen ingår i den önskade update-regeln (annars skulle låssvepet
+    // nedan och det här steget skriva om regeln fram och tillbaka).
+    const value = key === 'updateRule' && collection.type === 'base' ? withMoveLocks(raw, fieldNames) : raw;
     if ((collection[key] ?? null) !== value) patch[key] = value;
   }
   const protectedNames = PROTECTED_FILE_FIELDS[collectionName] || [];
@@ -6617,6 +6650,44 @@ for (const [collectionName, rules] of Object.entries(SECURITY_RULES)) {
     throw new Error(`säkerhetsregler för "${collectionName}" kunde inte sättas: ${describeError(err)}`);
   }
   ok(`säkerhetsregler synkade: ${collectionName} (${Object.keys(patch).join(', ')})`);
+}
+
+// 25. flyttlås (säkerhetsgranskning 2026-11-15) — SIST av reglerna. Varje
+// updateRule på en bas-kollektion med `tenant` (och `startup` där bolags-
+// medlemmar kan skriva) får låset mot att flytta posten till en annan
+// tenant/ett annat bolag. Speglar migration 1700000217; verify-baseline.mjs
+// fäller deployen om ett lås saknas.
+log('Lägger flyttlås på update-reglerna...');
+{
+  const allCollections = await pb.collections.getFullList();
+  for (const collection of allCollections) {
+    if (collection.system || collection.type !== 'base') continue;
+    const fieldNames = (collection.fields || []).map((f) => f.name);
+    const locked = withMoveLocks(collection.updateRule, fieldNames);
+    if (locked === collection.updateRule) continue;
+    try {
+      await pb.collections.update(collection.name, { updateRule: locked });
+    } catch (err) {
+      throw new Error(`flyttlås för "${collection.name}" kunde inte sättas: ${describeError(err)}`);
+    }
+    ok(`flyttlås satt: ${collection.name}`);
+  }
+}
+
+// 26. inloggningsgräns för superuser direkt mot PocketBase (§ 21.8). PB:s
+// standardregler tas bort — de stryper web-containerns delade IP. Användar-
+// inloggningen skyddas av auth-gaten (hooks/auth_gate.pb.js).
+log('Sätter PocketBase-rate-limit för superuser-inloggning...');
+{
+  const settings = await pb.settings.getAll();
+  if (!hasSuperuserRateLimit(settings.rateLimits)) {
+    await pb.settings.update({ rateLimits: desiredRateLimits(settings.rateLimits) });
+    const refreshed = await pb.settings.getAll();
+    if (!hasSuperuserRateLimit(refreshed.rateLimits)) {
+      throw new Error('rate-limit för _superusers:auth kunde inte sättas');
+    }
+    ok('rate-limit satt: _superusers:auth (10 per minut och IP)');
+  }
 }
 
 console.log('\n✓ Klart. Logga in på <din-web-url>/login med:');

@@ -1,8 +1,7 @@
 import 'server-only';
-import PocketBase from 'pocketbase';
+import { getSuperuserPbOrNull } from '@/lib/integrations/credentials';
 import type PocketBaseType from 'pocketbase';
 import { escFilter } from '@/lib/pb-filter';
-import { getServerPbUrl } from '@/lib/pb-url';
 import {
   COLLECTION_DENYLIST,
   autoMaskFields,
@@ -43,7 +42,6 @@ export interface ExposedCollection {
 }
 
 const DISCOVERY_TTL_MS = 5 * 60 * 1000;
-const ADMIN_AUTH_TTL_MS = 25 * 60 * 1000;
 const MAX_RELATION_DEPTH = 3;
 
 // COLLECTION_DENYLIST + PII_FIELD_PATTERNS + autoMaskFields + maskRecord
@@ -150,12 +148,6 @@ const STATIC_FALLBACK: ExposedCollection[] = [
   }
 ];
 
-interface AdminCacheEntry {
-  pb: PocketBaseType;
-  expires: number;
-}
-let adminCache: AdminCacheEntry | null = null;
-
 interface DiscoveryCacheEntry {
   collections: ExposedCollection[];
   expires: number;
@@ -163,25 +155,9 @@ interface DiscoveryCacheEntry {
 let discoveryCache: DiscoveryCacheEntry | null = null;
 
 async function getAdminPb(): Promise<PocketBaseType | null> {
-  const email = process.env.POCKETBASE_SUPERUSER_EMAIL;
-  const password = process.env.POCKETBASE_SUPERUSER_PASSWORD;
-  if (!email || !password) return null;
-
-  const now = Date.now();
-  if (adminCache && adminCache.pb.authStore.isValid && now < adminCache.expires) {
-    return adminCache.pb;
-  }
-
-  const pb = new PocketBase(getServerPbUrl());
-  pb.autoCancellation(false);
-  try {
-    await pb.collection('_superusers').authWithPassword(email, password);
-  } catch (err) {
-    console.warn('[schema] superuser auth failed', err);
-    return null;
-  }
-  adminCache = { pb, expires: now + ADMIN_AUTH_TTL_MS };
-  return pb;
+  // Den delade, cachade superuser-klienten (§ 21.8: PB rate-limitar
+  // superuser-inloggning — en egen cache här dubblerade inloggningarna).
+  return getSuperuserPbOrNull();
 }
 
 interface RawField {
