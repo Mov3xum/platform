@@ -1224,6 +1224,11 @@ kontrollkatalogen i 27002 (2022, ~93 kontroller).
   försök per IP+e-post (8/15 min) och per IP (40/15 min) via
   `lib/rate-limit.ts` (delad mellan containrar via PB-kollektionen
   `rate_limits`, processminne som reserv — § 21.8).
+  Gränserna gäller bara Next-routen; direkt mot PocketBases publika adress
+  skyddas användarinloggningen av auth-gaten och superuser-inloggningen av
+  PB:s egen rate-limit (§ 21.8 "Flyttlås, tenant-vakt och auth-gate"). Byte
+  av lösenord på `/konto` begränsas till 5 felaktiga försök per 15 min och
+  konto.
 - **Output-säkerhet (XSS):** allt användar-/AI-genererat innehåll som
   renderas via `dangerouslySetInnerHTML` MÅSTE gå genom
   `apps/web/src/lib/safe-html.ts` (`escapeHtml` / `inlineMarkdown` /
@@ -3385,10 +3390,8 @@ varje användartoken-create MÅSTE skicka `tenant: user.tenant`/`actor.tenant`.
 Kollektioner UTAN tenant-fält (`activities`, `notes`, `milestones`,
 `agreements`, `startup_team_members`, `partner_engagements`,
 `startup_contacts`, `compass_questions`/`_messages`/`_responses`) skyddas av
-PB-hooken **`hooks/tenant_guard.pb.js`** (`onRecordCreateRequest` +
-`onRecordUpdateRequest`): varje satt förälder (bolag, partner, kontakt, modul,
-konversation) slås upp och requesten nekas med 403 om förälderns tenant inte
-är den inloggades; superuser-requests släpps igenom. `compass_lead_sources`
+PB-hooken **`hooks/tenant_guard.pb.js`**, som sedan 2026-11-15 gäller ALLA
+bas-kollektioner (se "Flyttlås, tenant-vakt och auth-gate" nedan). `compass_lead_sources`
 (plattformsbred) skrivs bara av superuser. **PB:s JSVM kör varje
 hook-hanterare i en isolerad kontext** — konstanter/hjälpfunktioner måste
 deklareras INNE i hanteraren (`schedule_tick`/`survey_dispatch_tick` läste en
@@ -3456,6 +3459,55 @@ uppdrag och tenant-filtrerar mentions även vid redigering. Rapportsektioner
 vitlistas (`lib/report-section.ts`). Investerare/affärer skrivs bara av
 admin/incubator_lead/coach/mentor. `/api/chat/stream` har en gräns på 60
 turer per 5 min och användare.
+
+**Flyttlås, tenant-vakt och auth-gate (säkerhetsgranskning 2026-11-15).**
+Granskningen visade, verifierat mot PB 0.23.4 lokalt, att update-reglerna
+prövade postens NUVARANDE `tenant`/`startup` men inte det inskickade värdet:
+en coach kunde med sin egen token flytta ett bolag till en annan tenant och en
+bolagsmedlem flytta sin KPI-rad till ett annat bolag och en annan tenant.
+Dessutom kunde användar- och superuser-lösenord gissas obegränsat direkt mot
+PocketBases publika adress (Next-routens gränser gäller inte där). Åtgärdat i
+tre lager:
+- **Flyttlås i reglerna.** `withMoveLocks()` (`scripts/security-rules.mjs`)
+  lägger `TENANT_MOVE_LOCK` på VARJE updateRule på en bas-kollektion med
+  `tenant` och `STARTUP_MOVE_LOCK` där regeln släpper in bolagsmedlemmar
+  (`linked_startups`) — samma värde får skickas igen, bara Movexum-personal
+  byter bolag. Migration **1700000217**; `setup-via-api.mjs` lägger låsen
+  redan i collection-def-steget (och ett svep sist) och `verify-baseline.mjs`
+  fäller deployen om ett lås saknas. Collection-defs i synken använder nu
+  dessutom de härdade reglerna direkt (`SECURITY_RULES`, även
+  `TENANTS_UPDATE_RULE`) — tidigare skrev varje sync först de lösa reglerna
+  och rättade dem sist, ett fönster på sekunder per deploy (126 → 3
+  omskrivningar per sync; de tre kvar är likvärdiga createRules på
+  kollektioner utan tenant-fält).
+- **Tenant-vakten** (`hooks/tenant_guard.pb.js`) gäller alla bas-kollektioner
+  på create och update från API:t: `tenant` får inte ändras, en relation får
+  inte peka på en post i en annan tenant (förälderns `tenant`, annars dess
+  `startup.tenant`), och en ren bolagsmedlem får bara peka på sina egna bolag
+  (direkt eller via en förälder med `startup`). Bara relationer som ÄNDRAS
+  prövas. Vakten är ENDA skyddet vid create (createRules kan inte joina,
+  § 21.3) — `verify-baseline.mjs` provar den live (tillfällig tenant + bolag,
+  app-användaren försöker skriva en anteckning där, raderas efteråt).
+- **Auth-gate + superuser-gräns.** `hooks/auth_gate.pb.js`: när PB-resursen
+  har `MOVEXUM_PB_AUTH_GATE_SECRET` kräver användarinloggning, OTP,
+  lösenordsåterställning, verifiering och e-postbyte headern
+  `X-Movexum-Auth-Gate` med samma värde — före lösenordskontrollen, så en
+  direkt gissning får 403. Webbappen skickar den (`lib/pb-auth-gate.ts`,
+  login-route, `loginAction`, återställning, lösenordsbyte); CI:s
+  verify-baseline läser `MOVEXUM_PB_AUTH_GATE_SECRET_<MILJÖ>` från GitHub-
+  secrets. **Utrullning:** sätt värdet på web-appen och som GitHub-secret
+  först, sedan på PB-resursen. Utan värde på PB är gaten vilande och
+  verify-baseline varnar. PB:s egen rate-limit (migration **1700000218**,
+  `desiredRateLimits()`) gäller `_superusers:auth`, 10 per minut och IP;
+  PB:s standardregler tas bort (de stryper web-containerns delade IP).
+  Därför går ALL superuser-inloggning i appen via den cachade
+  `getSuperuserPb()`/`getSuperuserPbOrNull()` (`lib/integrations/
+  credentials.ts`) — skriv aldrig en egen `_superusers.authWithPassword`.
+- `/api/health` → `pb_auth_gate.web_secret_set` visar om web-appen har
+  värdet (aldrig värdet). `scripts/security-probe.mjs` kör attackerna mot en
+  LOKAL PB (vägrar annan värd) och kontrollerar att legitima flöden fungerar.
+  Den döda klientmodulen `lib/pocketbase.ts` (inloggning direkt från
+  webbläsaren) är borttagen.
 
 **Kända begränsningar (medvetna).** Processlokala cacher (superuser-token,
 Outlook-agenda, webbflöden, frågeembeddings) är bara effektivitet och får
@@ -10479,10 +10531,9 @@ och `talent_needs_published` — kan kopplas som indikator i Mål & VP (§ 42).
   bilaga III (högrisk).
 - **§ 21/ISO 27001:** RLS enligt ovan; skrivlagret verifierar bolags-
   tillhörighet (`access.linkedStartups`) och roll innan `writeWithFallback`;
-  intressen skapas bara av servern. Känd begränsning: `talent_needs.createRule`
-  kan inte joina bolagstillhörighet (§ 21.3) — en medlem kan via direkt-API
-  skapa ett utkast för ett annat bolag i samma tenant; det syns bara för det
-  bolaget + Movexum och publiceras aldrig utan granskning.
+  intressen skapas bara av servern. `talent_needs.createRule` kan inte
+  joina bolagstillhörighet (§ 21.3); sedan 2026-11-15 nekar tenant-vakten
+  (§ 21.8) att en medlem skapar ett behov för ett annat bolag.
 - **Inte byggt (medvetet):** CV-uppladdning, betyg, lärosätesportal,
   påminnelsemejl inför gallring (studenten förlänger själv på sin sida),
   chatt-verktyg för agenten, uppföljningsregler (§ 40-adapter) och

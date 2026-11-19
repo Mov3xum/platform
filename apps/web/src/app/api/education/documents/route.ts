@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import PocketBase from 'pocketbase';
+import { getSuperuserPbOrNull } from '@/lib/integrations/credentials';
 import { getCurrentUser, getServerPb } from '@/lib/auth.server';
-import { getPublicPbUrl, getServerPbUrl } from '@/lib/pb-url';
+import { getPublicPbUrl } from '@/lib/pb-url';
 import { hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { validateEducationDocumentFile } from '@platform/shared';
@@ -22,17 +23,8 @@ const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
 // verifierat staff-rollen + tenant i koden ovan, så fallbacken kringgår inte
 // någon behörighetskontroll.
 async function getSuperuserPb(): Promise<PocketBase | null> {
-  const email = process.env.POCKETBASE_SUPERUSER_EMAIL || process.env.PB_SU_EMAIL;
-  const password = process.env.POCKETBASE_SUPERUSER_PASSWORD || process.env.PB_SU_PASSWORD;
-  if (!email || !password) return null;
-  const pb = new PocketBase(getServerPbUrl());
-  pb.autoCancellation(false);
-  try {
-    await pb.collection('_superusers').authWithPassword(email, password);
-    return pb;
-  } catch {
-    return null;
-  }
+  // Cachad (§ 21.8: PB rate-limitar superuser-inloggning).
+  return getSuperuserPbOrNull();
 }
 
 export async function POST(request: Request): Promise<Response> {

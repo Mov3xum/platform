@@ -1,6 +1,7 @@
 'use server';
 
 import { createHash } from 'node:crypto';
+import { getSuperuserPbOrNull } from '@/lib/integrations/credentials';
 import { headers } from 'next/headers';
 import { clientIpFromHeaders } from '@/lib/client-ip';
 import { revalidatePath } from 'next/cache';
@@ -42,21 +43,8 @@ function statusOf(err: unknown): number | undefined {
 // bolagsmedlemmens signaturskrivning sker bara efter att vi verifierat
 // behörigheten i koden; PB v0.23:s rule-eval kan annars fela.
 async function getSuperuserPb(): Promise<PocketBase | null> {
-  const email = process.env.POCKETBASE_SUPERUSER_EMAIL || process.env.PB_SU_EMAIL;
-  const password = process.env.POCKETBASE_SUPERUSER_PASSWORD || process.env.PB_SU_PASSWORD;
-  if (!email || !password) {
-    console.error('[agreements] superuser credentials missing');
-    return null;
-  }
-  const pb = new PocketBase(PB_URL);
-  pb.autoCancellation(false);
-  try {
-    await pb.collection('_superusers').authWithPassword(email, password);
-    return pb;
-  } catch {
-    console.error('[agreements] superuser auth failed');
-    return null;
-  }
+  // Cachad (§ 21.8: PB rate-limitar superuser-inloggning).
+  return getSuperuserPbOrNull();
 }
 
 function sha256Hex(input: string): string {

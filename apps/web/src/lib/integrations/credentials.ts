@@ -134,6 +134,18 @@ export async function getSuperuserPb(): Promise<SuperuserPbResult> {
 }
 
 /** Glöm den cachade superuser-sessionen (t.ex. efter ett 401 från PB). */
+/**
+ * Den cachade superuser-klienten eller `null`. För superuser-reserven i
+ * server-actions och route-handlers (§ 21.3) — använd den här i stället för
+ * en egen `authWithPassword`: PocketBase har en rate-limit på superuser-
+ * inloggning (10/min och IP, § 21.8) och alla anrop kommer från samma
+ * web-container. Klienten delas mellan requests — ändra aldrig dess authStore.
+ */
+export async function getSuperuserPbOrNull(): Promise<PocketBase | null> {
+  const res = await getSuperuserPb();
+  return res.ok ? res.pb : null;
+}
+
 export function invalidateSuperuserPb(): void {
   superuserCache = null;
 }

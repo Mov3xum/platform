@@ -217,3 +217,100 @@ export const PROTECTED_FILE_FIELDS = {
   agreements: ['file'],
   user_files: ['file']
 };
+
+// ── Flyttlås (säkerhetsgranskning 2026-11-15) ───────────────────────────────
+//
+// Update-reglerna prövar POSTENS nuvarande `tenant`/`startup`, men inte det
+// värde som skickas in. Med sin egen token kunde därför en coach flytta ett
+// bolag till en annan tenant och en bolagsmedlem flytta sin KPI-rad till ett
+// annat bolag eller en annan tenant (verifierat mot PB 0.23.4 lokalt). Låsen
+// nedan läggs på VARJE updateRule (bas-kollektioner) av setup-via-api.mjs och
+// migration 1700000217; verify-baseline.mjs fäller deployen om ett saknas.
+// Hooken `record_guard.pb.js` är andra lagret (relationer till andra tenants
+// och, för bolagsmedlemmar, till andra bolag — även vid create).
+//
+// Att skicka SAMMA värde igen är tillåtet (formulär som skickar tillbaka hela
+// posten ska inte gå sönder). Movexum-personal får fortfarande byta bolag på
+// en post inom tenanten (t.ex. koppla om en uppgift, § 44).
+
+/** Ingen användartoken får byta `tenant` på en befintlig post. */
+export const TENANT_MOVE_LOCK = '(@request.body.tenant:isset = false || @request.body.tenant = tenant)';
+
+/** Bara Movexum-personal får byta `startup` där bolagsmedlemmar kan skriva. */
+export const STARTUP_MOVE_LOCK = `(${STAFF4} || @request.body.startup:isset = false || @request.body.startup = startup)`;
+
+/**
+ * Lägger flyttlåsen på en updateRule. Idempotent; `null` (bara superuser) och
+ * `""` (publik — används inte för update) lämnas orörda. Regeln omsluts med
+ * parenteser så att en toppnivå-`||` aldrig binder låset till bara ena ledet.
+ *
+ * @param {string|null|undefined} rule
+ * @param {string[]} fieldNames kollektionens fältnamn
+ */
+export function withMoveLocks(rule, fieldNames) {
+  if (typeof rule !== 'string' || rule === '') return rule;
+  const has = (name) => fieldNames.includes(name);
+  const locks = [];
+  if (has('tenant') && !rule.includes(TENANT_MOVE_LOCK)) locks.push(TENANT_MOVE_LOCK);
+  // Startup-låset behövs bara där regeln släpper in bolagsmedlemmar.
+  if (has('startup') && rule.includes('linked_startups') && !rule.includes(STARTUP_MOVE_LOCK)) {
+    locks.push(STARTUP_MOVE_LOCK);
+  }
+  if (locks.length === 0) return rule;
+  return [`(${rule})`, ...locks].join(' && ');
+}
+
+/** Saknade lås på en (förmodat låst) regel — tom lista = allt på plats. */
+export function missingMoveLocks(rule, fieldNames) {
+  if (typeof rule !== 'string' || rule === '') return [];
+  const missing = [];
+  if (fieldNames.includes('tenant') && !rule.includes(TENANT_MOVE_LOCK)) missing.push('tenant');
+  if (fieldNames.includes('startup') && rule.includes('linked_startups') && !rule.includes(STARTUP_MOVE_LOCK)) {
+    missing.push('startup');
+  }
+  return missing;
+}
+
+// ── Inloggningsgräns för superuser direkt mot PocketBase ────────────────────
+//
+// PocketBase har en egen publik adress. Webbappens inloggningsgränser gäller
+// bara Next-routen; utan PB:s egen gräns kunde `_superusers` (admin för hela
+// databasen) gissas obegränsat. PB:s standardregler (`*:auth` 2/3 s m.fl.)
+// används INTE: alla vanliga inloggningar kommer från web-containerns IP och
+// skulle strypas. Användarinloggning skyddas i stället av auth-gaten
+// (`hooks/auth_gate.pb.js`, MOVEXUM_PB_AUTH_GATE_SECRET).
+
+export const SUPERUSER_AUTH_RATE_LIMIT = Object.freeze({
+  label: '_superusers:auth',
+  audience: '',
+  duration: 60,
+  maxRequests: 10
+});
+
+/** PB:s standardregler — strypa per IP och slår mot web-containerns delade IP. */
+export const PB_DEFAULT_RATE_LIMIT_LABELS = Object.freeze(['*:auth', '*:create', '/api/batch', '/api/']);
+
+/**
+ * Önskat `settings.rateLimits` givet det nuvarande. Behåller egna regler som
+ * en administratör lagt till, tar bort PB:s standardregler och sätter
+ * superuser-regeln. Ren funktion — delas av setup-via-api och testerna.
+ */
+export function desiredRateLimits(current) {
+  const rules = Array.isArray(current?.rules) ? current.rules : [];
+  const kept = rules.filter(
+    (r) => r && !PB_DEFAULT_RATE_LIMIT_LABELS.includes(r.label) && r.label !== SUPERUSER_AUTH_RATE_LIMIT.label
+  );
+  return { enabled: true, rules: [...kept.map((r) => ({ ...r })), { ...SUPERUSER_AUTH_RATE_LIMIT }] };
+}
+
+/** `true` när gränsen gäller live (aktiv och inte lösare än vår regel). */
+export function hasSuperuserRateLimit(current) {
+  if (!current?.enabled || !Array.isArray(current.rules)) return false;
+  return current.rules.some(
+    (r) =>
+      r?.label === SUPERUSER_AUTH_RATE_LIMIT.label &&
+      Number(r.maxRequests) > 0 &&
+      Number(r.maxRequests) <= SUPERUSER_AUTH_RATE_LIMIT.maxRequests &&
+      Number(r.duration) >= SUPERUSER_AUTH_RATE_LIMIT.duration
+  );
+}

@@ -6,7 +6,13 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import vm from 'node:vm';
-import { SECURITY_RULES, PROTECTED_FILE_FIELDS } from './security-rules.mjs';
+import {
+  SECURITY_RULES,
+  PROTECTED_FILE_FIELDS,
+  withMoveLocks as withMoveLocksForSync,
+  desiredRateLimits as desiredRateLimitsForSync,
+  hasSuperuserRateLimit as hasSuperuserRateLimitForSync
+} from './security-rules.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const MIGRATION = join(here, '..', 'migrations', '1700000182_harden_api_rules.js');
@@ -76,9 +82,14 @@ test('API-sync behåller server-only notiser och reparerar äldre createRules id
   for (const initialRule of [null, '@request.auth.id != "" && (actor = "" || @request.auth.id = actor)']) {
     const collection = { name: 'notifications', createRule: initialRule };
     let writes = 0;
+    let settingsWrites = 0;
+    let rateLimits = { enabled: false, rules: [{ label: '*:auth', duration: 3, maxRequests: 2 }] };
     const context = {
       SECURITY_RULES,
       PROTECTED_FILE_FIELDS,
+      withMoveLocks: withMoveLocksForSync,
+      desiredRateLimits: desiredRateLimitsForSync,
+      hasSuperuserRateLimit: hasSuperuserRateLimitForSync,
       FORCE_CREATE_RULES: { notifications: '@request.auth.id != ""' },
       pb: {
         collections: {
@@ -94,6 +105,15 @@ test('API-sync behåller server-only notiser och reparerar äldre createRules id
             Object.assign(collection, patch);
             writes++;
           }
+        },
+        settings: {
+          async getAll() {
+            return { rateLimits: JSON.parse(JSON.stringify(rateLimits)) };
+          },
+          async update(patch) {
+            rateLimits = patch.rateLimits;
+            settingsWrites++;
+          }
         }
       },
       log() {},
@@ -106,6 +126,8 @@ test('API-sync behåller server-only notiser och reparerar äldre createRules id
     const firstWrites = writes;
     await vm.runInNewContext(sync, context);
     assert.equal(writes, firstWrites, 'en andra sync skriver inte om reglerna');
+    assert.equal(settingsWrites, 1, 'rate-limiten sätts en gång och lämnas sedan orörd');
+    assert.ok(hasSuperuserRateLimitForSync(rateLimits));
   }
 });
 
@@ -185,4 +207,113 @@ test('härdade update/delete-regler finns kvar på kärnkollektionerna', () => {
   for (const [name, keys] of Object.entries(expected)) {
     for (const key of keys) assert.equal(typeof SECURITY_RULES[name]?.[key], 'string', `${name}.${key}`);
   }
+});
+
+// ── Flyttlås + superuser-rate-limit (säkerhetsgranskning 2026-11-15) ────────
+import {
+  TENANT_MOVE_LOCK,
+  STARTUP_MOVE_LOCK,
+  withMoveLocks,
+  missingMoveLocks,
+  desiredRateLimits,
+  hasSuperuserRateLimit,
+  SUPERUSER_AUTH_RATE_LIMIT
+} from './security-rules.mjs';
+
+const LOCK_MIGRATION = join(here, '..', 'migrations', '1700000217_lock_record_moves.js');
+const RATE_MIGRATION = join(here, '..', 'migrations', '1700000218_superuser_auth_rate_limit.js');
+
+test('withMoveLocks: tenant-lås läggs på och omsluter toppnivå-||', () => {
+  const out = withMoveLocks('a || b', ['tenant']);
+  assert.equal(out, `(a || b) && ${TENANT_MOVE_LOCK}`);
+});
+
+test('withMoveLocks: startup-lås bara där bolagsmedlemmar kan skriva', () => {
+  assert.equal(withMoveLocks('staff', ['startup']), 'staff');
+  const out = withMoveLocks('x || @request.auth.linked_startups:each ?= startup', ['tenant', 'startup']);
+  assert.ok(out.includes(TENANT_MOVE_LOCK) && out.includes(STARTUP_MOVE_LOCK));
+});
+
+test('withMoveLocks: idempotent och lämnar null/"" orörda', () => {
+  const once = withMoveLocks('r && linked_startups', ['tenant', 'startup']);
+  assert.equal(withMoveLocks(once, ['tenant', 'startup']), once);
+  assert.equal(withMoveLocks(null, ['tenant']), null);
+  assert.equal(withMoveLocks('', ['tenant']), '');
+  assert.deepEqual(missingMoveLocks(once, ['tenant', 'startup']), []);
+  assert.deepEqual(missingMoveLocks('r && linked_startups', ['tenant', 'startup']), ['tenant', 'startup']);
+});
+
+test('SECURITY_RULES-uppdateringar med tenant-fält blir låsta', () => {
+  for (const [name, rules] of Object.entries(SECURITY_RULES)) {
+    if (typeof rules.updateRule !== 'string' || !rules.updateRule) continue;
+    const locked = withMoveLocks(rules.updateRule, ['tenant', 'startup']);
+    assert.deepEqual(missingMoveLocks(locked, ['tenant', 'startup']), [], name);
+  }
+});
+
+test('migration 1700000217 bär exakt samma låssträngar', () => {
+  const src = readFileSync(LOCK_MIGRATION, 'utf8');
+  assert.ok(src.includes(`'${TENANT_MOVE_LOCK}'`), 'TENANT_MOVE_LOCK skiljer sig');
+  assert.ok(src.includes(`'${STARTUP_MOVE_LOCK}'`), 'STARTUP_MOVE_LOCK skiljer sig');
+});
+
+test('migration 1700000217 låser regler likadant som withMoveLocks', () => {
+  const collections = [
+    { name: 'a', type: 'base', system: false, updateRule: 'x || y', fields: [{ name: 'tenant' }] },
+    {
+      name: 'b',
+      type: 'base',
+      system: false,
+      updateRule: 'm && @request.auth.linked_startups:each ?= startup',
+      fields: [{ name: 'tenant' }, { name: 'startup' }]
+    },
+    { name: 'c', type: 'base', system: false, updateRule: null, fields: [{ name: 'tenant' }] },
+    { name: 'users', type: 'auth', system: false, updateRule: 'self', fields: [{ name: 'tenant' }] }
+  ];
+  const before = collections.map((c) => c.updateRule);
+  const saved = [];
+  let up;
+  vm.runInNewContext(readFileSync(LOCK_MIGRATION, 'utf8'), { migrate: (u) => (up = u) });
+  up({ findAllCollections: () => collections, save: (c) => saved.push(c.name) });
+  assert.deepEqual(saved, ['a', 'b']);
+  assert.equal(collections[0].updateRule, withMoveLocks(before[0], ['tenant']));
+  assert.equal(collections[1].updateRule, withMoveLocks(before[1], ['tenant', 'startup']));
+  assert.equal(collections[2].updateRule, null);
+  assert.equal(collections[3].updateRule, 'self');
+});
+
+test('desiredRateLimits: tar bort PB:s standardregler, behåller egna, sätter superuser-regeln', () => {
+  const out = desiredRateLimits({
+    enabled: false,
+    rules: [
+      { label: '*:auth', duration: 3, maxRequests: 2 },
+      { label: '/api/', duration: 10, maxRequests: 300 },
+      { label: 'custom:list', duration: 5, maxRequests: 50, audience: '' }
+    ]
+  });
+  assert.equal(out.enabled, true);
+  assert.deepEqual(out.rules.map((r) => r.label), ['custom:list', SUPERUSER_AUTH_RATE_LIMIT.label]);
+  assert.ok(hasSuperuserRateLimit(out));
+  assert.equal(hasSuperuserRateLimit({ enabled: false, rules: out.rules }), false);
+  assert.equal(
+    hasSuperuserRateLimit({ enabled: true, rules: [{ label: '_superusers:auth', duration: 60, maxRequests: 1000 }] }),
+    false
+  );
+});
+
+test('migration 1700000218 ger samma läge som desiredRateLimits', () => {
+  const settings = {
+    rateLimits: {
+      enabled: false,
+      rules: [
+        { label: '*:auth', audience: '', duration: 3, maxRequests: 2 },
+        { label: 'custom:list', audience: '', duration: 5, maxRequests: 50 }
+      ]
+    }
+  };
+  const expected = desiredRateLimits(JSON.parse(JSON.stringify(settings.rateLimits)));
+  let up;
+  vm.runInNewContext(readFileSync(RATE_MIGRATION, 'utf8'), { migrate: (u) => (up = u) });
+  up({ settings: () => settings, save: () => {} });
+  assert.deepEqual(JSON.parse(JSON.stringify(settings.rateLimits)), expected);
 });
