@@ -354,12 +354,15 @@ export interface InlineVisualRef {
 
 // Ett verktygssteg agenten utförde under en turn. Live-streamas till UI:t
 // medan turen körs och persisteras på assistant-meddelandet så återöppnade
-// trådar visar vad agenten gjorde. Etiketter är PII-fria (kollektionsnivå /
-// dokumenttyp) — de innehåller aldrig användarvärden, filter eller fältdata.
+// trådar visar vad agenten gjorde. Allt är PII-fritt (kollektion, fältnamn,
+// resultatstorlek) — aldrig användarvärden, filtervärden eller fältdata.
 export interface AgentActivityStep {
   tool: string; // funktionsnamn, t.ex. 'query_collection'
   label: string; // svensk etikett, t.ex. 'Läser bolagsdata'
+  detail?: string; // hur steget körs, t.ex. 'summa av amount_sek per startup · filter på date'
   ok?: boolean; // utfall (sätts när steget är klart)
+  result?: string; // vad steget gav, t.ex. '14 grupper · 37 rader'
+  ms?: number; // körtid i ms
 }
 
 // Kvitto på en SKRIVNING agenten utförde (eller försökte utföra) under en

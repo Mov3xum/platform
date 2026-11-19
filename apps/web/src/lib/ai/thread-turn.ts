@@ -185,10 +185,14 @@ export async function executeThreadTurn(
   const stepMap = new Map<string, AgentActivityStep>();
   const onStep = (step: AgentLoopStep) => {
     const prev = stepMap.get(step.id);
+    const ended = step.phase === 'end';
     stepMap.set(step.id, {
       tool: step.tool,
       label: step.label,
-      ok: step.phase === 'end' ? step.ok : prev?.ok
+      detail: step.detail,
+      ok: ended ? step.ok : prev?.ok,
+      result: ended ? step.result : prev?.result,
+      ms: ended ? step.ms : prev?.ms
     });
     options.onStep?.(step);
   };

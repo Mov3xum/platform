@@ -23,6 +23,7 @@ import {
 } from '@/lib/ai/models';
 import type { Role } from '@platform/shared';
 import { chatMarkdownToHtml } from '@/lib/safe-html';
+import { formatStepDuration, groupTrailSteps, type TrailStep } from '@/lib/ai/step-detail';
 import {
   CHAT_ATTACHMENT_MAX_FILE_BYTES,
   CHAT_ATTACHMENT_MAX_FILES,
@@ -88,11 +89,9 @@ export interface UiMessage {
 }
 
 // Ett pågående verktygssteg under en streamande turn.
-export interface LiveStep {
+export interface LiveStep extends AgentActivityStep {
   id: string;
-  label: string;
   running: boolean;
-  ok?: boolean;
 }
 
 // Ett köat meddelande — skrivet medan en turn körs, körs när den är klar.
@@ -262,33 +261,49 @@ function ModelPicker({
   );
 }
 
-// Kompakt aktivitetsspår ("Läser bolagen", "Skapar PowerPoint"). Visas
-// live medan turen körs (running → spinner) och persiterat under färdiga svar.
-function ActivityTrail({
-  items
-}: {
-  items: Array<{ label: string; running?: boolean; ok?: boolean }>;
-}) {
+// Aktivitetsspår: en rad per verktygssteg med vad agenten gör ("Sammanställer
+// kapitalrundorna"), vilket verktyg som körs, hur (fält/filter/aggregat) och
+// vad det gav (antal rader, körtid). Live medan turen körs; under färdiga svar
+// ihopfällt bakom en sammanfattning. Identiska steg i följd slås ihop (×N).
+function ActivityTrail({ items, collapsed = false }: { items: TrailStep[]; collapsed?: boolean }) {
   if (items.length === 0) return null;
-  return (
-    <ul className="mb-2 flex flex-col gap-1">
-      {items.map((s, i) => (
-        <li
-          key={i}
-          className="inline-flex items-center gap-2 text-[12.5px] text-foreground-subtle"
-        >
-          {s.running ? (
-            <span
-              className="h-3 w-3 shrink-0 animate-spin rounded-full border border-foreground-subtle border-t-transparent"
-              aria-hidden
-            />
-          ) : (
-            <Icon name={s.ok === false ? 'x' : 'check'} size={12} />
-          )}
-          <span>{s.label}</span>
-        </li>
-      ))}
+  const list = (
+    <ul className="flex flex-col gap-1.5">
+      {groupTrailSteps(items).map((s, i) => {
+        const meta = [s.detail, s.running ? undefined : s.result, formatStepDuration(s.ms)].filter(Boolean);
+        return (
+          <li key={i} className="flex items-start gap-2 text-[12.5px] leading-snug text-foreground-subtle">
+            <span className="mt-[3px] inline-flex h-3 w-3 shrink-0 items-center justify-center">
+              {s.running ? (
+                <span
+                  className="h-3 w-3 animate-spin rounded-full border border-foreground-subtle border-t-transparent"
+                  aria-hidden
+                />
+              ) : (
+                <Icon name={s.ok === false ? 'x' : 'check'} size={12} />
+              )}
+            </span>
+            <span className="min-w-0">
+              <span className="text-foreground-muted">{s.label}</span>
+              {s.count > 1 && <span className="tabular-nums"> ×{s.count}</span>}
+              {s.tool && <span className="ml-1.5 text-[11px] opacity-80">{s.tool}</span>}
+              {meta.length > 0 && <span className="block text-[11.5px] tabular-nums">{meta.join(' · ')}</span>}
+            </span>
+          </li>
+        );
+      })}
     </ul>
+  );
+  if (!collapsed) return <div className="mb-2">{list}</div>;
+  const failed = items.filter((s) => s.ok === false).length;
+  return (
+    <details className="mb-2 text-[12.5px] text-foreground-subtle">
+      <summary className="cursor-pointer select-none">
+        {items.length === 1 ? '1 steg' : `${items.length} steg`}
+        {failed > 0 && ` · ${failed} misslyckades`}
+      </summary>
+      <div className="mt-1.5">{list}</div>
+    </details>
   );
 }
 
@@ -1808,7 +1823,7 @@ export default function DashboardChat({
                     {/* Full bredd när visualiseringar finns — de ska visas stort över hela ytan. */}
                     <div className={msg.visuals && msg.visuals.length > 0 ? 'w-full min-w-0' : 'max-w-[85%]'}>
                       {msg.steps && msg.steps.length > 0 && (
-                        <ActivityTrail items={msg.steps.map((s) => ({ label: s.label, ok: s.ok }))} />
+                        <ActivityTrail items={msg.steps} collapsed />
                       )}
                       <div
                         className="max-w-[640px] text-[14.5px] leading-relaxed text-foreground"
@@ -1829,9 +1844,7 @@ export default function DashboardChat({
               {isPending && (
                 <div className="flex justify-start">
                   <div className="max-w-[85%]">
-                    <ActivityTrail
-                      items={liveSteps.map((s) => ({ label: s.label, running: s.running, ok: s.ok }))}
-                    />
+                    <ActivityTrail items={liveSteps} />
                     {liveText ? (
                       <div
                         className="text-[14.5px] leading-relaxed text-foreground"

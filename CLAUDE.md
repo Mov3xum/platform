@@ -2670,6 +2670,18 @@ PowerPoint"). Stegen persisteras dessutom PII-fritt på assistant-meddelandet
 - **PII (GDPR §5):** stegens etiketter är på kollektions-/dokumenttyp-nivå —
   aldrig filter, fältvärden eller användarinmatning. `steps` matas ALDRIG
   tillbaka in i modellprompten (historiken byggs bara från `role`/`content`).
+- **Detaljnivå (2026-11, `lib/ai/step-detail.ts`, ren + enhetstestad):** varje
+  steg visar även verktygsnamnet (`aggregate_collection`), en detaljrad om HUR
+  det körs (`summa av amount_sek per startup · filter på date`) och vad det gav
+  (`14 grupper · 37 rader · 320 ms`). Tidigare visades bara "Sammanställer
+  kapitalrundorna" ×13 utan att man kunde se skillnad på stegen. Detaljen
+  består ENDAST av schema-nivå (fältnamn — strängliteraler strippas ur filtret
+  innan fältnamnen plockas, och fri text som inte är en identifierare släpps
+  aldrig igenom) och resultatstorlek (antal rader/träffar/grupper) — aldrig
+  filtervärden, sökfrågor, summor eller fältdata. Ett steg rapporteras klart
+  när JUST det anropet är färdigt (inte när turens parallella läsningar är
+  klara). Identiska steg i följd slås ihop till en rad med ×N; under färdiga
+  svar är spåret ihopfällt bakom "N steg".
 - **Ärlig agent:** `STAFF_TOOL_GUIDANCE` (i `staff-chat.ts` och `chat.ts`)
   förbjuder uttryckligen att lova bakgrundsarbete ("strax", "i bakgrunden",
   "återkom om en stund") — turen är synkron, så ett dokument måste skapas via
