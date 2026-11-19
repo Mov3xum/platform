@@ -24,7 +24,7 @@ const BUCKET_KEY_RE = /^[A-Za-z0-9_.-]{1,80}$/;
 interface ResultPdfBody {
   slug?: unknown;
   bucketKey?: unknown;
-  /** Besökarens språk (§ 23.13) — engelska bara när den är publicerad. */
+  /** Besökarens språk (§ 23.13): `en` ⇒ engelska, annars svenska. */
   lang?: unknown;
 }
 

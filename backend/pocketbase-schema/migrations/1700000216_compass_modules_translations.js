@@ -1,16 +1,17 @@
 /// <reference path="../pb_data/types.d.ts" />
 
 // Startupkompassen — engelsk version av publika moduler (CLAUDE.md § 23.13,
-// 2026-11). Personalen översätter modulens besökartexter (rubriker, start-
-// sida, samtycke, frågor, svarsalternativ, resultatprofiler) i modul-admin —
-// AI-förslag + mänsklig granskning — och publicerar den engelska versionen.
-// Den publika sidan /m/<slug> visar då en språkknapp Svenska/English.
+// 2026-11). Den publika sidan /m/<slug> har en språkknapp Svenska/English;
+// modulens besökartexter (rubriker, startsida, samtycke, frågor,
+// svarsalternativ, resultatprofiler) maskinöversätts automatiskt (Mistral,
+// EU) första gången en besökare väljer English och sparas här.
 //
 //   compass_modules.translations (json ≤ 1 MB):
-//     { en: { enabled, texts: { <nyckel>: text }, sources: { <nyckel>: hash },
-//             updated_at, updated_by } }
+//     { en: { texts: { <nyckel>: text }, sources: { <nyckel>: hash },
+//             updated_at } }
 //   Nycklarna och normaliseringen bor i packages/shared/src/compass-i18n.ts.
-//   Saknat fält ⇒ ingen engelsk version (oförändrat beteende).
+//   Saknat fält ⇒ översättningen kan inte sparas (görs om vid varje visning,
+//   med paus) — kör migrationen.
 //
 // Ingen PII (modulens egna marknadstexter). Compass är migration-only
 // (§ 23.4) men compass_modules inline-def i setup-via-api.mjs speglar fältet.

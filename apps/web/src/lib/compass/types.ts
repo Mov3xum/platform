@@ -326,7 +326,7 @@ export interface NextModuleLink {
   slug: string;
   /** Visningsnamn på "fortsätt"-knappen. */
   label: string;
-  /** Engelskt visningsnamn när nästa modul har en publicerad engelsk version (§ 23.13). */
+  /** Engelskt visningsnamn när nästa modul redan översatts (§ 23.13). */
   labelEn?: string;
 }
 

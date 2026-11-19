@@ -116,7 +116,7 @@ export async function POST(req: Request) {
       model,
       maxExchanges,
       assistantName,
-      // Förhandsgranskning på engelska (§ 23.13) — personalen testar före publicering.
+      // Förhandsgranskning på engelska (§ 23.13).
       locale: body.lang === 'en' ? 'en' : 'sv'
     });
   } catch (err) {

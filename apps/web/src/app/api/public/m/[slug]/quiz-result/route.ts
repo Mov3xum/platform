@@ -39,7 +39,7 @@ interface QuizBody {
   contact_preference?: string;
   /** Sessionstoken (§ 23.10) — slutför det pågående leadet i stället för att skapa ett nytt. */
   sessionToken?: string;
-  /** Besökarens språk (§ 23.13) — gäller bara när engelskan är publicerad. */
+  /** Besökarens språk (§ 23.13): `en` ⇒ engelska, annars svenska. */
   lang?: string;
 }
 
