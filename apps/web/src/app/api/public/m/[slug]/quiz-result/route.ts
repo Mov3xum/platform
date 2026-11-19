@@ -19,7 +19,7 @@ import {
 } from '@/lib/compass/lead-capture';
 import { notifyNewInflow } from '@/lib/compass/notify';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
-import { scoreQuiz, resolveBucket, isResultBucketArray, type QuizQuestion } from '@platform/shared';
+import { scoreQuizSubmission } from '@/lib/compass/quiz-ai';
 import type { Attribution } from '@/lib/compass/types';
 
 export const runtime = 'nodejs';
@@ -95,15 +95,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   const contactFields = leadFieldsFromContact(contact.values);
 
   const questions = await getPublicModuleQuestions(pb, module.id);
-  const quizQuestions: QuizQuestion[] = questions.map((q) => ({
-    key: q.key,
-    input_type: q.input_type,
-    choices: q.choices
-  }));
-
-  const score = scoreQuiz(quizQuestions, body.answers || {});
-  const buckets = isResultBucketArray(module.result_buckets) ? module.result_buckets : [];
-  const bucket = resolveBucket(score, buckets);
+  // Kryssfrågorna räknas deterministiskt; fritextsvar bedöms av AI när
+  // modulen har en bedömningsinstruktion (§ 23.14, best-effort).
+  const { score, bucket, aiAssessed, aiNote } = await scoreQuizSubmission(
+    pb,
+    tenant,
+    module,
+    questions,
+    body.answers || {}
+  );
   const visitorBucket = texts ? translateResultBucket(bucket, texts) : bucket;
 
   // ENKÄT (§ 43): svaren lagras per fråga mot subjektet — inget lead. Fela
@@ -121,13 +121,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
         { status: 500 }
       );
     }
-    return NextResponse.json({ bucket: visitorBucket, score: score.total });
+    return NextResponse.json({ bucket: visitorBucket, score: score.total, ai_assessed: aiAssessed });
   }
 
   // Steg 4-valet: modulen kan vara konfigurerad att INTE skapa lead — visa
   // bara resultatet i så fall.
   if (!moduleWantsLead(module)) {
-    return NextResponse.json({ bucket: visitorBucket, score: score.total });
+    return NextResponse.json({ bucket: visitorBucket, score: score.total, ai_assessed: aiAssessed });
   }
 
   // Bevara utfallet som en lead (människa-i-loopen följer upp). Kontaktfält är
@@ -148,7 +148,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     quiz_result_bucket: bucket?.key,
     quiz_score: score.total,
     contact_preference: contactPreference,
-    notes: '',
+    // Tömmer progress-noten; med AI-bedömning sparas personalens spår här.
+    notes: aiNote,
     consent_at: new Date().toISOString()
     }
   });
@@ -174,5 +175,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
 
   await notifyNewInflow(module, { ...lead, ai_summary: aiSummary ?? lead.ai_summary });
 
-  return NextResponse.json({ bucket: visitorBucket, score: score.total });
+  return NextResponse.json({ bucket: visitorBucket, score: score.total, ai_assessed: aiAssessed });
 }

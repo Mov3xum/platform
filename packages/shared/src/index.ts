@@ -1828,6 +1828,7 @@ export * from './agreements';
 export * from './reporting';
 // ─── Startupkompassen — quiz-poängsättning (ren logik, enhetstestad) ─────────
 export * from './compass-quiz';
+export * from './compass-quiz-ai';
 export * from './file-topics';
 // ─── Kompetenstaxonomi (tvärfunktionella team, ren logik, enhetstestad) ──────
 export * from './competences';

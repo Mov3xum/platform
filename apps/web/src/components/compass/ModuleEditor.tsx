@@ -81,6 +81,10 @@ export function ModuleEditor({
 }: Props) {
   const [step, setStep] = useState(0);
   const [flowType, setFlowType] = useState<FlowType>(mod.flow_type);
+  // Ett fält, två roller: chattens egna systemprompt och quizets
+  // bedömningsinstruktion för fritextsvar (§ 23.14). Kontrollerat så ett
+  // typbyte aldrig tappar texten; skickas via ett dolt fält i formuläret.
+  const [systemPrompt, setSystemPrompt] = useState(mod.system_prompt || '');
   const [purpose, setPurpose] = useState<CompassPurpose>(normalizeCompassPurpose(mod.purpose));
   const [layout, setLayout] = useState<CompassLayout>(() => normalizeCompassLayout(mod.layout));
   const layoutMeta = COMPASS_LAYOUT_META[layout];
@@ -521,14 +525,17 @@ export function ModuleEditor({
                 Egen systemprompt (valfri)
               </summary>
               <textarea
-                name="system_prompt"
-                defaultValue={mod.system_prompt || ''}
+                value={systemPrompt}
+                onChange={(e) => setSystemPrompt(e.target.value)}
+                aria-label="Egen systemprompt"
                 className="mx-textarea"
                 style={{ marginTop: 8, minHeight: 100, fontFamily: 'var(--mx-mono)', width: '100%' }}
                 placeholder="Lämna tom för standardbeteendet."
               />
             </details>
           </div>
+
+          <input type="hidden" name="system_prompt" value={systemPrompt} />
 
           {/* ── Steg 4: Målgrupp & uppgifter ────────────────────────────── */}
           <Step active={step === 3}>
@@ -784,9 +791,31 @@ export function ModuleEditor({
           {flowType === 'quiz' && (
             <>
               <ResultBucketsEditor initial={mod.result_buckets ?? []} formId={FORM_ID} />
+              {purpose !== 'survey' && (
+                <label className="mx-label">
+                  Så bedömer AI fritextsvaren (valfritt)
+                  <textarea
+                    value={systemPrompt}
+                    onChange={(e) => setSystemPrompt(e.target.value)}
+                    maxLength={8000}
+                    className="mx-textarea"
+                    style={{ marginTop: 4, minHeight: 140, width: '100%' }}
+                    placeholder={
+                      'Beskriv per fritextfråga vad som kännetecknar varje profil, t.ex.\n\n"Beskriv din idé":\nPotential: allmänt hållen, inget konkret problem eller kund\nUtveckling: tydligt problem och det framgår vem som har det\nRedo: problem, kund och lösning är konkreta, något är testat eller sålt'
+                    }
+                  />
+                  <span className="mx-muted mx-t-xs" style={{ display: 'block', marginTop: 4 }}>
+                    Tomt = fritextsvar ger inga poäng. Ifyllt = varje fritextsvar (kort eller lång
+                    text) tolkas av AI (Mistral, EU) och kan ge en profil lika många poäng som
+                    quizets lättaste kryssfråga. Använd profilernas nycklar eller titlar. Besökaren
+                    får veta att svaren tolkats av AI, och bedömningen sparas under Anteckningar på
+                    leadet. Gäller quiz där profilen med flest poäng vinner.
+                  </span>
+                </label>
+              )}
               <div className="mx-muted mx-t-12">
-                Resultatprofilerna sparas med <strong>Spara</strong>-knappen nedan.
-                Frågorna sparas direkt, en i taget.
+                Resultatprofilerna och AI-bedömningen sparas med <strong>Spara</strong>-knappen
+                nedan. Frågorna sparas direkt, en i taget.
               </div>
             </>
           )}

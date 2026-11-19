@@ -12,7 +12,7 @@ import {
   parseContactPreference,
   parseContactSubmission
 } from '@/lib/compass/lead-capture';
-import { scoreQuiz, resolveBucket, isResultBucketArray, type QuizQuestion } from '@platform/shared';
+import { scoreQuizSubmission } from '@/lib/compass/quiz-ai';
 import { PREVIEW_SOURCE_KEY, type Attribution } from '@/lib/compass/types';
 
 export const runtime = 'nodejs';
@@ -72,19 +72,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   const contactFields = leadFieldsFromContact(contact.values);
 
   const questions = await listQuestionsForModule(pb, mod.id);
-  const quizQuestions: QuizQuestion[] = questions.map((q) => ({
-    key: q.key,
-    input_type: q.input_type,
-    choices: q.choices
-  }));
-
-  const score = scoreQuiz(quizQuestions, body.answers || {});
-  const buckets = isResultBucketArray(mod.result_buckets) ? mod.result_buckets : [];
-  const bucket = resolveBucket(score, buckets);
+  const { score, bucket, aiAssessed, aiNote } = await scoreQuizSubmission(
+    pb,
+    user.tenant,
+    mod,
+    questions,
+    body.answers || {},
+    { userId: user.id }
+  );
 
   // Steg 4-valet: modulen kan vara konfigurerad att INTE skapa lead.
   if (!moduleWantsLead(mod)) {
-    return NextResponse.json({ bucket, score: score.total });
+    return NextResponse.json({ bucket, score: score.total, ai_assessed: aiAssessed });
   }
 
   const attribution = pickAttribution(body.attribution);
@@ -101,6 +100,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     quiz_result_bucket: bucket?.key,
     quiz_score: score.total,
     contact_preference: parseContactPreference(body.contact_preference),
+    notes: aiNote || undefined,
     consent_at: new Date().toISOString()
   });
 
@@ -117,5 +117,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   const resultLine = bucket ? `${bucket.title} (${score.total} poäng)` : `${score.total} poäng`;
   await attachAiSummary(pb, user.tenant, lead, entries, mod.name, resultLine, { userId: user.id });
 
-  return NextResponse.json({ bucket, score: score.total, leadId: lead.id });
+  return NextResponse.json({ bucket, score: score.total, ai_assessed: aiAssessed, leadId: lead.id });
 }
