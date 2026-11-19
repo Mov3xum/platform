@@ -36,6 +36,8 @@ interface Props {
 interface QuizResult {
   bucket: ResultBucket | null;
   score: number;
+  /** Sant när fritextsvar tolkats av AI och räknats in (art. 50). */
+  ai_assessed?: boolean;
 }
 
 // Quiz-flöde: ställer frågor (poäng/hink i choices), ett valfritt kontaktsteg,
@@ -146,6 +148,7 @@ export function ModuleQuiz({
         {showNextBox && nextModule && (
           <NextModuleCta next={nextModule} prompt={t.continueNext} />
         )}
+        {result.ai_assessed && <p className="mx-muted mx-t-xs">{t.aiAssessedNote}</p>}
         {error && (
           <div
             className="mx-t-12"
@@ -222,7 +225,11 @@ export function ModuleQuiz({
       }
       progressTracker.markDone();
       const data = (await res.json()) as QuizResult;
-      setResult({ bucket: data.bucket ?? null, score: data.score ?? 0 });
+      setResult({
+        bucket: data.bucket ?? null,
+        score: data.score ?? 0,
+        ai_assessed: data.ai_assessed === true
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : t.somethingWrong);
     } finally {

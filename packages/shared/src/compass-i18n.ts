@@ -393,6 +393,8 @@ export interface CompassUiStrings {
   summaryEmailFailed: (reason: string) => string;
   downloadSummary: string;
   aiDisclaimer: string;
+  /** Quiz där fritextsvar tolkats av AI (§ 23.14, art. 50). */
+  aiAssessedNote: string;
   chatEndedThanks: string;
   finishChat: string;
   finishChatTitle: string;
@@ -490,6 +492,7 @@ export const COMPASS_UI: Record<CompassLocale, CompassUiStrings> = {
     summaryEmailFailed: (reason) => `Sammanfattningen kunde inte mejlas (${reason}) — ladda ner den i stället.`,
     downloadSummary: 'Ladda ner sammanfattning (PDF)',
     aiDisclaimer: 'Genererat av AI – verifiera innan delning.',
+    aiAssessedNote: 'Dina fritextsvar har tolkats av AI och vägts in i resultatet.',
     chatEndedThanks: 'Samtalet är avslutat — tack för att du delade din idé.',
     finishChat: 'Avsluta',
     finishChatTitle: 'Avsluta samtalet och lämna dina uppgifter',
@@ -584,6 +587,7 @@ export const COMPASS_UI: Record<CompassLocale, CompassUiStrings> = {
     summaryEmailFailed: (reason) => `The summary could not be emailed (${reason}) — download it instead.`,
     downloadSummary: 'Download summary (PDF)',
     aiDisclaimer: 'AI-generated – verify before sharing.',
+    aiAssessedNote: 'Your free-text answers were interpreted by AI and weighed into the result.',
     chatEndedThanks: 'The conversation has ended — thank you for sharing your idea.',
     finishChat: 'Finish',
     finishChatTitle: 'End the conversation and leave your details',

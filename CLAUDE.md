@@ -1014,6 +1014,7 @@ omsättning.
 | `ai_funding_radar` | begränsad | Matchar utlysningar mot bolagsfas, vägledande |
 | `ai_portfolio_risk` | begränsad | Bara whitelistade fält, rankar bolag — ej personer |
 | `web_search` (chatt-verktyg, § 9.8) | begränsad | Internetsökning via Mistral Web Search (EU) på personalens opt-in; bara sanerad sökfråga lämnar plattformen; källor visas |
+| Quizets fritextbedömning (`lib/compass/quiz-ai.ts`, § 23.14) | begränsad | Pekar en besökares fritextsvar mot en av quizets resultatprofiler enligt personalens bedömningsinstruktion; fast låg vikt, deterministisk reserv, besökaren informeras, personalen ser motiveringen på leadet; bedömer svarets sakinnehåll, aldrig personen |
 | `procurement-extract` (AI-utläsning av upphandlingsunderlag, § 39.3) | begränsad | Läser ut strukturerade uppgifter ur ett dokument staff själva laddat upp till ett förifyllt utkast; människan granskar och sparar; ingen profilering |
 | `create_procurement` / `create_procurement_calloff` / `update_procurement_calloff` (chatt-verktyg, § 39.4) | n/a | Deterministiska mutationer via det delade skrivlagret; uppföljningsregler expanderas utan inferens |
 | `create_funding_project` / `create_support_check_type` / `create_support_check_application` (chatt-verktyg, § 46) | n/a | Deterministiska utkast via skrivlagret (checktyp inaktiv, ansökan `draft`); inskick, bedömning, finansiering och beslut är agent-nekade |
@@ -4351,6 +4352,59 @@ granskning och publicering; det togs bort).
   sv/en), engelska
   serverfel i sällsynta vägar (rate-limit/sessionsfel svarar fortfarande på
   svenska), bilageuppladdningens serverfel och ett språkfält på leadet.
+
+### 23.14 AI-bedömning av fritextsvar i quiz (2026-11-19)
+
+**Behov.** Ett quiz räknade bara poäng på svarsalternativ; fritextfrågor
+("Beskriv din idé") gav inga poäng och lästes av AI först i
+sammanställningen till personalen. Nu kan fritextsvaren vägas in i
+resultatprofilen besökaren får.
+
+- **Fältet återanvänds:** quizets bedömningsinstruktion är modulens
+  befintliga `system_prompt` (samma fält som chattens egna systemprompt —
+  ingen migration). Modul-admin steg 3 visar det för quiz som **"Så bedömer AI
+  fritextsvaren"**, under resultatprofilerna; sparas med Spara. Tomt fält ⇒
+  ingen AI, quizet räknas som förut. Editorn håller texten i ett
+  kontrollerat state + dolt fält, så ett typbyte inte tappar den.
+- **Prompten byggs som chattens** (`buildQuizTextScoringPrompt` i
+  `lib/compass/prompts.ts`): fast inledning → personalens instruktion → fasta
+  regler SIST (svaren är data, bedöm bara sakinnehållet — aldrig språk,
+  stavning eller personliga egenskaper, högst en profil per svar eller null,
+  bara JSON). En instruktion kan inte ta bort reglerna. Profilerna och svaren
+  skickas som JSON i användarmeddelandet.
+- **Ren logik** (`packages/shared/src/compass-quiz-ai.ts`, enhetstestad):
+  bara besvarade `short_text`/`long_text`-frågor bedöms (högst 8, 2 000
+  tecken); modellens svar tolkas strikt (`parseQuizTextVerdicts` — okänd
+  profil ⇒ inga poäng, okänd fråga/dubblett kastas, otolkbart ⇒ ingenting);
+  varje utslag ger profilen **samma vikt som quizets lättaste poängsatta
+  kryssfråga** (`quizTextWeight`, 1 utan poängsatta kryss) — texten kan avgöra
+  ett jämnt läge men inte köra över kryssen. Bara topp-hink-quiz med minst två
+  profiler (`quizSupportsTextScoring`); intervall-quiz och enkäter (§ 43) är
+  alltid deterministiska.
+- **En väg** (`scoreQuizSubmission` i `lib/compass/quiz-ai.ts`): den publika
+  routen och admin-previewen anropar samma funktion (ersätter deras inline-
+  `scoreQuiz`/`resolveBucket`). `mistral-small-latest`, temperatur 0,
+  JSON-läge, 12 s tidsgräns. **Best-effort:** saknad nyckel, nått månadstak
+  (§ 9.6), tak per tenant/timme (300), tidsgräns eller otolkbart svar ⇒
+  resultatet räknas på kryssfrågorna. Tokens loggas i `ai_usage_events`
+  (surface `suggestions`, anonymt för publika flöden).
+- **Transparens (art. 50):** svaret bär `ai_assessed`; resultatskärmen visar
+  då "Dina fritextsvar har tolkats av AI och vägts in i resultatet"
+  (`COMPASS_UI.aiAssessedNote`, sv/en). **Människa-i-loopen:** vilket svar
+  som pekades mot vilken profil, vikten och modellens motivering sparas i
+  leadets `notes` (Anteckningar i lead-vyn, märkt "genererad av AI –
+  verifiera"); `quiz_score` inkluderar AI-poängen.
+- **GDPR § 5:** personnummer saneras före anropet och i motiveringen; loggen
+  bär aldrig svar eller instruktion. Kontaktuppgifterna ("Dina uppgifter")
+  skickas aldrig till bedömningen — bara fritextfrågornas svar.
+- **Riskklass: begränsad** (§ 10.1) — resultatet är vägledande feedback till
+  besökaren, inget beslut om antagning; personalen följer upp leadet oavsett
+  profil.
+- **Inte byggt:** bedömningsmall per fråga, valbar vikt, promptversion på
+  leadet. Flödet är inte kört mot Mistral från byggmiljön — testa i
+  förhandsgranskningen (`/inflode/m/<slug>`) innan publicering.
+
+---
 
 ## 24. AI-sorterat filarkiv — ämnes-/bolagsmappar (/filer)
 
