@@ -29,6 +29,7 @@ export const MODULE_ICONS: Record<string, string> = {
   agenter: 'bolt',
   insights: 'graph',
   integrationer: 'link',
+  diarium: 'inbox',
   onskemal: 'help',
   min_profil: 'user',
   anvandare: 'user',

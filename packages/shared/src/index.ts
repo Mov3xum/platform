@@ -1439,7 +1439,7 @@ export const RAIL_GROUPS: ModuleGroup[] = [
   { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'mal', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
   { label: 'Portfölj', modules: ['startups', 'kontakter', 'talang', 'de_minimis', 'bedomning_excellens', 'impactnavigator', 'exportlab', 'checkar', 'projekt', 'upphandlingar', 'investerare'] },
   { label: 'Innehåll', modules: ['education', 'howspace', 'rapporter'] },
-  { label: 'System', modules: ['agenter', 'kunskapsbas', 'onskemal', 'installningar', 'min_profil'] }
+  { label: 'System', modules: ['agenter', 'kunskapsbas', 'diarium', 'onskemal', 'installningar', 'min_profil'] }
 ];
 
 /**
@@ -1683,6 +1683,14 @@ export const coreModules: ModuleDefinition[] = [
       'AI-stödd internationaliseringsanalys per bolag (CLAUDE.md § 58): exportprofil och marknadsurval (Uppsala, Born Global, CAGE), informationsgap, en första exportplan med inträdesform, regelverk, kulturell spelbok och affärsförutsättningar per marknad — kopplad till bolagets KTH IRL. Beslutsstöd för coachen — människan granskar marknaderna och planen.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer', 'startup_member'],
     route: '/exportlab'
+  },
+  {
+    id: 'diarium',
+    title: 'Diarium & arkiv',
+    description:
+      'Diarium, informationshanteringsplan och arkivförteckning (CLAUDE.md § 60): handlingar registreras automatiskt när de blir allmänna, med diarienummer, kontrollsumma, sekretessmarkering och gallringsfrist. Granskningsvyn visar vad som saknas inför en arkivtillsyn.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/diarium'
   },
   {
     id: 'onskemal',
@@ -1989,3 +1997,4 @@ export * from './program-stages';
 
 export * from './user-activity';
 export * from './howspace';
+export * from './records-register';

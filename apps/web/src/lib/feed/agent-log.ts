@@ -1052,6 +1052,29 @@ function mapRow(
       if (after.deleted === true) return { title: 'En studentprofil togs bort', href: '/talang/studenter', icon: 'trash' };
       return { title: `En studentprofil — ${(isStudentProfileStatus(after.status) ? STUDENT_PROFILE_STATUS_LABELS[after.status] : 'status').toLowerCase()}`, href: row.record_id ? `/talang/studenter/${row.record_id}` : '/talang/studenter', icon: 'cap' };
     }
+    case 'register_entries': {
+      const nr = str(after.designation);
+      const href = str(after.case) ? `/diarium/${str(after.case)}` : '/diarium';
+      if (action === 'create') return { title: `Diarium: handling ${nr} registrerad manuellt`, href, icon: 'inbox' };
+      if (after.voided === true) return { title: `Diarium: handling ${nr} makulerad`, href, icon: 'trash' };
+      return { title: `Diarium: sekretessmarkering ${after.secrecy === true ? 'satt' : 'borttagen'} på ${nr}`, href, icon: 'shield' };
+    }
+    case 'register_cases': {
+      const href = row.record_id ? `/diarium/${row.record_id}` : '/diarium';
+      return { title: `Diarium: ärende ${str(after.number)} ${str(after.status) === 'closed' ? 'avslutat' : 'öppnat igen'}`, href, icon: str(after.status) === 'closed' ? 'check' : 'inbox' };
+    }
+    case 'register_disclosures':
+      return { title: 'Diarium: ett utlämnande av allmän handling loggades', href: str(after.case) ? `/diarium/${str(after.case)}` : '/diarium?vy=utlamnanden', icon: 'external' };
+    case 'record_types':
+      return {
+        title: `Informationshanteringsplanen: "${str(after.label) || str(after.key)}" ${action === 'create' ? 'lades till' : after.confirmed === true ? 'bekräftades' : 'ändrades'}`,
+        href: '/diarium?vy=plan',
+        icon: 'doc'
+      };
+    case 'archive_profiles':
+      return { title: 'Arkivbeskrivningen uppdaterades', href: '/diarium?vy=forteckning', icon: 'doc' };
+    case 'archive_versions':
+      return { title: `Plan och arkivförteckning fastställda som version ${typeof after.version === 'number' ? after.version : ''}`.trim(), href: '/diarium?vy=forteckning', icon: 'check' };
     case 'screening_cases': {
       const name = str(after.subject_name);
       const href = row.record_id ? `/bedomning-excellens?arende=${row.record_id}` : '/bedomning-excellens';

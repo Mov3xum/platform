@@ -44,6 +44,8 @@ test('denylist håller ute auth-, credential- och privat-innehåll-kollektioner'
     'startup_screenings', // statsstödsbedömningar på bolagskortet (§51.6)
     'screening_requests', // begäran om komplettering med grundaruppgifter (§51.6)
     'screening_cases', // ärenden i Bedömning excellens — underlag + manuella svar (§51.10)
+    'register_entries', // diariets handlingsposter — motpart + sekretessmarkering (§60)
+    'register_disclosures', // logg över utlämnanden (§60)
     'student_profiles', // studenter = privatpersoner: namn, e-post, fritext (§54)
     'talent_interests', // intresseanmälningar med meddelanden (§54)
     'sustainability_documents', // text ur uppladdade dokument i Hållbarhetsanalysen (§56)

@@ -11300,3 +11300,93 @@ till Howspace renderas bara när de är https under `howspace.com`
 (`rel="noopener noreferrer"`). Migrationer 1700000213–214 är nya,
 oföränderliga filnummer; ingen schemaändring → ingen spegling i
 `setup-via-api.mjs`/`verify-baseline.mjs`.
+
+---
+
+## 60. Diarium, informationshanteringsplan & arkivförteckning (2026-11)
+
+`/diarium` (modul `diarium`, titel **Diarium & arkiv**, "System"-railen;
+Movexum-personal + observer) är plattformens svar på arkivlagen och OSL
+5 kap.: handlingar registreras **automatiskt när de blir allmänna**, planen
+säger hur varje handlingstyp ska hanteras, och förteckningen räknas ur de
+två. Fem flikar (`?vy=`): **Diarium** · **Plan** · **Förteckning** ·
+**Utlämnanden** · **Granskning**.
+
+**Förutsättning som inte är kod:** om Movexum omfattas (ägarnas rättsligt
+bestämmande inflytande, OSL 2 kap. 3 §), vem som är arkivmyndighet och vilka
+lagrum/gallringsfrister som gäller ska bekräftas av jurist och arkivmyndighet.
+Standardplanen är därför **förslag** — varje rad bär `confirmed`, och
+granskningen varnar tills raderna bekräftats och en version fastställts.
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/records-register.ts` (+ `.test.ts`) | REN: vokabulär, `DEFAULT_RECORD_TYPES` (Movexums förslag till plan), validering, diarienummer (`formatCaseNumber` `2026/0042`, handling `2026/0042-3`), `registerEntryHashPayload`, `disposalDueDate`, `buildArchiveInventory`, arkivbeskrivningens avsnitt, `runRegisterAudit` |
+| `backend/pocketbase-schema/migrations/1700000219_create_records_register.js` | `record_types`, `register_cases`, `register_entries`, `register_disclosures`, `archive_profiles`, `archive_versions` |
+| `apps/web/src/lib/core/write/register.ts` | Skrivlagret: `registerRecord`/`registerRecordSafe` (automatiskt), manuell registrering, sekretessmarkering, makulering, ärendestatus, utlämnandelogg, plan, arkivbeskrivning, fastställd version, `verifyRegisterIntegrity` |
+| `apps/web/src/lib/register/sources.ts` | Byggare per källa (samma för inkoppling OCH efterregistrering), `SOURCE_FILTERS`, `backfillRegister` |
+| `apps/web/src/lib/register/data.ts` | Läsvägen (användarens token) + granskningens underlag |
+| `apps/web/src/lib/actions/register.ts`, `app/diarium/**`, `app/api/diarium/export/route.ts` | Actions, sidor, CSV-export |
+
+**Bindande regler:**
+
+- **Bara servern skriver.** Alla sex kollektionernas create/update/delete-
+  regler är `null`; skrivlagret prövar rollen och skriver med den cachade
+  superusern. Ingen användartoken kan skapa, ändra eller ta bort en
+  diariepost (verifierat mot PB 0.23.4; `MUST_BE_IMMUTABLE` +
+  `MUST_BE_SERVER_CREATE_ONLY` i `verify-baseline.mjs`). Utan
+  `POCKETBASE_SUPERUSER_*` på web-appen registreras ingenting — granskningens
+  första punkt säger det.
+- **Var en handling blir allmän** (inkopplingarna — lägg nya här, aldrig som
+  egen skrivväg): slutförd lead (`finalizeLead`, inte förhandsgranskningar) →
+  `lead_incoming`; inskickad/kompletterad stödcheck → `support_check_application`
+  / `_completion`; beslut om stödcheck → `support_check_decision`; fullt
+  signerat avtal → `agreement_signed`; upplagd upphandling →
+  `procurement_opened`; klarmarkerad Bedömning excellens → `screening_final`.
+  Anropen går via `registerRecordSafe`: de kastar aldrig och fäller aldrig
+  huvudmutationen. Det som missas syns som saknat i **Granskning →
+  Täckning per källa** och tas igen med **Efterregistrera saknade**
+  (handlingens datum = originalets, registreringsdatum = i dag, märkt
+  "Efterregistrerad").
+- **Planen styr.** `registerRecord` registrerar bara typer som är aktiva med
+  hantering `register`. En typ som kan innehålla sekretess måste registreras
+  (OSL 5 kap. 1 § — validatorn vägrar annat). Planen materialiseras per
+  tenant första gången, bara efter en LYCKAD tom läsning.
+- **Nummerserien är obruten.** Ärendenummer delas ut under
+  `withDistributedLock('register:<tenant>')`; de unika indexen
+  `(tenant, year, seq)` och `(tenant, register_case, seq)` är den hårda
+  gränsen. Idempotens: `(tenant, source_collection, source_id, source_event)`.
+  Inget raderas — en felregistrering **makuleras** (posten och numret finns
+  kvar med orsak).
+- **Kontrollsumma.** Varje handling får SHA-256 över typ, rubrik, riktning,
+  datum, källa, handlingens egen hash (avtalets PDF, ansökans revision) och
+  `snapshot`. "Kontrollera kontrollsummor" räknar om ur lagrad post och
+  namnger avvikelser. Sekretessmarkering och makulering ingår inte i summan
+  (de ändras av ledningen och auditeras i `agent_actions`).
+- **Sekretess är en markering, inte ett beslut.** Typen sätter förvalet;
+  prövningen görs när någon begär ut handlingen och loggas under
+  **Utlämnanden** (utfall, lagrum vid avslag/maskning). Den som begär ut har
+  rätt att vara anonym — loggen frågar aldrig efter vem.
+- **Gallringsfristen** räknas från att ärendet avslutats (`disposalDueDate`).
+  Plattformen gallrar INTE källposter automatiskt utifrån planen ännu —
+  granskningen listar bara vad som passerat fristen.
+- **Förteckningen**: arkivförteckningen räknas live (process → handlingstyp:
+  antal, tidsspann, förvaring, bevara/gallra); arkivbeskrivningen har sju
+  avsnitt som ledningen håller aktuella; **Fastställ ny version** fryser
+  plan + förteckning + beskrivning med datum, vem och kontrollsumma
+  (`archive_versions`, oföränderlig). Granskningen varnar när något ändrats
+  sedan senaste version eller när den är äldre än ett år.
+- **Roller:** läsa = modulen; registrera manuellt = admin/incubator_lead/coach;
+  förvalta (plan, sekretess, makulering, ärendestatus, utlämnande, version,
+  efterregistrering) = admin/incubator_lead. Agenten har inga verktyg här.
+- **GDPR § 5:** rubrik och motpart bär bolags-/organisationsnamn — en lead
+  från en privatperson får motparten "Enskild person" (namnet finns i leadet,
+  dit ärendet länkar). `snapshot` bär id:n, status och belopp. Fritext
+  personnummer-saneras. `register_entries` och `register_disclosures` är
+  **denylistade för AI**; plan, ärenden och förteckning är läsbara.
+  `startup` har ingen cascade — diariet överlever att ett bolagskort tas bort.
+- **Riskklass (EU AI Act):** n/a — ingen AI-inferens.
+- **Inte byggt:** koppling till Platina/e-arkiv (CSV-exporten är underlaget
+  tills formatet är bestämt), automatisk gallring enligt planen, bilagor på
+  manuellt registrerade handlingar, registrering av expedierade
+  e-postkampanjer och kompletteringsbegäran. Migration 1700000220 backfillar
+  modulen i sparade sidmenyer (§ 36.3).

@@ -47,6 +47,8 @@ import { getRecordInTenant, writeWithFallback } from './helpers';
 import { validateBool, validateDateOnly, validateNonEmptyText, validateOptionalText } from './validators';
 import type { Actor, WriteResult } from './types';
 import { fail, ok } from './types';
+import { registerRecordSafe } from './register';
+import { supportCheckDecision, supportCheckSubmission } from '@/lib/register/sources';
 
 /**
  * Stödcheckar (CLAUDE.md § 46) via det delade skrivlagret. ANSÖKAN ÄR ENDA
@@ -724,6 +726,14 @@ export async function submitSupportCheckApplication(pb: PocketBase, actor: Actor
   }
   const name = await startupName(pb, actor, row.startup);
   await auditStatus(pb, actor, row, 'submitted', { revision, startup: row.startup, startup_name: name, requested_amount_sek: requested, document_hash: documentHash, submitted_by_role: role });
+  // Diariet (§ 60): ansökan är inkommen när den skickats in och signerats.
+  await registerRecordSafe(
+    supportCheckSubmission(
+      { id: row.id, tenant: actor.tenant, startup: row.startup, title: row.title, submitted_at: new Date().toISOString(), requested_amount_sek: requested },
+      { startupName: name, typeTitle: type?.title || '', revision, documentHash, actorId: actor.id },
+      'auto'
+    )
+  );
 
   const warnings: string[] = [];
   const recipients = await staffRecipientsForStartup(pb, actor.tenant, row.startup);
@@ -1044,6 +1054,9 @@ export async function decideSupportCheckApplication(pb: PocketBase, actor: Actor
       return fail('DB_ERROR', describeError(err, 'Kunde inte registrera beslutet.'));
     }
     await auditStatus(pb, actor, row, 'rejected', { startup: row.startup, startup_name: name, note_length: note.length });
+    await registerRecordSafe(
+      supportCheckDecision({ id: row.id, tenant: actor.tenant, startup: row.startup, title: row.title }, { startupName: name, typeTitle: type?.title || '', outcome: 'rejected', decidedAt: new Date().toISOString(), actorId: actor.id }, 'auto')
+    );
     await notifySafe(pb, { tenant: actor.tenant, recipients: await memberRecipientsForStartup(pb, actor.tenant, row.startup), kind: 'support_check_decision', actorId: actor.id, title: `Beslut om ${type?.title || 'stödcheck'}: avslag`, snippet: title, href: supportCheckPath(row.id) }, warnings);
     return ok({ applicationId: row.id, startupId: row.startup, startupName: name, title, status: 'rejected', path: supportCheckPath(row.id), warnings, decision: 'rejected', approvedAmountSek: null, deMinimisStodId: null, capitalRoundId: null });
   }
@@ -1166,6 +1179,15 @@ export async function decideSupportCheckApplication(pb: PocketBase, actor: Actor
     de_minimis_stod: deMinimisStodId,
     capital_round: capitalRoundId
   });
+
+  // Diariet (§ 60): beslutet är upprättat när det fattats och meddelas bolaget.
+  await registerRecordSafe(
+    supportCheckDecision(
+      { id: row.id, tenant: actor.tenant, startup: row.startup, title: row.title },
+      { startupName: name, typeTitle: type?.title || '', outcome: 'approved', decidedAt: new Date().toISOString(), approvedAmountSek: approved, stateAidBasis: String(basis), actorId: actor.id },
+      'auto'
+    )
+  );
 
   // 4. Aktivitetsrad på bolagskortet (fail-soft) + notis.
   try {
