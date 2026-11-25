@@ -55,6 +55,22 @@ Coolify ska återstå.
 4. **Töm kön.** Avbryt de köade deployerna i Coolify och trigga en ny —
    den första pullen drar imagen som Actions redan byggt.
 
+### "Nixpacks is deprecated" i Coolify (2026-11-09)
+
+Visar web-resursen den gula bannern **"Nixpacks is deprecated … Switch to
+Railpack"** (sågs på produktionsresursen `platform:main-…`) betyder det att
+resursen fortfarande har Build Pack = **Nixpacks**, dvs. att Coolify bygger
+Next.js på UpCloud-hosten vid varje deploy — tvärtemot flödet ovan, där
+GitHub Actions redan byggt `ghcr.io/mov3xum/platform-web:production`
+(jobbet `build-image` i "Deploy to Coolify Production"). Byt INTE till
+Railpack (det är bara en annan host-byggare med samma minnes-/köproblem);
+följ i stället steg 2 ovan: Build Pack → **Docker Image**,
+`ghcr.io/mov3xum/platform-web:production`, "pull latest image on deploy",
+och sätt `MOVEXUM_IMAGE_TAG=production`. Env-variablerna på resursen
+(`POCKETBASE_URL_PRODUCTION`, `POCKETBASE_SUPERUSER_*`, `RESEND_*` …)
+följer med oförändrat — de är runtime, inte build-time. Bannern försvinner
+när resursen inte längre byggs med Nixpacks.
+
 ## Verifiera
 
 - GitHub → Actions → "Deploy to Coolify Staging" → jobbet **build-image**

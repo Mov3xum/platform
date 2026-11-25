@@ -4,6 +4,7 @@ import { latestCompleteAssessment, listAssignableStaff } from '@/lib/impact/data
 import { impactHref } from '@/lib/impact/tabs';
 import { btnSecondary, eyebrow } from '@/components/impact/ui';
 import { Icon } from '@/components/proto/Icon';
+import { canManageImpact } from '@platform/shared';
 import { CompanySettingsForm } from './CompanySettingsForm';
 
 export const dynamic = 'force-dynamic';
@@ -12,7 +13,9 @@ export const dynamic = 'force-dynamic';
 export default async function CompanySettingsPage({ params }: { params: Promise<{ startupId: string }> }) {
   const { startupId } = await params;
   const ctx = await loadImpactCompanyContext(startupId);
-  const staff = ctx.canManage ? await listAssignableStaff(ctx.pb, ctx.user.tenant) : [];
+  // Bolagsuppgifter, fas och ansvarig ändras av personal — en bolagsmedlem ser dem bara (§ 56).
+  const canEditDetails = canManageImpact(ctx.user.roles);
+  const staff = canEditDetails ? await listAssignableStaff(ctx.pb, ctx.user.tenant) : [];
   const hasDashboard = Boolean(latestCompleteAssessment(ctx.assessments));
 
   return (
@@ -33,7 +36,7 @@ export default async function CompanySettingsPage({ params }: { params: Promise<
             </Link>
           ) : null}
         </div>
-        <CompanySettingsForm company={ctx.company} staff={staff} canManage={ctx.canManage} canDelete={ctx.canDelete} versions={ctx.assessments.length} />
+        <CompanySettingsForm company={ctx.company} staff={staff} canManage={canEditDetails} canDelete={ctx.canDelete} versions={ctx.assessments.length} />
       </div>
     </ImpactCompanyShell>
   );

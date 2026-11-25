@@ -4,7 +4,8 @@ import {
   resolvePublicModule,
   getPublicModuleQuestions,
   mapAnswersToLead,
-  pickAttribution
+  pickAttribution,
+  visitorLocale
 } from '@/lib/compass/public';
 import {
   attachAiSummary,
@@ -13,7 +14,7 @@ import {
   leadFieldsFromContact,
   moduleWantsLead,
   parseContactPreference,
-  parseContactSubmission
+  parsePublicContactSubmission
 } from '@/lib/compass/lead-capture';
 import { notifyNewInflow } from '@/lib/compass/notify';
 import { storeSurveyResponse } from '@/lib/compass/survey';
@@ -39,6 +40,8 @@ interface SubmitBody {
   subject?: string;
   /** Sessionstoken (§ 23.10) — slutför det pågående leadet i stället för att skapa ett nytt. */
   sessionToken?: string;
+  /** Besökarens språk (§ 23.13): `en` ⇒ engelska, annars svenska. */
+  lang?: string;
 }
 
 // Högra (proxy-tillagda) XFF-värdet — det vänstra är klientstyrt och lät en
@@ -108,7 +111,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   }
 
   // Avsnittet "Dina uppgifter" (§ 23.11): klienten är aldrig gränsen.
-  const contact = parseContactSubmission(module, body.contact);
+  const contact = await parsePublicContactSubmission(module, body.contact, {
+    tenant,
+    moduleSlug: slug,
+    sessionToken: body.sessionToken,
+    locale: visitorLocale(module, body.lang).locale
+  });
   if (contact.error) return NextResponse.json({ error: contact.error }, { status: 400 });
 
   const leadPayload = { ...mapAnswersToLead(answers), ...leadFieldsFromContact(contact.values) };

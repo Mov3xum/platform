@@ -8,7 +8,9 @@
  */
 
 import {
+  compassUi,
   missingContactField,
+  type CompassLocale,
   type ContactSectionConfig,
   type ContactValues
 } from '@platform/shared';
@@ -77,11 +79,13 @@ export function missingClosingField(input: {
   answers: Record<string, string | string[]>;
   contact: ContactValues;
   config: ContactSectionConfig;
+  /** Besökarens språk (§ 23.13) — svenska som default. */
+  locale?: CompassLocale;
 }): string | null {
   for (const q of closingQuestions(input.questions)) {
-    if (!isAnswered(input.answers[q.key])) return `Fältet "${q.prompt}" är obligatoriskt.`;
+    if (!isAnswered(input.answers[q.key])) return compassUi(input.locale).requiredQuestion(q.prompt);
   }
-  return missingContactField(input.contact, input.config);
+  return missingContactField(input.contact, input.config, input.locale);
 }
 
 /** PII-fri notering om var i flödet besökaren var när hen lämnade. */

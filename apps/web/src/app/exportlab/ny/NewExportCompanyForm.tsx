@@ -28,10 +28,11 @@ interface StartupOption {
  *   2. `uploadImpactDocument` per fil mot Export Labs endpoint
  *   3. `runExportProfileAction` → exportprofil & marknadsurval (Mistral, EU)
  */
-export function NewExportCompanyForm({ startups, preselectedStartup }: { startups: StartupOption[]; preselectedStartup: string }) {
+/** `allowNewCompany=false` (bolagsmedlem, § 58): bara det egna bolagskortet kan väljas — inget nytt bolag skapas. */
+export function NewExportCompanyForm({ startups, preselectedStartup, allowNewCompany = true }: { startups: StartupOption[]; preselectedStartup: string; allowNewCompany?: boolean }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [mode, setMode] = useState<'new' | 'existing'>(preselectedStartup ? 'existing' : 'new');
+  const [mode, setMode] = useState<'new' | 'existing'>(preselectedStartup || !allowNewCompany ? 'existing' : 'new');
   const [startupId, setStartupId] = useState(preselectedStartup);
   const pre = startups.find((s) => s.id === preselectedStartup);
   const [ambition, setAmbition] = useState(pre?.ambitionText ?? '');
@@ -112,14 +113,16 @@ export function NewExportCompanyForm({ startups, preselectedStartup }: { startup
 
         <section aria-labelledby="company-basics-title">
           <SectionHeading id="company-basics-title" icon="briefcase" title="Grunduppgifter" text="Hjälper verktyget att sätta bolaget i rätt sammanhang." />
-          <div className="mb-4 flex gap-2">
-            <ModeButton active={mode === 'new'} onClick={() => setMode('new')}>
-              Nytt bolag
-            </ModeButton>
-            <ModeButton active={mode === 'existing'} onClick={() => setMode('existing')}>
-              Befintligt bolagskort
-            </ModeButton>
-          </div>
+          {allowNewCompany ? (
+            <div className="mb-4 flex gap-2">
+              <ModeButton active={mode === 'new'} onClick={() => setMode('new')}>
+                Nytt bolag
+              </ModeButton>
+              <ModeButton active={mode === 'existing'} onClick={() => setMode('existing')}>
+                Befintligt bolagskort
+              </ModeButton>
+            </div>
+          ) : null}
           {mode === 'existing' ? (
             <div>
               <label className={labelClass} htmlFor="startup">

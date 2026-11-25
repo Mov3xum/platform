@@ -5,7 +5,7 @@ import { PageShell } from '@/components/PageShell';
 import { listImpactCompanies } from '@/lib/impact/data';
 import { AiNoticeBanner } from '@/components/impact/AiNoticeBanner';
 import { CompanyCreationIntro } from '@/components/impact/CompanyCreationIntro';
-import { canManageImpact } from '@platform/shared';
+import { canManageImpact, canWorkOnImpactCompany } from '@platform/shared';
 import { NewImpactCompanyForm } from './NewImpactCompanyForm';
 
 export const dynamic = 'force-dynamic';
@@ -21,8 +21,11 @@ export const maxDuration = 300;
 export default async function NewImpactCompanyPage({ searchParams }: { searchParams: Promise<{ startup?: string }> }) {
   const user = await requireUser();
   if (!canAccessModuleForUser(user.roles, 'impactnavigator', user.enabledModules)) redirect('/hem');
-  if (!canManageImpact(user.roles)) redirect('/impactnavigator');
   const { startup } = await searchParams;
+  // Personal startar analyser för vilket bolag som helst (även nya bolag);
+  // en bolagsmedlem bara för sitt eget bolagskort (§ 56).
+  const canCreateNew = canManageImpact(user.roles);
+  if (!canCreateNew && !canWorkOnImpactCompany(user, startup ?? null)) redirect('/impactnavigator');
   const pb = await getServerPb();
   const { items, latest } = await listImpactCompanies(pb, user.tenant);
   const options = items
@@ -34,7 +37,7 @@ export default async function NewImpactCompanyPage({ searchParams }: { searchPar
       <div className="space-y-6">
         <AiNoticeBanner />
         <CompanyCreationIntro />
-        <NewImpactCompanyForm startups={options} preselectedStartup={startup && /^[a-zA-Z0-9_-]{6,64}$/.test(startup) ? startup : ''} />
+        <NewImpactCompanyForm startups={options} preselectedStartup={startup && /^[a-zA-Z0-9_-]{6,64}$/.test(startup) ? startup : ''} allowNewCompany={canCreateNew} />
       </div>
     </PageShell>
   );

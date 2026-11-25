@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { Icon } from '@/components/proto';
 import { updateModuleAction } from '@/lib/actions/compass';
-import { QuestionsManager } from './QuestionsManager';
+import { QuestionsManager, type QuestionsManagerHandle } from './QuestionsManager';
 import { ResultBucketsEditor } from './ResultBucketsEditor';
 import { HeroMediaUploader } from './HeroMediaUploader';
 import { LayoutPicker } from './LayoutPicker';
@@ -65,12 +66,18 @@ interface Props {
  * Stegvis modul-editor: ETT steg synligt i taget — inklusive frågorna, som
  * har ett eget steg. Alla formulärfält ligger kvar i DOM:en (dolda steg får
  * display:none) så en enda Spara postar allt till updateModuleAction.
- * Frågor sparas direkt per fråga (egna server actions) och media laddas upp
- * direkt vid val (route handler) — de behöver ingen Spara.
+ * Frågor har egna server actions — Spara (och stegbyte) sparar alla ändrade
+ * frågor först. Media laddas upp direkt vid val (route handler).
  */
+const OK_TEXT: Record<'saved' | 'published' | 'unpublished', string> = {
+  saved: 'Modulen är sparad.',
+  published: 'Modulen är publicerad — den publika länken fungerar nu.',
+  unpublished: 'Modulen är avpublicerad — den publika länken är stängd.'
+};
+
 export function ModuleEditor({
   module: mod,
-  notice = null,
+  notice: initialNotice = null,
   heroImageUrl,
   heroVideoUrl,
   modelOptions,
@@ -80,6 +87,10 @@ export function ModuleEditor({
 }: Props) {
   const [step, setStep] = useState(0);
   const [flowType, setFlowType] = useState<FlowType>(mod.flow_type);
+  // Ett fält, två roller: chattens egna systemprompt och quizets
+  // bedömningsinstruktion för fritextsvar (§ 23.14). Kontrollerat så ett
+  // typbyte aldrig tappar texten; skickas via ett dolt fält i formuläret.
+  const [systemPrompt, setSystemPrompt] = useState(mod.system_prompt || '');
   const [purpose, setPurpose] = useState<CompassPurpose>(normalizeCompassPurpose(mod.purpose));
   const [layout, setLayout] = useState<CompassLayout>(() => normalizeCompassLayout(mod.layout));
   const layoutMeta = COMPASS_LAYOUT_META[layout];
@@ -89,17 +100,15 @@ export function ModuleEditor({
   const [pendingIntent, setPendingIntent] = useState<string | null>(null);
   const isPublished = Boolean(mod.is_active && mod.public_url_enabled);
 
-  // Actionen redirectar tillbaka med ?ok=/?error= — bannern nedan visar det.
-  // Klienten behåller sitt steg (samma komponentinstans), så användaren står
-  // kvar där hen tryckte Spara.
-  useEffect(() => {
-    if (notice) setPendingIntent(null);
-  }, [notice]);
+  const router = useRouter();
+  const questionsRef = useRef<QuestionsManagerHandle>(null);
+  const [notice, setNotice] = useState<ModuleEditorNotice | null>(initialNotice);
 
-  // Submit via transition så knapparna kan visa pending-läge trots att de
-  // ligger UTANFÖR <form> (form-attributet; useFormStatus når dem inte).
-  // Knappens name/value (intent) skickas med explicit — FormData(form,
-  // submitter) stöds inte i alla webbläsare.
+  // Spara = ändrade frågor FÖRST (de har egna server actions), sedan hela
+  // modulformuläret. Actionen returnerar kvittot (ingen redirect), så editorn
+  // står kvar på samma steg med allt ifyllt. Knapparna ligger UTANFÖR <form>
+  // (form-attributet), därför transition i stället för useFormStatus; knappens
+  // intent skickas explicit (FormData(form, submitter) stöds inte överallt).
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = e.currentTarget;
@@ -109,7 +118,37 @@ export function ModuleEditor({
     fd.set('intent', intent);
     setPendingIntent(intent);
     startTransition(async () => {
-      await updateModuleAction(fd);
+      try {
+        const questionsOk = (await questionsRef.current?.saveDirty()) ?? true;
+        const res = await updateModuleAction(fd);
+        if (!res.ok) setNotice({ kind: 'error', text: res.error });
+        else if (!questionsOk) {
+          setStep(2);
+          setNotice({
+            kind: 'error',
+            text: 'Modulen är sparad, men minst en fråga kunde inte sparas — se felet vid frågorna.'
+          });
+        } else setNotice({ kind: 'ok', text: OK_TEXT[res.result] });
+        router.refresh();
+      } catch {
+        setNotice({ kind: 'error', text: 'Kunde inte spara modulen. Försök igen.' });
+      } finally {
+        setPendingIntent(null);
+      }
+    });
+  }
+
+  // Lämnar man frågesteget sparas ändrade frågor först; går det inte står
+  // man kvar så felet syns.
+  function goToStep(next: number) {
+    if (next === step) return;
+    if (step !== 2) {
+      setStep(next);
+      return;
+    }
+    startTransition(async () => {
+      const ok = (await questionsRef.current?.saveDirty()) ?? true;
+      if (ok) setStep(next);
     });
   }
 
@@ -141,7 +180,7 @@ export function ModuleEditor({
             <button
               key={s.key}
               type="button"
-              onClick={() => setStep(i)}
+              onClick={() => goToStep(i)}
               className="mx-t-13"
               style={{
                 textAlign: 'left',
@@ -516,14 +555,17 @@ export function ModuleEditor({
                 Egen systemprompt (valfri)
               </summary>
               <textarea
-                name="system_prompt"
-                defaultValue={mod.system_prompt || ''}
+                value={systemPrompt}
+                onChange={(e) => setSystemPrompt(e.target.value)}
+                aria-label="Egen systemprompt"
                 className="mx-textarea"
                 style={{ marginTop: 8, minHeight: 100, fontFamily: 'var(--mx-mono)', width: '100%' }}
                 placeholder="Lämna tom för standardbeteendet."
               />
             </details>
           </div>
+
+          <input type="hidden" name="system_prompt" value={systemPrompt} />
 
           {/* ── Steg 4: Målgrupp & uppgifter ────────────────────────────── */}
           <Step active={step === 3}>
@@ -535,7 +577,7 @@ export function ModuleEditor({
                 defaultValue={mod.target_audience || ''}
                 className="mx-input"
                 style={{ marginTop: 4 }}
-                placeholder="Vem är modulen till för? Visas på landningssidan."
+                placeholder="Vem är modulen till för? Bara för er — visas inte för besökaren."
               />
             </label>
             <label className="mx-label">
@@ -571,6 +613,17 @@ export function ModuleEditor({
                               Vinnovas statistik, aldrig i bedömningen.
                             </span>
                           )}
+                          {key === 'attachments' && (
+                            <span className="mx-t-xs mx-muted" style={{ display: 'block', fontWeight: 400 }}>
+                              Pitch deck, affärsplan m.m. — PDF, PowerPoint, Word, Excel eller bild, högst
+                              5 filer à 25 MB. Filerna syns på leadet och kan laddas ned av personalen.
+                            </span>
+                          )}
+                          {key === 'other_info' && (
+                            <span className="mx-t-xs mx-muted" style={{ display: 'block', fontWeight: 400 }}>
+                              Fritextruta där idébäraren kan lägga till det som inte fått plats i frågorna.
+                            </span>
+                          )}
                         </td>
                         <td style={{ padding: '6px 0', whiteSpace: 'nowrap' }}>
                           {CONTACT_FIELD_MODES.filter((m) => !(meta.neverRequired && m === 'required')).map(
@@ -599,7 +652,7 @@ export function ModuleEditor({
               </table>
               <span className="mx-t-xs mx-muted" style={{ display: 'block', marginTop: 6 }}>
                 Kön, kommun och kontaktväg är fasta val. Övriga teammedlemmar är en fritextruta
-                (namn + e-post). Kön på grundare och teammedlemmar når aldrig AI-analysen och
+                (namn + e-post). Hemsidan kontrolleras som en webbadress. Kön på grundare och teammedlemmar når aldrig AI-analysen och
                 exporteras inte per lead.
               </span>
             </div>
@@ -613,6 +666,9 @@ export function ModuleEditor({
                 style={{ marginTop: 4, minHeight: 50 }}
                 placeholder="Du samtycker till att Movexum kontaktar dig och lagrar dina uppgifter inom EU."
               />
+              <span className="mx-muted mx-t-xs" style={{ display: 'block', marginTop: 4 }}>
+                Visas i slutet, där besökaren skickar in: ”När du slutför bekräftar du …”.
+              </span>
             </label>
           </Step>
 
@@ -759,13 +815,36 @@ export function ModuleEditor({
           {flowType === 'quiz' && (
             <>
               <ResultBucketsEditor initial={mod.result_buckets ?? []} formId={FORM_ID} />
+              {purpose !== 'survey' && (
+                <label className="mx-label">
+                  Så bedömer AI fritextsvaren (valfritt)
+                  <textarea
+                    value={systemPrompt}
+                    onChange={(e) => setSystemPrompt(e.target.value)}
+                    maxLength={8000}
+                    className="mx-textarea"
+                    style={{ marginTop: 4, minHeight: 140, width: '100%' }}
+                    placeholder={
+                      'Beskriv per fritextfråga vad som kännetecknar varje profil, t.ex.\n\n"Beskriv din idé":\nPotential: allmänt hållen, inget konkret problem eller kund\nUtveckling: tydligt problem och det framgår vem som har det\nRedo: problem, kund och lösning är konkreta, något är testat eller sålt'
+                    }
+                  />
+                  <span className="mx-muted mx-t-xs" style={{ display: 'block', marginTop: 4 }}>
+                    Tomt = fritextsvar ger inga poäng. Ifyllt = varje fritextsvar (kort eller lång
+                    text) tolkas av AI (Mistral, EU) och kan ge en profil lika många poäng som
+                    quizets lättaste kryssfråga. Använd profilernas nycklar eller titlar. Besökaren
+                    får veta att svaren tolkats av AI, och bedömningen sparas under Anteckningar på
+                    leadet. Gäller quiz där profilen med flest poäng vinner.
+                  </span>
+                </label>
+              )}
               <div className="mx-muted mx-t-12">
-                Resultatprofilerna sparas med <strong>Spara</strong>-knappen nedan.
-                Frågorna sparas direkt, en i taget.
+                Resultatprofilerna och AI-bedömningen sparas med <strong>Spara</strong>-knappen
+                nedan — den sparar även ändrade frågor.
               </div>
             </>
           )}
           <QuestionsManager
+            ref={questionsRef}
             moduleId={mod.id}
             moduleSlug={mod.slug}
             flowType={flowType}
@@ -788,7 +867,7 @@ export function ModuleEditor({
           type="button"
           className="mx-btn"
           disabled={step === 0}
-          onClick={() => setStep((s) => Math.max(0, s - 1))}
+          onClick={() => goToStep(Math.max(0, step - 1))}
         >
           ← Föregående
         </button>
@@ -813,7 +892,7 @@ export function ModuleEditor({
             <button
               type="button"
               className="mx-btn mx-primary"
-              onClick={() => setStep((s) => Math.min(steps.length - 1, s + 1))}
+              onClick={() => goToStep(Math.min(steps.length - 1, step + 1))}
             >
               Nästa →
             </button>

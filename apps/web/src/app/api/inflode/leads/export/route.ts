@@ -28,6 +28,7 @@ const COLUMNS: { header: string; value: (l: Lead) => string | number | undefined
   { header: 'E-post', value: (l) => l.email },
   { header: 'Telefon', value: (l) => l.phone },
   { header: 'Organisation', value: (l) => l.organization },
+  { header: 'Hemsida', value: (l) => l.website },
   // Avsnittet "Dina uppgifter" (§ 23.11). Kön på grundare (art. 9-klass) och
   // övriga teammedlemmar (tredjeparts-PII) exporteras MEDVETET inte per lead.
   { header: 'Kommun', value: (l) => contactValueLabel('kommun', l.kommun) },

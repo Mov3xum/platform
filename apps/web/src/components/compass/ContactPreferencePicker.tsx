@@ -4,18 +4,7 @@
 // inskickat formulär, eller höra av sig själv när hen är redo. Frivilligt —
 // inget förval, värdet skickas bara om besökaren aktivt väljer.
 
-const OPTIONS = [
-  {
-    value: 'contact_me',
-    label: 'Jag vill att Movexum kontaktar mig',
-    hint: 'Någon från Movexum hör av sig på dina kontaktuppgifter.'
-  },
-  {
-    value: 'self_reach',
-    label: 'Jag hör av mig själv när jag är redo',
-    hint: 'Vi väntar på dig — ingen kontakt från oss.'
-  }
-] as const;
+import { useCompassLocale } from './locale';
 
 interface Props {
   value: string;
@@ -23,9 +12,14 @@ interface Props {
 }
 
 export function ContactPreferencePicker({ value, onChange }: Props) {
+  const { t } = useCompassLocale();
+  const OPTIONS = [
+    { value: 'contact_me', ...t.contactMe },
+    { value: 'self_reach', ...t.selfReach }
+  ] as const;
   return (
     <div style={{ display: 'grid', gap: 8 }}>
-      <div className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6">Hur vill du gå vidare?</div>
+      <div className="mx-mono mx-t-xs mx-t-up mx-muted mx-fw-6">{t.howToProceed}</div>
       {OPTIONS.map((opt) => {
         const active = value === opt.value;
         return (

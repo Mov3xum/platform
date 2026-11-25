@@ -141,6 +141,9 @@ export interface Lead {
   team_members?: string;
   kommun?: string;
   referral_channel?: string;
+  /** Hemsida (normaliserad http(s)) och övrig information (migration 1700000215, § 23.12). */
+  website?: string;
+  other_info?: string;
   /**
    * Vad besökaren gjorde (migration 1700000192, § 23.10): pågående, slutförd
    * eller avbruten. Saknat = slutförd. Skilt från `status` (personalens
@@ -266,6 +269,11 @@ export interface CompassModule {
   /** Quiz-resultatprofiler (flow_type === 'quiz'). */
   result_buckets?: ResultBucket[];
   /**
+   * Engelsk version (migration 1700000216, § 23.13): `{ en: { enabled, texts,
+   * sources } }` — tolkas av `normalizeCompassTranslations`. Saknat ⇒ ingen.
+   */
+  translations?: unknown;
+  /**
    * Nästa modul i kedjan (relation→compass_modules, migration 1700000124).
    * När satt erbjuds besökaren att fortsätta till den modulen efter att den
    * här slutförts. Pekar alltid på en modul i samma tenant (verifieras i
@@ -318,6 +326,8 @@ export interface NextModuleLink {
   slug: string;
   /** Visningsnamn på "fortsätt"-knappen. */
   label: string;
+  /** Engelskt visningsnamn när nästa modul redan översatts (§ 23.13). */
+  labelEn?: string;
 }
 
 export interface Attribution {

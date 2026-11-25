@@ -12,8 +12,10 @@ import { QuestionInput, readAttribution } from './QuestionInput';
 import { NextModuleCta } from './NextModuleCta';
 import { ContactPreferencePicker } from './ContactPreferencePicker';
 import { ContactSection } from './ContactSection';
+import { ConsentNotice } from './ConsentNotice';
 import { resolveNextQuestionIndex } from '@/lib/compass/question-flow';
 import { useFlowProgress } from './useFlowProgress';
+import { useCompassLocale } from './locale';
 
 interface Props {
   moduleSlug: string;
@@ -29,6 +31,12 @@ interface Props {
   apiBase?: string;
   /** Skickas i submit-body för publika flöden där samtycke krävs. */
   consent?: boolean;
+  /**
+   * Modulens samtyckestext — visas vid sista steget. När den finns bokförs
+   * bara HUR LÅNGT besökaren kommit före inskick, aldrig svaren (texten har
+   * inte visats än).
+   */
+  consentNote?: string;
   /** Enkätens subjekt (`?om=<id>`, § 43) — skickas med i submit-body. */
   subject?: string | null;
   /** Bokför pågående/avbrutet flöde (§ 23.10) — bara publika flöden. */
@@ -47,11 +55,13 @@ export function ModuleWizard({
   redirectUrl,
   apiBase = '/api/inflode/m',
   consent,
+  consentNote,
   subject,
   nextModule,
   trackProgress,
   contactSection
 }: Props) {
+  const { locale, t } = useCompassLocale();
   const [step, setStep] = useState(0);
   // Besökta steg (för "Tillbaka") — hopplogik (next_key) kan skippa frågor,
   // så step-1 är inte alltid den fråga besökaren faktiskt såg senast.
@@ -79,7 +89,7 @@ export function ModuleWizard({
   const progress = steps === 0 ? 0 : Math.round((100 * (step + (done ? 1 : 0))) / steps);
 
   if (total === 0) {
-    return <p className="mx-muted mx-t-13">Den här modulen har inga frågor publicerade ännu.</p>;
+    return <p className="mx-muted mx-t-13">{t.noQuestionsWizard}</p>;
   }
 
   if (done) {
@@ -89,19 +99,19 @@ export function ModuleWizard({
           className="mx-disp"
           style={{ fontSize: 24, fontWeight: 600, marginBottom: 12 }}
         >
-          Tack — vi har dina svar.
+          {t.thanksAnswers}
         </div>
         <p className="mx-muted mx-t-13" style={{ maxWidth: 460, margin: '0 auto' }}>
-          {successMessage || 'En människa från Movexum tittar på din ansökan och hör av sig inom 3 arbetsdagar.'}
+          {successMessage || t.thanksDefault}
         </p>
         {redirectUrl && (
           <p className="mx-mono mx-t-xs mx-muted" style={{ marginTop: 12 }}>
-            Du skickas vidare till <a href={redirectUrl}>{redirectUrl}</a>…
+            {t.redirecting} <a href={redirectUrl}>{redirectUrl}</a>…
           </p>
         )}
         {!redirectUrl && nextModule && (
           <div style={{ maxWidth: 460, margin: '20px auto 0' }}>
-            <NextModuleCta next={nextModule} prompt="Fortsätt till nästa steg" />
+            <NextModuleCta next={nextModule} prompt={t.continueNext} />
           </div>
         )}
       </div>
@@ -112,7 +122,7 @@ export function ModuleWizard({
     e.preventDefault();
     if (onContactStep) {
       // Samma validering som server-side (klienten är aldrig gränsen).
-      const missing = missingContactField(cleanContactValues(contact, contactSection), contactSection);
+      const missing = missingContactField(cleanContactValues(contact, contactSection), contactSection, locale);
       if (missing) {
         setError(missing);
         return;
@@ -121,7 +131,7 @@ export function ModuleWizard({
       if (!q) return;
       const value = answers[q.key];
       if (q.required && (value === undefined || value === '' || (Array.isArray(value) && value.length === 0))) {
-        setError('Det här fältet är obligatoriskt.');
+        setError(t.requiredField);
         return;
       }
       setError(null);
@@ -130,7 +140,7 @@ export function ModuleWizard({
       if (nextStep < total || hasContact) {
         setTrail((t) => [...t, step]);
         setStep(nextStep < total ? nextStep : total);
-        progressTracker.report(answers, step + 1, total);
+        progressTracker.report(consentNote ? {} : answers, step + 1, total);
         return;
       }
     }
@@ -149,14 +159,15 @@ export function ModuleWizard({
           consent,
           contact_preference: contactPreference || undefined,
           subject: subject || undefined,
-          sessionToken: trackProgress ? progressTracker.sessionToken : undefined
+          sessionToken: trackProgress ? progressTracker.sessionToken : undefined,
+          lang: locale
         })
       });
       if (!res.ok) {
         // Visa serverns riktiga felmeddelande (t.ex. "kunde inte sparas") i
         // stället för en naken statuskod — lead-garantin ska synas (§ 23.6).
         const data = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error || `Servern svarade ${res.status}`);
+        throw new Error(data.error || t.serverStatus(res.status));
       }
       progressTracker.markDone();
       setDone(true);
@@ -166,7 +177,7 @@ export function ModuleWizard({
         }, 1500);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Något gick fel');
+      setError(err instanceof Error ? err.message : t.somethingWrong);
     } finally {
       setSubmitting(false);
     }
@@ -179,13 +190,15 @@ export function ModuleWizard({
 
   if (!q && !onContactStep) return null;
   const current = q ? answers[q.key] : undefined;
-  const isLast = onContactStep || (!hasContact && step + 1 === total);
+  // Hopplogik kan avsluta flödet tidigare än sista frågan i listan.
+  const isLast =
+    onContactStep || (!hasContact && resolveNextQuestionIndex(questions, step, current) >= total);
 
   return (
     <form onSubmit={onSubmit} style={{ display: 'grid', gap: 16 }}>
       {/* Progress */}
       <div className="mx-flex mx-items-c mx-gap-2 mx-mono mx-t-xs mx-muted mx-t-up">
-        <span>{onContactStep ? 'Snart klar' : `Fråga ${step + 1} av ${total}`}</span>
+        <span>{onContactStep ? t.almostDone : t.questionOf(step + 1, total)}</span>
         <span className="mx-grow" />
         <span>{progress}%</span>
       </div>
@@ -198,6 +211,15 @@ export function ModuleWizard({
         <ContactSection
           config={contactSection}
           values={contact}
+          attachmentUpload={
+            trackProgress
+              ? {
+                  endpoint: `${apiBase}/${encodeURIComponent(moduleSlug)}/attachments`,
+                  sessionToken: progressTracker.sessionToken,
+                  consent
+                }
+              : undefined
+          }
           onChange={(key, value) => setContact((c) => ({ ...c, [key]: value }))}
         />
       ) : (
@@ -221,6 +243,8 @@ export function ModuleWizard({
 
       {/* Kontaktpreferens — visas på sista steget, innan inskick. */}
       {isLast && <ContactPreferencePicker value={contactPreference} onChange={setContactPreference} />}
+
+      {isLast && <ConsentNotice note={consentNote} />}
 
       {error && (
         <div
@@ -249,10 +273,10 @@ export function ModuleWizard({
             setError(null);
           }}
         >
-          ← Tillbaka
+          {t.back}
         </button>
         <button type="submit" className="mx-btn mx-primary" disabled={submitting}>
-          {isLast ? (submitting ? 'Skickar…' : 'Skicka in →') : 'Nästa →'}
+          {isLast ? (submitting ? t.submitting : t.submit) : t.next}
         </button>
       </div>
     </form>

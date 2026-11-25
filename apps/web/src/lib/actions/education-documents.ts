@@ -1,9 +1,9 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { getSuperuserPbOrNull } from '@/lib/integrations/credentials';
 import PocketBase from 'pocketbase';
 import { getServerPb, getCurrentUser } from '@/lib/auth.server';
-import { getServerPbUrl } from '@/lib/pb-url';
 import { hasRole } from '@/lib/rbac';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { notifyStartupMembers } from '@/lib/notifications-server';
@@ -22,7 +22,6 @@ import type {
 const STAFF_ROLES: Role[] = ['admin', 'incubator_lead', 'coach', 'mentor'];
 // Radering (dokument + alla bolags tilldelningar) är ett ledningsbeslut.
 const DELETE_ROLES: Role[] = ['admin', 'incubator_lead'];
-const PB_URL = getServerPbUrl();
 
 export interface DocumentActionState {
   ok?: boolean;
@@ -42,21 +41,8 @@ function statusOf(err: unknown): number | undefined {
 // rule-eval kan fela för annars behöriga skrivningar, och bolagsmedlemmens
 // "slutför"-skrivning sker bara efter att vi verifierat behörigheten i koden.
 async function getSuperuserPb(): Promise<PocketBase | null> {
-  const email = process.env.POCKETBASE_SUPERUSER_EMAIL || process.env.PB_SU_EMAIL;
-  const password = process.env.POCKETBASE_SUPERUSER_PASSWORD || process.env.PB_SU_PASSWORD;
-  if (!email || !password) {
-    console.error('[education-documents] superuser credentials missing');
-    return null;
-  }
-  const pb = new PocketBase(PB_URL);
-  pb.autoCancellation(false);
-  try {
-    await pb.collection('_superusers').authWithPassword(email, password);
-    return pb;
-  } catch {
-    console.error('[education-documents] superuser auth failed');
-    return null;
-  }
+  // Cachad (§ 21.8: PB rate-limitar superuser-inloggning).
+  return getSuperuserPbOrNull();
 }
 
 /**

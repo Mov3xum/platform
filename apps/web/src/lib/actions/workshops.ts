@@ -1,6 +1,7 @@
 'use server';
 
 import PocketBase from 'pocketbase';
+import { getSuperuserPb as getCachedSuperuserPb } from '@/lib/integrations/credentials';
 import { revalidatePath } from 'next/cache';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { getAssignmentReadPb } from '@/lib/assignments/read';
@@ -55,32 +56,8 @@ function toPbErrorLike(err: unknown): PbErrorLike {
 }
 
 async function getSuperuserPb(): Promise<SuperuserPbResult> {
-  const email = process.env.POCKETBASE_SUPERUSER_EMAIL || process.env.PB_SU_EMAIL;
-  const password = process.env.POCKETBASE_SUPERUSER_PASSWORD || process.env.PB_SU_PASSWORD;
-  if (!email || !password) {
-    console.error('[workshops] superuser credentials missing', {
-      pbUrl: PB_URL,
-      hasPocketbaseSuperuserEmail: Boolean(process.env.POCKETBASE_SUPERUSER_EMAIL),
-      hasPocketbaseSuperuserPassword: Boolean(process.env.POCKETBASE_SUPERUSER_PASSWORD),
-      hasPbSuEmail: Boolean(process.env.PB_SU_EMAIL),
-      hasPbSuPassword: Boolean(process.env.PB_SU_PASSWORD)
-    });
-    return { ok: false, reason: 'missing_credentials' };
-  }
-
-  const pb = new PocketBase(PB_URL);
-  pb.autoCancellation(false);
-
-  try {
-    await pb.collection('_superusers').authWithPassword(email, password);
-    return { ok: true, pb };
-  } catch {
-    console.error('[workshops] superuser auth failed', {
-      email,
-      pbUrl: PB_URL
-    });
-    return { ok: false, reason: 'auth_failed' };
-  }
+  // Cachad (§ 21.8: PB rate-limitar superuser-inloggning). Loggar aldrig e-post.
+  return getCachedSuperuserPb();
 }
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;

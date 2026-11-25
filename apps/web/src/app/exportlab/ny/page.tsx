@@ -4,7 +4,7 @@ import { canAccessModuleForUser } from '@/lib/rbac';
 import { PageShell } from '@/components/PageShell';
 import { listExportCompanies } from '@/lib/export-lab/data';
 import { AiNoticeBanner } from '@/components/impact/AiNoticeBanner';
-import { canManageExportLab } from '@platform/shared';
+import { canManageExportLab, canWorkOnExportCompany } from '@platform/shared';
 import { NewExportCompanyForm } from './NewExportCompanyForm';
 
 export const dynamic = 'force-dynamic';
@@ -19,8 +19,11 @@ export const maxDuration = 300;
 export default async function NewExportCompanyPage({ searchParams }: { searchParams: Promise<{ startup?: string }> }) {
   const user = await requireUser();
   if (!canAccessModuleForUser(user.roles, 'exportlab', user.enabledModules)) redirect('/hem');
-  if (!canManageExportLab(user.roles)) redirect('/exportlab');
   const { startup } = await searchParams;
+  // Personal startar analyser för vilket bolag som helst (även nya bolag);
+  // en bolagsmedlem bara för sitt eget bolagskort (§ 58).
+  const canCreateNew = canManageExportLab(user.roles);
+  if (!canCreateNew && !canWorkOnExportCompany(user, startup ?? null)) redirect('/exportlab');
   const pb = await getServerPb();
   const { items, latest } = await listExportCompanies(pb, user.tenant);
   const options = items
@@ -31,7 +34,7 @@ export default async function NewExportCompanyPage({ searchParams }: { searchPar
     <PageShell title="Starta exportanalys" meta={<span className="text-sm text-foreground-muted">Export Lab</span>}>
       <div className="space-y-6">
         <AiNoticeBanner />
-        <NewExportCompanyForm startups={options} preselectedStartup={startup && /^[a-zA-Z0-9_-]{6,64}$/.test(startup) ? startup : ''} />
+        <NewExportCompanyForm startups={options} preselectedStartup={startup && /^[a-zA-Z0-9_-]{6,64}$/.test(startup) ? startup : ''} allowNewCompany={canCreateNew} />
       </div>
     </PageShell>
   );

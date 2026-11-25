@@ -6,7 +6,13 @@
 
 import PocketBase from 'pocketbase';
 import { authenticateSuperuserWithRetry } from './lib/pb-auth-retry.mjs';
-import { SECURITY_RULES, PROTECTED_FILE_FIELDS } from './security-rules.mjs';
+import {
+  SECURITY_RULES,
+  PROTECTED_FILE_FIELDS,
+  withMoveLocks,
+  missingMoveLocks,
+  hasSuperuserRateLimit
+} from './security-rules.mjs';
 
 const PB_URL_RAW = process.env.PB_URL;
 const SU_EMAIL = process.env.PB_SU_EMAIL;
@@ -35,6 +41,7 @@ pb.autoCancellation(false);
 const COMPASS_COLLECTIONS = new Set([
   'compass_lead_sources',
   'compass_leads',
+  'compass_lead_attachments',
   'compass_conversations',
   'compass_messages',
   'compass_modules',
@@ -43,6 +50,17 @@ const COMPASS_COLLECTIONS = new Set([
   'compass_security_events',
   'compass_brand'
 ]);
+
+// Auth-gaten (hooks/auth_gate.pb.js): när PB har MOVEXUM_PB_AUTH_GATE_SECRET
+// får bara den som skickar samma värde logga in användare direkt mot PB.
+// CI-skriptets egna app-användarinloggning skickar därför headern.
+const AUTH_GATE_SECRET = (process.env.MOVEXUM_PB_AUTH_GATE_SECRET || '').trim();
+const AUTH_GATE_HEADER = 'X-Movexum-Auth-Gate';
+const gateOptions = AUTH_GATE_SECRET ? { headers: { [AUTH_GATE_HEADER]: AUTH_GATE_SECRET } } : {};
+const gateHint = (err) =>
+  err?.status === 403
+    ? ' (HTTP 403 — auth-gaten är aktiv på PocketBase; sätt GitHub-secreten MOVEXUM_PB_AUTH_GATE_SECRET_<MILJÖ> till samma värde som på PB-resursen)'
+    : '';
 
 const log = (...a) => console.log('•', ...a);
 const ok = (...a) => console.log('✓', ...a);
@@ -223,6 +241,7 @@ async function verifyCollectionsExist() {
     // buggen upptäcks först av en användare). Se diagnose-migrations.mjs.
     'compass_lead_sources',
     'compass_leads',
+    'compass_lead_attachments',
     'compass_conversations',
     'compass_messages',
     'compass_modules',
@@ -308,6 +327,176 @@ function assertCreateRuleDoesNotJoinRecord(collection) {
 // gälla live — exakt. setup-via-api.mjs skrev tidigare tyst över dem med
 // roll-lösa `auth && tenant`-regler vid varje sync (säkerhetsgranskning
 // 2026-10-08); den här kontrollen fäller deployen om det händer igen.
+// Säkerhetsgranskning 2026-11-15: varje updateRule på en bas-kollektion med
+// `tenant` (och `startup` där bolagsmedlemmar kan skriva) ska låsa att posten
+// flyttas till en annan tenant/ett annat bolag. Fäller deployen om ett lås
+// saknas — en ny kollektion eller en sync som skriver om regeln utan låset.
+async function verifyMoveLocks() {
+  let all;
+  try {
+    all = await pb.collections.getFullList({ $autoCancel: false });
+  } catch (err) {
+    fail(`Kunde inte lista kollektioner för flyttlås-svep:\n${describeError(err)}`);
+  }
+  const offenders = [];
+  let checked = 0;
+  for (const col of all) {
+    if (col.system || col.type !== 'base') continue;
+    const fieldNames = (col.fields || []).map((f) => f.name);
+    const missing = missingMoveLocks(col.updateRule, fieldNames);
+    if (typeof col.updateRule === 'string' && col.updateRule !== '' && fieldNames.includes('tenant')) checked++;
+    if (missing.length) offenders.push(`${col.name}.updateRule saknar lås för ${missing.join(' + ')}`);
+  }
+  if (offenders.length) {
+    fail(
+      'Flyttlås saknas (poster kan flyttas till en annan tenant/ett annat bolag):\n' +
+        offenders.map((o) => `  - ${o}`).join('\n') +
+        '\nKör migration 1700000217 / setup-via-api.mjs.'
+    );
+  }
+  ok(`flyttlås: ${checked} update-regler låser tenant (och bolag där medlemmar skriver)`);
+}
+
+// PB:s egen inloggningsgräns för `_superusers` (webbappens gränser gäller bara
+// Next-routen) — och en prob av auth-gaten för användarinloggning.
+async function verifyAuthHardening() {
+  let settings;
+  try {
+    settings = await pb.settings.getAll({ $autoCancel: false });
+  } catch (err) {
+    fail(`Kunde inte läsa PocketBase-inställningarna:\n${describeError(err)}`);
+  }
+  if (!hasSuperuserRateLimit(settings.rateLimits)) {
+    fail(
+      'PocketBase rate-limit för _superusers:auth är inte aktiv — superuser-lösenordet kan gissas obegränsat ' +
+        'direkt mot PB. Kör setup-via-api.mjs / migration 1700000218.'
+    );
+  }
+  ok('rate-limit aktiv för _superusers:auth');
+
+  // Prob: inloggning UTAN gate-header med en påhittad adress. 403 = gaten är
+  // aktiv; 400 = PB prövade lösenordet (gaten vilande). Påverkar inga konton.
+  try {
+    const res = await fetch(`${PB_URL.replace(/\/$/, '')}/api/collections/users/auth-with-password`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ identity: 'gate-probe@invalid.example', password: 'gate-probe-not-a-password' })
+    });
+    if (res.status === 403) {
+      ok('auth-gate aktiv: användarinloggning direkt mot PocketBase kräver webbappens hemlighet');
+    } else {
+      console.log(
+        `⚠ auth-gate vilande (HTTP ${res.status}): användarlösenord kan prövas direkt mot PocketBase. ` +
+          'Sätt MOVEXUM_PB_AUTH_GATE_SECRET på web-appen, sedan på PB-resursen (samma värde) och som GitHub-secret.'
+      );
+    }
+  } catch (err) {
+    console.log(`⚠ auth-gate-prob misslyckades: ${err?.message || err}`);
+  }
+}
+
+// Hooken tenant_guard.pb.js är ENDA skyddet mot att en användare vid create
+// pekar en post på en annan tenants bolag (createRules kan inte joina, § 21.3).
+// Prov: en tillfällig tenant + ett bolag skapas av superusern, app-användaren
+// försöker skriva en anteckning på bolaget med sin egen token — det ska nekas.
+// Allt raderas efteråt (tenant-raderingen kaskaderar).
+async function verifyTenantGuardHook() {
+  if (!APP_USER_PASSWORD) {
+    console.log('⚠ tenant-vakt-prov hoppas över: APP_USER_PASSWORD saknas');
+    return;
+  }
+  const userPb = new PocketBase(PB_URL);
+  userPb.autoCancellation(false);
+  try {
+    await userPb.collection('users').authWithPassword(APP_USER_EMAIL, APP_USER_PASSWORD, gateOptions);
+  } catch (err) {
+    fail(`tenant-vakt-prov: kunde inte logga in app-användaren${gateHint(err)}`);
+  }
+  const suffix = Date.now().toString(36);
+  let probeTenant = null;
+  let probeStartup = null;
+  try {
+    probeTenant = await pb.collection('tenants').create({
+      name: `verify-baseline tenant-vakt ${suffix}`,
+      slug: `verify-guard-${suffix}`,
+      type: 'incubator'
+    });
+    probeStartup = await pb.collection('startups').create({
+      tenant: probeTenant.id,
+      name: 'verify-baseline prov',
+      phase: 'inflode',
+      status: 'active'
+    });
+    let status = 200;
+    try {
+      const note = await userPb.collection('notes').create({
+        startup: probeStartup.id,
+        author: userPb.authStore.record?.id ?? userPb.authStore.model?.id,
+        body: 'tenant-vakt-prov'
+      });
+      await pb.collection('notes').delete(note.id).catch(() => {});
+    } catch (err) {
+      status = err?.status ?? 0;
+    }
+    if (status !== 403) {
+      // Färskhetsbevis: migration 1700000186 (2026-10) bytte notifications.kind
+      // select → text och kan BARA appliceras av PB-containern själv. Är fältet
+      // fortfarande select kör containern en image byggd före oktober — då är
+      // det imagen (inte hooken) som är problemet (incident 2026-11-25:
+      // Coolify-resursen bygger en legacy-Dockerfile, inte repots stack).
+      let staleImage = false;
+      try {
+        const notifications = await pb.collections.getOne('notifications');
+        const kindField = (notifications.fields ?? notifications.schema ?? []).find(
+          (f) => String(f.name) === 'kind'
+        );
+        staleImage = Boolean(kindField && String(kindField.type) === 'select');
+      } catch {
+        /* best-effort-bevis — påverkar aldrig utfallet */
+      }
+      const runbook =
+        `Åtgärd (Coolify-UI, incident 2026-11-25): resursen bakom COOLIFY_APP_UUID_* bygger en legacy-Dockerfile ` +
+        `sparad i Coolify — skapa en Docker Compose-resurs på infra/coolify.yml, flytta pb_data-volymen, byt ` +
+        `UUID-secreten och stäng legacy-resursen. Full runbook: docs/incidents/2026-11-25-staging-deploy-blocked.md. ` +
+        `Hooken är verifierad fungerande mot PB 0.23.4.`;
+      if (staleImage) {
+        // KÄND, dokumenterad incident: PB-imagen är byggd före migration
+        // 1700000186 och KAN inte bära hooken — ett hårt stopp gör inget
+        // säkrare (läget är detsamma som före 2026-11-15), det blockerar
+        // bara web-releaser. Varna högt; grinden förblir hård så fort
+        // imagen är färsk (då är en inaktiv vakt en verklig regression).
+        console.log(
+          `⚠ tenant-vakten är inte aktiv (HTTP ${status}) MEN PB-imagen är bevisat gammal ` +
+            `(notifications.kind är fortfarande select ⇒ byggd före migration 1700000186, 2026-10). ` +
+            `Deployen släpps fram under incident 2026-11-25. ${runbook}`
+        );
+        if (process.env.GITHUB_ACTIONS) {
+          console.log(
+            `::warning::tenant-vakten inaktiv pga gammal PB-image (incident 2026-11-25) — åtgärda Coolify-resursen enligt docs/incidents/2026-11-25-staging-deploy-blocked.md`
+          );
+        }
+        return;
+      }
+      fail(
+        `tenant-vakten (hooks/tenant_guard.pb.js) är inte aktiv: en användare kunde skapa en post på en annan ` +
+          `tenants bolag (HTTP ${status}) — trots att PB-imagen är färsk (migration 1700000186 applicerad). ` +
+          `Det är en verklig regression: kontrollera att PB-imagen byggts med repots hooks ` +
+          `(docker exec moveum-pocketbase ls /pb/pb_hooks) och att starten inte loggar hook-fel. ${runbook}`
+      );
+    }
+    ok('tenant-vakt aktiv: poster kan inte kopplas till en annan tenants bolag');
+  } finally {
+    if (probeStartup) await pb.collection('startups').delete(probeStartup.id).catch(() => {});
+    if (probeTenant) {
+      try {
+        await pb.collection('tenants').delete(probeTenant.id);
+      } catch (err) {
+        console.log(`⚠ tenant-vakt-prov: provtenanten ${probeTenant.id} kunde inte raderas — radera den manuellt (${describeError(err)})`);
+      }
+    }
+  }
+}
+
 async function verifySecurityRules() {
   let collections;
   try {
@@ -320,7 +509,9 @@ async function verifySecurityRules() {
   for (const [name, rules] of Object.entries(SECURITY_RULES)) {
     const col = collections.get(name);
     if (!col) continue; // migration-only-familjer som inte finns på instansen
-    for (const [key, expected] of Object.entries(rules)) {
+    const fieldNames = (col.fields || []).map((f) => f.name);
+    for (const [key, raw] of Object.entries(rules)) {
+      const expected = key === 'updateRule' && col.type === 'base' ? withMoveLocks(raw, fieldNames) : raw;
       const actual = col[key] ?? null;
       if (actual !== expected) {
         offenders.push(`${name}.${key}: förväntat ${JSON.stringify(expected)}, fick ${JSON.stringify(actual)}`);
@@ -462,7 +653,22 @@ const MUST_SCOPE_TO_MEMBER = [
   'screening_requests',
   // Studenter & talang (§ 54): bolaget ser sina egna behov och intressen.
   'talent_needs',
-  'talent_interests'
+  'talent_interests',
+  // Impact Navigator (§ 56) och Export Lab (§ 58), migration 1700000213:
+  // bolagsmedlemmen läser och driver det EGNA bolagets analys (direkt
+  // `startup` eller via `assessment.startup`).
+  'sustainability_assessments',
+  'sustainability_gap_questions',
+  'sustainability_materiality_overrides',
+  'sustainability_update_events',
+  'sustainability_documents',
+  'sustainability_ai_jobs',
+  'export_assessments',
+  'export_gap_questions',
+  'export_market_reviews',
+  'export_update_events',
+  'export_documents',
+  'export_ai_jobs'
 ];
 
 const MUST_BE_STAFF_OR_OBSERVER = [
@@ -534,24 +740,6 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   // Ärenden i Bedömning excellens (§ 51.10, migration 1700000200) — internt
   // statsstödsunderlag per bolag → staff/observer-only.
   'screening_cases',
-  // Hållbarhetsanalysen (§ 56, migration 1700000206): personalverktyg utan
-  // bolagsmedlemsyta — analyser, frågor, dokumenttext och AI-körningar är
-  // internt underlag → staff/observer-only.
-  'sustainability_assessments',
-  'sustainability_gap_questions',
-  'sustainability_materiality_overrides',
-  'sustainability_update_events',
-  'sustainability_documents',
-  'sustainability_ai_jobs',
-  // Export Lab (§ 58, migration 1700000210): personalverktyg utan
-  // bolagsmedlemsyta — exportprofiler, planer, frågor, dokumenttext och
-  // AI-körningar är internt underlag → staff/observer-only.
-  'export_assessments',
-  'export_gap_questions',
-  'export_market_reviews',
-  'export_update_events',
-  'export_documents',
-  'export_ai_jobs',
   // Studentprofiler (§ 54, migration 1700000201): privatpersoners uppgifter —
   // bolaget ser dem BARA anonymiserat via kod, aldrig via RLS.
   'student_profiles',
@@ -656,7 +844,7 @@ function verifyImmutableCollections(collections) {
 // ingen användarsession, och ett intresse får aldrig förfalskas av ett bolag.
 // Användaraktivitet (§ 57, migration 1700000209): bara servern skriver raderna
 // (en användare ska inte kunna PATCH:a sin egen eller någon annans aktivitet).
-const MUST_BE_SERVER_CREATE_ONLY = ['notifications', 'student_profiles', 'talent_interests', 'user_activity'];
+const MUST_BE_SERVER_CREATE_ONLY = ['notifications', 'student_profiles', 'talent_interests', 'user_activity', 'compass_lead_attachments'];
 const MUST_BE_OWNER_ONLY = ['notifications', 'notification_preferences'];
 
 function verifyNotificationRules(collections) {
@@ -801,6 +989,7 @@ const AI_DENYLIST = new Set([
   'student_profiles', 'talent_interests',
   'sustainability_documents', 'sustainability_ai_jobs',
   'export_documents', 'export_ai_jobs',
+  'compass_lead_attachments',
   'user_activity'
 ]);
 
@@ -1003,9 +1192,9 @@ async function verifyAppUserCanCreate(pb, appUserEmail, appUserPassword) {
   const userPb = new (await import('pocketbase')).default(PB_URL);
   userPb.autoCancellation(false);
   try {
-    await userPb.collection('users').authWithPassword(appUserEmail, appUserPassword, { expand: 'tenant' });
+    await userPb.collection('users').authWithPassword(appUserEmail, appUserPassword, { expand: 'tenant', ...gateOptions });
   } catch (err) {
-    fail(`Kunde inte autentisera ${appUserEmail} för end-to-end test: ${err.message}`);
+    fail(`Kunde inte autentisera ${appUserEmail} för end-to-end test: ${err.message}${gateHint(err)}`);
   }
 
   const authUser = userPb.authStore.model;
@@ -1152,10 +1341,11 @@ async function verifyAppUser() {
     userPb.autoCancellation(false);
     try {
       await userPb.collection('users').authWithPassword(APP_USER_EMAIL, APP_USER_PASSWORD, {
-        expand: 'tenant'
+        expand: 'tenant',
+        ...gateOptions
       });
-    } catch {
-      fail(`Unable to authenticate app user ${APP_USER_EMAIL} with APP_USER_PASSWORD`);
+    } catch (err) {
+      fail(`Unable to authenticate app user ${APP_USER_EMAIL} with APP_USER_PASSWORD${gateHint(err)}`);
     }
     ok(`App user auth check succeeded for ${APP_USER_EMAIL}`);
   } else {
@@ -1186,6 +1376,11 @@ async function verifyHealthEndpoint() {
  * obligatoriskt i schemat → varje create svarar 400.
  */
 const REQUIRED_APP_FIELDS = [
+  // Startupkompassen (§ 23.12, migration 1700000215): hemsida + övrig info —
+  // utan fälten "sparas" besökarens uppgifter tyst bort.
+  { collection: 'compass_leads', fields: ['website', 'other_info'] },
+  // Engelsk version av publika moduler (migration 1700000216, § 23.13).
+  { collection: 'compass_modules', fields: ['translations'] },
   // Önskemål & buggar (§ 49, migration 1700000208): testare + återkoppling —
   // utan fälten "pekas testaren ut" tyst bort och återkopplingen försvinner.
   { collection: 'feedback_items', fields: ['tester', 'test_note', 'tested_at'] },
@@ -1409,6 +1604,9 @@ async function main() {
   verifyAppWritableFields(collections);
   await verifyNoBrokenCreateRules();
   await verifySecurityRules();
+  await verifyMoveLocks();
+  await verifyAuthHardening();
+  await verifyTenantGuardHook();
   await verifyNoBareMultiValueOperators();
   await verifyAiPiiMasking();
   await verifyAppUser();

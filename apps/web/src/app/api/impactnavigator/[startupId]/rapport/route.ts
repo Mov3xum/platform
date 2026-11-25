@@ -4,7 +4,7 @@ import { canAccessModuleForUser } from '@/lib/rbac';
 import { phaseLabels } from '@/lib/labels';
 import { getImpactCompany, latestCompleteAssessment, listAssessments } from '@/lib/impact/data';
 import { buildImpactReportPdf, impactReportFilename } from '@/lib/impact/report-pdf';
-import { canReadImpact, type StartupPhase } from '@platform/shared';
+import { canViewImpactCompany, type StartupPhase } from '@platform/shared';
 
 /**
  * Exportera impactrapporten (CLAUDE.md § 56; originalets /api/export). Den
@@ -19,11 +19,11 @@ const ID_RE = /^[a-zA-Z0-9_-]{6,64}$/;
 export async function GET(_request: Request, context: { params: Promise<{ startupId: string }> }): Promise<Response> {
   const user = await getCurrentUser();
   if (!user) return new NextResponse('Ej inloggad.', { status: 401 });
-  if (!canAccessModuleForUser(user.roles, 'impactnavigator', user.enabledModules) || !canReadImpact(user.roles)) {
-    return new NextResponse('Åtkomst nekad.', { status: 403 });
-  }
+  if (!canAccessModuleForUser(user.roles, 'impactnavigator', user.enabledModules)) return new NextResponse('Åtkomst nekad.', { status: 403 });
   const { startupId } = await context.params;
   if (!ID_RE.test(startupId)) return new NextResponse('Rapport saknas.', { status: 404 });
+  // Staff/observer för alla bolag, bolagsmedlem för sitt eget (§ 56).
+  if (!canViewImpactCompany(user, startupId)) return new NextResponse('Åtkomst nekad.', { status: 403 });
 
   const pb = await getServerPb();
   const company = await getImpactCompany(pb, user.tenant, startupId);

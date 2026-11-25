@@ -68,6 +68,17 @@ Två separata inloggningar per miljö:
    ```
 
    Uppdatera sedan secrets i Coolify + GitHub så de matchar.
+
+   **Två platser, två syften (incident 2026-11-09):** GitHub-secreten
+   `PB_SU_PASSWORD_<MILJÖ>` läses bara av CI-workflows (bootstrap, verify)
+   och når aldrig web-containern. Webbappens egna superuser-skrivningar —
+   "Skapa användare"/rollbyte/lösenordsåterställning i Inställningar →
+   Användare, publika Startupkompass-sidor, superuser-reserven (§ 21.3) —
+   kräver `POCKETBASE_SUPERUSER_EMAIL` + `POCKETBASE_SUPERUSER_PASSWORD` på
+   **web-appen i Coolify, per miljö** (staging och production är separata
+   resurser), följt av omdeploy. Saknas paret svarar "Skapa användare" med
+   "superuser-credentials saknas i web-appen" och `/api/health` visar
+   `superuser.configured: false` — kontrollera den först.
 2. **Webbappen:** `<web-adress>/login` med app-användaren `hampus@movexum.se`
    i `users` (seedad av migration `1700000013_seed_app_admin.js` med
    `APP_ADMIN_INITIAL_PASSWORD`).

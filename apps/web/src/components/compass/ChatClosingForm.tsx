@@ -7,6 +7,8 @@ import { closingQuestions, missingClosingField } from '@/lib/compass/completion'
 import { QuestionInput } from './QuestionInput';
 import { ContactPreferencePicker } from './ContactPreferencePicker';
 import { ContactSection } from './ContactSection';
+import { ConsentNotice } from './ConsentNotice';
+import { useCompassLocale } from './locale';
 
 export interface ChatClosingConfig {
   /** Endpoint-bas för publika flöden (`/api/public/m`). */
@@ -29,6 +31,8 @@ interface Props {
   moduleSlug: string;
   sessionToken: string;
   consent?: boolean;
+  /** Modulens samtyckestext — visas ovanför Skicka. */
+  consentNote?: string;
   attribution: Attribution;
   onDone: (result: ChatClosingResult) => void;
 }
@@ -40,7 +44,8 @@ interface Props {
  * mejlad till den adress hen själv anger. Samma `missingClosingField` körs
  * server-side; klienten ger bara snabb feedback.
  */
-export function ChatClosingForm({ config, moduleSlug, sessionToken, consent, attribution, onDone }: Props) {
+export function ChatClosingForm({ config, moduleSlug, sessionToken, consent, consentNote, attribution, onDone }: Props) {
+  const { locale, t } = useCompassLocale();
   const questions = closingQuestions(config.questions);
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
   const [contact, setContact] = useState<Record<string, string>>({});
@@ -57,14 +62,15 @@ export function ChatClosingForm({ config, moduleSlug, sessionToken, consent, att
       questions: config.questions,
       answers,
       contact: cleanContactValues(contact, config.contactSection),
-      config: config.contactSection
+      config: config.contactSection,
+      locale
     });
     if (missing) {
       setError(missing);
       return;
     }
     if (sendSummary && !contact.email?.trim()) {
-      setError('Ange en e-postadress för att få sammanfattningen skickad — eller bocka ur valet.');
+      setError(t.summaryNeedsEmail);
       return;
     }
     setError(null);
@@ -80,7 +86,8 @@ export function ChatClosingForm({ config, moduleSlug, sessionToken, consent, att
           contact_preference: contactPreference || undefined,
           send_summary: sendSummary,
           attribution,
-          consent
+          consent,
+          lang: locale
         })
       });
       const data = (await res.json().catch(() => ({}))) as {
@@ -89,7 +96,7 @@ export function ChatClosingForm({ config, moduleSlug, sessionToken, consent, att
         emailed?: boolean;
         emailError?: string;
       };
-      if (!res.ok) throw new Error(data.error || `Servern svarade ${res.status}`);
+      if (!res.ok) throw new Error(data.error || t.serverStatus(res.status));
       onDone({
         summary: data.summary || '',
         emailed: Boolean(data.emailed),
@@ -97,7 +104,7 @@ export function ChatClosingForm({ config, moduleSlug, sessionToken, consent, att
         email: contact.email?.trim() || undefined
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Något gick fel');
+      setError(err instanceof Error ? err.message : t.somethingWrong);
     } finally {
       setSubmitting(false);
     }
@@ -106,12 +113,12 @@ export function ChatClosingForm({ config, moduleSlug, sessionToken, consent, att
   return (
     <form onSubmit={onSubmit} className="mx-chat-closing" style={{ display: 'grid', gap: 14 }}>
       <div>
-        <div className="mx-mono mx-t-xs mx-muted mx-t-up">Samtalet är avslutat</div>
+        <div className="mx-mono mx-t-xs mx-muted mx-t-up">{t.chatEnded}</div>
         <div className="mx-disp mx-fw-6" style={{ fontSize: 18, marginTop: 4 }}>
-          Några uppgifter innan vi rundar av
+          {t.closingTitle}
         </div>
         <p className="mx-muted mx-t-13" style={{ margin: '6px 0 0', lineHeight: 1.55 }}>
-          Fält märkta * är obligatoriska. Vi hanterar dina uppgifter inom EU och delar dem aldrig vidare.
+          {t.requiredNote}
         </p>
       </div>
 
@@ -140,6 +147,15 @@ export function ChatClosingForm({ config, moduleSlug, sessionToken, consent, att
         config={config.contactSection}
         values={contact}
         heading={false}
+        attachmentUpload={
+          config.apiBase.startsWith('/api/public/')
+            ? {
+                endpoint: `${config.apiBase}/${encodeURIComponent(moduleSlug)}/attachments`,
+                sessionToken,
+                consent
+              }
+            : undefined
+        }
         onChange={(key, value) => setContact((c) => ({ ...c, [key]: value }))}
       />
 
@@ -148,9 +164,11 @@ export function ChatClosingForm({ config, moduleSlug, sessionToken, consent, att
       {emailVisible && (
         <label className="mx-flex mx-items-c mx-gap-2 mx-t-13" style={{ cursor: 'pointer' }}>
           <input type="checkbox" checked={sendSummary} onChange={(e) => setSendSummary(e.target.checked)} />
-          <span>Skicka sammanfattningen av samtalet till min e-post</span>
+          <span>{t.sendSummary}</span>
         </label>
       )}
+
+      <ConsentNotice note={consentNote} />
 
       {error && (
         <div
@@ -163,7 +181,7 @@ export function ChatClosingForm({ config, moduleSlug, sessionToken, consent, att
 
       <div className="mx-flex mx-items-c" style={{ justifyContent: 'flex-end' }}>
         <button type="submit" className="mx-btn mx-primary" disabled={submitting}>
-          {submitting ? 'Skickar…' : 'Skicka in →'}
+          {submitting ? t.submitting : t.submit}
         </button>
       </div>
     </form>

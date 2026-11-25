@@ -14,6 +14,8 @@ import {
   EXPORT_UPLOAD_STAGES,
   applyExportMarketReview,
   canDeleteExportLab,
+  canViewExportCompany,
+  canWorkOnExportCompany,
   canManageExportLab,
   canReadExportLab,
   createExportCustomMarket,
@@ -63,6 +65,12 @@ test('roller: personal driver, observer läser, ledning tar bort', () => {
   assert.equal(canReadExportLab(['startup_member']), false);
   assert.equal(canDeleteExportLab(['coach']), false);
   assert.equal(canDeleteExportLab(['incubator_lead']), true);
+  const member = { roles: ['startup_member'] as const, linkedStartups: ['s1'] };
+  assert.equal(canWorkOnExportCompany(member, 's1'), true);
+  assert.equal(canWorkOnExportCompany(member, 's2'), false);
+  assert.equal(canViewExportCompany(member, 's1'), true);
+  assert.equal(canViewExportCompany({ roles: ['observer'] }, 's1'), true);
+  assert.equal(canWorkOnExportCompany({ roles: ['observer'] }, 's1'), false);
   assert.equal(exportPhaseFor('incubation'), 'INKUBATOR');
   assert.equal(exportPhaseFor('lead'), 'SCREENING');
 });

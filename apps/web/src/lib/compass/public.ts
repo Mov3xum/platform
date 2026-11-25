@@ -2,7 +2,15 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { getPublicPbUrl } from '@/lib/pb-url';
-import { contactSectionForModule, sortCompassQuestions, type ContactSectionConfig } from '@platform/shared';
+import {
+  contactSectionForModule,
+  normalizeCompassTranslations,
+  parseCompassLocale,
+  storedEnglishTexts,
+  type CompassLocale,
+  sortCompassQuestions,
+  type ContactSectionConfig
+} from '@platform/shared';
 import { moduleWantsLead } from './lead-capture';
 import type { CompassModule, CompassQuestion, NextModuleLink } from './types';
 
@@ -47,7 +55,6 @@ export type PublicCompassModule = Pick<
   | 'start_page_body'
   | 'hero_image'
   | 'hero_video'
-  | 'target_audience'
   | 'consent_note'
   | 'intro_message'
   | 'chat_persona'
@@ -92,7 +99,6 @@ export function toPublicModule(m: CompassModule): PublicCompassModule {
     start_page_body: m.start_page_body,
     hero_image: m.hero_image,
     hero_video: m.hero_video,
-    target_audience: m.target_audience,
     consent_note: m.consent_note,
     intro_message: m.intro_message,
     chat_persona: m.chat_persona,
@@ -103,6 +109,20 @@ export function toPublicModule(m: CompassModule): PublicCompassModule {
     require_phone: m.require_phone,
     require_organization: m.require_organization
   };
+}
+
+/**
+ * Besökarens språk i de publika routarna (§ 23.13): `en` när klienten bett
+ * om det — annars svenska. `texts` = modulens sparade engelska texter (null
+ * på svenska). Routarna översätter aldrig själva: sidan /m/<slug> har redan
+ * gjort det (`ensureEnglishTexts`) innan besökaren kan skicka något.
+ */
+export function visitorLocale(
+  module: Pick<CompassModule, 'translations'>,
+  rawLang: unknown
+): { locale: CompassLocale; texts: Record<string, string> | null } {
+  const locale = parseCompassLocale(rawLang);
+  return { locale, texts: storedEnglishTexts(module.translations, locale) };
 }
 
 export interface ResolvedPublicModule {
@@ -177,7 +197,13 @@ export async function getNextModuleLink(
     // inte tyst brytas bara för att public_slug-fältet lämnats tomt.
     const slug = next.public_slug || next.slug;
     if (!slug) return null;
-    return { slug, label: next.welcome_title || next.name };
+    // Engelsk knapptext när nästa modul redan översatts (§ 23.13) — annars
+    // svenskan (översätts när besökaren kommer dit).
+    const en = normalizeCompassTranslations(next.translations).en;
+    const labelEn = en
+      ? (next.welcome_title && en.texts['m.welcome_title']) || en.texts['m.name'] || undefined
+      : undefined;
+    return { slug, label: next.welcome_title || next.name, labelEn };
   } catch {
     return null;
   }

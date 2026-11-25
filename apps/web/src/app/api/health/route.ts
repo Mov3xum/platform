@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import { describePbUrlSource, getServerPbUrl } from '@/lib/pb-url';
+import { isPbAuthGateConfigured } from '@/lib/pb-auth-gate';
 import { probePocketBase, probeSummary } from '@/lib/pb-health';
 import { resolveSender, senderAddress } from '@/lib/mail-sender';
 import { isEmailConfigured, resendKeyLooksValid } from '@/lib/email';
+import { describeSuperuserConfig } from '@/lib/integrations/credentials';
 
 // Driftdiagnos för web-appen (publik, undantagen auth-redirect + force-https i
 // middleware). Svarar vilken PocketBase-adress servern resolvat för sin miljö
@@ -44,6 +46,15 @@ export async function GET(): Promise<NextResponse> {
         link_secret_set: Boolean((process.env.MOVEXUM_UNSUBSCRIBE_SECRET ?? process.env.MOVEXUM_INTEGRATION_KEY ?? '').trim()),
         app_url_set: Boolean((process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? '').trim())
       },
+      // Superuser-paret för web-appen (users-skrivningar, publika kompass-
+      // sidor, superuser-reserv § 21.3). `configured: false` = "Skapa
+      // användare" svarar "superuser-credentials saknas": sätt
+      // POCKETBASE_SUPERUSER_EMAIL/PASSWORD på web-appen i Coolify + omdeploy.
+      // Bara om paret finns och via vilket namn — aldrig värden.
+      superuser: describeSuperuserConfig(),
+      // Auth-gaten mot PocketBase (§ 21.8): `true` = web-appen skickar headern.
+      // PB kräver den först när samma värde även satts på PB-resursen.
+      pb_auth_gate: { web_secret_set: isPbAuthGateConfigured() },
       checked_at: new Date().toISOString()
     },
     { status: ok ? 200 : 503, headers: { 'cache-control': 'no-store' } }

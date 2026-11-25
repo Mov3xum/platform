@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
 import { clientIpFromRequest } from '@/lib/client-ip';
-import { isSurveyModule } from '@platform/shared';
+import { isSurveyModule, translateResultBucket } from '@platform/shared';
 import { storeSurveyResponse } from '@/lib/compass/survey';
 import {
   resolvePublicModule,
   getPublicModuleQuestions,
-  pickAttribution
+  pickAttribution,
+  visitorLocale
 } from '@/lib/compass/public';
 import {
   attachAiSummary,
@@ -14,11 +15,11 @@ import {
   leadFieldsFromContact,
   moduleWantsLead,
   parseContactPreference,
-  parseContactSubmission
+  parsePublicContactSubmission
 } from '@/lib/compass/lead-capture';
 import { notifyNewInflow } from '@/lib/compass/notify';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
-import { scoreQuiz, resolveBucket, isResultBucketArray, type QuizQuestion } from '@platform/shared';
+import { scoreQuizSubmission } from '@/lib/compass/quiz-ai';
 import type { Attribution } from '@/lib/compass/types';
 
 export const runtime = 'nodejs';
@@ -38,6 +39,8 @@ interface QuizBody {
   contact_preference?: string;
   /** Sessionstoken (§ 23.10) — slutför det pågående leadet i stället för att skapa ett nytt. */
   sessionToken?: string;
+  /** Besökarens språk (§ 23.13): `en` ⇒ engelska, annars svenska. */
+  lang?: string;
 }
 
 // Högra (proxy-tillagda) XFF-värdet — det vänstra är klientstyrt och lät en
@@ -77,21 +80,31 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     return NextResponse.json({ error: 'Samtycke krävs.' }, { status: 400 });
   }
 
+  // Besökarens språk (§ 23.13): felmeddelanden + resultatprofilen på
+  // engelska. Leadet (staff-data) behåller den svenska profiltiteln.
+  const { locale, texts } = visitorLocale(module, body.lang);
+
   // Avsnittet "Dina uppgifter" (§ 23.11): klienten är aldrig gränsen.
-  const contact = parseContactSubmission(module, body.contact);
+  const contact = await parsePublicContactSubmission(module, body.contact, {
+    tenant,
+    moduleSlug: slug,
+    sessionToken: body.sessionToken,
+    locale
+  });
   if (contact.error) return NextResponse.json({ error: contact.error }, { status: 400 });
   const contactFields = leadFieldsFromContact(contact.values);
 
   const questions = await getPublicModuleQuestions(pb, module.id);
-  const quizQuestions: QuizQuestion[] = questions.map((q) => ({
-    key: q.key,
-    input_type: q.input_type,
-    choices: q.choices
-  }));
-
-  const score = scoreQuiz(quizQuestions, body.answers || {});
-  const buckets = isResultBucketArray(module.result_buckets) ? module.result_buckets : [];
-  const bucket = resolveBucket(score, buckets);
+  // Kryssfrågorna räknas deterministiskt; fritextsvar bedöms av AI när
+  // modulen har en bedömningsinstruktion (§ 23.14, best-effort).
+  const { score, bucket, aiAssessed, aiNote } = await scoreQuizSubmission(
+    pb,
+    tenant,
+    module,
+    questions,
+    body.answers || {}
+  );
+  const visitorBucket = texts ? translateResultBucket(bucket, texts) : bucket;
 
   // ENKÄT (§ 43): svaren lagras per fråga mot subjektet — inget lead. Fela
   // högt om lagringen misslyckas (svaren får inte tyst försvinna).
@@ -108,13 +121,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
         { status: 500 }
       );
     }
-    return NextResponse.json({ bucket, score: score.total });
+    return NextResponse.json({ bucket: visitorBucket, score: score.total, ai_assessed: aiAssessed });
   }
 
   // Steg 4-valet: modulen kan vara konfigurerad att INTE skapa lead — visa
   // bara resultatet i så fall.
   if (!moduleWantsLead(module)) {
-    return NextResponse.json({ bucket, score: score.total });
+    return NextResponse.json({ bucket: visitorBucket, score: score.total, ai_assessed: aiAssessed });
   }
 
   // Bevara utfallet som en lead (människa-i-loopen följer upp). Kontaktfält är
@@ -135,7 +148,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     quiz_result_bucket: bucket?.key,
     quiz_score: score.total,
     contact_preference: contactPreference,
-    notes: '',
+    // Tömmer progress-noten; med AI-bedömning sparas personalens spår här.
+    notes: aiNote,
     consent_at: new Date().toISOString()
     }
   });
@@ -161,5 +175,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
 
   await notifyNewInflow(module, { ...lead, ai_summary: aiSummary ?? lead.ai_summary });
 
-  return NextResponse.json({ bucket, score: score.total });
+  return NextResponse.json({ bucket: visitorBucket, score: score.total, ai_assessed: aiAssessed });
 }

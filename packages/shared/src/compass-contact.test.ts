@@ -13,6 +13,9 @@ import {
   legacyRequirementsFromSection,
   missingContactField,
   normalizeContactSection,
+  normalizeWebsite,
+  validateContactAttachment,
+  cleanAttachmentFilename,
   visibleContactFields
 } from './compass-contact';
 
@@ -123,5 +126,40 @@ test('etiketter för fasta val och alla fält har metadata', () => {
   assert.equal(contactValueLabel('referral_channel', 'event'), 'Event, föreläsning eller mässa');
   assert.equal(contactValueLabel('kommun', 'okand'), 'okand');
   assert.equal(contactValueLabel('name', ''), undefined);
-  assert.equal(CONTACT_FIELD_KEYS.length, 8);
+  assert.equal(CONTACT_FIELD_KEYS.length, 11);
+});
+
+test('hemsida, övrig info och bilagor (§ 23.12)', () => {
+  const config = { ...CONTACT_SECTION_NONE, website: 'optional', other_info: 'optional', attachments: 'required' } as const;
+  const v = cleanContactValues(
+    { website: 'movexum.se/om', other_info: '  Vi har en pilot.\r\nRing 19900101-1234  ', attachments: '2' },
+    config
+  );
+  assert.equal(v.website, 'https://movexum.se/om');
+  assert.equal(v.other_info, 'Vi har en pilot.\nRing [REDACTED]');
+  assert.equal(v.attachments, '2');
+  assert.equal(missingContactField(cleanContactValues({}, config), config), 'Bifoga minst en fil.');
+  assert.equal(cleanContactValues({ attachments: '0' }, config).attachments, undefined);
+  assert.equal(cleanContactValues({ attachments: '99' }, config).attachments, '5');
+
+  assert.equal(normalizeWebsite('javascript:alert(1)'), undefined);
+  assert.equal(normalizeWebsite('http://exempel.se'), 'http://exempel.se/');
+  assert.equal(normalizeWebsite('localhost'), undefined);
+  assert.equal(normalizeWebsite('https://user:pw@exempel.se'), undefined);
+  assert.equal(normalizeWebsite(''), undefined);
+
+  assert.deepEqual(validateContactAttachment({ name: 'deck.pptx', type: '', size: 10 }), {
+    ok: true,
+    mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+  });
+  assert.deepEqual(validateContactAttachment({ name: 'deck.pdf', type: 'application/pdf', size: 10 }), {
+    ok: true,
+    mime: 'application/pdf'
+  });
+  assert.equal(validateContactAttachment({ name: 'x.exe', type: 'application/x-msdownload', size: 10 }).ok, false);
+  assert.equal(validateContactAttachment({ name: 'x.pdf', type: 'application/pdf', size: 26 * 1024 * 1024 }).ok, false);
+  assert.equal(validateContactAttachment({ name: 'x.pdf', type: 'application/pdf', size: 0 }).ok, false);
+  assert.equal(cleanAttachmentFilename('C:\\tmp\\pitch\u0001.pdf'), 'pitch.pdf');
+  assert.equal(CONTACT_SECTION_DEFAULT.attachments, 'optional');
+  assert.equal(CONTACT_SECTION_NONE.website, 'hidden');
 });

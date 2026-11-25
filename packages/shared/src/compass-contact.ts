@@ -23,10 +23,13 @@ export const CONTACT_FIELD_KEYS = [
   'email',
   'phone',
   'organization',
+  'website',
   'founder_gender',
   'team_members',
   'kommun',
-  'referral_channel'
+  'referral_channel',
+  'other_info',
+  'attachments'
 ] as const;
 
 export type ContactFieldKey = (typeof CONTACT_FIELD_KEYS)[number];
@@ -63,6 +66,11 @@ export const CONTACT_FIELD_META: Record<ContactFieldKey, ContactFieldMeta> = {
   email: { label: 'E-post', max: 254 },
   phone: { label: 'Telefonnummer', max: 50 },
   organization: { label: 'Organisation', max: 200 },
+  website: {
+    label: 'Hemsida',
+    hint: 'Om ni har en — t.ex. bolagets eller projektets webbplats.',
+    max: 300
+  },
   founder_gender: {
     label: 'Kön på grundare',
     hint: 'Används bara för Vinnovas statistik över könsfördelning i stödprogrammen — aldrig i bedömningen av idén. Du kan välja att inte ange.',
@@ -74,8 +82,183 @@ export const CONTACT_FIELD_META: Record<ContactFieldKey, ContactFieldMeta> = {
     max: 2000
   },
   kommun: { label: 'Kommuntillhörighet', max: 80 },
-  referral_channel: { label: 'Hur kom du i kontakt med Movexum?', max: 60 }
+  referral_channel: { label: 'Hur kom du i kontakt med Movexum?', max: 60 },
+  other_info: {
+    label: 'Övrig information',
+    hint: 'Något mer du vill att vi ska veta om idén, teamet eller var ni står just nu.',
+    max: 3000
+  },
+  attachments: {
+    label: 'Bilagor',
+    hint: 'Pitch deck, affärsplan eller annat underlag (PDF, PowerPoint, Word, Excel eller bild, högst 25 MB per fil).',
+    max: 2
+  }
 };
+
+/**
+ * Engelska etiketter/hjälptexter för avsnittet "Dina uppgifter" — den
+ * publika modulsidans engelska version (§ 23.13). Samma nycklar som
+ * CONTACT_FIELD_META; lagrade värden är oförändrade (bara visningen byts).
+ */
+export const CONTACT_FIELD_META_EN: Record<ContactFieldKey, { label: string; hint?: string }> = {
+  name: { label: 'Name of the idea owner' },
+  email: { label: 'Email' },
+  phone: { label: 'Phone number' },
+  organization: { label: 'Organisation' },
+  website: { label: 'Website', hint: "If you have one — e.g. the company's or project's website." },
+  founder_gender: {
+    label: 'Gender of founder(s)',
+    hint: "Only used for Vinnova's statistics on gender distribution in support programmes — never when assessing the idea. You can choose not to say."
+  },
+  team_members: {
+    label: 'Other team members',
+    hint: 'Name and email of any other team members, one per line.'
+  },
+  kommun: { label: 'Municipality' },
+  referral_channel: { label: 'How did you hear about Movexum?' },
+  other_info: {
+    label: 'Other information',
+    hint: 'Anything else you want us to know about the idea, the team or where you are right now.'
+  },
+  attachments: {
+    label: 'Attachments',
+    hint: 'Pitch deck, business plan or other material (PDF, PowerPoint, Word, Excel or image, max 25 MB per file).'
+  }
+};
+
+/** Engelska etiketter för de fasta valen (nyckel → etikett). Ortnamn behålls. */
+export const CONTACT_OPTION_LABEL_EN: Record<string, string> = {
+  kvinna: 'Woman',
+  man: 'Man',
+  mixat_team: 'Mixed team',
+  vill_inte_ange: 'Prefer not to say',
+  annan_sverige: 'Other municipality in Sweden',
+  utanfor_sverige: 'Outside Sweden',
+  sociala_medier: 'Social media (LinkedIn, Instagram, Facebook …)',
+  event: 'Event, lecture or fair',
+  rekommendation: 'Recommendation from a friend, colleague or another founder',
+  partner: 'Via Almi, Region Gävleborg, the municipality or another partner',
+  hogskola: 'University or college',
+  sokmotor: 'Searched online',
+  press: 'Press, news or newsletter',
+  movexum: 'Someone from Movexum contacted me',
+  annat: 'Other'
+};
+
+/** Besökarens språk på den publika modulsidan (§ 23.13). */
+export type ContactLocale = 'sv' | 'en';
+
+/** Etikett + hjälptext för ett kontaktfält på besökarens språk. */
+export function contactFieldText(key: ContactFieldKey, locale: ContactLocale = 'sv'): { label: string; hint?: string } {
+  if (locale === 'en') return CONTACT_FIELD_META_EN[key];
+  return { label: CONTACT_FIELD_META[key].label, hint: CONTACT_FIELD_META[key].hint };
+}
+
+/** Etikett för ett fast val på besökarens språk (okänd nyckel ⇒ svensk etikett). */
+export function contactOptionText(option: { value: string; label: string }, locale: ContactLocale = 'sv'): string {
+  if (locale === 'en') return CONTACT_OPTION_LABEL_EN[option.value] ?? option.label;
+  return option.label;
+}
+
+/** Bilagor (§ 23.12): tak per inskick och per fil, och tillåtna typer. */
+export const CONTACT_ATTACHMENT_MAX_FILES = 5;
+export const CONTACT_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
+/** Speglar `compass_lead_attachments.file.mimeTypes` i migration 1700000215. */
+export const CONTACT_ATTACHMENT_MIME_TYPES = [
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+  'image/png',
+  'image/jpeg',
+  'image/webp'
+] as const;
+
+const ATTACHMENT_MIME_BY_EXT: Record<string, string> = {
+  pdf: 'application/pdf',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  ppt: 'application/vnd.ms-powerpoint',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  doc: 'application/msword',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  xls: 'application/vnd.ms-excel',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp'
+};
+
+/** `accept`-attributet för filväljaren. */
+export const CONTACT_ATTACHMENT_ACCEPT = Object.keys(ATTACHMENT_MIME_BY_EXT)
+  .map((e) => `.${e}`)
+  .join(',');
+
+/**
+ * Validerar en bilaga (klient + upload-route). Mime härleds ur filändelsen
+ * när webbläsaren inte rapporterar någon (eller rapporterar en generisk
+ * typ). Returnerar den mime som ska användas, eller ett svenskt fel.
+ */
+/** Orsak när en bilaga avvisas — låter UI:t visa felet på besökarens språk. */
+export type ContactAttachmentErrorCode = 'empty' | 'too_large' | 'type';
+
+export function validateContactAttachment(file: {
+  name: string;
+  type?: string;
+  size: number;
+}):
+  | { ok: true; mime: string }
+  | { ok: false; error: string; code: ContactAttachmentErrorCode } {
+  if (!file.size) return { ok: false, error: 'Filen är tom.', code: 'empty' };
+  if (file.size > CONTACT_ATTACHMENT_MAX_BYTES) {
+    return { ok: false, error: 'Filen är för stor (högst 25 MB).', code: 'too_large' };
+  }
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  const byExt = ATTACHMENT_MIME_BY_EXT[ext];
+  const reported = (file.type || '').toLowerCase();
+  const allowed = (CONTACT_ATTACHMENT_MIME_TYPES as readonly string[]).includes(reported);
+  const mime = allowed ? reported : byExt;
+  if (!mime) {
+    return {
+      ok: false,
+      error: 'Filtypen stöds inte. Använd PDF, PowerPoint, Word, Excel eller en bild.',
+      code: 'type'
+    };
+  }
+  return { ok: true, mime };
+}
+
+/** Tvättar ett filnamn för visning (inga sökvägar/styrtecken, max 200). */
+export function cleanAttachmentFilename(name: unknown): string {
+  const base = String(name ?? '')
+    .split(/[\\/]/)
+    .pop()!
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .trim();
+  return (base || 'bilaga').slice(0, 200);
+}
+
+/**
+ * Normaliserar en hemsideadress: lägger till https:// när protokoll saknas,
+ * kräver http(s) och en värd med punkt. Ogiltigt ⇒ undefined (aldrig fel).
+ */
+export function normalizeWebsite(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined;
+  let t = v.trim();
+  if (!t) return undefined;
+  if (!/^https?:\/\//i.test(t)) t = `https://${t}`;
+  try {
+    const u = new URL(t);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return undefined;
+    if (!u.hostname.includes('.') || u.username || u.password) return undefined;
+    const out = u.toString();
+    return out.length > 300 ? undefined : out;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Kön på grundare — fasta val (kvinna / man / mixat team) plus "Vill inte
@@ -149,10 +332,13 @@ export const CONTACT_SECTION_NONE: ContactSectionConfig = {
   email: 'hidden',
   phone: 'hidden',
   organization: 'hidden',
+  website: 'hidden',
   founder_gender: 'hidden',
   team_members: 'hidden',
   kommun: 'hidden',
-  referral_channel: 'hidden'
+  referral_channel: 'hidden',
+  other_info: 'hidden',
+  attachments: 'hidden'
 };
 
 /**
@@ -164,10 +350,13 @@ export const CONTACT_SECTION_DEFAULT: ContactSectionConfig = {
   email: 'required',
   phone: 'optional',
   organization: 'hidden',
+  website: 'optional',
   founder_gender: 'optional',
   team_members: 'optional',
   kommun: 'optional',
-  referral_channel: 'optional'
+  referral_channel: 'optional',
+  other_info: 'optional',
+  attachments: 'optional'
 };
 
 export interface LegacyContactRequirements {
@@ -316,8 +505,19 @@ export function cleanContactValues(raw: unknown, config: ContactSectionConfig): 
         value = referralChannelLabel(rec[key]) ? (rec[key] as string) : undefined;
         break;
       case 'team_members':
+      case 'other_info':
         value = cleanText(rec[key], max, true);
         break;
+      case 'website':
+        value = normalizeWebsite(rec[key]);
+        break;
+      case 'attachments': {
+        // Antal uppladdade bilagor. Server-side sätts värdet ur databasen
+        // (klientens siffra litas aldrig på) — se parseContactSubmission.
+        const n = Number(rec[key]);
+        value = Number.isInteger(n) && n > 0 ? String(Math.min(n, CONTACT_ATTACHMENT_MAX_FILES)) : undefined;
+        break;
+      }
       case 'email':
         value = cleanText(rec[key], max);
         if (value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) value = undefined;
@@ -331,16 +531,24 @@ export function cleanContactValues(raw: unknown, config: ContactSectionConfig): 
 }
 
 /**
- * Första saknade obligatoriska fältet som ett svenskt felmeddelande — eller
- * null. Körs i klienten (snabb feedback) OCH server-side.
+ * Första saknade obligatoriska fältet som ett felmeddelande på besökarens
+ * språk (svenska som default) — eller null. Körs i klienten (snabb feedback) OCH server-side.
  */
 export function missingContactField(
   values: ContactValues,
-  config: ContactSectionConfig
+  config: ContactSectionConfig,
+  locale: ContactLocale = 'sv'
 ): string | null {
   for (const key of CONTACT_FIELD_KEYS) {
     if (config[key] !== 'required') continue;
-    if (!values[key]) return `${CONTACT_FIELD_META[key].label} krävs.`;
+    if (!values[key]) {
+      if (locale === 'en') {
+        if (key === 'attachments') return 'Attach at least one file.';
+        return `${CONTACT_FIELD_META_EN[key].label} is required.`;
+      }
+      if (key === 'attachments') return 'Bifoga minst en fil.';
+      return `${CONTACT_FIELD_META[key].label} krävs.`;
+    }
   }
   return null;
 }

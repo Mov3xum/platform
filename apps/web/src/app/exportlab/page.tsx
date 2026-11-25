@@ -11,7 +11,7 @@ import { AiNoticeBanner } from '@/components/impact/AiNoticeBanner';
 import { AutoSubmitSelect } from '@/components/impact/AutoSubmitSelect';
 import { btnPrimary, btnSecondary, eyebrowAccent, inputClass, labelClass, noticeWarn } from '@/components/exportlab/ui';
 import { Icon } from '@/components/proto/Icon';
-import { ALL_PHASES, EXPORT_FRAMEWORKS, EXPORT_READINESS_LEVELS, EXPORT_READINESS_LEVEL_LABELS, canDeleteExportLab, canManageExportLab, isExportReadinessLevel, type ExportPathway, type StartupPhase } from '@platform/shared';
+import { ALL_PHASES, EXPORT_FRAMEWORKS, EXPORT_READINESS_LEVELS, EXPORT_READINESS_LEVEL_LABELS, canDeleteExportLab, canManageExportLab, canReadExportLab, isExportReadinessLevel, type ExportPathway, type StartupPhase } from '@platform/shared';
 import { DeleteCompanyButton } from './DeleteCompanyButton';
 
 export const dynamic = 'force-dynamic';
@@ -27,6 +27,15 @@ const NOT_ASSESSED = 'NOT_ASSESSED';
 export default async function ExportLabPage({ searchParams }: { searchParams: Promise<{ q?: string; phase?: string; level?: string }> }) {
   const user = await requireUser();
   if (!canAccessModuleForUser(user.roles, 'exportlab', user.enabledModules)) redirect('/hem');
+  // En bolagsmedlem har ingen portföljlista — hen landar i det egna bolagets
+  // exportanalys, eller i startformuläret om ingen finns ännu (§ 58).
+  if (!canReadExportLab(user.roles)) {
+    const own = user.linkedStartups[0];
+    if (!own) redirect('/min-oversikt');
+    const ownPb = await getServerPb();
+    const { latest } = await listExportCompanies(ownPb, user.tenant);
+    redirect(latest.has(own) ? `/exportlab/${own}` : `/exportlab/ny?startup=${encodeURIComponent(own)}`);
+  }
   const query = await searchParams;
   const q = (query.q ?? '').trim().slice(0, 120);
   const phase = (ALL_PHASES as readonly string[]).includes(query.phase ?? '') ? (query.phase as StartupPhase) : undefined;

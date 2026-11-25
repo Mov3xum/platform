@@ -25,6 +25,7 @@
 //   MOVEXUM_RETENTION_AGENT_ACTIONS_DAYS         default 1095 (golv 365)
 //   MOVEXUM_RETENTION_COMPASS_SECURITY_DAYS      default 365 (golv 30)
 //   MOVEXUM_RETENTION_WEB_CACHE_DAYS             default 2
+//   MOVEXUM_RETENTION_COMPASS_UNLINKED_ATTACHMENTS_DAYS default 2 (okopplade bilagor, § 23.12)
 //   MOVEXUM_RETENTION_EMAIL_EVENTS_DAYS          default 730 (golv 90)
 // Ogiltiga värden faller tillbaka på default; värden under golvet höjs till
 // golvet (en felskriven env får aldrig radera audit-spåret).
@@ -97,6 +98,14 @@ cronAdd('movexum-retention-tick', '17 3 * * *', () => {
       fields: ['created'],
       filter: 'created < {:cut}',
       params: { cut: cutoff(intEnv('MOVEXUM_RETENTION_EMAIL_EVENTS_DAYS', 730, 90, 3650)) }
+    },
+    {
+      // Bilagor i Startupkompassen (§ 23.12) som aldrig kopplades till ett
+      // lead — besökaren laddade upp men slutförde aldrig flödet.
+      collection: 'compass_lead_attachments',
+      fields: ['created', 'lead'],
+      filter: 'lead = "" && created < {:cut}',
+      params: { cut: cutoff(intEnv('MOVEXUM_RETENTION_COMPASS_UNLINKED_ATTACHMENTS_DAYS', 2, 1, 30)) }
     },
     {
       collection: 'web_cache',

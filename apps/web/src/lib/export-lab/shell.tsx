@@ -13,7 +13,7 @@ import { ExportSideNav } from '@/components/exportlab/ExportSideNav';
 import { Icon } from '@/components/proto/Icon';
 import { btnPrimary, btnSecondary, noticeWarn } from '@/components/exportlab/ui';
 import { CrumbLabels } from '@/components/proto/CrumbLabels';
-import { canDeleteExportLab, canManageExportLab, type ExportIrlSource, type StartupPhase } from '@platform/shared';
+import { canDeleteExportLab, canViewExportCompany, canWorkOnExportCompany, type ExportIrlSource, type StartupPhase } from '@platform/shared';
 import { getExportCompany, latestCompletePlan, listExportAssessments, type ExportAssessment, type ExportCompany } from './data';
 import { loadExportIrl } from './irl.server';
 import { EXPORT_PAGES, exportHref, exportReportHref } from './tabs';
@@ -33,11 +33,13 @@ export interface ExportCompanyContext {
 export async function loadExportCompanyContext(startupId: string): Promise<ExportCompanyContext> {
   const user = await requireUser();
   if (!canAccessModuleForUser(user.roles, 'exportlab', user.enabledModules)) redirect('/hem');
+  // Bolagsmedlem når bara det egna bolaget (§ 58) — koden är den uttryckliga gränsen, RLS speglar.
+  if (!canViewExportCompany(user, startupId)) notFound();
   const pb = await getServerPb();
   const company = await getExportCompany(pb, user.tenant, startupId);
   if (!company) notFound();
   const [assessments, irl] = await Promise.all([listExportAssessments(pb, user.tenant, startupId), loadExportIrl(pb, user.tenant, startupId)]);
-  return { user, pb, company, assessments: assessments.items, assessmentsError: assessments.error, irl, canManage: canManageExportLab(user.roles), canDelete: canDeleteExportLab(user.roles) };
+  return { user, pb, company, assessments: assessments.items, assessmentsError: assessments.error, irl, canManage: canWorkOnExportCompany(user, startupId), canDelete: canDeleteExportLab(user.roles) };
 }
 
 /** Sidskalet per bolag: sidomeny till vänster (blå brand-block), innehållet till höger. */

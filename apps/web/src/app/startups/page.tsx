@@ -4,7 +4,12 @@ import { listAllForTenant, listForTenant, hasTenantWideRead } from '@/lib/pb.ser
 import { pagerState, parsePageParam } from '@/lib/read-scaling';
 import { requireUser, getServerPb } from '@/lib/auth.server';
 import { canAccessModule, hasRole } from '@/lib/rbac';
-import { ALL_PHASES, type StartupPhase, type SprintXScore } from '@platform/shared';
+import {
+  ALL_PHASES,
+  irlAverageByStartup,
+  summarizeProgramStages,
+  type StartupPhase
+} from '@platform/shared';
 import { phaseLabels, statusLabels, type StartupStatus } from '@/lib/labels';
 import { StartupListDashboard } from '@/components/StartupListDashboard';
 import { PageShell } from '@/components/PageShell';
@@ -32,8 +37,23 @@ interface StartupMetricRow {
   id: string;
   phase: StartupPhase;
   status: StartupStatus;
-  irl_level?: number;
-  sprint_x_json?: SprintXScore;
+}
+
+/**
+ * En KTH IRL-bedömning (§ 52.2) — bara nivåerna. IRL på översikten hämtas
+ * ALLTID härifrån (bolagets gällande bedömning, samma rad som bolagskortets
+ * radar), aldrig ur `startups.irl_level`, som bara är reserv i tabellen.
+ */
+interface IrlAssessmentRow {
+  startup: string;
+  assessed_at: string;
+  crl?: number;
+  tmrl?: number;
+  brl?: number;
+  srl?: number;
+  trl?: number;
+  iprl?: number;
+  frl?: number;
 }
 
 // Skalbarhetsgranskning 2026-10-08: listan läste 200 hela bolagsposter (alla
@@ -43,8 +63,11 @@ interface StartupMetricRow {
 // över ALLA bolag upp till ett tak som rapporteras ärligt (§ 33.4).
 const PAGE_SIZE = 100;
 const TABLE_FIELDS = 'id,name,description,phase,status,irl_level,next_step';
-const METRIC_FIELDS = 'id,phase,status,irl_level,sprint_x_json';
+const METRIC_FIELDS = 'id,phase,status';
 const METRIC_MAX_ROWS = 5_000;
+const IRL_FIELDS = 'startup,assessed_at,crl,tmrl,brl,srl,trl,iprl,frl';
+// Flera bedömningar per bolag — taket ger utrymme för historik på 5 000 bolag.
+const IRL_MAX_ROWS = 20_000;
 
 const IN_FUNNEL_STATUSES = ['new', 'contacted', 'meeting-booked', 'evaluating'] as const;
 
@@ -75,7 +98,9 @@ export default async function StartupsOverviewPage({
   let metricsNotice: string | null = null;
   // `scopeToStartupField: 'id'` begränsar listan till medlemmens länkade
   // bolag (tom no-op för staff/observer). Läsningar via användarens token (RLS § 21).
-  const [tableRes, metricsRes] = await Promise.allSettled([
+  // IRL-bedömningarna är staff/observer-only (§ 21.7): en medlemstoken får
+  // en tom lista och tabellen faller då tillbaka på `irl_level`.
+  const [tableRes, metricsRes, irlRes] = await Promise.allSettled([
     listForTenant<StartupRecord>('startups', {
       sort: 'name',
       page,
@@ -88,6 +113,12 @@ export default async function StartupsOverviewPage({
       fields: METRIC_FIELDS,
       scopeToStartupField: 'id',
       maxRows: METRIC_MAX_ROWS
+    }),
+    listAllForTenant<IrlAssessmentRow>('startup_readiness_assessments', {
+      sort: '-assessed_at',
+      fields: IRL_FIELDS,
+      scopeToStartupField: 'startup',
+      maxRows: IRL_MAX_ROWS
     })
   ]);
   if (tableRes.status === 'fulfilled') {
@@ -119,6 +150,21 @@ export default async function StartupsOverviewPage({
       error: metricsRes.reason
     });
   }
+  let irlByStartup = new Map<string, number>();
+  let irlNotice: string | null = null;
+  if (irlRes.status === 'fulfilled') {
+    irlByStartup = irlAverageByStartup(irlRes.value.items);
+    if (!irlRes.value.complete) {
+      irlNotice = `IRL-snitten bygger på de ${irlRes.value.items.length} senaste av ${irlRes.value.total} bedömningar.`;
+    }
+  } else {
+    irlNotice = 'IRL-bedömningarna kunde inte läsas — IRL visas från bolagskortets reservvärde.';
+    console.error('[startups] overview irl failed', {
+      tenant: user.tenant,
+      userId: user.id,
+      error: irlRes.reason
+    });
+  }
   const pager = pagerState(page, PAGE_SIZE, totalItems);
 
   const [statusCounts, recentLeads] = await Promise.all([
@@ -135,35 +181,28 @@ export default async function StartupsOverviewPage({
   const conversionRate =
     statusCounts && leadTotal > 0 ? Math.round((100 * (statusCounts.accepted || 0)) / leadTotal) : 0;
 
-  const irlSamples = metricRows.filter((s) => s.irl_level);
-  const avgIRL = irlSamples.length
-    ? irlSamples.reduce((sum, s) => sum + (s.irl_level || 0), 0) / irlSamples.length
-    : 0;
-  const sxAvg = (key: keyof SprintXScore) => {
-    const list = metricRows.filter((s) => s.sprint_x_json?.[key]);
-    return list.length
-      ? list.reduce((sum, s) => sum + (s.sprint_x_json?.[key] || 0), 0) / list.length
-      : 0;
-  };
+  // Programsteg (Formation · Incubation · Acceleration · Alumni) + IRL per
+  // steg ur bolagens KTH IRL-bedömningar — ren, enhetstestad logik.
+  const stages = summarizeProgramStages(metricRows, irlByStartup);
+  const avgIRL = stages.irlAverage;
+  const byPhase = metricRows.reduce(
+    (acc, s) => {
+      acc[s.phase] = (acc[s.phase] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
   const metrics = {
     totalStartups: totalItems,
     activeStartups: metricRows.filter((s) => s.status === 'active').length,
-    byPhase: metricRows.reduce(
-      (acc, s) => {
-        acc[s.phase] = (acc[s.phase] || 0) + 1;
-        return acc;
-      },
-      {} as Record<string, number>
-    ),
-    byStatus: metricRows.reduce(
-      (acc, s) => {
-        acc[s.status] = (acc[s.status] || 0) + 1;
-        return acc;
-      },
-      {} as Record<string, number>
-    ),
     avgIRLLevel: avgIRL,
-    avgSprintX: { funding: sxAvg('funding'), intl: sxAvg('intl'), sustain: sxAvg('sustain'), team: sxAvg('team') }
+    irlAssessed: stages.assessed
+  };
+  /** IRL i tabellen: KTH-snittet, annars bolagskortets reservvärde (§ 52.2). */
+  const tableIrl = (s: StartupRecord): string => {
+    const kth = irlByStartup.get(s.id);
+    if (typeof kth === 'number') return kth.toLocaleString('sv-SE', { maximumFractionDigits: 1 });
+    return s.irl_level ? String(s.irl_level) : '—';
   };
 
   const tabs = buildStartupTabs({ isStaff, inflowBadge: inFunnel });
@@ -174,8 +213,8 @@ export default async function StartupsOverviewPage({
         <div className="grid grid-cols-2 gap-2 px-2">
           <RailStat label="Bolag" value={totalItems} />
           <RailStat label="Aktiva" value={metrics.activeStartups} />
-          <RailStat label="∅ IRL" value={avgIRL ? avgIRL.toFixed(1) : '—'} />
-          <RailStat label="Faser" value={Object.keys(metrics.byPhase).length} />
+          <RailStat label="∅ IRL" value={avgIRL !== null ? avgIRL.toLocaleString('sv-SE') : '—'} />
+          <RailStat label="Faser" value={Object.keys(byPhase).length} />
         </div>
       </RailSection>
 
@@ -191,14 +230,14 @@ export default async function StartupsOverviewPage({
       )}
 
       <RailSection label="Per fas">
-        {ALL_PHASES.filter((p) => metrics.byPhase[p]).map((p) => (
+        {ALL_PHASES.filter((p) => byPhase[p]).map((p) => (
           <Link
             key={p}
             href={`/startups/inkubator?phase=${p}`}
             className="flex items-center justify-between rounded-xl px-3 py-2 text-[13px] text-foreground-muted hover:bg-canvas-muted hover:text-foreground"
           >
             {phaseLabels[p]}
-            <span className="font-mono text-[11px] text-foreground-subtle">{metrics.byPhase[p]}</span>
+            <span className="font-mono text-[11px] text-foreground-subtle">{byPhase[p]}</span>
           </Link>
         ))}
       </RailSection>
@@ -239,6 +278,12 @@ export default async function StartupsOverviewPage({
           </div>
         )}
 
+        {irlNotice && (
+          <div className="rounded-xl border border-default bg-movexum-pastell-gul p-4 text-[13px] text-movexum-morkgul">
+            {irlNotice}
+          </div>
+        )}
+
         {items.length === 0 && pager.outOfRange && (
           <div className="rounded-xl border border-default bg-surface p-4 text-[13px] text-foreground-muted">
             Sidan {page} finns inte — portföljen har {pager.totalPages}{' '}
@@ -250,7 +295,7 @@ export default async function StartupsOverviewPage({
         )}
 
         {items.length > 0 || metricRows.length > 0 ? (
-          <StartupListDashboard startups={metricRows} metrics={metrics} />
+          <StartupListDashboard startupCount={metricRows.length} metrics={metrics} stages={stages} />
         ) : (
           !loadFailed && (
             <div className="rounded-2xl border border-dashed border-default p-12 text-center">
@@ -321,7 +366,7 @@ export default async function StartupsOverviewPage({
                         {statusLabels[s.status] ?? s.status}
                       </td>
                       <td className="px-3 py-3 text-right font-mono tabular-nums text-foreground-muted">
-                        {s.irl_level ?? '—'}
+                        {tableIrl(s)}
                       </td>
                       <td className="px-3 py-3 text-foreground-subtle">
                         <span className="block max-w-xs truncate">{s.next_step || '—'}</span>

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getCurrentUser, getServerPb } from '@/lib/auth.server';
 import { getServerPbUrl } from '@/lib/pb-url';
 import { DOCUMENTS, getDocument } from '@/lib/impact/data';
-import { canReadImpact } from '@platform/shared';
+import { canViewImpactCompany } from '@platform/shared';
 
 /**
  * Tenant-scopad proxy för underlag i Impact Navigator (§ 56). Filfältet är
@@ -16,12 +16,13 @@ export const dynamic = 'force-dynamic';
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }): Promise<Response> {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'Ej inloggad.' }, { status: 401 });
-  if (!canReadImpact(user.roles)) return NextResponse.json({ error: 'Åtkomst nekad.' }, { status: 403 });
 
   const { id } = await params;
   const pb = await getServerPb();
   const doc = await getDocument(pb, user.tenant, id);
   if (!doc) return NextResponse.json({ error: 'Dokumentet hittades inte.' }, { status: 404 });
+  // Staff/observer i tenanten, eller bolagsmedlem för det egna bolagets underlag (§ 56).
+  if (!canViewImpactCompany(user, doc.startup)) return NextResponse.json({ error: 'Åtkomst nekad.' }, { status: 403 });
   if (!doc.file) return NextResponse.json({ error: 'Originalfilen finns inte i plattformen (importerad post utan fil).' }, { status: 404 });
 
   try {

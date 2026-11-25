@@ -25,7 +25,13 @@
 
 import PocketBase from 'pocketbase';
 import { authenticateSuperuserWithRetry } from './lib/pb-auth-retry.mjs';
-import { SECURITY_RULES, PROTECTED_FILE_FIELDS } from './security-rules.mjs';
+import {
+  SECURITY_RULES,
+  PROTECTED_FILE_FIELDS,
+  withMoveLocks,
+  desiredRateLimits,
+  hasSuperuserRateLimit
+} from './security-rules.mjs';
 
 const PB_URL_RAW = process.env.PB_URL;
 const SU_EMAIL = process.env.PB_SU_EMAIL;
@@ -194,15 +200,36 @@ async function ensureCollection(definition, { allowDefer = true } = {}) {
     ...definition,
     fields: await normalizeFields(definition.fields, definition.name)
   };
+  // De härdade reglerna (§ 21.8, SECURITY_RULES) och flyttlåsen gäller redan
+  // här. Tidigare skrev varje sync först definitionens lösare regler (t.ex.
+  // tools.updateRule utan rollkrav) och rättade dem först i sista steget — ett
+  // fönster på några sekunder per deploy där sårbarheten var öppen.
+  // Härdade createRules gäller också direkt (FORCE_CREATE_RULES-passen sätter
+  // dem igen senare; övriga createRules lämnas åt dem).
+  const hardened = SECURITY_RULES[definition.name] || {};
+  for (const key of ['listRule', 'viewRule', 'createRule', 'updateRule', 'deleteRule']) {
+    if (Object.prototype.hasOwnProperty.call(hardened, key)) normalizedDefinition[key] = hardened[key];
+  }
+  if ((definition.type ?? 'base') === 'base') {
+    const defFieldNames = (normalizedDefinition.fields || []).map((f) => f?.name).filter(Boolean);
+    normalizedDefinition.updateRule = withMoveLocks(normalizedDefinition.updateRule, defFieldNames);
+  }
 
   try {
     const existing = await findExistingCollection(definition);
     if (existing) {
+      const existingNames = (existing.fields || []).map((f) => f.name);
       const desiredRules = {
         listRule: normalizedDefinition.listRule ?? null,
         viewRule: normalizedDefinition.viewRule ?? null,
         createRule: normalizedDefinition.createRule ?? null,
-        updateRule: normalizedDefinition.updateRule ?? null,
+        updateRule:
+          existing.type === 'base'
+            ? withMoveLocks(normalizedDefinition.updateRule ?? null, [
+                ...existingNames,
+                ...(normalizedDefinition.fields || []).map((f) => f?.name).filter(Boolean)
+              ]) ?? null
+            : normalizedDefinition.updateRule ?? null,
         deleteRule: normalizedDefinition.deleteRule ?? null
       };
       const needsRuleSync =
@@ -599,8 +626,10 @@ const USERS_SELF_UPDATE_RULE =
   '@request.auth.id = id && ' + USERS_LOCKED_SELF_UPDATE_FIELDS.map((f) => `@request.body.${f}:isset = false`).join(' && ');
 const TENANT_DIRECT = '@request.auth.tenant = tenant';
 const TENANT_VIA_STARTUP = '@request.auth.tenant = startup.tenant';
-const TENANTS_UPDATE_RULE =
-  '@request.auth.id != "" && (@request.auth.roles:each ?= "admin" || (@request.auth.roles:each ?= "incubator_lead" && @request.auth.tenant = id))';
+// Bara den egna tenanten, även för admin (§ 21.8) — samma som SECURITY_RULES.
+// Tidigare lät den här regeln en admin ändra VILKEN tenant som helst under
+// tiden mellan collection-def-steget och säkerhetssteget i varje sync.
+const TENANTS_UPDATE_RULE = SECURITY_RULES.tenants.updateRule;
 const STAFF_ROLES =
   '(@request.auth.roles:each ?= "admin" || @request.auth.roles:each ?= "incubator_lead" || @request.auth.roles:each ?= "coach")';
 const STAFF_OR_LEAD =
@@ -2768,7 +2797,10 @@ await ensureCollection({
     { name: 'founder_gender', type: 'select', required: false, maxSelect: 1, values: ['kvinna', 'man', 'mixat_team', 'vill_inte_ange'] },
     { name: 'team_members', type: 'text', required: false, max: 2000 },
     { name: 'kommun', type: 'text', required: false, max: 80 },
-    { name: 'referral_channel', type: 'text', required: false, max: 60 }
+    { name: 'referral_channel', type: 'text', required: false, max: 60 },
+    // Hemsida + övrig information (migration 1700000215, § 23.12).
+    { name: 'website', type: 'text', required: false, max: 300 },
+    { name: 'other_info', type: 'text', required: false, max: 3000 }
   ],
   indexes: [
     'CREATE INDEX idx_compass_leads_tenant_status ON compass_leads (tenant, status)',
@@ -2805,6 +2837,50 @@ await ensureCollection({
   viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`,
   createRule: `${ANY_AUTH} && ${TENANT_DIRECT}`,
   updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`,
+  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`
+});
+
+// Bilagor från en publik intag-modul (migration 1700000215, § 23.12). Bara
+// servern skapar (createRule null); filen är protected och serveras via den
+// tenant-scopade proxyn /api/inflode/leads/[id]/attachments/[aid].
+await ensureCollection({
+  id: 'compass_lead_attachments_collection',
+  name: 'compass_lead_attachments',
+  type: 'base',
+  fields: [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true },
+    { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+    { name: 'lead', type: 'relation', required: false, collectionId: 'compass_leads_collection', cascadeDelete: true, minSelect: 0, maxSelect: 1 },
+    { name: 'module_slug', type: 'text', required: false, max: 100 },
+    { name: 'session_hash', type: 'text', required: false, max: 64 },
+    {
+      name: 'file', type: 'file', required: true, maxSelect: 1, maxSize: 26214400, protected: true,
+      mimeTypes: [
+        'application/pdf',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/vnd.ms-powerpoint',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-excel',
+        'image/png',
+        'image/jpeg',
+        'image/webp'
+      ]
+    },
+    { name: 'filename', type: 'text', required: false, max: 200 },
+    { name: 'mime', type: 'text', required: false, max: 120 },
+    { name: 'size_bytes', type: 'number', required: false, min: 0 }
+  ],
+  indexes: [
+    'CREATE INDEX idx_compass_lead_att_lead ON compass_lead_attachments (lead)',
+    'CREATE INDEX idx_compass_lead_att_session ON compass_lead_attachments (tenant, module_slug, session_hash)'
+  ],
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`,
+  createRule: null,
+  updateRule: null,
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${COMPASS_STAFF_EACH}`
 });
 
@@ -2904,7 +2980,10 @@ await ensureCollection({
     { name: 'anonymous', type: 'bool', required: false },
     // Avsnittet "Dina uppgifter" (migration 1700000208, § 23.11): läge per
     // kontaktfält (hidden/optional/required). Saknat ⇒ legacy-booleanerna.
-    { name: 'contact_fields', type: 'json', required: false, maxSize: 4000 }
+    { name: 'contact_fields', type: 'json', required: false, maxSize: 4000 },
+    // Engelsk version (migration 1700000216, § 23.13): granskade översättningar
+    // av besökartexterna. Format i packages/shared/src/compass-i18n.ts.
+    { name: 'translations', type: 'json', required: false, maxSize: 1000000 }
   ],
   indexes: [
     'CREATE UNIQUE INDEX idx_compass_modules_tenant_slug ON compass_modules (tenant, slug)',
@@ -4748,12 +4827,20 @@ await ensureCollection({
 // källan saknar skapare); update Movexum-personal; delete ledning.
 // `sustainability_documents` + `sustainability_ai_jobs` är denylistade för AI.
 // Enum-värden MÅSTE spegla scripts/lib/sustainability-import.mjs.
-const SUST_RULES = (createRule) => ({
-  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
-  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`,
+// Migration 1700000213 (2026-11-09): bolagsmedlemmar får läsa och arbeta med
+// det EGNA bolagets analys (§ 21.3: `:each ?=`; `scope` = `startup` eller
+// `assessment.startup` där kollektionen saknar eget startup-fält). Dokument får
+// dessutom tas bort av den länkade medlem som laddade upp dem. Koden
+// (`canWorkOnImpactCompany`/`canWorkOnExportCompany`) är primär gräns.
+const SUST_MEMBER = (scope) => `(@request.auth.roles:each ?= "startup_member" && @request.auth.linked_startups:each ?= ${scope})`;
+const SUST_RULES = (createRule, scope = 'startup', memberDeletesOwn = null) => ({
+  listRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || ${SUST_MEMBER(scope)})`,
+  viewRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || ${SUST_MEMBER(scope)})`,
   createRule,
-  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
-  deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+  updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_EACH} || ${SUST_MEMBER(scope)})`,
+  deleteRule: memberDeletesOwn
+    ? `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_LEAD_EACH} || (${SUST_MEMBER(scope)} && ${memberDeletesOwn} = @request.auth.id))`
+    : `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
 });
 const SUST_CREATE_PINNED = (field) => `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.${field} = @request.auth.id`;
 const SUST_CREATE_TENANT = `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant`;
@@ -4822,7 +4909,7 @@ await ensureCollection({
     'CREATE INDEX idx_sustainability_gap_questions_assessment ON sustainability_gap_questions (assessment)',
     "CREATE UNIQUE INDEX idx_sustainability_gap_questions_external ON sustainability_gap_questions (tenant, external_id) WHERE external_id != ''"
   ],
-  ...SUST_RULES(SUST_CREATE_TENANT)
+  ...SUST_RULES(SUST_CREATE_TENANT, 'assessment.startup')
 });
 
 await ensureCollection({
@@ -4844,7 +4931,7 @@ await ensureCollection({
     'CREATE INDEX idx_sustainability_overrides_assessment ON sustainability_materiality_overrides (assessment)',
     "CREATE UNIQUE INDEX idx_sustainability_overrides_external ON sustainability_materiality_overrides (tenant, external_id) WHERE external_id != ''"
   ],
-  ...SUST_RULES(SUST_CREATE_PINNED('created_by'))
+  ...SUST_RULES(SUST_CREATE_PINNED('created_by'), 'assessment.startup')
 });
 
 await ensureCollection({
@@ -4911,7 +4998,7 @@ await ensureCollection({
     'CREATE INDEX idx_sustainability_documents_assessment ON sustainability_documents (assessment)',
     "CREATE UNIQUE INDEX idx_sustainability_documents_external ON sustainability_documents (tenant, external_id) WHERE external_id != ''"
   ],
-  ...SUST_RULES(SUST_CREATE_PINNED('uploaded_by'))
+  ...SUST_RULES(SUST_CREATE_PINNED('uploaded_by'), 'startup', 'uploaded_by')
 });
 
 await ensureCollection({
@@ -4994,7 +5081,7 @@ await ensureCollection({
     { name: 'answer_text', type: 'text', required: false, max: 10000 }
   ],
   indexes: ['CREATE INDEX idx_export_gap_questions_assessment ON export_gap_questions (assessment)'],
-  ...SUST_RULES(SUST_CREATE_TENANT)
+  ...SUST_RULES(SUST_CREATE_TENANT, 'assessment.startup')
 });
 
 await ensureCollection({
@@ -5013,7 +5100,7 @@ await ensureCollection({
     SUST_USER('created_by')
   ],
   indexes: ['CREATE INDEX idx_export_market_reviews_assessment ON export_market_reviews (assessment)'],
-  ...SUST_RULES(SUST_CREATE_PINNED('created_by'))
+  ...SUST_RULES(SUST_CREATE_PINNED('created_by'), 'assessment.startup')
 });
 
 await ensureCollection({
@@ -5070,7 +5157,7 @@ await ensureCollection({
     { name: 'extraction_warning', type: 'text', required: false, max: 500 }
   ],
   indexes: ['CREATE INDEX idx_export_documents_startup ON export_documents (startup)', 'CREATE INDEX idx_export_documents_assessment ON export_documents (assessment)'],
-  ...SUST_RULES(SUST_CREATE_PINNED('uploaded_by'))
+  ...SUST_RULES(SUST_CREATE_PINNED('uploaded_by'), 'startup', 'uploaded_by')
 });
 
 await ensureCollection({
@@ -6537,7 +6624,11 @@ for (const [collectionName, rules] of Object.entries(SECURITY_RULES)) {
     throw err;
   }
   const patch = {};
-  for (const [key, value] of Object.entries(rules)) {
+  const fieldNames = (collection.fields || []).map((f) => f.name);
+  for (const [key, raw] of Object.entries(rules)) {
+    // Flyttlåsen ingår i den önskade update-regeln (annars skulle låssvepet
+    // nedan och det här steget skriva om regeln fram och tillbaka).
+    const value = key === 'updateRule' && collection.type === 'base' ? withMoveLocks(raw, fieldNames) : raw;
     if ((collection[key] ?? null) !== value) patch[key] = value;
   }
   const protectedNames = PROTECTED_FILE_FIELDS[collectionName] || [];
@@ -6559,6 +6650,44 @@ for (const [collectionName, rules] of Object.entries(SECURITY_RULES)) {
     throw new Error(`säkerhetsregler för "${collectionName}" kunde inte sättas: ${describeError(err)}`);
   }
   ok(`säkerhetsregler synkade: ${collectionName} (${Object.keys(patch).join(', ')})`);
+}
+
+// 25. flyttlås (säkerhetsgranskning 2026-11-15) — SIST av reglerna. Varje
+// updateRule på en bas-kollektion med `tenant` (och `startup` där bolags-
+// medlemmar kan skriva) får låset mot att flytta posten till en annan
+// tenant/ett annat bolag. Speglar migration 1700000217; verify-baseline.mjs
+// fäller deployen om ett lås saknas.
+log('Lägger flyttlås på update-reglerna...');
+{
+  const allCollections = await pb.collections.getFullList();
+  for (const collection of allCollections) {
+    if (collection.system || collection.type !== 'base') continue;
+    const fieldNames = (collection.fields || []).map((f) => f.name);
+    const locked = withMoveLocks(collection.updateRule, fieldNames);
+    if (locked === collection.updateRule) continue;
+    try {
+      await pb.collections.update(collection.name, { updateRule: locked });
+    } catch (err) {
+      throw new Error(`flyttlås för "${collection.name}" kunde inte sättas: ${describeError(err)}`);
+    }
+    ok(`flyttlås satt: ${collection.name}`);
+  }
+}
+
+// 26. inloggningsgräns för superuser direkt mot PocketBase (§ 21.8). PB:s
+// standardregler tas bort — de stryper web-containerns delade IP. Användar-
+// inloggningen skyddas av auth-gaten (hooks/auth_gate.pb.js).
+log('Sätter PocketBase-rate-limit för superuser-inloggning...');
+{
+  const settings = await pb.settings.getAll();
+  if (!hasSuperuserRateLimit(settings.rateLimits)) {
+    await pb.settings.update({ rateLimits: desiredRateLimits(settings.rateLimits) });
+    const refreshed = await pb.settings.getAll();
+    if (!hasSuperuserRateLimit(refreshed.rateLimits)) {
+      throw new Error('rate-limit för _superusers:auth kunde inte sättas');
+    }
+    ok('rate-limit satt: _superusers:auth (10 per minut och IP)');
+  }
 }
 
 console.log('\n✓ Klart. Logga in på <din-web-url>/login med:');

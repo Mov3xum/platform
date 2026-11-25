@@ -351,7 +351,13 @@ Ingen PII, inga secrets (URL:en finns redan i klientbundeln). Svaret bär
 `pocketbase.resolved_via` = vilken env-nyckel som gav URL:en; `fallback:*`
 eller `NEXT_PUBLIC_POCKETBASE_URL` i produktion betyder att
 `POCKETBASE_URL_PRODUCTION` saknas/felstavad på web-appen (eller att
-`MOVEXUM_ENV` inte är `production`, då läses `_STAGING`-paret).
+`MOVEXUM_ENV` inte är `production`, då läses `_STAGING`-paret). Svaret bär
+även `superuser.configured`/`via` (`describeSuperuserConfig`, aldrig värden):
+`false` betyder att `POCKETBASE_SUPERUSER_EMAIL/PASSWORD` saknas på
+web-appen i Coolify för den miljön — då felar "Skapa användare", rollbyten
+och alla superuser-reserver med "superuser-credentials saknas i web-appen"
+(incident 2026-11-09, produktion). GitHub-secreten `PB_SU_PASSWORD_PRODUCTION`
+når bara CI, aldrig containern.
 **Runtime, inte build-time:** Next.js inlinar `process.env.NEXT_PUBLIC_*`
 vid bygget (även i serverbundlar), så `pb-url.ts` läser alla nycklar via
 beräknad nyckel (`readEnv`) — ett värde satt i Coolify vinner därmed alltid
@@ -1008,6 +1014,7 @@ omsättning.
 | `ai_funding_radar` | begränsad | Matchar utlysningar mot bolagsfas, vägledande |
 | `ai_portfolio_risk` | begränsad | Bara whitelistade fält, rankar bolag — ej personer |
 | `web_search` (chatt-verktyg, § 9.8) | begränsad | Internetsökning via Mistral Web Search (EU) på personalens opt-in; bara sanerad sökfråga lämnar plattformen; källor visas |
+| Quizets fritextbedömning (`lib/compass/quiz-ai.ts`, § 23.14) | begränsad | Pekar en besökares fritextsvar mot en av quizets resultatprofiler enligt personalens bedömningsinstruktion; fast låg vikt, deterministisk reserv, besökaren informeras, personalen ser motiveringen på leadet; bedömer svarets sakinnehåll, aldrig personen |
 | `procurement-extract` (AI-utläsning av upphandlingsunderlag, § 39.3) | begränsad | Läser ut strukturerade uppgifter ur ett dokument staff själva laddat upp till ett förifyllt utkast; människan granskar och sparar; ingen profilering |
 | `create_procurement` / `create_procurement_calloff` / `update_procurement_calloff` (chatt-verktyg, § 39.4) | n/a | Deterministiska mutationer via det delade skrivlagret; uppföljningsregler expanderas utan inferens |
 | `create_funding_project` / `create_support_check_type` / `create_support_check_application` (chatt-verktyg, § 46) | n/a | Deterministiska utkast via skrivlagret (checktyp inaktiv, ansökan `draft`); inskick, bedömning, finansiering och beslut är agent-nekade |
@@ -1217,6 +1224,11 @@ kontrollkatalogen i 27002 (2022, ~93 kontroller).
   försök per IP+e-post (8/15 min) och per IP (40/15 min) via
   `lib/rate-limit.ts` (delad mellan containrar via PB-kollektionen
   `rate_limits`, processminne som reserv — § 21.8).
+  Gränserna gäller bara Next-routen; direkt mot PocketBases publika adress
+  skyddas användarinloggningen av auth-gaten och superuser-inloggningen av
+  PB:s egen rate-limit (§ 21.8 "Flyttlås, tenant-vakt och auth-gate"). Byte
+  av lösenord på `/konto` begränsas till 5 felaktiga försök per 15 min och
+  konto.
 - **Output-säkerhet (XSS):** allt användar-/AI-genererat innehåll som
   renderas via `dangerouslySetInnerHTML` MÅSTE gå genom
   `apps/web/src/lib/safe-html.ts` (`escapeHtml` / `inlineMarkdown` /
@@ -2658,6 +2670,18 @@ PowerPoint"). Stegen persisteras dessutom PII-fritt på assistant-meddelandet
 - **PII (GDPR §5):** stegens etiketter är på kollektions-/dokumenttyp-nivå —
   aldrig filter, fältvärden eller användarinmatning. `steps` matas ALDRIG
   tillbaka in i modellprompten (historiken byggs bara från `role`/`content`).
+- **Detaljnivå (2026-11, `lib/ai/step-detail.ts`, ren + enhetstestad):** varje
+  steg visar även verktygsnamnet (`aggregate_collection`), en detaljrad om HUR
+  det körs (`summa av amount_sek per startup · filter på date`) och vad det gav
+  (`14 grupper · 37 rader · 320 ms`). Tidigare visades bara "Sammanställer
+  kapitalrundorna" ×13 utan att man kunde se skillnad på stegen. Detaljen
+  består ENDAST av schema-nivå (fältnamn — strängliteraler strippas ur filtret
+  innan fältnamnen plockas, och fri text som inte är en identifierare släpps
+  aldrig igenom) och resultatstorlek (antal rader/träffar/grupper) — aldrig
+  filtervärden, sökfrågor, summor eller fältdata. Ett steg rapporteras klart
+  när JUST det anropet är färdigt (inte när turens parallella läsningar är
+  klara). Identiska steg i följd slås ihop till en rad med ×N; under färdiga
+  svar är spåret ihopfällt bakom "N steg".
 - **Ärlig agent:** `STAFF_TOOL_GUIDANCE` (i `staff-chat.ts` och `chat.ts`)
   förbjuder uttryckligen att lova bakgrundsarbete ("strax", "i bakgrunden",
   "återkom om en stund") — turen är synkron, så ett dokument måste skapas via
@@ -3271,7 +3295,10 @@ list/view; createRules orörda; `:each ?=` per § 21.3):
   list/view scopas till den egna tenanten (`@request.auth.tenant = id`).
 - **Medlem-scopade (egen-bolag) tillagda:** `agreement_signatures`,
   `de_minimis_units`/`de_minimis_unit_orgnr` (via `unit.startup`)/`de_minimis_stod`,
-  `event_signups` (sitt-bolags + inbjuden `user`).
+  `event_signups` (sitt-bolags + inbjuden `user`). **2026-11 (migration
+  1700000213):** Impact Navigators och Export Labs tolv kollektioner
+  (`sustainability_*`/`export_*`; frågor, justeringar och marknadsval via
+  `assessment.startup`) — se § 56/§ 58.
 - **Staff/observer-only tillagda:** `contacts` (PII inkl. art. 9 `gender`),
   `service_time_entries`, `startup_service_costs`,
   `startup_readiness_assessments`, `startup_state_aid_periods`,
@@ -3375,10 +3402,8 @@ varje användartoken-create MÅSTE skicka `tenant: user.tenant`/`actor.tenant`.
 Kollektioner UTAN tenant-fält (`activities`, `notes`, `milestones`,
 `agreements`, `startup_team_members`, `partner_engagements`,
 `startup_contacts`, `compass_questions`/`_messages`/`_responses`) skyddas av
-PB-hooken **`hooks/tenant_guard.pb.js`** (`onRecordCreateRequest` +
-`onRecordUpdateRequest`): varje satt förälder (bolag, partner, kontakt, modul,
-konversation) slås upp och requesten nekas med 403 om förälderns tenant inte
-är den inloggades; superuser-requests släpps igenom. `compass_lead_sources`
+PB-hooken **`hooks/tenant_guard.pb.js`**, som sedan 2026-11-15 gäller ALLA
+bas-kollektioner (se "Flyttlås, tenant-vakt och auth-gate" nedan). `compass_lead_sources`
 (plattformsbred) skrivs bara av superuser. **PB:s JSVM kör varje
 hook-hanterare i en isolerad kontext** — konstanter/hjälpfunktioner måste
 deklareras INNE i hanteraren (`schedule_tick`/`survey_dispatch_tick` läste en
@@ -3447,6 +3472,55 @@ vitlistas (`lib/report-section.ts`). Investerare/affärer skrivs bara av
 admin/incubator_lead/coach/mentor. `/api/chat/stream` har en gräns på 60
 turer per 5 min och användare.
 
+**Flyttlås, tenant-vakt och auth-gate (säkerhetsgranskning 2026-11-15).**
+Granskningen visade, verifierat mot PB 0.23.4 lokalt, att update-reglerna
+prövade postens NUVARANDE `tenant`/`startup` men inte det inskickade värdet:
+en coach kunde med sin egen token flytta ett bolag till en annan tenant och en
+bolagsmedlem flytta sin KPI-rad till ett annat bolag och en annan tenant.
+Dessutom kunde användar- och superuser-lösenord gissas obegränsat direkt mot
+PocketBases publika adress (Next-routens gränser gäller inte där). Åtgärdat i
+tre lager:
+- **Flyttlås i reglerna.** `withMoveLocks()` (`scripts/security-rules.mjs`)
+  lägger `TENANT_MOVE_LOCK` på VARJE updateRule på en bas-kollektion med
+  `tenant` och `STARTUP_MOVE_LOCK` där regeln släpper in bolagsmedlemmar
+  (`linked_startups`) — samma värde får skickas igen, bara Movexum-personal
+  byter bolag. Migration **1700000217**; `setup-via-api.mjs` lägger låsen
+  redan i collection-def-steget (och ett svep sist) och `verify-baseline.mjs`
+  fäller deployen om ett lås saknas. Collection-defs i synken använder nu
+  dessutom de härdade reglerna direkt (`SECURITY_RULES`, även
+  `TENANTS_UPDATE_RULE`) — tidigare skrev varje sync först de lösa reglerna
+  och rättade dem sist, ett fönster på sekunder per deploy (126 → 3
+  omskrivningar per sync; de tre kvar är likvärdiga createRules på
+  kollektioner utan tenant-fält).
+- **Tenant-vakten** (`hooks/tenant_guard.pb.js`) gäller alla bas-kollektioner
+  på create och update från API:t: `tenant` får inte ändras, en relation får
+  inte peka på en post i en annan tenant (förälderns `tenant`, annars dess
+  `startup.tenant`), och en ren bolagsmedlem får bara peka på sina egna bolag
+  (direkt eller via en förälder med `startup`). Bara relationer som ÄNDRAS
+  prövas. Vakten är ENDA skyddet vid create (createRules kan inte joina,
+  § 21.3) — `verify-baseline.mjs` provar den live (tillfällig tenant + bolag,
+  app-användaren försöker skriva en anteckning där, raderas efteråt).
+- **Auth-gate + superuser-gräns.** `hooks/auth_gate.pb.js`: när PB-resursen
+  har `MOVEXUM_PB_AUTH_GATE_SECRET` kräver användarinloggning, OTP,
+  lösenordsåterställning, verifiering och e-postbyte headern
+  `X-Movexum-Auth-Gate` med samma värde — före lösenordskontrollen, så en
+  direkt gissning får 403. Webbappen skickar den (`lib/pb-auth-gate.ts`,
+  login-route, `loginAction`, återställning, lösenordsbyte); CI:s
+  verify-baseline läser `MOVEXUM_PB_AUTH_GATE_SECRET_<MILJÖ>` från GitHub-
+  secrets. **Utrullning:** sätt värdet på web-appen och som GitHub-secret
+  först, sedan på PB-resursen. Utan värde på PB är gaten vilande och
+  verify-baseline varnar. PB:s egen rate-limit (migration **1700000218**,
+  `desiredRateLimits()`) gäller `_superusers:auth`, 10 per minut och IP;
+  PB:s standardregler tas bort (de stryper web-containerns delade IP).
+  Därför går ALL superuser-inloggning i appen via den cachade
+  `getSuperuserPb()`/`getSuperuserPbOrNull()` (`lib/integrations/
+  credentials.ts`) — skriv aldrig en egen `_superusers.authWithPassword`.
+- `/api/health` → `pb_auth_gate.web_secret_set` visar om web-appen har
+  värdet (aldrig värdet). `scripts/security-probe.mjs` kör attackerna mot en
+  LOKAL PB (vägrar annan värd) och kontrollerar att legitima flöden fungerar.
+  Den döda klientmodulen `lib/pocketbase.ts` (inloggning direkt från
+  webbläsaren) är borttagen.
+
 **Kända begränsningar (medvetna).** Processlokala cacher (superuser-token,
 Outlook-agenda, webbflöden, frågeembeddings) är bara effektivitet och får
 skilja sig mellan containrar. Bakgrundsarbete som startas från en request
@@ -3461,7 +3535,8 @@ Låset förnyas inte — `fn` måste bli klar inom TTL (15 s).
 
 En ren `startup_member` ska **inte** se samma vyer som Movexum-personal.
 Bolagsmedlemmen får en egen, kortare rail med bara det som rör det egna
-bolaget under inkubatorprogrammet. Railen har exakt fem rubriker:
+bolaget under inkubatorprogrammet. Railen har sju rubriker (fem
+ursprungliga + Impact Navigator och Export Lab sedan 2026-11):
 
 1. **Min översikt** (`/min-oversikt`) — information om inkubatorprogrammet och
    Movexum, bolagsstatus, de minimis-status, egna uppgifter ("nödvändiga
@@ -3475,7 +3550,11 @@ bolaget under inkubatorprogrammet. Railen har exakt fem rubriker:
    dokument som blivit output av aktiviteter (utbildningsdokument), plus
    medlemmens egna genererade/uppladdade filer.
 4. **De minimis** (`/de-minimis`) — befintlig modul (§ 20).
-5. **Community** (`/inflode/community`) — platshållare för co-startup-interaktion ("bara
+5. **Impact Navigator** (`/impactnavigator`) — bolagets egen
+   hållbarhetsanalys (§ 56); medlemmen landar direkt i sitt bolag.
+6. **Export Lab** (`/exportlab`) — bolagets egen internationaliseringsanalys
+   (§ 58); samma mönster.
+7. **Community** (`/inflode/community`) — platshållare för co-startup-interaktion ("bara
    rubriken för nu"). Alumni-/partnerdatan är staff/observer-only (§ 21).
 
 ### 22.2 Implementation
@@ -4187,6 +4266,244 @@ formuläret hade inget avslutssteg alls.
 - **Inte byggt:** aggregerad statistik per kommun/kontaktväg i
   `/inflode/analysis` och k-anonym könsfördelning per period — nästa steg när
   underlaget finns.
+
+### 23.12 Hemsida, övrig information och bilagor i "Dina uppgifter" (2026-11-11)
+
+**Behov (inflödesansvarig).** De mer drivna idébärarna har ofta ett pitch
+deck eller annat underlag de vill bifoga, en hemsida och lite extra att
+berätta som inte ryms i frågorna. Avsnittet "Dina uppgifter" (§ 23.11) har
+därför tre nya fält, konfigurerbara per modul i steg 4 som de övriga
+(Visas inte / Frivillig / Obligatorisk):
+
+| Fält | Lagras | Regler |
+|------|--------|--------|
+| `website` — Hemsida | `compass_leads.website` (text ≤ 300) | `normalizeWebsite`: `https://` läggs till när protokoll saknas, bara http(s) med en värd med punkt, inga inloggningsuppgifter i adressen; ogiltigt ⇒ som om inget angetts. Visas som länk (`rel="noopener noreferrer nofollow"`) i lead-vyn, i notismejlet och i CSV-exporten. |
+| `other_info` — Övrig information | `compass_leads.other_info` (text ≤ 3000) | Fritext, radbrytningar behålls, personnummer-saneras. Lead-vyn + notismejlet; inte i exporten. |
+| `attachments` — Bilagor | `compass_lead_attachments` (ny kollektion) | PDF, PowerPoint, Word, Excel, PNG/JPG/WebP; högst 5 filer à 25 MB (`validateContactAttachment`, `CONTACT_ATTACHMENT_*`). |
+
+- **Källa av sanning:** `packages/shared/src/compass-contact.ts` (nycklar,
+  metadata, `normalizeWebsite`, `validateContactAttachment`,
+  `cleanAttachmentFilename`; enhetstestat). `CONTACT_SECTION_DEFAULT` visar
+  alla tre som frivilliga i nya intag-moduler. Migration **1700000215**
+  lägger till dem som frivilliga i befintliga intag-moduler med lagrad
+  konfiguration (bara när nyckeln saknas — ett uttryckligt val rörs aldrig);
+  legacy-moduler och enkäter rörs inte.
+- **Uppladdningsflödet:** besökaren laddar upp direkt vid val (knapp eller
+  dra-och-släpp) till `POST /api/public/m/<slug>/attachments` (route handler,
+  § 18.2-mönstret; `DELETE` tar bort en fil före inskick). Routen resolvar
+  modulen på slugen, härleder tenant FRÅN modulen, kräver att modulen sparar
+  lead och visar bilagefältet, tillämpar samtyckesgrinden, rate-limitar per
+  IP (20/10 min) och validerar typ/storlek (PB:s `mimeTypes` sniffar dessutom
+  innehållet). Filen nycklas på flödets sessionstoken — bara **SHA-256-hashen**
+  (`session_hash`) lagras — och kopplas till leadet i `finalizeLead`
+  (`linkSessionAttachments`) när flödet slutförs. Okopplade filer (besökaren
+  slutförde aldrig) gallras av `retention_tick` efter 2 dygn
+  (`MOVEXUM_RETENTION_COMPASS_UNLINKED_ATTACHMENTS_DAYS`).
+- **"Bilagor krävs" räknas server-side:** `parsePublicContactSubmission`
+  räknar sessionens filer i databasen innan valideringen — klientens siffra
+  litas aldrig på. Admin-förhandsgranskningen laddar inte upp (fältet visar
+  en not) och kravet hoppas över där.
+- **Personalen:** lead-vyn (`/inflode/leads/<id>`) listar bilagorna med
+  storlek; nedladdning via den tenant-scopade proxyn
+  `/api/inflode/leads/<id>/attachments/<aid>` (admin/incubator_lead/coach,
+  bilagan måste höra till leadet, alltid `Content-Disposition: attachment` —
+  besökarens fil körs aldrig på appens origin). Notismejlet säger hur många
+  filer som bifogats; filerna mejlas aldrig.
+- **`compass_lead_attachments`:** `tenant` (cascade), `lead` (cascade, tomt
+  tills slutförande), `module_slug`, `session_hash`, `file` (**protected**),
+  `filename`, `mime`, `size_bytes`, autodate. list/view/delete =
+  kompass-personal i tenanten; **create/update = null** (bara servern).
+  Speglat i `setup-via-api.mjs`, asserterat i `verify-baseline.mjs`
+  (must-exist, `MUST_BE_SERVER_CREATE_ONLY`, AI-denylist,
+  `compass_leads.website/other_info` i `REQUIRED_APP_FIELDS`).
+- **GDPR § 5 / AI:** bilagorna är tredjepartsmaterial som kan bära
+  personuppgifter — **denylistade för AI** (`redaction.ts`), extraheras inte
+  och når aldrig AI-sammanställningen. Filnamn loggas aldrig. Rättslig grund
+  oförändrad (berättigat intresse + samtyckesgrinden); cascade via lead/tenant
+  ger art. 17. Riskklass oförändrad — ingen ny AI-funktion.
+
+### 23.13 Engelsk version av publika moduler — språkknapp Svenska/English (2026-11-11)
+
+**Behov.** Idébeskrivningsmodulen (och andra intag-moduler) behövs på
+engelska. **Alla** publika moduler (`/m/<slug>`) har en tydlig språkknapp
+**🌐 Svenska | English** uppe till höger i sidhuvudet (alla mallar, även
+mobil). Valet är en vanlig länk (`?lang=en`, övriga parametrar som UTM och
+`?om=` bevaras) och följer med till en kedjad nästa modul. **Modulen
+översätts automatiskt när en besökare väljer English** — det finns inget
+redaktörssteg och inget att publicera (beslut av maintainer 2026-11-12: det
+första utförandet hade ett eget steg "Engelska" i modul-editorn med
+granskning och publicering; det togs bort).
+
+- **Två lager.** *Gränssnittet* (steg, knappar, samtyckesgrind, kontakt-
+  avsnittet, kontaktpreferens, bilagor, felmeddelanden, chattens fasta
+  texter, resultat-/sammanfattnings-PDF och sammanfattningsmejlet) har fasta
+  sv/en-ordböcker (`COMPASS_UI` i `packages/shared/src/compass-i18n.ts`,
+  `CONTACT_FIELD_META_EN`/`CONTACT_OPTION_LABEL_EN` i `compass-contact.ts`;
+  testet låser att ordböckerna har samma nycklar). Komponenterna läser
+  språket ur `CompassLocaleProvider` (`components/compass/locale.tsx`) —
+  default svenska. *Modulens innehåll* (namn, eyebrow, rubrik, ingress,
+  målgrupp, startsida, samtycke, chattens första meddelande, tack, frågor +
+  hjälptext + svarsalternativ, resultatprofiler) maskinöversätts och lagras i
+  `compass_modules.translations` (json, migration **1700000216**):
+  `{ en: { texts: { <nyckel>: text }, sources: { <nyckel>: hash }, updated_at } }`.
+  Nycklarna härleds ur modulen (`compassTranslatableEntries`: `m.<fält>`,
+  `q.<fråge-id>.prompt|help|c.<värde>`, `b.<profil>.title|body|tip.<n>|cta`).
+  En text utan engelska faller tillbaka på svenskan.
+- **Svaren lagras på värdet** — bara etiketterna byts. Lead, quiz-
+  poängsättning, hopplogik och statistik påverkas inte av språket; personalen
+  ser frågorna på svenska i lead-vyn och AI-sammanställningen.
+- **Automatisk översättning (`lib/compass/auto-translate.ts`,
+  `ensureEnglishTexts`).** Sidan `/m/<slug>?lang=en` räknar fram vilka texter
+  som saknar engelska eller vars svenska källa ändrats (`sources[nyckel]` =
+  FNV-1a-hash av källan, `compassEntriesToTranslate`), översätter BARA dem
+  (`lib/ai/compass-translate.ts`: Mistral medium → large → small, EU,
+  batchar parallellt, isolerad prompt där texten är data) och sparar
+  resultatet på modulen (`mergeCompassTranslation`, ren + enhetstestad: en
+  text som inte kunde översättas behåller sin gamla hash och försöks igen;
+  texter för borttagna frågor rensas). Nästa besökare får de sparade
+  texterna utan AI-anrop. Ändrar personalen en svensk text översätts just den
+  om vid nästa engelska visning — inget att komma ihåg. Robusthet: metadata
+  och sida delar EN översättning per request (React `cache`), samtidiga
+  besökare delar en pågående översättning per modul (in-process), ett
+  misslyckat försök ger 5 min paus per modul (ingen anropsstorm), besökaren
+  väntar högst 15 s (sedan visas det som finns medan översättningen går
+  klart i bakgrunden), och månadstaket (§ 9.6) prövas först. **Fail-soft i
+  varje led:** saknad nyckel, nått tak, modellfel eller ett schema utan
+  fältet ⇒ det som redan är översatt + resten på svenska; sidan går aldrig
+  sönder. Tokens loggas anonymt i `ai_usage_events` (surface `suggestions`,
+  § 21.8). Förhandsgranskningen (`/inflode/m/<slug>?lang=en`, knappen
+  English) kör samma funktion och sparar — personalen kan alltså se
+  engelskan (och värma upp den) innan första besökaren.
+- **Publika routar:** `visitorLocale(module, body.lang)`
+  (`lib/compass/public.ts`) ger språk + modulens sparade engelska texter;
+  routarna översätter aldrig själva (sidan har redan gjort det). Gäller
+  quiz-resultat (`translateResultBucket`), resultat-PDF (texter fortsatt bara
+  ur modulens lagrade data, § 21.8), chattens avslutssteg, sammanfattningen
+  (sparar `visitor_language` på konversationen så `/summary-pdf` renderar
+  rätt språk) och mejlet.
+- **AI-chatten på engelska:** `intakeReply({ locale: 'en' })` lägger
+  `ENGLISH_REPLY_RULE` SIST i systemprompten (modulens svenska prompt kan inte
+  ta bort den) — assistenten svarar på engelska och översätter frågebanken
+  när den ställer frågorna; sammanfattningen till besökaren skrivs på
+  engelska.
+- **Följdfix:** den publika chattens avslutssteg fick tidigare inga frågor
+  (sidan hämtade bara frågor för formulär/quiz), så en chattmodul med
+  obligatoriska frågor kunde inte slutföras; nu hämtas frågorna för alla
+  flöden.
+- **Regelefterlevnad — dokumenterad avvikelse från § 10.1.** Huvudregeln
+  "AI-output publiceras aldrig utan granskning" gäller inte här: den engelska
+  texten visas för besökare utan att en människa läst den (maintainerns
+  uttryckliga beslut, se ovan). Avvägningen: översättningen är en
+  språkväxling av personalens EGNA, redan publicerade texter (inget nytt
+  innehåll, inga beslut, ingen profilering), svaren lagras på värdet så en
+  svag översättning aldrig påverkar lead eller poäng, och den engelska sidan
+  säger i sidfoten **"Automatically translated from Swedish."**
+  (`COMPASS_UI.autoTranslated` — samma upplysning som en vanlig
+  maskinöversatt webbsida ger; ordet "AI" står medvetet inte med, beslut av
+  maintainer 2026-11-12. Översättning ändrar inte textens innebörd och faller
+  under undantaget i EU AI Act art. 50.2). Riskklass **begränsad**.
+  Samtyckestexten (`consent_note`) maskinöversätts också — den svenska är
+  den gällande; behövs en juridiskt granskad engelsk text får ett
+  redaktörsfält läggas tillbaka för just den. Ingen PII (modulens egna
+  texter); inga nya fält i `lib/ai/context.ts`. Skrivningen görs med den
+  cachade superusern på en modul som resolvats på sin publika slug, och bara
+  fältet `translations` rörs. Speglat i `setup-via-api.mjs`, asserterat i
+  `verify-baseline.mjs` (`REQUIRED_APP_FIELDS`); utan migrationen sparas
+  inget (loggas, 5 min paus) och varje paus-fönster kostar en översättning.
+- **Inte byggt:** manuell rättning av en enskild engelsk text (ändra den
+  svenska källan så översätts den om), fler språk än engelska (modellen tar
+  fler nycklar under `translations`, men UI och ordböcker finns bara för
+  sv/en), engelska
+  serverfel i sällsynta vägar (rate-limit/sessionsfel svarar fortfarande på
+  svenska), bilageuppladdningens serverfel och ett språkfält på leadet.
+
+### 23.14 AI-bedömning av fritextsvar i quiz (2026-11-19)
+
+**Behov.** Ett quiz räknade bara poäng på svarsalternativ; fritextfrågor
+("Beskriv din idé") gav inga poäng och lästes av AI först i
+sammanställningen till personalen. Nu kan fritextsvaren vägas in i
+resultatprofilen besökaren får.
+
+- **Fältet återanvänds:** quizets bedömningsinstruktion är modulens
+  befintliga `system_prompt` (samma fält som chattens egna systemprompt —
+  ingen migration). Modul-admin steg 3 visar det för quiz som **"Så bedömer AI
+  fritextsvaren"**, under resultatprofilerna; sparas med Spara. Tomt fält ⇒
+  ingen AI, quizet räknas som förut. Editorn håller texten i ett
+  kontrollerat state + dolt fält, så ett typbyte inte tappar den.
+- **Prompten byggs som chattens** (`buildQuizTextScoringPrompt` i
+  `lib/compass/prompts.ts`): fast inledning → personalens instruktion → fasta
+  regler SIST (svaren är data, bedöm bara sakinnehållet — aldrig språk,
+  stavning eller personliga egenskaper, högst en profil per svar eller null,
+  bara JSON). En instruktion kan inte ta bort reglerna. Profilerna och svaren
+  skickas som JSON i användarmeddelandet.
+- **Ren logik** (`packages/shared/src/compass-quiz-ai.ts`, enhetstestad):
+  bara besvarade `short_text`/`long_text`-frågor bedöms (högst 8, 2 000
+  tecken); modellens svar tolkas strikt (`parseQuizTextVerdicts` — okänd
+  profil ⇒ inga poäng, okänd fråga/dubblett kastas, otolkbart ⇒ ingenting);
+  varje utslag ger profilen **samma vikt som quizets lättaste poängsatta
+  kryssfråga** (`quizTextWeight`, 1 utan poängsatta kryss) — texten kan avgöra
+  ett jämnt läge men inte köra över kryssen. Bara topp-hink-quiz med minst två
+  profiler (`quizSupportsTextScoring`); intervall-quiz och enkäter (§ 43) är
+  alltid deterministiska.
+- **En väg** (`scoreQuizSubmission` i `lib/compass/quiz-ai.ts`): den publika
+  routen och admin-previewen anropar samma funktion (ersätter deras inline-
+  `scoreQuiz`/`resolveBucket`). `mistral-small-latest`, temperatur 0,
+  JSON-läge, 12 s tidsgräns. **Best-effort:** saknad nyckel, nått månadstak
+  (§ 9.6), tak per tenant/timme (300), tidsgräns eller otolkbart svar ⇒
+  resultatet räknas på kryssfrågorna. Tokens loggas i `ai_usage_events`
+  (surface `suggestions`, anonymt för publika flöden).
+- **Transparens (art. 50):** svaret bär `ai_assessed`; resultatskärmen visar
+  då "Dina fritextsvar har tolkats av AI och vägts in i resultatet"
+  (`COMPASS_UI.aiAssessedNote`, sv/en). **Människa-i-loopen:** vilket svar
+  som pekades mot vilken profil, vikten och modellens motivering sparas i
+  leadets `notes` (Anteckningar i lead-vyn, märkt "genererad av AI –
+  verifiera"); `quiz_score` inkluderar AI-poängen.
+- **GDPR § 5:** personnummer saneras före anropet och i motiveringen; loggen
+  bär aldrig svar eller instruktion. Kontaktuppgifterna ("Dina uppgifter")
+  skickas aldrig till bedömningen — bara fritextfrågornas svar.
+- **Riskklass: begränsad** (§ 10.1) — resultatet är vägledande feedback till
+  besökaren, inget beslut om antagning; personalen följer upp leadet oavsett
+  profil.
+- **Inte byggt:** bedömningsmall per fråga, valbar vikt, promptversion på
+  leadet. Flödet är inte kört mot Mistral från byggmiljön — testa i
+  förhandsgranskningen (`/inflode/m/<slug>`) innan publicering.
+
+### 23.15 Publika sidans sidhuvud, samtycke i slutet & sparning i modul-admin (2026-11-25)
+
+- **Sidhuvud:** liten logotyp i sidans övre vänstra hörn (`mx-compass-topbar-page`,
+  utanför innehållskolumnen) + språkväxlaren till höger, i alla mallar.
+  **Målgruppen (`target_audience`) är intern** — den visas inte längre på
+  `/m/<slug>` och ingår inte i `toPublicModule()`.
+- **Samtyckestexten visas där besökaren slutför, inte som grind på första
+  sidan** (beslut av maintainer). `ConsentNotice` renderar "När du slutför
+  bekräftar du att du har tagit del av hur vi hanterar dina uppgifter: …" +
+  modulens `consent_note` vid sista steget i formulär/quiz, i chattens
+  avslutssteg och under chattens skrivfält (chatten lagrar per tur).
+  Första sidan visas bara när modulen har en startsida (§ 23.11).
+  **Följd för § 23.10 (dataminimering):** när modulen har en samtyckestext
+  skickar formulär/quiz INGA svar i `/progress` före inskick — bara steg
+  och antal ("2 av 5 frågor besvarade"), så ett pågående/avbrutet lead är
+  PII-fritt tills besökaren sett texten och slutfört. Servern kräver
+  oförändrat `consent:true` på inskicken.
+- **Typografi:** hela `.mx-compass-landing` (även `/u/`, `/s/`, `/e/`) —
+  rubriker Sora Bold (700), allt övrigt Nunito Sans.
+- **Layout:** *Heltäckande* är vänsterställd tvåkolumn på desktop (rubrik
+  till vänster, flödet till höger) i stället för en smal centrerad kolumn.
+  På mobil (≤ 640 px) ligger flödet inline på sidan utan svävande kort
+  (hårlinje + full bredd); *Heltäckande* blir ett ark kant i kant som
+  fyller skärmen, *Färgpanel* behåller sitt kort (överlappar panelen).
+- **Modul-admin — "det hoppar tillbaka":** `updateModuleAction` redirectade
+  till `?ok=…`, vilket byter sidans segmentnyckel och monterade om hela
+  editorn (steget hoppade till Grunder, osparade frågor försvann). Den
+  **returnerar nu kvittot** och editorn visar bannern själv. **Spara och
+  stegbyte sparar alla ändrade frågor** (`QuestionsManagerHandle.saveDirty`;
+  varje frågekort registrerar sin sparfunktion och märks "osparade
+  ändringar") — tidigare sparades bara den fråga vars egen knapp man tryckte
+  på. En tömd hjälptext sparas nu (skickades som `undefined` och låg kvar).
+  Redirecta aldrig en server action tillbaka till samma sida med ny query
+  för att visa ett kvitto — returnera det.
+
+---
 
 ## 24. AI-sorterat filarkiv — ämnes-/bolagsmappar (/filer)
 
@@ -6570,7 +6887,8 @@ roll**:
   saknas i sidmenyn. Skriv därför en idempotent datamigration som lägger till
   id:t i befintliga listor för de roller vars standard innehåller det
   (precedens: **1700000174** för `projekt`/`checkar`, **1700000177** för
-  `onskemal`, **1700000180** för `min_profil` — union, tar aldrig bort,
+  `onskemal`, **1700000180** för `min_profil`, **1700000214** för
+  `impactnavigator`/`exportlab` till `startup_member` — union, tar aldrig bort,
   rör inte `null`). Ingen spegling i `setup-via-api.mjs` (data, inte schema).
 - **Säkerhetsgräns oförändrad:** `canAccessModuleForUser(roles, id,
   enabledModules)` = `canAccessModule` (rollen, `rolesAllowed`) **och**
@@ -9766,6 +10084,20 @@ team (TMRL), affär (BRL), IPR (IPRL), finansiering (FRL), teknik (TRL)**.
   `/startups/<id>/utveckling#irl`.
 - **Riskklass (EU AI Act):** n/a — mänsklig bedömning + deterministisk
   presentation, ingen AI-inferens.
+- **Portföljöversikten (`/startups`, 2026-11) läser IRL härifrån.** IRL-
+  snittet, tabellens IRL-kolumn och raden **Per programsteg** (Formation ·
+  Incubation · Acceleration · Alumni) hämtas ALLTID ur bolagens KTH IRL-
+  bedömningar — samma rad per bolag som bolagskortets radar visar som
+  senaste (`irlAverageByStartup`/`summarizeProgramStages` i den rena,
+  enhetstestade `packages/shared/src/program-stages.ts`); `startups.irl_level`
+  är bara reserv i tabellen när ett bolag saknar bedömning. Stegen mappar
+  faserna (`PROGRAM_STAGE_PHASES`: inflöde/lead/Boost Chamber ⇒ Formation,
+  prescale/acceleration ⇒ Acceleration; `paus` står utanför och räknas
+  separat) och länkar till kortvyn (`/startups/inkubator?stage=<steg>`).
+  Sprint X-medelvärdena ("Medelvärden — 4 axlar") och status-chipsen är
+  borttagna från översikten. Läsningen går med användarens token (RLS
+  § 21.7: medlem ⇒ tom lista ⇒ reservvärdet); kapning/läsfel visas som
+  banner (§ 33.4). Ingen ny dataväg; riskklass n/a.
 
 
 ---
@@ -10246,10 +10578,9 @@ och `talent_needs_published` — kan kopplas som indikator i Mål & VP (§ 42).
   bilaga III (högrisk).
 - **§ 21/ISO 27001:** RLS enligt ovan; skrivlagret verifierar bolags-
   tillhörighet (`access.linkedStartups`) och roll innan `writeWithFallback`;
-  intressen skapas bara av servern. Känd begränsning: `talent_needs.createRule`
-  kan inte joina bolagstillhörighet (§ 21.3) — en medlem kan via direkt-API
-  skapa ett utkast för ett annat bolag i samma tenant; det syns bara för det
-  bolaget + Movexum och publiceras aldrig utan granskning.
+  intressen skapas bara av servern. `talent_needs.createRule` kan inte
+  joina bolagstillhörighet (§ 21.3); sedan 2026-11-15 nekar tenant-vakten
+  (§ 21.8) att en medlem skapar ett behov för ett annat bolag.
 - **Inte byggt (medvetet):** CV-uppladdning, betyg, lärosätesportal,
   påminnelsemejl inför gallring (studenten förlänger själv på sin sida),
   chatt-verktyg för agenten, uppföljningsregler (§ 40-adapter) och
@@ -10743,16 +11074,42 @@ kodkarta: `docs/integrations/impact-navigator.md`.
   PB v0.23.4:s tysta regel-nekande; PB:s fältfel svaras i klartext). Filproxy
   `/api/impactnavigator/documents/[id]/file` (protected, tenant-scopad).
   Importerade dokument har text men ingen fil (originalen låg i Vercel Blob).
-- **RLS (§ 21.3):** list/view staff/observer; create pinnar tenant +
-  skapare (§ 21.8; bara tenant där källan saknar skapare — frågor,
-  AI-körningar); update Movexum-personal; delete ledning. Bolagsmedlemmar
-  har ingen yta. `sustainability_documents` + `sustainability_ai_jobs`
+- **RLS (§ 21.3):** list/view staff/observer ELLER länkad bolagsmedlem
+  (`linked_startups:each ?= startup`, för frågor/justeringar via
+  `assessment.startup`); create pinnar tenant + skapare (§ 21.8; bara
+  tenant där källan saknar skapare — frågor, AI-körningar); update
+  Movexum-personal eller länkad medlem; delete ledning (medlemmen raderar
+  bara egna uppladdade dokument). Member-scopet kom med migration
+  **1700000213** (var staff/observer-only i 1700000206) och ligger i
+  `MUST_SCOPE_TO_MEMBER` i `verify-baseline.mjs`. `sustainability_documents` + `sustainability_ai_jobs`
   **denylistade för AI-chatten** (`redaction.ts`, fritext ur
   tredjepartsmaterial); analyser/frågor/justeringar/uppdateringar läsbara
   under RLS + fältmaskning. Speglat i `setup-via-api.mjs` (defs +
   `FORCE_CREATE_RULES` + `startups`-patch; self-relationen via
   `patchCollection`), asserterat i `verify-baseline.mjs` (must-exist,
   `MUST_BE_STAFF_OR_OBSERVER`, `REQUIRED_APP_FIELDS`, `AI_DENYLIST`).
+- **Bolagsmedlemmens åtkomst (2026-11, beslut: "ska vara åtkomstbar för
+  startup-rollen").** En länkad `startup_member` **läser och driver analysen
+  för sitt eget bolag**: kör stegen, granskar väsentligheten, besvarar
+  kompletteringsfrågor, laddar upp och tar bort egna dokument, skriver
+  anteckningar och uppdaterar bolagets hållbarhetsresa. Medlemmen kan INTE
+  skapa nya bolag (`/impactnavigator/ny` låser "befintligt bolagskort" till
+  det egna via `allowNewCompany={false}`), inte ändra bolagsuppgifter
+  (fas/bransch/ansvarig — `updateCompanyDetailsAction` godtar bara
+  `journeyText` från medlem; inställningssidan är läs-läge), inte radera
+  analysen och ser varken portföljlistan eller `/jamfor` (redirect).
+  Landningssidan skickar medlemmen direkt till sitt bolags dashboard (eller
+  `ny?startup=<eget>` när ingen analys finns; utan länkat bolag →
+  `/min-oversikt`). Gränsen är de rena, enhetstestade hjälparna
+  `canWorkOnImpactCompany`/`canViewImpactCompany` (`@platform/shared`
+  impact-navigator.ts: staff-roll ELLER `isLinkedStartupMember`) som
+  server-actions (`requireWorker(startupId)`), skalet (`notFound` för annat
+  bolag), API-routerna (documents, file, rapport) och sidorna alla använder —
+  klienten är aldrig gränsen, RLS (ovan) är den hårda. Modulen ligger i
+  `MEMBER_RAIL` (§ 22) och i `DEFAULT_MODULES_BY_ROLE.startup_member`;
+  migration **1700000214** backfillar den i sparade sidmenyer (§ 36.3). AI-
+  flödet och riskklassen är oförändrade (samma körningar, samma banner,
+  människa-i-loopen); `agent_actions`-audit bär medlemmens id som aktör.
 - **Utseende (2026-11):** modulen bär originalets GRÖNA accent och
   sidomeny — inom profilen: Movexum grön/mörkgrön/ljusgrön/pastell grön
   (`components/impact/ui.ts`), aldrig emerald/stone; fokusringar § 3.4;
@@ -10879,9 +11236,18 @@ domänmodell, egna promptar och Movexums BLÅ toner (zon `export`,
   (`EXPORT_LAB_AI_MOCK_MODE=true`, eller automatiskt utan `MISTRAL_API_KEY`
   utanför produktion); tidsgräns/omförsök per steg via
   `EXPORT_LAB_<STEG>_TIMEOUT_MS`/`_MAX_RETRIES`.
-- **RLS (§ 21.3):** list/view staff/observer på alla sex kollektionerna;
-  create pinnar tenant + skapare (§ 21.8); update Movexum-personal; delete
-  ledning. Bolagsmedlemmar har ingen yta. `export_documents` + `export_ai_jobs`
+- **RLS (§ 21.3):** list/view staff/observer ELLER länkad bolagsmedlem på
+  alla sex kollektionerna (frågor och marknadsval via `assessment.startup`);
+  create pinnar tenant + skapare (§ 21.8); update Movexum-personal eller
+  länkad medlem; delete ledning (medlemmen raderar bara egna dokument).
+  Member-scopet kom med migration **1700000213**. **Bolagsmedlemmens
+  åtkomst (2026-11)** speglar § 56 exakt: medlemmen driver analysen för sitt
+  eget bolag (steg, marknadsval, gapsvar, egna dokument, ambition/önskade
+  marknader via `updateExportCompanyDetailsAction`), men skapar inte bolag,
+  ändrar inte fas/ansvarig, raderar inte analysen och ser inte portföljen;
+  gränsen är `canWorkOnExportCompany`/`canViewExportCompany`
+  (`export-lab.ts`, samma `isLinkedStartupMember`), modulen ligger i
+  `MEMBER_RAIL` och backfillas av **1700000214**. `export_documents` + `export_ai_jobs`
   **denylistade för AI-chatten** (`redaction.ts`); profiler/planer/frågor är
   läsbara under RLS + fältmaskning.
 - **GDPR § 5 / riskklass:** bolagsdata, ingen individbedömning; all fritext

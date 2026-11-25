@@ -15,6 +15,7 @@
  */
 
 import type { Role, StartupPhase } from './index';
+import { isLinkedStartupMember, type StartupScopedUser } from './impact-navigator';
 import { IRL_AXIS_KEYS, type IrlAxisKey, type IrlProfile } from './kth-irl';
 
 // ─── Vokabulär (speglar migration 1700000210) ───────────────────────────────
@@ -58,6 +59,15 @@ export function canReadExportLab(roles: readonly Role[] | undefined): boolean {
 }
 export function canDeleteExportLab(roles: readonly Role[] | undefined): boolean {
   return (roles ?? []).some((r) => EXPORT_DELETE_ROLES.includes(r));
+}
+
+/** Bolagsmedlem får arbeta med det egna bolagets exportanalys (§ 58, 2026-11-09) — samma regel som Impact Navigator. */
+export function canWorkOnExportCompany(user: StartupScopedUser, startupId: string | null | undefined): boolean {
+  return canManageExportLab(user.roles) || isLinkedStartupMember(user, startupId);
+}
+
+export function canViewExportCompany(user: StartupScopedUser, startupId: string | null | undefined): boolean {
+  return canReadExportLab(user.roles) || isLinkedStartupMember(user, startupId);
 }
 
 /** Plattformens bolagsfas → analysens fas (samma fyra som Impact Navigator). */

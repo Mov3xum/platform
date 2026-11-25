@@ -1,10 +1,10 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { getSuperuserPbOrNull } from '@/lib/integrations/credentials';
 import PocketBase from 'pocketbase';
 import { getServerPb, getCurrentUser } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { getServerPbUrl } from '@/lib/pb-url';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { escFilter } from '@/lib/pb-filter';
 import { DE_MINIMIS_STAFF_ROLES, canManageStartupDeMinimis, loadRegelverk } from '@/lib/de-minimis/data';
@@ -18,7 +18,6 @@ import {
   type ForordningKod
 } from '@platform/shared';
 
-const PB_URL = getServerPbUrl();
 
 export interface DeMinimisActionState {
   ok?: boolean;
@@ -39,21 +38,8 @@ function statusOf(err: unknown): number | undefined {
 // skrivregeln är staff-only, men en länkad bolagsmedlem får hantera sitt eget
 // bolags de minimis-data efter att behörigheten verifierats i koden.
 async function getSuperuserPb(): Promise<PocketBase | null> {
-  const email = process.env.POCKETBASE_SUPERUSER_EMAIL || process.env.PB_SU_EMAIL;
-  const password = process.env.POCKETBASE_SUPERUSER_PASSWORD || process.env.PB_SU_PASSWORD;
-  if (!email || !password) {
-    console.error('[de-minimis] superuser credentials missing');
-    return null;
-  }
-  const pb = new PocketBase(PB_URL);
-  pb.autoCancellation(false);
-  try {
-    await pb.collection('_superusers').authWithPassword(email, password);
-    return pb;
-  } catch {
-    console.error('[de-minimis] superuser auth failed');
-    return null;
-  }
+  // Cachad (§ 21.8: PB rate-limitar superuser-inloggning).
+  return getSuperuserPbOrNull();
 }
 
 /** Kör en skrivning som den inloggade; faller tillbaka till superuser vid

@@ -354,12 +354,15 @@ export interface InlineVisualRef {
 
 // Ett verktygssteg agenten utförde under en turn. Live-streamas till UI:t
 // medan turen körs och persisteras på assistant-meddelandet så återöppnade
-// trådar visar vad agenten gjorde. Etiketter är PII-fria (kollektionsnivå /
-// dokumenttyp) — de innehåller aldrig användarvärden, filter eller fältdata.
+// trådar visar vad agenten gjorde. Allt är PII-fritt (kollektion, fältnamn,
+// resultatstorlek) — aldrig användarvärden, filtervärden eller fältdata.
 export interface AgentActivityStep {
   tool: string; // funktionsnamn, t.ex. 'query_collection'
   label: string; // svensk etikett, t.ex. 'Läser bolagsdata'
+  detail?: string; // hur steget körs, t.ex. 'summa av amount_sek per startup · filter på date'
   ok?: boolean; // utfall (sätts när steget är klart)
+  result?: string; // vad steget gav, t.ex. '14 grupper · 37 rader'
+  ms?: number; // körtid i ms
 }
 
 // Kvitto på en SKRIVNING agenten utförde (eller försökte utföra) under en
@@ -1480,6 +1483,8 @@ export const MEMBER_RAIL: { id: string; label: string }[] = [
   { id: 'mina_aktiviteter', label: 'Aktiviteter' },
   { id: 'filer', label: 'Filer' },
   { id: 'de_minimis', label: 'De minimis' },
+  { id: 'impactnavigator', label: 'Impact Navigator' },
+  { id: 'exportlab', label: 'Export Lab' },
   { id: 'community', label: 'Community' }
 ];
 
@@ -1668,7 +1673,7 @@ export const coreModules: ModuleDefinition[] = [
     title: 'Impact Navigator',
     description:
       'AI-stödd hållbarhetsanalys per bolag (CLAUDE.md § 56): väsentliga ESG-aspekter, kompletteringsfrågor, slutanalys med risker, möjligheter och greenwashing-risker, samt versionerade uppdateringar. Beslutsstöd för coachen — människan granskar väsentligheten och slutanalysen.',
-    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer', 'startup_member'],
     route: '/impactnavigator'
   },
   {
@@ -1676,7 +1681,7 @@ export const coreModules: ModuleDefinition[] = [
     title: 'Export Lab',
     description:
       'AI-stödd internationaliseringsanalys per bolag (CLAUDE.md § 58): exportprofil och marknadsurval (Uppsala, Born Global, CAGE), informationsgap, en första exportplan med inträdesform, regelverk, kulturell spelbok och affärsförutsättningar per marknad — kopplad till bolagets KTH IRL. Beslutsstöd för coachen — människan granskar marknaderna och planen.',
-    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer', 'startup_member'],
     route: '/exportlab'
   },
   {
@@ -1826,6 +1831,7 @@ export * from './agreements';
 export * from './reporting';
 // ─── Startupkompassen — quiz-poängsättning (ren logik, enhetstestad) ─────────
 export * from './compass-quiz';
+export * from './compass-quiz-ai';
 export * from './file-topics';
 // ─── Kompetenstaxonomi (tvärfunktionella team, ren logik, enhetstestad) ──────
 export * from './competences';
@@ -1839,6 +1845,7 @@ export * from './chat-attachments';
 export * from './compass-authoring';
 export * from './compass-layout';
 export * from './compass-contact';
+export * from './compass-i18n';
 export * from './login-branding';
 // ─── Mötesläge i chatten (ren möteslogik, enhetstestad, § 34) ────────────────
 export * from './meeting';
@@ -1978,6 +1985,7 @@ export interface OrgKnowledgeChunk {
 }
 export * from './kth-irl';
 export * from './excellence-irl';
+export * from './program-stages';
 
 export * from './user-activity';
 export * from './howspace';

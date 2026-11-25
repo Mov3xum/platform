@@ -45,6 +45,7 @@ import {
   buildExportUpdateAIInput,
   canDeleteExportLab,
   canManageExportLab,
+  canWorkOnExportCompany,
   createAnalysisLease,
   exportCompanyStatusFor,
   exportGapResponseStatus,
@@ -96,10 +97,13 @@ function actorOf(user: SessionUser): Actor {
   return { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles };
 }
 
-async function requireManager(): Promise<{ user: SessionUser; pb: PocketBase } | { error: string }> {
+/** Personal för alla bolag, bolagsmedlem bara för det egna länkade bolaget (§ 58, 2026-11-09; RLS speglar i migration 1700000213). */
+async function requireWorker(startupId: string | null): Promise<{ user: SessionUser; pb: PocketBase } | { error: string }> {
   const user = await getCurrentUser();
   if (!user) return { error: 'Ej inloggad.' };
-  if (!canManageExportLab(user.roles)) return { error: 'Bara Movexum-personal kan arbeta med Export Lab.' };
+  if (!canWorkOnExportCompany(user, startupId)) {
+    return { error: user.roles.includes('startup_member') ? 'Du kan bara arbeta med ditt eget bolags exportanalys.' : 'Bara Movexum-personal kan arbeta med Export Lab.' };
+  }
   const pb = await getServerPb();
   return { user, pb };
 }
@@ -214,7 +218,7 @@ async function finishJob<T>(pb: PocketBase, user: SessionUser, jobId: string | n
 type StepCtx = { user: SessionUser; pb: PocketBase; company: ExportCompany; a: ExportAssessment };
 
 async function loadForStep(startupId: string, assessmentId: string): Promise<StepCtx | { error: string }> {
-  const ctx = await requireManager();
+  const ctx = await requireWorker(startupId);
   if ('error' in ctx) return ctx;
   const { user, pb } = ctx;
   if (!ID_RE.test(startupId) || !ID_RE.test(assessmentId)) return { error: 'Ogiltig analys.' };
@@ -293,11 +297,13 @@ async function releaseLease(pb: PocketBase, user: SessionUser, a: ExportAssessme
 // ─── Steg 1: Skapa bolag + första analysversionen ───────────────────────────
 
 export async function createExportCompanyAction(input: Record<string, unknown>): Promise<ExportActionState> {
-  const ctx = await requireManager();
+  const existingId = clean(input.startupId, 64);
+  // Nytt bolag kräver personal; på ett befintligt bolagskort får även den
+  // länkade bolagsmedlemmen starta exportanalysen.
+  const ctx = await requireWorker(existingId || null);
   if ('error' in ctx) return { error: ctx.error };
   const { user, pb } = ctx;
 
-  const existingId = clean(input.startupId, 64);
   const ambitionText = clean(input.ambitionText, 20000);
   const desiredMarkets = clean(input.desiredMarkets, 1000);
   if (!ambitionText) return { error: 'Beskriv innovationen och den internationella ambitionen — det är underlaget analysen utgår från.' };
@@ -683,7 +689,7 @@ export async function finalizeExportPlanAction(startupId: string, assessmentId: 
 // ─── Uppdatera planen (ny version) ──────────────────────────────────────────
 
 export async function updateExportPlanAction(startupId: string, input: Record<string, unknown>): Promise<ExportActionState> {
-  const ctx = await requireManager();
+  const ctx = await requireWorker(startupId);
   if ('error' in ctx) return { error: ctx.error };
   const { user, pb } = ctx;
   if (!ID_RE.test(startupId)) return { error: 'Ogiltigt bolag.' };
@@ -807,10 +813,15 @@ export async function updateExportPlanAction(startupId: string, input: Record<st
 // ─── Bolagsuppgifter, dokument, radering ────────────────────────────────────
 
 export async function updateExportCompanyDetailsAction(startupId: string, input: Record<string, unknown>): Promise<ExportActionState> {
-  const ctx = await requireManager();
+  const ctx = await requireWorker(startupId);
   if ('error' in ctx) return { error: ctx.error };
   const { user, pb } = ctx;
   if (!ID_RE.test(startupId)) return { error: 'Ogiltigt bolag.' };
+  // En bolagsmedlem får bara uppdatera sin egen ambition och sina önskade
+  // marknader — namn, bransch, fas och ansvarig är personalens.
+  if (!canManageExportLab(user.roles) && Object.keys(input).some((k) => k !== 'ambitionText' && k !== 'desiredMarkets')) {
+    return { error: 'Bara Movexum-personal kan ändra bolagsuppgifter och ansvarig.' };
+  }
   const company = await getExportCompany(pb, user.tenant, startupId);
   if (!company) return { error: 'Bolaget hittades inte.' };
   const payload: Record<string, unknown> = {};
@@ -851,7 +862,7 @@ export async function updateExportCompanyDetailsAction(startupId: string, input:
 }
 
 export async function deleteExportDocumentAction(startupId: string, documentId: string): Promise<ExportActionState> {
-  const ctx = await requireManager();
+  const ctx = await requireWorker(startupId);
   if ('error' in ctx) return { error: ctx.error };
   const { user, pb } = ctx;
   if (!ID_RE.test(startupId) || !ID_RE.test(documentId)) return { error: 'Ogiltigt dokument.' };

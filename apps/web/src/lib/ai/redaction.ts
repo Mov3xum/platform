@@ -108,6 +108,9 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   // läsas rad för rad av modellen — målstyrningen får bara det k-anonyma
   // aggregatet via /mal. (Fältet var oanvänt före enkätmotorn.)
   'compass_responses',
+  // Bilagor från publika intag-moduler (§ 23.12): pitch deck m.m. från
+  // idébärare — tredjepartsmaterial som når AI aldrig rått.
+  'compass_lead_attachments',
   // Bedömning excellens (§ 51.6): körningar (sammanfattning kan bära grundar-
   // uppgifter via etiketter) och kompletteringsförfrågningar (svar med
   // grundarnamn/andel/engagemang + fri text) — når AI aldrig rått.

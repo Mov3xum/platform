@@ -1,8 +1,8 @@
 'use server';
 
 import PocketBase from 'pocketbase';
+import { getSuperuserPbOrNull } from '@/lib/integrations/credentials';
 import { getServerPb, requireUser } from '@/lib/auth.server';
-import { getServerPbUrl } from '@/lib/pb-url';
 import { hasRole } from '@/lib/rbac';
 import { revalidatePath } from 'next/cache';
 import { MAX_TENANT_LOGO_BYTES } from '@/lib/settings-constants';
@@ -27,7 +27,6 @@ export type SaveLoginBrandingState = {
 
 const MAX_AI_BUDGET_USD = 1000000;
 
-const PB_URL = getServerPbUrl();
 
 const ALLOWED_LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'];
 
@@ -38,31 +37,8 @@ function buildTenantLogoUploadData(fieldName: 'logo_light' | 'logo_dark', logoFi
 }
 
 async function getSuperuserPb(): Promise<PocketBase | null> {
-  const email = process.env.POCKETBASE_SUPERUSER_EMAIL || process.env.PB_SU_EMAIL;
-  const password = process.env.POCKETBASE_SUPERUSER_PASSWORD || process.env.PB_SU_PASSWORD;
-  if (!email || !password) {
-    console.error('[settings] superuser credentials missing', {
-      hasPocketbaseSuperuserEmail: Boolean(process.env.POCKETBASE_SUPERUSER_EMAIL),
-      hasPocketbaseSuperuserPassword: Boolean(process.env.POCKETBASE_SUPERUSER_PASSWORD),
-      hasPbSuEmail: Boolean(process.env.PB_SU_EMAIL),
-      hasPbSuPassword: Boolean(process.env.PB_SU_PASSWORD)
-    });
-    return null;
-  }
-
-  const pb = new PocketBase(PB_URL);
-  pb.autoCancellation(false);
-
-  try {
-    await pb.collection('_superusers').authWithPassword(email, password);
-    return pb;
-  } catch (err) {
-    console.error('[settings] superuser auth failed', {
-      email,
-      pbUrl: PB_URL
-    });
-    return null;
-  }
+  // Cachad (§ 21.8: PB rate-limitar superuser-inloggning). Loggar aldrig e-post.
+  return getSuperuserPbOrNull();
 }
 
 /**

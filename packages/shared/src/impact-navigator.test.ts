@@ -14,6 +14,8 @@ import {
   IMPACT_UPLOAD_STAGES,
   applyImpactMaterialityReview,
   canDeleteImpact,
+  canViewImpactCompany,
+  canWorkOnImpactCompany,
   canManageImpact,
   canReadImpact,
   createImpactAspectDisplayCodes,
@@ -64,6 +66,22 @@ test('roller: personal driver, observer läser, ledning tar bort, bolagsmedlem i
   assert.equal(canReadImpact(undefined), false);
   assert.equal(canDeleteImpact(['coach']), false);
   assert.equal(canDeleteImpact(['incubator_lead']), true);
+});
+
+test('bolagsmedlem arbetar bara med det egna bolaget (§ 56, 2026-11-09)', () => {
+  const member = { roles: ['startup_member'] as const, linkedStartups: ['s1'] };
+  assert.equal(canWorkOnImpactCompany(member, 's1'), true);
+  assert.equal(canViewImpactCompany(member, 's1'), true);
+  assert.equal(canWorkOnImpactCompany(member, 's2'), false);
+  assert.equal(canViewImpactCompany(member, 's2'), false);
+  assert.equal(canWorkOnImpactCompany(member, null), false);
+  // Länkat bolag utan medlemsrollen räcker inte (t.ex. partner).
+  assert.equal(canWorkOnImpactCompany({ roles: ['partner'], linkedStartups: ['s1'] }, 's1'), false);
+  // Personal behöver ingen länkning; observer läser men driver inte.
+  assert.equal(canWorkOnImpactCompany({ roles: ['coach'] }, 's9'), true);
+  assert.equal(canWorkOnImpactCompany({ roles: ['observer'] }, 's9'), false);
+  assert.equal(canViewImpactCompany({ roles: ['observer'] }, 's9'), true);
+  assert.equal(canDeleteImpact(['startup_member']), false);
 });
 
 test('plattformens fas → analysens fas', () => {

@@ -1,48 +1,33 @@
 'use client';
 
 import Link from 'next/link';
-import { SPRINT_X_AXES, type SprintXScore } from '@platform/shared';
-import { statusLabels, phaseLabels } from '@/lib/labels';
+import type { ProgramStagesOverview, ProgramStage } from '@platform/shared';
 
 interface DashboardMetrics {
   totalStartups: number;
   activeStartups: number;
-  byPhase: Record<string, number>;
-  byStatus: Record<string, number>;
-  avgIRLLevel: number;
-  avgSprintX: Partial<SprintXScore>;
-}
-
-interface StartupItem {
-  id: string;
-  tenant?: string;
-  name?: string;
-  description?: string;
-  phase: string;
-  status: string;
-  irl_level?: number;
-  next_step?: string;
-  tags?: string;
-  sprint_x_json?: SprintXScore;
+  /** Portföljens IRL-snitt ur bolagens KTH IRL-bedömningar (§ 52.2); null utan bedömningar. */
+  avgIRLLevel: number | null;
+  /** Antal bolag med en KTH IRL-bedömning. */
+  irlAssessed: number;
 }
 
 export function StartupListDashboard({
-  startups,
-  metrics
+  startupCount,
+  metrics,
+  stages
 }: {
-  startups: StartupItem[];
+  startupCount: number;
   metrics: DashboardMetrics;
+  stages: ProgramStagesOverview;
 }) {
-  const phaseColors: Record<string, string> = {
-    paus: 'bg-canvas-subtle text-foreground-muted',
-    inflode: 'bg-movexum-pastell-bla text-movexum-djupbla',
-    lead: 'bg-movexum-pastell-lila text-movexum-morklila',
-    boost_chamber: 'bg-movexum-pastell-gron text-movexum-morkgron',
+  const stageTone: Record<ProgramStage, string> = {
+    formation: 'bg-movexum-pastell-lila text-movexum-morklila',
     incubation: 'bg-movexum-pastell-gul text-movexum-morkgul',
-    prescale: 'bg-movexum-pastell-orange text-movexum-morkorange',
-    acceleration: 'bg-movexum-bla text-movexum-vit',
-    alumni: 'bg-canvas-subtle text-foreground-muted'
+    acceleration: 'bg-movexum-pastell-bla text-movexum-djupbla',
+    alumni: 'bg-movexum-pastell-gron text-movexum-morkgron'
   };
+  const fmt = (v: number | null) => (v === null ? '—' : v.toLocaleString('sv-SE', { maximumFractionDigits: 1 }));
 
   return (
     <div className="mb-8 space-y-6 rounded-3xl border border-default bg-surface p-8 shadow-sm shadow-movexum-svart/5">
@@ -54,17 +39,15 @@ export function StartupListDashboard({
 
       {/* KPI Grid */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {/* Total */}
         <div className="rounded-2xl border border-default bg-canvas-subtle/40 p-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-foreground-subtle">Totalt</p>
-          <p className="mt-2 text-3xl font-bold text-foreground">{metrics.totalStartups}</p>
+          <p className="mt-2 text-3xl font-bold text-foreground mx-tnum">{metrics.totalStartups}</p>
           <p className="mt-1 text-xs text-foreground-muted">bolag i portföljen</p>
         </div>
 
-        {/* Active */}
         <div className="rounded-2xl border border-default bg-movexum-pastell-gron/20 p-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-movexum-morkgron">Aktiva</p>
-          <p className="mt-2 text-3xl font-bold text-movexum-morkgron">{metrics.activeStartups}</p>
+          <p className="mt-2 text-3xl font-bold text-movexum-morkgron mx-tnum">{metrics.activeStartups}</p>
           <p className="mt-1 text-xs text-foreground-muted">
             {metrics.totalStartups > 0
               ? `${Math.round((metrics.activeStartups / metrics.totalStartups) * 100)}%`
@@ -72,116 +55,63 @@ export function StartupListDashboard({
           </p>
         </div>
 
-        {/* Avg IRL */}
         <div className="rounded-2xl border border-default bg-movexum-pastell-lila/20 p-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-movexum-morklila">IRL Snitt</p>
-          <p className="mt-2 text-3xl font-bold text-movexum-morklila">
-            {metrics.avgIRLLevel > 0 ? metrics.avgIRLLevel.toFixed(1) : '–'}
+          <p className="mt-2 text-3xl font-bold text-movexum-morklila mx-tnum">{fmt(metrics.avgIRLLevel)}</p>
+          <p className="mt-1 text-xs text-foreground-muted">
+            {metrics.irlAssessed > 0
+              ? `KTH IRL · ${metrics.irlAssessed} bedömda bolag`
+              : 'ingen KTH IRL-bedömning än'}
           </p>
-          <p className="mt-1 text-xs text-foreground-muted">innovation readiness</p>
         </div>
 
-        {/* Last Updated */}
         <div className="rounded-2xl border border-default bg-canvas-subtle/40 p-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-foreground-subtle">Bolag</p>
-          <p className="mt-2 text-3xl font-bold text-foreground">{startups.length}</p>
+          <p className="mt-2 text-3xl font-bold text-foreground mx-tnum">{startupCount}</p>
           <p className="mt-1 text-xs text-foreground-muted">i denna vy</p>
         </div>
       </div>
 
-      {/* Phase Distribution */}
+      {/* Programsteg — kompakt rad: antal + IRL ur bolagens KTH IRL-bedömningar */}
       <div>
-        <h3 className="mb-3 text-sm font-semibold text-foreground">Distribution per fas</h3>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {(
-            [
-              'paus',
-              'inflode',
-              'lead',
-              'boost_chamber',
-              'incubation',
-              'prescale',
-              'acceleration',
-              'alumni'
-            ] as const
-          ).map((phase) => {
-            const count = metrics.byPhase[phase] || 0;
-            const pct =
-              metrics.totalStartups > 0
-                ? Math.round((count / metrics.totalStartups) * 100)
-                : 0;
-            return (
-              <div key={phase} className="flex items-center gap-3 rounded-xl border border-default bg-canvas-subtle/40 p-3">
-                <div className={`w-2 h-2 rounded-full ${phaseColors[phase] || 'bg-foreground-muted'}`} />
-                <div className="flex-1">
-                  <p className="text-xs font-medium text-foreground-muted">{phaseLabels[phase]}</p>
-                  <p className="text-sm font-semibold text-foreground">
-                    {count} ({pct}%)
-                  </p>
-                </div>
-              </div>
-            );
-          })}
+        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+          <h3 className="text-sm font-semibold text-foreground">Per programsteg</h3>
+          <p className="text-[11px] text-foreground-subtle">IRL = medel av bolagens KTH IRL-bedömningar</p>
         </div>
-      </div>
-
-      {/* Sprint X Averages */}
-      <div>
-        <h3 className="mb-3 text-sm font-semibold text-foreground">Medelväarden — 4 Axlar</h3>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {SPRINT_X_AXES.map((axis) => {
-            const avg = metrics.avgSprintX[axis.id] || 0;
-            const pct = Math.round(avg);
-            const bgColor = {
-              funding: 'bg-movexum-pastell-gul',
-              intl: 'bg-movexum-pastell-bla',
-              sustain: 'bg-movexum-pastell-gron',
-              team: 'bg-movexum-pastell-lila'
-            }[axis.id];
-            const textColor = {
-              funding: 'text-movexum-morkgul',
-              intl: 'text-movexum-djupbla',
-              sustain: 'text-movexum-morkgron',
-              team: 'text-movexum-morklila'
-            }[axis.id];
-            return (
-              <div
-                key={axis.id}
-                className={`rounded-2xl ${bgColor}/20 border border-default p-4`}
-              >
-                <p className={`text-xs font-semibold uppercase tracking-wide ${textColor}`}>
-                  {axis.label}
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {stages.stages.map((s) => (
+            <Link
+              key={s.stage}
+              href={`/startups/inkubator?stage=${s.stage}`}
+              className="flex items-center justify-between gap-3 rounded-xl border border-default bg-canvas-subtle/40 px-3 py-2 hover:bg-canvas-muted"
+            >
+              <div className="min-w-0">
+                <span
+                  className={`inline-flex rounded-full px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide ${stageTone[s.stage]}`}
+                >
+                  {s.label}
+                </span>
+                <p className="mt-1 text-sm font-semibold text-foreground mx-tnum">
+                  {s.count} <span className="text-xs font-normal text-foreground-muted">({s.pct}%)</span>
                 </p>
-                <p className={`mt-2 text-2xl font-bold ${textColor}`}>{pct}%</p>
-                <div className="mt-2 h-1.5 rounded-full bg-canvas-subtle overflow-hidden">
-                  <div
-                    className={`h-full ${bgColor}`}
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
               </div>
-            );
-          })}
+              <div className="text-right">
+                <p className="text-[10.5px] font-semibold uppercase tracking-wide text-foreground-subtle">IRL</p>
+                <p
+                  className="text-sm font-semibold text-foreground mx-tnum"
+                  title={s.assessed > 0 ? `${s.assessed} av ${s.count} bolag bedömda` : 'Ingen KTH IRL-bedömning'}
+                >
+                  {fmt(s.irlAverage)}
+                </p>
+              </div>
+            </Link>
+          ))}
         </div>
-      </div>
-
-      {/* Status breakdown */}
-      <div>
-        <h3 className="mb-3 text-sm font-semibold text-foreground">Status</h3>
-        <div className="flex flex-wrap gap-2">
-          {(['active', 'alumni', 'paused', 'rejected'] as const).map((status) => {
-            const count = metrics.byStatus[status] || 0;
-            if (count === 0) return null;
-            return (
-              <span
-                key={status}
-                className="inline-flex items-center rounded-full bg-canvas-subtle px-3 py-1.5 text-sm font-medium text-foreground-muted"
-              >
-                {statusLabels[status]}: <span className="ml-2 font-bold text-foreground">{count}</span>
-              </span>
-            );
-          })}
-        </div>
+        {stages.unstaged > 0 && (
+          <p className="mt-2 text-[11px] text-foreground-subtle">
+            {stages.unstaged} {stages.unstaged === 1 ? 'bolag är pausat' : 'bolag är pausade'} och ingår inte i stegen.
+          </p>
+        )}
       </div>
     </div>
   );

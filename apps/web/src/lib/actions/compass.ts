@@ -681,17 +681,10 @@ function parseSaveIntent(v: unknown): ModuleSaveIntent {
   return v === 'publish' || v === 'unpublish' ? v : 'save';
 }
 
-function moduleEditorPath(slug: string, params: Record<string, string>): string {
-  const qs = new URLSearchParams(params).toString();
-  return `/inflode/admin/modules/${slug}${qs ? `?${qs}` : ''}`;
-}
-
 /**
  * Sparar modulformuläret (alla steg postas i ETT anrop, § 23.7) och
- * redirectar tillbaka till editorn med `?ok=` eller `?error=` så att
- * användaren alltid får ett kvitto — tidigare returnerade actionen tyst
- * (ingen redirect, ingen banner) och fel kastades rakt in i den globala
- * felvyn, vilket upplevdes som att "Spara & klart" inte gjorde någonting.
+ * returnerar ett kvitto (`ok` + resultat eller fel) som editorn visar som
+ * banner — användaren får alltid besked, och editorn monteras inte om.
  */
 export async function updateModuleAction(formData: FormData) {
   const user = await requireUser();
@@ -717,15 +710,17 @@ export async function updateModuleAction(formData: FormData) {
   revalidatePath('/inflode/admin/modules');
   revalidatePath(`/inflode/admin/modules/${existing.slug}`);
 
-  // redirect() kastar — måste ligga UTANFÖR try/catch.
-  if (errorMessage) {
-    redirect(moduleEditorPath(existing.slug, { error: errorMessage.slice(0, 300) }));
-  }
-  redirect(
-    moduleEditorPath(existing.slug, {
-      ok: intent === 'publish' ? 'published' : intent === 'unpublish' ? 'unpublished' : 'saved'
-    })
-  );
+  // Returnerar kvittot i stället för att redirecta: en redirect till
+  // `?ok=…` byter sidans segmentnyckel och monterar om hela editorn, så
+  // steget hoppade tillbaka till "Grunder" och osparade frågor försvann.
+  if (errorMessage) return { ok: false as const, error: errorMessage.slice(0, 300) };
+  return {
+    ok: true as const,
+    result: (intent === 'publish' ? 'published' : intent === 'unpublish' ? 'unpublished' : 'saved') as
+      | 'saved'
+      | 'published'
+      | 'unpublished'
+  };
 }
 
 async function applyModuleUpdate(
@@ -1317,7 +1312,7 @@ export async function updateQuestionAction(formData: FormData) {
       c.collection('compass_questions').update(id, {
         key,
         prompt,
-        help_text: helpText || undefined,
+        help_text: helpText,
         input_type: inputType,
         required,
         choices

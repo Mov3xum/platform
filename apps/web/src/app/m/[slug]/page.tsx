@@ -1,8 +1,17 @@
 import type { Metadata } from 'next';
 import { cache } from 'react';
 import { notFound } from 'next/navigation';
-import { SURVEY_SUBJECT_PARAM, isValidSurveySubjectId } from '@platform/shared';
+import {
+  COMPASS_LANG_PARAM,
+  SURVEY_SUBJECT_PARAM,
+  applyCompassModuleTranslation,
+  applyCompassQuestionTranslation,
+  isValidSurveySubjectId,
+  parseCompassLocale,
+  type CompassLocale
+} from '@platform/shared';
 import { PublicModuleLayout } from '@/components/compass/PublicModuleLayout';
+import { ensureEnglishTexts } from '@/lib/compass/auto-translate';
 import {
   resolvePublicModule,
   getPublicModuleQuestions,
@@ -21,15 +30,47 @@ const brandingOnce = cache((pb: Parameters<typeof getPublicTenantBranding>[0], t
   getPublicTenantBranding(pb, tenant)
 );
 
+const questionsOnce = cache((pb: Parameters<typeof getPublicModuleQuestions>[0], moduleId: string) =>
+  getPublicModuleQuestions(pb, moduleId)
+);
+/**
+ * Engelska (§ 23.13): modulen översätts automatiskt första gången någon
+ * väljer English och sparas på modulen. En gång per request — metadata och
+ * sida delar resultatet (annars skulle den andra översätta om på den ännu
+ * inte omlästa modulen).
+ */
+const englishOnce = cache(async (slug: string): Promise<Record<string, string>> => {
+  const resolved = await resolveOnce(slug);
+  if (!resolved) return {};
+  const questions = await questionsOnce(resolved.pb, resolved.module.id);
+  return ensureEnglishTexts(resolved.pb, resolved.module, questions, resolved.tenant);
+});
+
+/** Samma sida på ett annat språk — övriga parametrar (UTM, `?om=`) bevaras. */
+function languageHref(slug: string, sp: Record<string, string | string[] | undefined>, lang: CompassLocale): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(sp)) {
+    if (key === COMPASS_LANG_PARAM || value === undefined) continue;
+    for (const v of Array.isArray(value) ? value : [value]) params.append(key, v);
+  }
+  if (lang === 'en') params.set(COMPASS_LANG_PARAM, 'en');
+  const qs = params.toString();
+  return `/m/${encodeURIComponent(slug)}${qs ? `?${qs}` : ''}`;
+}
+
 export async function generateMetadata({
-  params
+  params,
+  searchParams
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }): Promise<Metadata> {
   const { slug } = await params;
+  const sp = await searchParams;
   const resolved = await resolveOnce(slug);
   if (!resolved) return { title: 'Sidan finns inte' };
-  const m = resolved.module;
+  const texts = parseCompassLocale(sp[COMPASS_LANG_PARAM]) === 'en' ? await englishOnce(slug) : null;
+  const m = texts ? applyCompassModuleTranslation(resolved.module, texts) : resolved.module;
   // Fliktiteln bär avsändaren (modulens egen eyebrow, annars tenantens
   // namn) — inte produktnamnet "Startupkompassen" (2026-11).
   const branding = await brandingOnce(resolved.pb, resolved.tenant);
@@ -63,24 +104,31 @@ export default async function PublicModulePage({
   const resolved = await resolveOnce(slug);
   if (!resolved) notFound();
 
-  const { pb, module, tenant } = resolved;
-  const [questions, branding, nextModule] = await Promise.all([
-    module.flow_type === 'chat'
-      ? Promise.resolve([])
-      : getPublicModuleQuestions(pb, module.id),
+  const { pb, module: swedishModule, tenant } = resolved;
+  // Språkknappen finns på alla moduler; English översätts automatiskt.
+  const locale: CompassLocale = parseCompassLocale(sp[COMPASS_LANG_PARAM]);
+  // Frågorna behövs även för chatten (avslutsstegets obligatoriska frågor, § 23.10).
+  const [swedishQuestions, branding, nextModule, texts] = await Promise.all([
+    questionsOnce(pb, swedishModule.id),
     brandingOnce(pb, tenant),
-    getNextModuleLink(pb, module)
+    getNextModuleLink(pb, swedishModule),
+    locale === 'en' ? englishOnce(slug) : Promise.resolve(null)
   ]);
+  const visibleModule = texts ? applyCompassModuleTranslation(swedishModule, texts) : swedishModule;
+  const questions = texts ? applyCompassQuestionTranslation(swedishQuestions, texts) : swedishQuestions;
+  const languageLinks = { sv: languageHref(slug, sp, 'sv'), en: languageHref(slug, sp, 'en') };
 
   // Bara den vitlistade publika projektionen når klienten — hela posten
   // (intern beskrivning, systemprompt, notis-e-post …) stannar på servern.
   return (
     <PublicModuleLayout
-      module={toPublicModule(module)}
+      module={toPublicModule(visibleModule)}
       questions={questions}
       branding={branding}
       nextModule={nextModule}
       subject={subject}
+      locale={locale}
+      languageLinks={languageLinks}
     />
   );
 }

@@ -44,6 +44,8 @@ import {
   buildImpactUpdateAnalysisAIInput,
   canDeleteImpact,
   canManageImpact,
+  canWorkOnImpactCompany,
+  isLinkedStartupMember,
   createImpactCustomAspect,
   impactCompanyStatusFor,
   impactGapResponseStatus,
@@ -104,10 +106,18 @@ function actorOf(user: SessionUser): Actor {
   return { kind: 'user', id: user.id, tenant: user.tenant, roles: user.roles };
 }
 
-async function requireManager(): Promise<{ user: SessionUser; pb: PocketBase } | { error: string }> {
+/**
+ * Vem får arbeta med analysen (§ 56, 2026-11-09): Movexum-personal för alla
+ * bolag, en bolagsmedlem BARA för det egna länkade bolaget (`startupId`).
+ * Utan bolag (nytt bolag) krävs personal. Klienten är aldrig gränsen —
+ * PB-RLS speglar (migration 1700000213).
+ */
+async function requireWorker(startupId: string | null): Promise<{ user: SessionUser; pb: PocketBase } | { error: string }> {
   const user = await getCurrentUser();
   if (!user) return { error: 'Ej inloggad.' };
-  if (!canManageImpact(user.roles)) return { error: 'Bara Movexum-personal kan arbeta med analysen.' };
+  if (!canWorkOnImpactCompany(user, startupId)) {
+    return { error: isLinkedStartupMember(user, null) || user.roles.includes('startup_member') ? 'Du kan bara arbeta med ditt eget bolags analys.' : 'Bara Movexum-personal kan arbeta med analysen.' };
+  }
   const pb = await getServerPb();
   return { user, pb };
 }
@@ -236,7 +246,7 @@ async function finishJob<T>(pb: PocketBase, user: SessionUser, jobId: string | n
 type StepCtx = { user: SessionUser; pb: PocketBase; company: ImpactCompany; a: ImpactAssessment };
 
 async function loadForStep(startupId: string, assessmentId: string): Promise<StepCtx | { error: string }> {
-  const ctx = await requireManager();
+  const ctx = await requireWorker(startupId);
   if ('error' in ctx) return ctx;
   const { user, pb } = ctx;
   if (!ID_RE.test(startupId) || !ID_RE.test(assessmentId)) return { error: 'Ogiltig analys.' };
@@ -326,11 +336,13 @@ async function releaseLease(pb: PocketBase, user: SessionUser, a: ImpactAssessme
  * "Skapa bolag och sammanfattning" i tre steg.
  */
 export async function createImpactCompanyAction(input: Record<string, unknown>): Promise<ImpactActionState> {
-  const ctx = await requireManager();
+  const existingId = clean(input.startupId, 64);
+  // Nytt bolag kräver personal; på ett befintligt bolagskort får även den
+  // länkade bolagsmedlemmen starta analysen.
+  const ctx = await requireWorker(existingId || null);
   if ('error' in ctx) return { error: ctx.error };
   const { user, pb } = ctx;
 
-  const existingId = clean(input.startupId, 64);
   const journeyText = clean(input.journeyText, 20000);
   if (!journeyText) return { error: 'Beskriv bolagets hållbarhetsambitioner och vägval — det är underlaget analysen utgår från.' };
 
@@ -720,7 +732,7 @@ export async function finalizeAnalysisAction(startupId: string, assessmentId: st
 // ─── Uppdatera bolag (ny analysversion) ─────────────────────────────────────
 
 export async function updateCompanyAction(startupId: string, input: Record<string, unknown>): Promise<ImpactActionState> {
-  const ctx = await requireManager();
+  const ctx = await requireWorker(startupId);
   if ('error' in ctx) return { error: ctx.error };
   const { user, pb } = ctx;
   if (!ID_RE.test(startupId)) return { error: 'Ogiltigt bolag.' };
@@ -845,10 +857,15 @@ export async function updateCompanyAction(startupId: string, input: Record<strin
 
 /** Bolagsuppgifter (namn, bransch, fas, hållbarhetsresa, ansvarig) — originalets settings-sida. */
 export async function updateCompanyDetailsAction(startupId: string, input: Record<string, unknown>): Promise<ImpactActionState> {
-  const ctx = await requireManager();
+  const ctx = await requireWorker(startupId);
   if ('error' in ctx) return { error: ctx.error };
   const { user, pb } = ctx;
   if (!ID_RE.test(startupId)) return { error: 'Ogiltigt bolag.' };
+  // En bolagsmedlem får bara uppdatera sin egen hållbarhetsresa — namn,
+  // bransch, fas och ansvarig är bolagskortets uppgifter (personal).
+  if (!canManageImpact(user.roles) && Object.keys(input).some((k) => k !== 'journeyText')) {
+    return { error: 'Bara Movexum-personal kan ändra bolagsuppgifter och ansvarig.' };
+  }
   const company = await getImpactCompany(pb, user.tenant, startupId);
   if (!company) return { error: 'Bolaget hittades inte.' };
   const payload: Record<string, unknown> = {};
@@ -893,7 +910,7 @@ export async function updateImpactCompanyAction(startupId: string, input: Record
 }
 
 export async function addImpactNoteAction(startupId: string, input: Record<string, unknown>): Promise<ImpactActionState> {
-  const ctx = await requireManager();
+  const ctx = await requireWorker(startupId);
   if ('error' in ctx) return { error: ctx.error };
   const { user, pb } = ctx;
   if (!ID_RE.test(startupId)) return { error: 'Ogiltigt bolag.' };
@@ -919,7 +936,7 @@ export async function addImpactNoteAction(startupId: string, input: Record<strin
 }
 
 export async function deleteImpactDocumentAction(startupId: string, documentId: string): Promise<ImpactActionState> {
-  const ctx = await requireManager();
+  const ctx = await requireWorker(startupId);
   if ('error' in ctx) return { error: ctx.error };
   const { user, pb } = ctx;
   if (!ID_RE.test(startupId) || !ID_RE.test(documentId)) return { error: 'Ogiltigt dokument.' };

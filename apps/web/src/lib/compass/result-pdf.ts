@@ -119,13 +119,33 @@ export interface QuizResultPdfInput {
   disclaimer?: string;
   /** Egen eyebrow-text (default "<brand> · Startupkompassen"). */
   eyebrow?: string;
+  /** Besökarens språk (§ 23.13) — styr PDF:ens fasta texter. Default svenska. */
+  locale?: 'sv' | 'en';
 }
+
+const PDF_TEXT = {
+  sv: {
+    result: 'Resultat',
+    thanks: 'Tack för dina svar!',
+    nextSteps: 'Nästa steg',
+    disclaimer:
+      'Resultatet är vägledande och baseras på dina egna svar. Dina uppgifter hanteras inom EU och delas aldrig vidare.'
+  },
+  en: {
+    result: 'Result',
+    thanks: 'Thank you for your answers!',
+    nextSteps: 'Next steps',
+    disclaimer:
+      'The result is indicative and based on your own answers. Your information is handled within the EU and never shared with third parties.'
+  }
+} as const;
 
 export async function buildQuizResultPdf(input: QuizResultPdfInput): Promise<Buffer> {
   const pdf = await PDFDocument.create();
   pdf.registerFontkit(fontkit);
   const brand = input.brandName || 'Movexum';
-  pdf.setTitle(`${input.title || 'Resultat'} – Startupkompassen`);
+  const L = PDF_TEXT[input.locale === 'en' ? 'en' : 'sv'];
+  pdf.setTitle(`${input.title || L.result} – Startupkompassen`);
   pdf.setCreator('Movexum OS');
   pdf.setProducer('Movexum OS');
 
@@ -184,7 +204,7 @@ export async function buildQuizResultPdf(input: QuizResultPdfInput): Promise<Buf
   });
 
   // Titel + accent-streck.
-  drawLines(ctx, input.title || 'Tack för dina svar!', { size: 26, font: 'heading', color: INK, lh: 1.15, gap: 4 });
+  drawLines(ctx, input.title || L.thanks, { size: 26, font: 'heading', color: INK, lh: 1.15, gap: 4 });
   ctx.page.drawRectangle({ x: MARGIN, y: ctx.y + 4, width: 56, height: 3, color: col(accent) });
   ctx.y -= 12;
 
@@ -200,7 +220,7 @@ export async function buildQuizResultPdf(input: QuizResultPdfInput): Promise<Buf
   // Nästa steg.
   const tips = (input.tips || []).filter((t) => typeof t === 'string' && t.trim());
   if (tips.length > 0) {
-    drawLines(ctx, 'Nästa steg', { size: 14, font: 'heading', color: accent, gap: 8 });
+    drawLines(ctx, L.nextSteps, { size: 14, font: 'heading', color: accent, gap: 8 });
     for (const t of tips) {
       const before = ctx.y;
       drawLines(ctx, t, { size: 11.5, color: INK_SOFT, indent: 16, lh: 1.5, gap: 5 });
@@ -225,8 +245,7 @@ export async function buildQuizResultPdf(input: QuizResultPdfInput): Promise<Buf
   // Footer på alla sidor: vägledande disclaimer + EU-not.
   const disclaimer = clean(
     ctx,
-    input.disclaimer ||
-      'Resultatet är vägledande och baseras på dina egna svar. Dina uppgifter hanteras inom EU och delas aldrig vidare.'
+    input.disclaimer || L.disclaimer
   );
   const pages = pdf.getPages();
   for (const p of pages) {

@@ -1,6 +1,8 @@
 'use server';
 
 import { cookies, headers } from 'next/headers';
+import { pbAuthGateHeaders } from '@/lib/pb-auth-gate';
+import { checkRateLimit, clearFailures, recordFailure } from '@/lib/rate-limit';
 import { redirect } from 'next/navigation';
 import PocketBase from 'pocketbase';
 import { AUTH_COOKIE, getServerPb, requireUser } from '@/lib/auth.server';
@@ -104,6 +106,9 @@ export async function updateProfileAction(
   return { success: true };
 }
 
+const PASSWORD_CHANGE_MAX_FAILURES = 5;
+const PASSWORD_CHANGE_WINDOW_MS = 15 * 60 * 1000;
+
 export async function changePasswordAction(
   _prev: ChangePasswordState,
   formData: FormData
@@ -124,13 +129,24 @@ export async function changePasswordAction(
     return { error: 'Lösenordet måste vara minst 8 tecken.' };
   }
 
+  // Nuvarande lösenord prövas mot PB — begränsa antalet felaktiga försök per
+  // konto så att en kapad session inte kan gissa lösenordet (§ 21.8).
+  const limitKey = `password-change:${user.id}`;
+  const limit = await checkRateLimit(limitKey, PASSWORD_CHANGE_MAX_FAILURES);
+  if (limit.blocked) {
+    const retryMin = Math.max(1, Math.ceil(limit.retryAfterSec / 60));
+    return { error: `För många felaktiga försök. Försök igen om ca ${retryMin} min.` };
+  }
+
   // Verify current password by re-authenticating
   const freshPb = new PocketBase(PB_URL);
   try {
-    await freshPb.collection('users').authWithPassword(user.email, currentPassword);
+    await freshPb.collection('users').authWithPassword(user.email, currentPassword, { headers: pbAuthGateHeaders() });
   } catch {
+    await recordFailure(limitKey, PASSWORD_CHANGE_WINDOW_MS);
     return { error: 'Nuvarande lösenord stämmer inte.' };
   }
+  await clearFailures(limitKey);
 
   // Update password using the authenticated session
   try {

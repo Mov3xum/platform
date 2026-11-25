@@ -90,6 +90,16 @@ export function assistantIdentityBlock(name?: string | null): string {
   ].join('\n');
 }
 
+/**
+ * Språkregeln när besökaren valt engelska (§ 23.13). Läggs SIST i
+ * systemprompten — modulens egen (svenska) prompt kan inte ta bort den.
+ */
+export const ENGLISH_REPLY_RULE = [
+  '## Språk',
+  'Besökaren har valt ENGELSKA. Svara alltid på engelska, även om instruktionerna ovan och frågebanken är skrivna på svenska — översätt frågorna naturligt när du ställer dem.',
+  'Om besökaren själv byter till svenska får du svara på svenska.'
+].join('\n');
+
 export async function intakeReply(
   history: CompassChatMessage[],
   options: {
@@ -102,6 +112,8 @@ export async function intakeReply(
      * kallar sig något annat (t.ex. det gamla hårdkodade "Inflöde").
      */
     assistantName?: string | null;
+    /** Besökarens språk (§ 23.13) — `en` ⇒ svara alltid på engelska. */
+    locale?: 'sv' | 'en';
   } = {}
 ): Promise<{ text: string; tokensIn: number; tokensOut: number; model: string }> {
   // Avslutsstyrning (§ 23.9): med ett tak på antal utbyten får modellen veta
@@ -114,7 +126,7 @@ export async function intakeReply(
   const systemPrompt = `${withExchangeBudget(base, {
     userTurns: countUserTurns(history),
     maxExchanges: options.maxExchanges
-  })}\n\n${VISITOR_REPLY_RULES}`;
+  })}\n\n${VISITOR_REPLY_RULES}${options.locale === 'en' ? `\n\n${ENGLISH_REPLY_RULE}` : ''}`;
   const messages: MistralMessage[] = [
     { role: 'system', content: systemPrompt },
     ...history.map<MistralMessage>((m) => ({ role: m.role, content: m.content }))
@@ -190,7 +202,8 @@ export async function summarizeSubmission(
 export async function summarizeChatForVisitor(
   history: CompassChatMessage[],
   closingEntries: SubmissionEntry[],
-  moduleName: string
+  moduleName: string,
+  locale: 'sv' | 'en' = 'sv'
 ): Promise<{ summary: string | null; usage: CompassAiUsage | null }> {
   const turns = history
     .filter((m) => m.content.trim())
@@ -208,7 +221,13 @@ export async function summarizeChatForVisitor(
     .join('\n\n');
   try {
     const res = await callMistral(SCORING_MODEL, [
-      { role: 'system', content: CHAT_SUMMARY_SYSTEM_PROMPT },
+      {
+        role: 'system',
+        content:
+          locale === 'en'
+            ? `${CHAT_SUMMARY_SYSTEM_PROMPT}\n\nSkriv HELA sammanfattningen på engelska — besökaren har valt engelska.`
+            : CHAT_SUMMARY_SYSTEM_PROMPT
+      },
       { role: 'user', content: redactPersonnummer(transcript).slice(0, 16000) }
     ]);
     const text = redactPersonnummer(stripStructuredTrailer(res.text));
