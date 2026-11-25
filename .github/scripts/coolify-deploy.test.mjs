@@ -268,7 +268,16 @@ test('COOLIFY_WAIT=true: pollar /api/v1/deployments tills finished → exit 0', 
     'GET /api/v1/deployments/dep111': [
       { status: 200, body: { status: 'queued', application_name: 'moveum-stack' } },
       { status: 200, body: { status: 'in_progress' } },
-      { status: 200, body: { status: 'finished' } },
+      {
+        status: 200,
+        body: {
+          status: 'finished',
+          logs: JSON.stringify([
+            { command: 'docker compose build', output: 'Building pocketbase ...\n Container moveum-pocketbase  Recreated' },
+            { output: 'Container moveum-web  Started' },
+          ]),
+        },
+      },
     ],
   });
   try {
@@ -283,6 +292,8 @@ test('COOLIFY_WAIT=true: pollar /api/v1/deployments tills finished → exit 0', 
     assert.match(out, /Väntar på att Coolify-bygget dep111 blir klart/);
     assert.match(out, /Bygget dep111 gäller resursen: moveum-stack/);
     assert.match(out, /✓ Coolify-bygget dep111 är klart\./);
+    assert.match(out, /pocketbase-rader ur Coolify-byggloggen/);
+    assert.match(out, /Container moveum-pocketbase {2}Recreated/);
     assert.equal(mock.seen.filter((s) => s.key === 'GET /api/v1/deployments/dep111').length, 3);
   } finally {
     await mock.close();
@@ -381,6 +392,29 @@ test('utan COOLIFY_WAIT ändras ingenting: ingen statuspollning', async () => {
     const { code, out } = await run({ COOLIFY_BASE_URL: mock.baseUrl, COOLIFY_APP_UUID: UUID });
     assert.equal(code, 0, out);
     assert.equal(mock.seen.filter((s) => s.key.startsWith('GET /api/v1/deployments/')).length, 0);
+  } finally {
+    await mock.close();
+  }
+});
+
+test('COOLIFY_WAIT=true: bygglogg utan pocketbase-rader → varning om fel resurs', async () => {
+  const mock = await startMock({
+    'GET /api/v1/version': VERSION_OK,
+    [`POST /api/v1/deploy?uuid=${UUID}&force=false`]: DEPLOY_OK_WITH_UUID,
+    'GET /api/v1/deployments/dep111': {
+      status: 200,
+      body: { status: 'finished', logs: JSON.stringify([{ output: 'Pulling web ...\nContainer moveum-web  Started' }]) },
+    },
+  });
+  try {
+    const { code, out } = await run({
+      COOLIFY_BASE_URL: mock.baseUrl,
+      COOLIFY_APP_UUID: UUID,
+      COOLIFY_WAIT: 'true',
+      COOLIFY_WAIT_INTERVAL: '0',
+    });
+    assert.equal(code, 0, out);
+    assert.match(out, /::warning::Coolify-byggloggen för dep111 nämner aldrig pocketbase/);
   } finally {
     await mock.close();
   }

@@ -214,6 +214,43 @@ extract_deployment_resource() {
   ' "$body_file"
 }
 
+# Pocketbase-raderna ur Coolify-byggloggen (deployment.logs) — avgör UTAN
+# SSH om pocketbase-tjänsten faktiskt byggdes/återskapades i deployen.
+# Skriver "__NOLOGS__" när API-svaret saknar logg, "__NOPB__" när loggen
+# finns men inte nämner pocketbase (= stacken byggde aldrig PB-tjänsten).
+extract_deployment_pb_log() {
+  node -e '
+    const fs = require("fs");
+    let raw = "";
+    try { raw = fs.readFileSync(process.argv[1], "utf8"); } catch {}
+    let text = "";
+    try {
+      const data = JSON.parse(raw);
+      const d = data?.deployment ?? data;
+      let logs = d?.logs;
+      if (typeof logs === "string") {
+        try {
+          const arr = JSON.parse(logs);
+          if (Array.isArray(arr)) {
+            text = arr.map((e) => [e?.command, e?.output].filter(Boolean).join("\n")).join("\n");
+          } else {
+            text = logs;
+          }
+        } catch { text = logs; }
+      } else if (Array.isArray(logs)) {
+        text = logs.map((e) => [e?.command, e?.output].filter(Boolean).join("\n")).join("\n");
+      }
+    } catch {}
+    if (!text.trim()) { process.stdout.write("__NOLOGS__"); process.exit(0); }
+    const lines = text
+      .split(/\r?\n/)
+      .filter((l) => /pocketbase/i.test(l))
+      .slice(0, 40)
+      .map((l) => l.slice(0, 300));
+    process.stdout.write(lines.length ? lines.join("\n") : "__NOPB__");
+  ' "$body_file"
+}
+
 # wait_for_deployments "<uuid> [uuid...]"
 # Returnerar 0 när alla bygget blivit klara (eller väntan inte går att göra —
 # då med ::warning), 1 när ett bygge misslyckades eller timeouten nåddes.
@@ -233,7 +270,7 @@ wait_for_deployments() {
     return 0
   fi
   local deadline=$(( $(date +%s) + wait_timeout ))
-  local uuid status_value resource_name resource_logged
+  local uuid status_value resource_name resource_logged pb_log
   for uuid in $uuids; do
     log "Väntar på att Coolify-bygget $uuid blir klart (timeout ${wait_timeout}s)..."
     resource_logged="false"
@@ -252,6 +289,20 @@ wait_for_deployments() {
             case "$status_value" in
               finished)
                 log "✓ Coolify-bygget $uuid är klart."
+                pb_log="$(extract_deployment_pb_log)"
+                case "$pb_log" in
+                  __NOLOGS__)
+                    log "(byggloggen kunde inte läsas ur API-svaret — kontrollera pocketbase-tjänsten i Coolify-UI:t)"
+                    ;;
+                  __NOPB__)
+                    gh_warning "Coolify-byggloggen för $uuid nämner aldrig pocketbase — resursen byggde sannolikt INTE pocketbase-tjänsten. Kontrollera att UUID:t pekar på compose-stacken (infra/coolify.yml), inte bara web-appen."
+                    ;;
+                  *)
+                    log "— pocketbase-rader ur Coolify-byggloggen ($uuid) —"
+                    printf '%s\n' "$pb_log"
+                    log "— slut på utdrag —"
+                    ;;
+                esac
                 break
                 ;;
               failed|cancelled*)
