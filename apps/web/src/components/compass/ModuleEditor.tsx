@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { Icon } from '@/components/proto';
 import { updateModuleAction } from '@/lib/actions/compass';
 import { QuestionsManager } from './QuestionsManager';
@@ -44,15 +45,19 @@ interface EventOption {
   starts_at?: string;
 }
 
-export interface ModuleEditorNotice {
+interface SaveNotice {
   kind: 'ok' | 'error';
   text: string;
 }
 
+const SAVED_TEXT = {
+  saved: 'Sparat',
+  published: 'Publicerad — den publika länken fungerar nu',
+  unpublished: 'Avpublicerad — den publika länken är stängd'
+} as const;
+
 interface Props {
   module: CompassModule;
-  /** Kvitto från senaste sparning (läses ur ?ok= / ?error= av sidan). */
-  notice?: ModuleEditorNotice | null;
   heroImageUrl: string | null;
   heroVideoUrl: string | null;
   modelOptions: ModelOption[];
@@ -67,10 +72,13 @@ interface Props {
  * display:none) så en enda Spara postar allt till updateModuleAction.
  * Frågor sparas direkt per fråga (egna server actions) och media laddas upp
  * direkt vid val (route handler) — de behöver ingen Spara.
+ *
+ * Spara stannar på samma steg och visar en "Sparat"-ruta (actionen
+ * returnerar utfallet, ingen redirect). Publicering sker BARA via knappen
+ * Publicera på sista steget.
  */
 export function ModuleEditor({
   module: mod,
-  notice = null,
   heroImageUrl,
   heroVideoUrl,
   modelOptions,
@@ -89,15 +97,21 @@ export function ModuleEditor({
   const layoutMeta = COMPASS_LAYOUT_META[layout];
   // Avsnittet "Dina uppgifter" (§ 23.11) — lagrad konfiguration eller legacy.
   const contactSection = contactSectionForModule(mod);
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [pendingIntent, setPendingIntent] = useState<string | null>(null);
+  const [notice, setNotice] = useState<SaveNotice | null>(null);
+  // Kontrollerade så att Publicera/Avpublicera syns i rutorna direkt — annars
+  // skulle nästa vanliga Spara posta de gamla värdena och ångra publiceringen.
+  const [isActive, setIsActive] = useState(!!mod.is_active);
+  const [publicEnabled, setPublicEnabled] = useState(!!mod.public_url_enabled);
   const isPublished = Boolean(mod.is_active && mod.public_url_enabled);
 
-  // Actionen redirectar tillbaka med ?ok=/?error= — bannern nedan visar det.
-  // Klienten behåller sitt steg (samma komponentinstans), så användaren står
-  // kvar där hen tryckte Spara.
+  // "Sparat"-rutan försvinner av sig själv; fel står kvar tills de stängs.
   useEffect(() => {
-    if (notice) setPendingIntent(null);
+    if (notice?.kind !== 'ok') return;
+    const t = window.setTimeout(() => setNotice(null), 3500);
+    return () => window.clearTimeout(t);
   }, [notice]);
 
   // Submit via transition så knapparna kan visa pending-läge trots att de
@@ -112,8 +126,30 @@ export function ModuleEditor({
     const fd = new FormData(form);
     fd.set('intent', intent);
     setPendingIntent(intent);
+    setNotice(null);
     startTransition(async () => {
-      await updateModuleAction(fd);
+      try {
+        const res = await updateModuleAction(fd);
+        if (!res.ok) {
+          setNotice({ kind: 'error', text: res.error });
+        } else {
+          if (res.result === 'published') {
+            setIsActive(true);
+            setPublicEnabled(true);
+          } else if (res.result === 'unpublished') {
+            setPublicEnabled(false);
+          }
+          setNotice({ kind: 'ok', text: SAVED_TEXT[res.result] });
+          router.refresh();
+        }
+      } catch {
+        setNotice({
+          kind: 'error',
+          text: 'Kunde inte spara. Ladda om sidan och försök igen.'
+        });
+      } finally {
+        setPendingIntent(null);
+      }
     });
   }
 
@@ -127,7 +163,7 @@ export function ModuleEditor({
   const isLast = step === steps.length - 1;
 
   return (
-    <div style={{ display: 'grid' }}>
+    <div className="mx-modedit" style={{ display: 'grid' }}>
       {/* Steg-navigering */}
       <div
         style={{
@@ -183,38 +219,13 @@ export function ModuleEditor({
         })}
       </div>
 
-      <div style={{ padding: 16, display: 'grid', gap: 12 }}>
-        {notice && (
-          <div
-            role={notice.kind === 'error' ? 'alert' : 'status'}
-            className="mx-t-13 mx-flex mx-items-c mx-gap-2"
-            style={{
-              padding: '10px 12px',
-              borderRadius: 10,
-              border: `1px solid ${
-                notice.kind === 'error'
-                  ? 'var(--movexum-morkorange)'
-                  : 'var(--movexum-gron)'
-              }`,
-              background:
-                notice.kind === 'error'
-                  ? 'var(--movexum-pastell-orange)'
-                  : 'var(--movexum-pastell-gron)',
-              color:
-                notice.kind === 'error'
-                  ? 'var(--movexum-morkorange)'
-                  : 'var(--movexum-morkgron)'
-            }}
-          >
-            <Icon name={notice.kind === 'error' ? 'alert' : 'check'} size={13} />
-            <span>{notice.text}</span>
-          </div>
-        )}
-        <form id={FORM_ID} onSubmit={handleSubmit} style={{ display: 'grid', gap: 12 }}>
+      <div style={{ padding: 16, display: 'grid', gap: 16 }}>
+        <form id={FORM_ID} onSubmit={handleSubmit} style={{ display: 'grid', gap: 16 }}>
           <input type="hidden" name="id" value={mod.id} />
 
           {/* ── Steg 1: Grunder ─────────────────────────────────────────── */}
           <Step active={step === 0}>
+            <Section title="Namn och typ" desc="Vad modulen heter och hur besökaren svarar.">
             <label className="mx-label">
               Namn
               <input
@@ -267,11 +278,11 @@ export function ModuleEditor({
               />
             </label>
 
+            </Section>
+
             {/* Syfte (§ 43): intag skapar lead; enkät samlar svar utan lead. */}
+            <Section title="Syfte" desc="Intag skapar ett lead när modulen slutförs. En enkät samlar bara svar.">
             <div>
-              <div className="mx-label" style={{ marginBottom: 6 }}>
-                Syfte
-              </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 {COMPASS_PURPOSES.map((p) => (
                   <label
@@ -317,22 +328,35 @@ export function ModuleEditor({
                 </div>
               )}
             </div>
+            </Section>
           </Step>
 
           {/* ── Steg 2: Utseende & mall ─────────────────────────────────── */}
           <Step active={step === 1}>
-            <div className="mx-muted mx-t-13">
-              Det här är det första besökaren ser. Välj en mall för hela sidan — mallen
-              bestämmer var bild, rubrik och {flowType === 'chat' ? 'chatten' : 'frågorna'} hamnar.
-            </div>
-
-            <div>
-              <div className="mx-label" style={{ marginBottom: 8 }}>
-                Mall
-              </div>
+            <Section
+              title="Mall"
+              desc={`Det första besökaren ser. Mallen bestämmer var bild, rubrik och ${
+                flowType === 'chat' ? 'chatten' : 'frågorna'
+              } hamnar.`}
+            >
               <LayoutPicker initial={layout} flowType={flowType} onChange={setLayout} />
-            </div>
+              <label className="mx-label" style={{ maxWidth: 320 }}>
+                Accentfärg (hex)
+                <input
+                  type="text"
+                  name="theme_color"
+                  defaultValue={mod.theme_color || ''}
+                  className="mx-input"
+                  style={{ marginTop: 4 }}
+                  placeholder="#002c40"
+                />
+                <span className="mx-t-12 mx-muted" style={{ display: 'block', marginTop: 4 }}>
+                  Färgar knappar, progress, färgpanel och heltäckande bakgrund. Tomt = Movexum mörkblå.
+                </span>
+              </label>
+            </Section>
 
+            <Section title="Rubrik och text" desc="Texten överst på sidan.">
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <label className="mx-label">
                 Rubrik
@@ -369,25 +393,12 @@ export function ModuleEditor({
                 style={{ marginTop: 4, minHeight: 60 }}
               />
             </label>
+            </Section>
 
-            <div
-              style={{
-                display: 'grid',
-                gap: 10,
-                padding: 12,
-                borderRadius: 12,
-                border: '1px solid var(--mx-line)',
-                background: 'var(--mx-paper)'
-              }}
+            <Section
+              title={`Startsida innan ${flowType === 'chat' ? 'chatten' : 'frågorna'}`}
+              desc="En första sida där besökaren läser vad modulen är till för innan hen börjar svara. Tom text = ingen startsida. Samtyckestexten (steg 4) visas på samma sida."
             >
-              <div>
-                <div className="mx-label">Startsida innan {flowType === 'chat' ? 'chatten' : 'frågorna'}</div>
-                <div className="mx-t-12 mx-muted" style={{ marginTop: 4 }}>
-                  En första sida inne i flödet där besökaren läser vad modulen är till för och vad ni
-                  vill ha ut av svaren, innan hen börjar svara. Tom text = ingen startsida. Finns en
-                  samtyckestext (steg 4) visas den på samma sida, med en enda startknapp.
-                </div>
-              </div>
               <label className="mx-label">
                 Rubrik på startsidan
                 <input
@@ -418,11 +429,11 @@ export function ModuleEditor({
                   Skriv inte personuppgifter här — texten är publik.
                 </span>
               </label>
-            </div>
+            </Section>
 
-            <div className="mx-label" style={{ opacity: layoutMeta.media === 'none' ? 0.6 : 1 }}>
-              Bild eller video
-              <div className="mx-layoutpick-hint" style={{ marginTop: 6, marginBottom: 8 }}>
+            <Section title="Bild eller video">
+            <div style={{ opacity: layoutMeta.media === 'none' ? 0.6 : 1 }}>
+              <div className="mx-layoutpick-hint" style={{ marginBottom: 8 }}>
                 <strong>{layoutMeta.label}:</strong> {layoutMeta.mediaHint}
                 {layoutMeta.media !== 'none' && (
                   <> Finns både bild och video spelas videon, med bilden som startbild.</>
@@ -435,38 +446,16 @@ export function ModuleEditor({
               />
             </div>
 
-            <details>
-              <summary className="mx-t-13" style={{ cursor: 'pointer' }}>
-                Fler alternativ
-              </summary>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 8 }}>
-                <label className="mx-label">
-                  Accentfärg (hex)
-                  <input
-                    type="text"
-                    name="theme_color"
-                    defaultValue={mod.theme_color || ''}
-                    className="mx-input"
-                    style={{ marginTop: 4 }}
-                    placeholder="#002c40"
-                  />
-                  <span className="mx-t-12 mx-muted" style={{ display: 'block', marginTop: 4 }}>
-                    Färgar knappar, progress, färgpanel och heltäckande bakgrund. Tomt = Movexum mörkblå.
-                  </span>
-                </label>
-              </div>
-            </details>
+            </Section>
           </Step>
 
           {/* ── Steg 3: Samtalsinställningar (bara AI-chatt) ────────────── */}
           {/* Fälten ligger alltid i DOM:en så ett typbyte inte tappar värden. */}
           <div
-            style={{
-              display: step === 2 && flowType === 'chat' ? 'grid' : 'none',
-              gap: 12
-            }}
+            style={{ display: step === 2 && flowType === 'chat' ? 'grid' : 'none' }}
             aria-hidden={!(step === 2 && flowType === 'chat')}
           >
+            <Section title="Samtalet" desc="Hur AI-assistenten presenterar sig och hur långt samtalet får bli.">
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <label className="mx-label">
                 Assistentens namn
@@ -528,12 +517,14 @@ export function ModuleEditor({
                 placeholder="Lämna tom för standardbeteendet."
               />
             </details>
+            </Section>
           </div>
 
           <input type="hidden" name="system_prompt" value={systemPrompt} />
 
           {/* ── Steg 4: Målgrupp & uppgifter ────────────────────────────── */}
           <Step active={step === 3}>
+            <Section title="Målgrupp och inledning">
             <label className="mx-label">
               Målgrupp
               <input
@@ -555,21 +546,21 @@ export function ModuleEditor({
               />
             </label>
 
-            <div className="mx-label">
-              Dina uppgifter — avsnittet sist i flödet
-              <span className="mx-t-xs mx-muted" style={{ display: 'block', marginTop: 4, fontWeight: 400 }}>
-                Välj vilka uppgifter besökaren fyller i efter frågorna och vilka som är
-                obligatoriska. Gäller alla flödestyper: i AI-chatten som avslutssteg efter samtalet
-                (med sammanfattning som PDF/e-post), i formulär och quiz som sista steg.
-              </span>
-              <table style={{ marginTop: 8, width: '100%', borderCollapse: 'collapse' }}>
+            </Section>
+
+            <Section
+              title="Dina uppgifter — avsnittet sist i flödet"
+              desc="Vilka uppgifter besökaren fyller i efter frågorna och vilka som är obligatoriska. I AI-chatten visas de som avslutssteg efter samtalet, i formulär och quiz som sista steg."
+            >
+            <div>
+              <table className="mx-modedit-table">
                 <tbody>
                   {CONTACT_FIELD_KEYS.map((key) => {
                     const meta = CONTACT_FIELD_META[key];
                     const current = contactSection[key];
                     return (
                       <tr key={key}>
-                        <td style={{ padding: '6px 8px 6px 0', verticalAlign: 'top' }}>
+                        <td>
                           <span className="mx-t-13 mx-fw-6">{meta.label}</span>
                           {key === 'founder_gender' && (
                             <span className="mx-t-xs mx-muted" style={{ display: 'block', fontWeight: 400 }}>
@@ -590,7 +581,7 @@ export function ModuleEditor({
                             </span>
                           )}
                         </td>
-                        <td style={{ padding: '6px 0', whiteSpace: 'nowrap' }}>
+                        <td style={{ whiteSpace: 'nowrap' }}>
                           {CONTACT_FIELD_MODES.filter((m) => !(meta.neverRequired && m === 'required')).map(
                             (mode) => (
                               <label
@@ -615,13 +606,15 @@ export function ModuleEditor({
                   })}
                 </tbody>
               </table>
-              <span className="mx-t-xs mx-muted" style={{ display: 'block', marginTop: 6 }}>
+              <span className="mx-t-12 mx-muted" style={{ display: 'block', marginTop: 10 }}>
                 Kön, kommun och kontaktväg är fasta val. Övriga teammedlemmar är en fritextruta
                 (namn + e-post). Hemsidan kontrolleras som en webbadress. Kön på grundare och teammedlemmar når aldrig AI-analysen och
                 exporteras inte per lead.
               </span>
             </div>
+            </Section>
 
+            <Section title="Samtycke" desc="Visas för besökaren innan hen börjar svara.">
             <label className="mx-label">
               Samtyckestext (GDPR)
               <textarea
@@ -632,10 +625,12 @@ export function ModuleEditor({
                 placeholder="Du samtycker till att Movexum kontaktar dig och lagrar dina uppgifter inom EU."
               />
             </label>
+            </Section>
           </Step>
 
           {/* ── Steg 5: Efter slutförande ───────────────────────────────── */}
           <Step active={step === 4}>
+            <Section title="När besökaren är klar" desc="Vad besökaren ser och vart hen skickas efter sista steget.">
             <label className="mx-label">
               Tack-meddelande
               <textarea
@@ -670,7 +665,20 @@ export function ModuleEditor({
                 Besökaren erbjuds att fortsätta dit när den här modulen är klar.
               </span>
             </label>
+            <label className="mx-label">
+              Skicka vidare till URL efter inskick (vinner över kedjan)
+              <input
+                type="url"
+                name="redirect_url"
+                defaultValue={mod.redirect_url || ''}
+                className="mx-input"
+                style={{ marginTop: 4 }}
+                placeholder="https://..."
+              />
+            </label>
+            </Section>
 
+            <Section title="Leads och notiser">
             <label className="mx-flex mx-items-c mx-gap-2 mx-t-13" style={{ cursor: 'pointer' }}>
               <input type="checkbox" name="create_lead" defaultChecked={mod.create_lead !== false} />
               <span>Skapa lead under Leads när modulen slutförs</span>
@@ -688,78 +696,60 @@ export function ModuleEditor({
               />
             </label>
 
-            <details>
-              <summary className="mx-t-13" style={{ cursor: 'pointer' }}>
-                Fler alternativ
-              </summary>
-              <div style={{ display: 'grid', gap: 12, marginTop: 8 }}>
-                <label className="mx-label">
-                  Kopplat event / aktivitet
-                  <select
-                    name="linked_event"
-                    defaultValue={mod.linked_event || ''}
-                    className="mx-input"
-                    style={{ marginTop: 4 }}
-                  >
-                    <option value="">Inget</option>
-                    {events.map((e) => {
-                      const date = e.starts_at ? e.starts_at.slice(0, 10) : '';
-                      return (
-                        <option key={e.id} value={e.id}>
-                          {e.name}
-                          {date ? ` (${date})` : ''}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </label>
-                <label className="mx-label">
-                  Skicka vidare till URL efter inskick (vinner över kedjan)
-                  <input
-                    type="url"
-                    name="redirect_url"
-                    defaultValue={mod.redirect_url || ''}
-                    className="mx-input"
-                    style={{ marginTop: 4 }}
-                    placeholder="https://..."
-                  />
-                </label>
-              </div>
-            </details>
+            <label className="mx-label">
+              Kopplat event / aktivitet (valfri)
+              <select
+                name="linked_event"
+                defaultValue={mod.linked_event || ''}
+                className="mx-input"
+                style={{ marginTop: 4 }}
+              >
+                <option value="">Inget</option>
+                {events.map((e) => {
+                  const date = e.starts_at ? e.starts_at.slice(0, 10) : '';
+                  return (
+                    <option key={e.id} value={e.id}>
+                      {e.name}
+                      {date ? ` (${date})` : ''}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+            </Section>
 
-            {/* Publicering */}
-            <div
-              style={{
-                padding: 12,
-                borderRadius: 12,
-                background: 'var(--mx-paper-2)',
-                border: '1px solid var(--mx-line-soft)',
-                display: 'grid',
-                gap: 8
-              }}
+            <Section
+              title="Publicering"
+              desc="Modulen publiceras först när du trycker Publicera här nedanför."
             >
-              <div className="mx-fw-6 mx-t-13">Publicering</div>
               <label className="mx-label">
                 Publik länk — modulen nås på /m/[länk]
                 <input
+                  key={mod.public_slug || 'no-slug'}
                   type="text"
                   name="public_slug"
                   defaultValue={mod.public_slug || ''}
                   className="mx-input"
-                  style={{ marginTop: 4, fontFamily: 'var(--mx-mono)' }}
+                  style={{ marginTop: 4 }}
                   placeholder="t.ex. ar-du-entreprenor"
                 />
               </label>
               <div className="mx-flex mx-items-c mx-gap-3 mx-wrap">
                 <label className="mx-flex mx-items-c mx-gap-2 mx-t-13" style={{ cursor: 'pointer' }}>
-                  <input type="checkbox" name="is_active" defaultChecked={!!mod.is_active} />
+                  <input
+                    type="checkbox"
+                    name="is_active"
+                    checked={isActive}
+                    onChange={(e) => setIsActive(e.target.checked)}
+                  />
                   <span>Aktiv</span>
                 </label>
                 <label className="mx-flex mx-items-c mx-gap-2 mx-t-13" style={{ cursor: 'pointer' }}>
                   <input
                     type="checkbox"
                     name="public_url_enabled"
-                    defaultChecked={!!mod.public_url_enabled}
+                    checked={publicEnabled}
+                    onChange={(e) => setPublicEnabled(e.target.checked)}
                   />
                   <span>Publicerad publikt (kräver Aktiv)</span>
                 </label>
@@ -768,7 +758,7 @@ export function ModuleEditor({
                 Länken fungerar när båda är ibockade och du har sparat. Knappen{' '}
                 <strong>Publicera</strong> bockar i båda och sparar i ett steg.
               </span>
-            </div>
+            </Section>
           </Step>
         </form>
 
@@ -776,10 +766,19 @@ export function ModuleEditor({
         <div style={{ display: step === 2 ? 'grid' : 'none', gap: 16 }}>
           {flowType === 'quiz' && (
             <>
-              <ResultBucketsEditor initial={mod.result_buckets ?? []} formId={FORM_ID} />
+              <Section
+                title="Resultatprofiler"
+                desc="En profil per möjligt resultat (t.ex. grön/gul/röd). Profilen med flest poäng visas för besökaren. Sparas med Spara-knappen längst ned."
+              >
+                <ResultBucketsEditor initial={mod.result_buckets ?? []} formId={FORM_ID} />
+              </Section>
               {purpose !== 'survey' && (
+                <Section
+                  title="AI-bedömning av fritextsvar (valfritt)"
+                  desc="Sparas med Spara-knappen längst ned."
+                >
                 <label className="mx-label">
-                  Så bedömer AI fritextsvaren (valfritt)
+                  Så bedömer AI fritextsvaren
                   <textarea
                     value={systemPrompt}
                     onChange={(e) => setSystemPrompt(e.target.value)}
@@ -790,7 +789,7 @@ export function ModuleEditor({
                       'Beskriv per fritextfråga vad som kännetecknar varje profil, t.ex.\n\n"Beskriv din idé":\nPotential: allmänt hållen, inget konkret problem eller kund\nUtveckling: tydligt problem och det framgår vem som har det\nRedo: problem, kund och lösning är konkreta, något är testat eller sålt'
                     }
                   />
-                  <span className="mx-muted mx-t-xs" style={{ display: 'block', marginTop: 4 }}>
+                  <span className="mx-muted mx-t-12" style={{ display: 'block', marginTop: 6 }}>
                     Tomt = fritextsvar ger inga poäng. Ifyllt = varje fritextsvar (kort eller lång
                     text) tolkas av AI (Mistral, EU) och kan ge en profil lika många poäng som
                     quizets lättaste kryssfråga. Använd profilernas nycklar eller titlar. Besökaren
@@ -798,20 +797,26 @@ export function ModuleEditor({
                     leadet. Gäller quiz där profilen med flest poäng vinner.
                   </span>
                 </label>
+                </Section>
               )}
-              <div className="mx-muted mx-t-12">
-                Resultatprofilerna och AI-bedömningen sparas med <strong>Spara</strong>-knappen
-                nedan. Frågorna sparas direkt, en i taget.
-              </div>
             </>
           )}
-          <QuestionsManager
-            moduleId={mod.id}
-            moduleSlug={mod.slug}
-            flowType={flowType}
-            initialQuestions={questions}
-            resultBuckets={mod.result_buckets ?? []}
-          />
+          <Section
+            title="Frågor"
+            desc={
+              flowType === 'chat'
+                ? 'Frågorna används som intervjuguide i samtalet. Klicka på en fråga för att öppna den. Varje fråga sparas för sig.'
+                : 'Visas för besökaren i den här ordningen. Klicka på en fråga för att öppna den. Varje fråga sparas för sig.'
+            }
+          >
+            <QuestionsManager
+              moduleId={mod.id}
+              moduleSlug={mod.slug}
+              flowType={flowType}
+              initialQuestions={questions}
+              resultBuckets={mod.result_buckets ?? []}
+            />
+          </Section>
         </div>
       </div>
 
@@ -839,6 +844,7 @@ export function ModuleEditor({
             </span>
           )}
           <button
+            key="save"
             type="submit"
             form={FORM_ID}
             name="intent"
@@ -849,8 +855,13 @@ export function ModuleEditor({
             <Icon name="check" size={13} />{' '}
             {isPending && pendingIntent === 'save' ? 'Sparar…' : 'Spara'}
           </button>
+          {/* key på varje knapp: utan den återanvänder React "Nästa"-knappens
+              DOM-nod som "Publicera" (type=submit) MITT I klicket, och
+              webbläsaren skickar då formuläret — modulen publicerades av
+              att man klickade Nästa på steg 4. */}
           {!isLast ? (
             <button
+              key="next"
               type="button"
               className="mx-btn mx-primary"
               onClick={() => setStep((s) => Math.min(steps.length - 1, s + 1))}
@@ -859,6 +870,7 @@ export function ModuleEditor({
             </button>
           ) : isPublished ? (
             <button
+              key="unpublish"
               type="submit"
               form={FORM_ID}
               name="intent"
@@ -872,6 +884,7 @@ export function ModuleEditor({
             </button>
           ) : (
             <button
+              key="publish"
               type="submit"
               form={FORM_ID}
               name="intent"
@@ -886,13 +899,54 @@ export function ModuleEditor({
           )}
         </div>
       </div>
+
+      {notice && (
+        <div
+          className={`mx-savetoast ${notice.kind === 'error' ? 'is-error' : ''}`}
+          role={notice.kind === 'error' ? 'alert' : 'status'}
+        >
+          <Icon name={notice.kind === 'error' ? 'alert' : 'check'} size={14} />
+          <span>{notice.text}</span>
+          {notice.kind === 'error' && (
+            <button
+              type="button"
+              className="mx-savetoast-close"
+              aria-label="Stäng"
+              onClick={() => setNotice(null)}
+            >
+              <Icon name="close" size={12} />
+            </button>
+          )}
+        </div>
+      )}
     </div>
+  );
+}
+
+/** Avgränsad sektion med egen rubrik — så fält och grupper inte flyter ihop. */
+function Section({
+  title,
+  desc,
+  children
+}: {
+  title: string;
+  desc?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="mx-modsec">
+      <header className="mx-modsec-head">
+        <h3 className="mx-modsec-title">{title}</h3>
+        {desc && <p className="mx-modsec-desc">{desc}</p>}
+      </header>
+      <div className="mx-modsec-body">{children}</div>
+    </section>
   );
 }
 
 function Step({ active, children }: { active: boolean; children: React.ReactNode }) {
   // Inaktiva steg döljs men ligger kvar i DOM:en så submit postar alla fält.
-  return <div style={{ display: active ? 'grid' : 'none', gap: 12 }}>{children}</div>;
+  return <div style={{ display: active ? 'grid' : 'none', gap: 16 }}>{children}</div>;
 }
 
 function FlowOption({

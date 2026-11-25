@@ -3915,6 +3915,28 @@ fråga via egna server actions); `ResultBucketsEditor`s dolda fält associeras
 via `form`-attributet. "Skapa modul"-sidan är avsiktligt minimal (namn + typ) —
 allt annat byggs i stegen.
 
+**Editorns sparflöde och läsbarhet (2026-11-25).** Tre fel i samma yta:
+(1) **"Nästa" på steg 4 publicerade modulen.** Fotens "Nästa"-knapp
+(`type="button"`) och "Publicera" (`type="submit"`) renderades på samma plats
+utan `key`, så React återanvände DOM-noden och bytte typ MITT I klicket —
+webbläsaren skickade då formuläret med `intent=publish`. Knapparna har nu
+egna `key`; ge alltid knappar som byter mellan `button` och `submit` på samma
+plats en `key`. Publicering sker bara via Publicera på sista steget.
+(2) **Spara kastade tillbaka till steg 1.** `updateModuleAction` redirectade
+till `?ok=`, vilket monterade om editorn. Actionen RETURNERAR nu
+`ModuleSaveResult` (ingen redirect); editorn står kvar på steget och visar en
+"Sparat"-ruta (`.mx-savetoast`, försvinner efter 3,5 s; fel står kvar tills de
+stängs). Kryssrutorna Aktiv/Publicerad är kontrollerade och följer
+Publicera/Avpublicera, annars skulle nästa Spara ångra publiceringen.
+(3) **Fält och rubriker flöt ihop.** Varje steg är indelat i sektioner med
+egen rubrik (`Section`, `.mx-modsec`), etiketterna är läsbara (13 px, inte
+10 px versaler) och fälten har tydligare ram — allt scopat under
+`.mx-modedit` i `prototype.css`. **Frågor och resultatprofiler är hopfällda
+som standard** (`.mx-qcard`: nummer, frågetext, typ, antal alternativ,
+"Obligatorisk", "Ej sparad"); klick öppnar, en nyss tillagd fråga öppnas
+direkt, "Öppna alla/Fäll ihop alla" finns. Svarsalternativen är en tabell med
+kolumnrubriker (värde, svarstext, poäng per profil). Ingen ny dataväg.
+
 **Omslagsmedia (bild + video).** `compass_modules.hero_image` (migration
 1700000122) kompletteras av **`hero_video`** (migration **1700000141**, filfält
 200 MB, video-mimes). Uppladdning sker DIREKT vid filval via route-handlern
