@@ -23,6 +23,13 @@ on:
 permissions:
   contents: read
 
+# Samma concurrency-grupp som staging-deployen: en manuellt startad sync får
+# inte raceas av en pågående deploy (eller tvärtom). Vid workflow_call gäller
+# anroparens grupp (deploy.yml).
+concurrency:
+  group: coolify-staging
+  cancel-in-progress: false
+
 jobs:
   redeploy-stack:
     name: Trigger Coolify stack redeploy
@@ -42,6 +49,11 @@ jobs:
           COOLIFY_UUID_SECRET_NAME: COOLIFY_APP_UUID_STAGING
           # force=true → bygg om utan cache så nya PB-migrations garanterat bakas in.
           COOLIFY_FORCE: 'true'
+          # Vänta tills ombygget är KLART: api-sync + verify-baseline nedan
+          # kör annars mot den gamla PB-containern (utan nya hooks/migrations)
+          # medan Coolify fortfarande bygger — incident 2026-11-19
+          # ("tenant-vakten är inte aktiv").
+          COOLIFY_WAIT: 'true'
           # Utan webhook/UUID hoppar vi över redeployen med varning (som förut).
           COOLIFY_MISSING_UUID_IS_WARNING: 'true'
         run: bash .github/scripts/coolify-deploy.sh
