@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { Attribution, NextModuleLink } from '@/lib/compass/types';
+import { ConsentNotice } from './ConsentNotice';
 import { ChatClosingForm, type ChatClosingConfig, type ChatClosingResult } from './ChatClosingForm';
 import { NextModuleCta } from './NextModuleCta';
 import { useFlowProgress } from './useFlowProgress';
@@ -27,6 +28,8 @@ interface Props {
   maxExchanges?: number;
   /** Skickas till publika chat-routen där modulen har en samtyckesgrind. */
   consent?: boolean;
+  /** Modulens samtyckestext — visas under skrivfältet och i avslutssteget. */
+  consentNote?: string;
   /**
    * Avslutssteg (§ 23.10): obligatoriska frågor + kontaktfält efter samtalet,
    * sammanfattning som PDF/e-post. Bara publika moduler som sparar lead.
@@ -63,6 +66,7 @@ export function CompassChat({
   avatarInitial = 'M',
   maxExchanges = 0,
   consent,
+  consentNote,
   closing,
   nextModule
 }: Props) {
@@ -226,6 +230,7 @@ export function CompassChat({
               moduleSlug={moduleSlug}
               sessionToken={sessionToken}
               consent={consent}
+              consentNote={consentNote}
               attribution={attribution}
               onDone={finishChat}
             />
@@ -298,6 +303,11 @@ export function CompassChat({
           {t.send}
         </button>
       </form>
+      )}
+      {stage === 'chat' && consentNote && (
+        <div className="mx-chat-consent">
+          <ConsentNotice note={consentNote} variant="chat" />
+        </div>
       )}
     </div>
   );

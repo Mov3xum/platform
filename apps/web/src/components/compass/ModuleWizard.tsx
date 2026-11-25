@@ -12,6 +12,7 @@ import { QuestionInput, readAttribution } from './QuestionInput';
 import { NextModuleCta } from './NextModuleCta';
 import { ContactPreferencePicker } from './ContactPreferencePicker';
 import { ContactSection } from './ContactSection';
+import { ConsentNotice } from './ConsentNotice';
 import { resolveNextQuestionIndex } from '@/lib/compass/question-flow';
 import { useFlowProgress } from './useFlowProgress';
 import { useCompassLocale } from './locale';
@@ -30,6 +31,12 @@ interface Props {
   apiBase?: string;
   /** Skickas i submit-body för publika flöden där samtycke krävs. */
   consent?: boolean;
+  /**
+   * Modulens samtyckestext — visas vid sista steget. När den finns bokförs
+   * bara HUR LÅNGT besökaren kommit före inskick, aldrig svaren (texten har
+   * inte visats än).
+   */
+  consentNote?: string;
   /** Enkätens subjekt (`?om=<id>`, § 43) — skickas med i submit-body. */
   subject?: string | null;
   /** Bokför pågående/avbrutet flöde (§ 23.10) — bara publika flöden. */
@@ -48,6 +55,7 @@ export function ModuleWizard({
   redirectUrl,
   apiBase = '/api/inflode/m',
   consent,
+  consentNote,
   subject,
   nextModule,
   trackProgress,
@@ -132,7 +140,7 @@ export function ModuleWizard({
       if (nextStep < total || hasContact) {
         setTrail((t) => [...t, step]);
         setStep(nextStep < total ? nextStep : total);
-        progressTracker.report(answers, step + 1, total);
+        progressTracker.report(consentNote ? {} : answers, step + 1, total);
         return;
       }
     }
@@ -182,7 +190,9 @@ export function ModuleWizard({
 
   if (!q && !onContactStep) return null;
   const current = q ? answers[q.key] : undefined;
-  const isLast = onContactStep || (!hasContact && step + 1 === total);
+  // Hopplogik kan avsluta flödet tidigare än sista frågan i listan.
+  const isLast =
+    onContactStep || (!hasContact && resolveNextQuestionIndex(questions, step, current) >= total);
 
   return (
     <form onSubmit={onSubmit} style={{ display: 'grid', gap: 16 }}>
@@ -233,6 +243,8 @@ export function ModuleWizard({
 
       {/* Kontaktpreferens — visas på sista steget, innan inskick. */}
       {isLast && <ContactPreferencePicker value={contactPreference} onChange={setContactPreference} />}
+
+      {isLast && <ConsentNotice note={consentNote} />}
 
       {error && (
         <div

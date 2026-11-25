@@ -82,19 +82,18 @@ export function PublicModuleLayout({
   const onDark = layout === 'cover';
 
   const topbar = (
-    <header className="mx-compass-topbar">
+    <header className="mx-compass-topbar mx-compass-topbar-page">
       <span className="mx-compass-brand">
         <Logo
           variant={onDark ? 'dark' : 'light'}
           href="/"
-          height={hasTenantLogo ? 52 : 40}
-          width={hasTenantLogo ? 260 : 200}
+          height={hasTenantLogo ? 30 : 24}
+          width={hasTenantLogo ? 150 : 120}
           logoLightUrl={branding.logoLightUrl}
           logoDarkUrl={branding.logoDarkUrl}
         />
       </span>
       <div className="mx-compass-topbar-end">
-        {module.target_audience && <span className="mx-compass-aud">{module.target_audience}</span>}
         {languageLinks && (
           <nav className="mx-compass-lang" aria-label={`${t.language} / ${locale === 'en' ? 'Språk' : 'Language'}`}>
             <span className="mx-compass-lang-ico" aria-hidden>
@@ -200,8 +199,8 @@ export function PublicModuleLayout({
           {media}
           <div className="mx-compass-cover-veil" />
         </div>
+        {topbar}
         <div className="mx-compass-wrap">
-          {topbar}
           <div className="mx-compass-stage">
             <div className="mx-compass-content">
               {head}
@@ -218,8 +217,8 @@ export function PublicModuleLayout({
   if (layout === 'split_left' || layout === 'split_right') {
     return (
       <main lang={locale} className="mx-compass-landing" data-layout={layout} style={style}>
+        {topbar}
         <div className="mx-compass-wrap">
-          {topbar}
           <div className="mx-compass-stage">
             <aside className="mx-compass-visual">{media ?? fallbackVisual}</aside>
             <div className="mx-compass-content">
@@ -237,8 +236,8 @@ export function PublicModuleLayout({
   if (layout === 'panel') {
     return (
       <main lang={locale} className="mx-compass-landing" data-layout="panel" style={style}>
+        {topbar}
         <div className="mx-compass-wrap">
-          {topbar}
           <div className="mx-compass-stage">
             <div className={`mx-compass-panel${hasMedia ? ' has-media' : ''}`}>
               <div className="mx-compass-panel-glow" aria-hidden />
@@ -257,8 +256,8 @@ export function PublicModuleLayout({
   if (layout === 'minimal') {
     return (
       <main lang={locale} className="mx-compass-landing" data-layout="minimal" style={style}>
+        {topbar}
         <div className="mx-compass-wrap">
-          {topbar}
           <div className="mx-compass-stage">
             <div className="mx-compass-content">
               {head}
@@ -274,8 +273,8 @@ export function PublicModuleLayout({
   // ── Klassisk (default) ───────────────────────────────────────────────────
   return (
     <main lang={locale} className="mx-compass-landing" data-layout="classic" style={style}>
+      {topbar}
       <div className="mx-compass-wrap">
-        {topbar}
         <div className="mx-compass-stage">
           {media && <aside className="mx-compass-visual">{media}</aside>}
           <div className="mx-compass-content">

@@ -1,6 +1,16 @@
 'use client';
 
-import { useEffect, useMemo, useState, useTransition, type DragEvent } from 'react';
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type DragEvent
+} from 'react';
 import { useRouter } from 'next/navigation';
 import { Icon } from '@/components/proto';
 import {
@@ -51,20 +61,56 @@ function toEditableChoices(q: CompassQuestion): EditableChoice[] {
   });
 }
 
-export function QuestionsManager({
-  moduleId,
-  moduleSlug,
-  flowType,
-  initialQuestions,
-  resultBuckets
-}: {
-  moduleId: string;
-  moduleSlug: string;
-  flowType: FlowType;
-  initialQuestions: CompassQuestion[];
-  resultBuckets: ResultBucket[];
-}) {
+/** Det modul-editorn når via ref: spara alla frågor med osparade ändringar. */
+export interface QuestionsManagerHandle {
+  /** Sparar varje ändrad fråga. `false` = minst en fråga kunde inte sparas (felet visas i listan). */
+  saveDirty: () => Promise<boolean>;
+}
+
+/** En frågas sparfunktion: `true` = sparad, `false` = inget att spara. Kastar vid fel. */
+type QuestionSaver = () => Promise<boolean>;
+
+export const QuestionsManager = forwardRef<
+  QuestionsManagerHandle,
+  {
+    moduleId: string;
+    moduleSlug: string;
+    flowType: FlowType;
+    initialQuestions: CompassQuestion[];
+    resultBuckets: ResultBucket[];
+  }
+>(function QuestionsManager({ moduleId, moduleSlug, flowType, initialQuestions, resultBuckets }, ref) {
   const router = useRouter();
+  // Varje frågekort registrerar sin sparfunktion här, så modulens Spara och
+  // stegbyten kan spara ALLA ändrade frågor — tidigare sparades bara den
+  // fråga vars egen knapp man tryckte på, och övriga ändringar försvann.
+  const savers = useRef(new Map<string, QuestionSaver>());
+  const registerSaver = useCallback((id: string, saver: QuestionSaver | null) => {
+    if (saver) savers.current.set(id, saver);
+    else savers.current.delete(id);
+  }, []);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      async saveDirty() {
+        let savedAny = false;
+        const errors: string[] = [];
+        for (const saver of Array.from(savers.current.values())) {
+          try {
+            if (await saver()) savedAny = true;
+          } catch (e) {
+            errors.push(e instanceof Error ? e.message : 'Kunde inte spara frågan.');
+          }
+        }
+        if (savedAny) router.refresh();
+        setError(errors.length ? errors.join(' ') : null);
+        return errors.length === 0;
+      }
+    }),
+    [router]
+  );
+
   const [questions, setQuestions] = useState<CompassQuestion[]>(initialQuestions);
   const [error, setError] = useState<string | null>(null);
 
@@ -149,7 +195,8 @@ export function QuestionsManager({
       <div className="mx-muted mx-t-13" style={{ lineHeight: 1.5 }}>
         {flowType === 'chat'
           ? 'Frågorna används som intervjuguide i samtalet.'
-          : 'Frågorna visas för besökaren i den här ordningen. Varje fråga sparas direkt.'}
+          : 'Frågorna visas för besökaren i den här ordningen.'}{' '}
+        Ändringar sparas med Spara fråga, med Spara längst ned eller när du går till ett annat steg.
         {questions.length > 1 && (
           <>
             {' '}
@@ -196,6 +243,7 @@ export function QuestionsManager({
               moduleSlug={moduleSlug}
               flowType={flowType}
               profileKeys={profileKeys}
+              registerSaver={registerSaver}
               onSaved={() => router.refresh()}
               onError={setError}
               canReorder={canReorder}
@@ -224,7 +272,7 @@ export function QuestionsManager({
       />
     </div>
   );
-}
+});
 
 /* ──────────────────────────────────────────────────────────────────────
    Ny fråga
@@ -401,6 +449,7 @@ function QuestionCard({
   moduleSlug,
   flowType,
   profileKeys,
+  registerSaver,
   onSaved,
   onError,
   canReorder,
@@ -419,6 +468,7 @@ function QuestionCard({
   moduleSlug: string;
   flowType: FlowType;
   profileKeys: string[];
+  registerSaver: (id: string, saver: QuestionSaver | null) => void;
   onSaved: () => void;
   onError: (msg: string | null) => void;
   canReorder: boolean;
@@ -440,6 +490,18 @@ function QuestionCard({
   const [required, setRequired] = useState(!!question.required);
   const [choices, setChoices] = useState<EditableChoice[]>(() => toEditableChoices(question));
   const [pending, start] = useTransition();
+
+  // Osparade ändringar = fälten skiljer sig från det som senast sparades.
+  const snapshot = JSON.stringify({
+    key,
+    prompt,
+    helpText,
+    inputType,
+    required,
+    choices: hasChoices(inputType) ? choices : null
+  });
+  const [savedSnapshot, setSavedSnapshot] = useState(snapshot);
+  const dirty = snapshot !== savedSnapshot;
 
   // Poängkolumner = profilnycklar ∪ nycklar som redan används i valen.
   const bucketColumns = useMemo(() => {
@@ -483,8 +545,11 @@ function QuestionCard({
     );
   }
 
-  function save() {
-    onError(null);
+  /** Skriver frågan till servern. Kastar med ett läsbart fel. */
+  async function persist(): Promise<void> {
+    if (!key.trim() || !prompt.trim()) {
+      throw new Error(`Fråga ${index + 1} saknar nyckel eller frågetext.`);
+    }
     const fd = new FormData();
     fd.set('id', question.id);
     fd.set('module_id', moduleId);
@@ -497,9 +562,36 @@ function QuestionCard({
     if (hasChoices(inputType)) {
       fd.set('choices_json', JSON.stringify(choices));
     }
+    const sent = snapshot;
+    try {
+      await updateQuestionAction(fd);
+    } catch (e) {
+      throw new Error(
+        `Fråga ${index + 1} kunde inte sparas${e instanceof Error && e.message ? `: ${e.message}` : '.'}`
+      );
+    }
+    setSavedSnapshot(sent);
+  }
+
+  // Modulens Spara / stegbyte sparar via den här (alltid senaste fälten).
+  const persistRef = useRef({ dirty, persist });
+  useEffect(() => {
+    persistRef.current = { dirty, persist };
+  });
+  useEffect(() => {
+    registerSaver(question.id, async () => {
+      if (!persistRef.current.dirty) return false;
+      await persistRef.current.persist();
+      return true;
+    });
+    return () => registerSaver(question.id, null);
+  }, [question.id, registerSaver]);
+
+  function save() {
+    onError(null);
     start(async () => {
       try {
-        await updateQuestionAction(fd);
+        await persist();
         onSaved();
       } catch (e) {
         onError(e instanceof Error ? e.message : 'Kunde inte spara frågan.');
@@ -593,6 +685,11 @@ function QuestionCard({
         </span>
         <span className="mx-mono mx-t-xs mx-muted">{key || '(ingen nyckel)'}</span>
         {required && <span className="mx-mono mx-t-xs mx-muted">· obligatorisk</span>}
+        {dirty && (
+          <span className="mx-t-xs mx-fw-6" style={{ color: 'var(--movexum-morkgul)' }}>
+            · osparade ändringar
+          </span>
+        )}
         <span className="mx-grow" />
         <button type="button" className="mx-btn mx-sm" onClick={remove} disabled={pending} style={{ color: '#4b2718' }}>
           <Icon name="trash" size={11} /> Ta bort
