@@ -439,9 +439,33 @@ async function verifyTenantGuardHook() {
       status = err?.status ?? 0;
     }
     if (status !== 403) {
+      // Färskhetsbevis: migration 1700000186 (2026-10) bytte notifications.kind
+      // select → text och kan BARA appliceras av PB-containern själv. Är fältet
+      // fortfarande select kör containern en image byggd före oktober — då är
+      // det imagen (inte hooken) som är problemet (incident 2026-11-25:
+      // "lyckade" stack-redeploys förnyade aldrig PB-containern).
+      let staleEvidence = '';
+      try {
+        const notifications = await pb.collections.getOne('notifications');
+        const kindField = (notifications.fields ?? notifications.schema ?? []).find(
+          (f) => String(f.name) === 'kind'
+        );
+        if (kindField && String(kindField.type) === 'select') {
+          staleEvidence =
+            ' BEVIS PÅ GAMMAL IMAGE: notifications.kind är fortfarande select — migration 1700000186 ' +
+            '(2026-10) har inte körts av containern, så PB-imagen är byggd före oktober.';
+        }
+      } catch {
+        /* best-effort-bevis — påverkar aldrig utfallet */
+      }
       fail(
         `tenant-vakten (hooks/tenant_guard.pb.js) är inte aktiv: en användare kunde skapa en post på en annan ` +
-          `tenants bolag (HTTP ${status}). Kontrollera att PB-imagen byggts med repots hooks.`
+          `tenants bolag (HTTP ${status}).${staleEvidence} Felsök på servern/Coolify: ` +
+          `(1) pekar COOLIFY_APP_UUID_* på docker-compose-STACKEN med pocketbase-tjänsten — inte på web-appen? ` +
+          `(2) docker ps --format '{{.Names}} {{.CreatedAt}}' | grep pocketbase — återskapades containern vid senaste bygget? ` +
+          `(3) docker exec moveum-pocketbase ls /pb/pb_hooks — finns tenant_guard.pb.js i imagen? ` +
+          `(4) docker logs moveum-pocketbase --tail 100 — migrationsfel vid start? ` +
+          `Hooken är verifierad fungerande mot PB 0.23.4 (docs/incidents/2026-11-25-staging-deploy-blocked.md).`
       );
     }
     ok('tenant-vakt aktiv: poster kan inte kopplas till en annan tenants bolag');

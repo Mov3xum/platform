@@ -266,7 +266,7 @@ test('COOLIFY_WAIT=true: pollar /api/v1/deployments tills finished → exit 0', 
     'GET /api/v1/version': VERSION_OK,
     [`POST /api/v1/deploy?uuid=${UUID}&force=false`]: DEPLOY_OK_WITH_UUID,
     'GET /api/v1/deployments/dep111': [
-      { status: 200, body: { status: 'queued' } },
+      { status: 200, body: { status: 'queued', application_name: 'moveum-stack' } },
       { status: 200, body: { status: 'in_progress' } },
       { status: 200, body: { status: 'finished' } },
     ],
@@ -281,6 +281,7 @@ test('COOLIFY_WAIT=true: pollar /api/v1/deployments tills finished → exit 0', 
     });
     assert.equal(code, 0, out);
     assert.match(out, /Väntar på att Coolify-bygget dep111 blir klart/);
+    assert.match(out, /Bygget dep111 gäller resursen: moveum-stack/);
     assert.match(out, /✓ Coolify-bygget dep111 är klart\./);
     assert.equal(mock.seen.filter((s) => s.key === 'GET /api/v1/deployments/dep111').length, 3);
   } finally {

@@ -197,6 +197,23 @@ extract_deployment_status() {
   ' "$body_file"
 }
 
+# Resursnamnet ur status-svaret — gör en felpekad UUID synlig i loggen
+# (incident 2026-11-25: bygget blev "klart" men PB-containern förnyades
+# aldrig; vilken resurs som faktiskt byggdes måste gå att läsa ut).
+extract_deployment_resource() {
+  node -e '
+    const fs = require("fs");
+    let raw = "";
+    try { raw = fs.readFileSync(process.argv[1], "utf8"); } catch {}
+    try {
+      const data = JSON.parse(raw);
+      const d = data?.deployment ?? data;
+      const name = d?.application_name ?? d?.name ?? d?.application?.name;
+      process.stdout.write(typeof name === "string" ? name : "");
+    } catch { process.stdout.write(""); }
+  ' "$body_file"
+}
+
 # wait_for_deployments "<uuid> [uuid...]"
 # Returnerar 0 när alla bygget blivit klara (eller väntan inte går att göra —
 # då med ::warning), 1 när ett bygge misslyckades eller timeouten nåddes.
@@ -216,13 +233,21 @@ wait_for_deployments() {
     return 0
   fi
   local deadline=$(( $(date +%s) + wait_timeout ))
-  local uuid status_value
+  local uuid status_value resource_name resource_logged
   for uuid in $uuids; do
     log "Väntar på att Coolify-bygget $uuid blir klart (timeout ${wait_timeout}s)..."
+    resource_logged="false"
     while :; do
       if request GET "$poll_base/api/v1/deployments/$uuid"; then
         case "$http_code" in
           2??)
+            if [ "$resource_logged" != "true" ]; then
+              resource_name="$(extract_deployment_resource)"
+              if [ -n "$resource_name" ]; then
+                log "Bygget $uuid gäller resursen: $resource_name"
+              fi
+              resource_logged="true"
+            fi
             status_value="$(extract_deployment_status)"
             case "$status_value" in
               finished)

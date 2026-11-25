@@ -1,7 +1,10 @@
 # Incident 2026-11-25 — staging har inte deployats sedan 2026-11-19
 
-**Status:** åtgärdat i repot (typfel + två workflow-robusthetsfixar).
-Ingen serveråtgärd krävs — Coolify-instansen var frisk hela tiden.
+**Status:** workflow-delen åtgärdad i repot (typfel, väntan på Coolify-bygget,
+serialisering, deadlock-fix, produktionsflödet). **Kvarstående serveråtgärd:**
+PB-containrarna på BÅDE staging och produktion kör gamla images — se
+"Grundorsak 4" + "Åtgärd på servern" nedan. Pipelinen fortsätter (korrekt)
+att falla på tenant-vakt-provet tills det är åtgärdat.
 
 ## Tidslinje (UTC, från GitHub Actions-loggarna)
 
@@ -34,6 +37,30 @@ Ingen serveråtgärd krävs — Coolify-instansen var frisk hela tiden.
    medan en nyare körnings `setup-via-api` skrev flyttlåsen live →
    "förväntat utan lås, fick med lås".
 
+4. **PB-containrarna kör gamla images (HUVUDFYND, serveråtgärd krävs).**
+   Efter fix 1–3 väntade run 45592088922 korrekt in Coolify-bygget
+   (status `finished` efter ~5 min) — och tenant-vakt-provet föll ÄNDÅ.
+   Belägg:
+   - Hooken är **verifierad fungerande** mot PocketBase 0.23.4 lokalt med
+     repots `hooksDir` (cross-tenant-create → 403, egen tenant → 200).
+   - `setup-via-api` varnar i varje sync sedan minst 11-19:
+     *"notifications.kind: … migration 1700000186 måste köras av
+     PocketBase-containern"* — en migration från **oktober**. Staging-PB:n
+     har alltså inte applicerat nya migrationer (och därmed inte fått nya
+     hooks) på över en månad, trots "lyckade" stack-redeploys med
+     `force=true`.
+   - Tenant-vakt-provet har **aldrig** varit grönt mot staging: sista gröna
+     deployen (90abe6e9, 11-19 12:49) innehöll inte provet
+     (`verifyTenantGuardHook` kom med 98f3d43f).
+   - Produktionsstacken byggdes senast om **2026-09-29** (sista
+     sync-pocketbase-production-körningen); produktions-PB:ns image saknar
+     därmed garanterat allt från oktober/november (flyttlås-migrationerna,
+     rate-limit 1700000218, tenant-vakten).
+   Trolig orsak: Coolify-resursen som `COOLIFY_APP_UUID_STAGING` pekar på
+   förnyar inte pocketbase-tjänstens container (fel resurs — t.ex. bara
+   web-appen — eller så återskapas inte containern trots ombyggd image).
+   Kan inte avgöras från repot; se "Åtgärd på servern".
+
 ## Åtgärder (i repot)
 
 - **Typfelet:** `summarizeStepResult`-parametern i
@@ -56,6 +83,50 @@ Ingen serveråtgärd krävs — Coolify-instansen var frisk hela tiden.
   faller. Sync-workflowsen delar därför gruppen BARA vid fristående
   `workflow_dispatch` (`github.workflow` = eget namn); vid `workflow_call`
   används en unik grupp per run (anroparens grupp serialiserar redan).
+- **Produktionsflödet:** `deploy-production.yml` anropade ALDRIG
+  produktions-synken — PB-stacken byggdes bara om när någon mindes att
+  dispatcha "Sync PocketBase schema (production)" manuellt (senast 09-29).
+  Nu: build-image → typecheck → `sync-pocketbase-production` (stack-rebuild
+  med `COOLIFY_WAIT` → setup-via-api → verify-baseline) vid VARJE
+  produktionsdeploy; det redundanta deploy-jobbet (duplicerad bootstrap +
+  verify) är borttaget.
+- **Diagnosbarhet:** `coolify-deploy.sh` loggar vilken RESURS bygget gäller
+  (ur deployment-statusens `application_name`) så en felpekad UUID syns i
+  loggen; tenant-vakt-felet i `verify-baseline.mjs` bär nu färskhetsbevis
+  (är `notifications.kind` fortfarande select är imagen byggd före migration
+  1700000186) + serverrunbooken nedan.
+
+## Åtgärd på servern (kvarstår)
+
+SSH:a till UpCloud-hosten och kontrollera, för staging och produktion:
+
+1. **Pekar `COOLIFY_APP_UUID_STAGING`/`_PRODUCTION` på rätt resurs?** Öppna
+   Coolify → resursen vars UUID står i GitHub-secreten. Det MÅSTE vara
+   docker-compose-stacken med `pocketbase`-tjänsten (infra/coolify.yml),
+   inte web-appen. Nästa körning loggar resursnamnet ("Bygget … gäller
+   resursen: …") — stämmer det inte: uppdatera secreten.
+2. **Återskapas PB-containern?**
+   `docker ps --format '{{.Names}}\t{{.CreatedAt}}' | grep pocketbase` —
+   CreatedAt ska vara från senaste bygget. Är den gammal trots "finished":
+   kontrollera i Coolify att compose-appen inte har pocketbase-tjänsten
+   exkluderad, och trigga en redeploy med force.
+3. **Finns hookarna i imagen?**
+   `docker exec moveum-pocketbase ls /pb/pb_hooks` — ska lista
+   `tenant_guard.pb.js` m.fl. ur repots `backend/pocketbase-schema/hooks/`.
+4. **Startar PB utan migrationsfel?**
+   `docker logs moveum-pocketbase --tail 100` — ett "Failed to apply
+   migration …" vid start betyder att containern aldrig kommer upp på den
+   nya imagen.
+5. När PB-containern kör rätt image: kör om "Deploy to Coolify Staging"
+   (och dispatcha produktionsdeployen) — verify-baseline ska då ge
+   "✓ tenant-vakt aktiv".
+
+**Separat observation (eget ärende):** en HELT FÄRSK installation (tom
+pb_data) faller på migration `1700000051_create_mission_comments.js`
+("The relation collection doesn't exist") — fältet refererar en kollektion
+som skapas i en senare migration. Påverkar inte instanser med data, men
+blockerar disaster recovery från noll; kräver en egen fix (migrationer är
+oföränderliga — felet måste lösas utan att redigera applicerade filer).
 
 ## Lärdomar
 
