@@ -4468,6 +4468,41 @@ resultatprofilen besökaren får.
   leadet. Flödet är inte kört mot Mistral från byggmiljön — testa i
   förhandsgranskningen (`/inflode/m/<slug>`) innan publicering.
 
+### 23.15 Publika sidans sidhuvud, samtycke i slutet & sparning i modul-admin (2026-11-25)
+
+- **Sidhuvud:** liten logotyp i sidans övre vänstra hörn (`mx-compass-topbar-page`,
+  utanför innehållskolumnen) + språkväxlaren till höger, i alla mallar.
+  **Målgruppen (`target_audience`) är intern** — den visas inte längre på
+  `/m/<slug>` och ingår inte i `toPublicModule()`.
+- **Samtyckestexten visas där besökaren slutför, inte som grind på första
+  sidan** (beslut av maintainer). `ConsentNotice` renderar "När du slutför
+  bekräftar du att du har tagit del av hur vi hanterar dina uppgifter: …" +
+  modulens `consent_note` vid sista steget i formulär/quiz, i chattens
+  avslutssteg och under chattens skrivfält (chatten lagrar per tur).
+  Första sidan visas bara när modulen har en startsida (§ 23.11).
+  **Följd för § 23.10 (dataminimering):** när modulen har en samtyckestext
+  skickar formulär/quiz INGA svar i `/progress` före inskick — bara steg
+  och antal ("2 av 5 frågor besvarade"), så ett pågående/avbrutet lead är
+  PII-fritt tills besökaren sett texten och slutfört. Servern kräver
+  oförändrat `consent:true` på inskicken.
+- **Typografi:** hela `.mx-compass-landing` (även `/u/`, `/s/`, `/e/`) —
+  rubriker Sora Bold (700), allt övrigt Nunito Sans.
+- **Layout:** *Heltäckande* är vänsterställd tvåkolumn på desktop (rubrik
+  till vänster, flödet till höger) i stället för en smal centrerad kolumn.
+  På mobil (≤ 640 px) ligger flödet inline på sidan utan svävande kort
+  (hårlinje + full bredd); *Heltäckande* blir ett ark kant i kant som
+  fyller skärmen, *Färgpanel* behåller sitt kort (överlappar panelen).
+- **Modul-admin — "det hoppar tillbaka":** `updateModuleAction` redirectade
+  till `?ok=…`, vilket byter sidans segmentnyckel och monterade om hela
+  editorn (steget hoppade till Grunder, osparade frågor försvann). Den
+  **returnerar nu kvittot** och editorn visar bannern själv. **Spara och
+  stegbyte sparar alla ändrade frågor** (`QuestionsManagerHandle.saveDirty`;
+  varje frågekort registrerar sin sparfunktion och märks "osparade
+  ändringar") — tidigare sparades bara den fråga vars egen knapp man tryckte
+  på. En tömd hjälptext sparas nu (skickades som `undefined` och låg kvar).
+  Redirecta aldrig en server action tillbaka till samma sida med ny query
+  för att visa ett kvitto — returnera det.
+
 ---
 
 ## 24. AI-sorterat filarkiv — ämnes-/bolagsmappar (/filer)

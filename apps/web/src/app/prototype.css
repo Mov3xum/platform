@@ -1195,11 +1195,22 @@ select.mx-input:focus {
   min-height: 100vh;
   min-height: 100dvh;
   padding: 0 20px 72px;
-  display: flex;
-  justify-content: center;
   background: var(--mx-canvas);
   color: var(--mx-ink);
+  font-family: var(--mx-ui);
+  font-weight: 400;
   isolation: isolate;
+}
+/* Typografi (§ 2.4): rubriker i Sora Bold, allt övrigt i Nunito Sans. */
+.mx-compass-landing :is(h1, h2, h3, h4),
+.mx-compass-landing .mx-disp,
+.mx-compass-landing .mx-qprompt,
+.mx-compass-landing .mx-chat-title {
+  font-family: var(--mx-display) !important;
+  font-weight: 700 !important;
+}
+.mx-compass-landing :is(p, li, label, input, textarea, select, button, .mx-btn, .mx-mono) {
+  font-family: var(--mx-ui);
 }
 /* Aurora-backdrop bakom hela sidan — låg alpha så vit canvas lyser igenom. */
 .mx-compass-landing::before {
@@ -1217,6 +1228,7 @@ select.mx-input:focus {
 .mx-compass-wrap {
   width: 100%;
   max-width: var(--mx-compass-max);
+  margin: 0 auto;
   display: grid;
   gap: 30px;
   align-content: start;
@@ -1241,7 +1253,13 @@ select.mx-input:focus {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--mx-accent) 14%, transparent);
 }
 
-/* Topbar — wordmark + målgruppspill */
+/* Topbar — wordmark (+ språkväxlare). På modulsidan (`-page`) ligger den
+   utanför innehållskolumnen: liten logotyp i sidans övre vänstra hörn. */
+.mx-compass-topbar-page {
+  padding: 18px 8px 0;
+  flex-wrap: nowrap;
+}
+.mx-compass-topbar-page + .mx-compass-wrap { padding-top: clamp(20px, 5vh, 48px); }
 .mx-compass-topbar {
   display: flex;
   align-items: center;
@@ -1254,20 +1272,6 @@ select.mx-input:focus {
   align-items: center;
   color: var(--mx-ink);
 }
-.mx-compass-aud {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 15px;
-  border-radius: var(--mx-r-pill);
-  font-family: var(--mx-ui);
-  font-size: 12.5px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  background: var(--mx-copper-tint);
-  color: var(--mx-brown-ink);
-  border: 1px solid rgba(214, 126, 71, 0.22);
-}
-
 /* Språkväxlare Svenska/English (§ 23.13) — tydlig segmentknapp i sidhuvudet. */
 .mx-compass-topbar-end {
   display: inline-flex;
@@ -1537,11 +1541,24 @@ select.mx-input:focus {
   font-weight: 600;
   color: var(--mx-ink);
 }
-.mx-startpage-body ul { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.mx-startpage-body ul { margin: 0; padding-left: 20px; display: grid; gap: 4px; list-style: disc; }
 .mx-startpage-consent {
   padding-top: 14px;
   border-top: 1px solid var(--mx-line-soft);
 }
+/* Samtyckestexten vid sista steget / under chattens skrivfält. */
+.mx-consent-note {
+  margin: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--mx-line-soft);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--mx-muted);
+  max-width: 620px;
+}
+.mx-consent-note strong { font-weight: 600; color: var(--mx-ink-soft); }
+.mx-chat-consent { padding: 0 16px 12px; background: var(--mx-paper); }
+.mx-chat-consent .mx-consent-note { padding-top: 0; border-top: none; font-size: 11.5px; max-width: none; }
 .mx-consent-cta {
   display: flex;
   align-items: center;
@@ -1592,10 +1609,21 @@ select.mx-input:focus {
 
 /* ── Mall: Heltäckande ─────────────────────────────────────────────── */
 .mx-compass-landing[data-layout='cover'] {
-  --mx-compass-max: 760px;
+  --mx-compass-max: 1180px;
   color: #fff;
   background: #002c40;
 }
+.mx-compass-landing[data-layout='cover'] .mx-compass-content {
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  gap: clamp(28px, 5vw, 72px);
+  align-items: start;
+}
+.mx-compass-landing[data-layout='cover'] .mx-compass-head {
+  position: sticky;
+  top: 32px;
+  padding-top: clamp(8px, 6vh, 64px);
+}
+.mx-compass-landing[data-layout='cover'] .mx-compass-title { font-size: clamp(32px, 4vw, 54px); }
 .mx-compass-landing[data-layout='cover']::before { display: none; }
 .mx-compass-cover-bg {
   position: fixed;
@@ -1617,23 +1645,15 @@ select.mx-input:focus {
     linear-gradient(90deg, rgba(0, 20, 30, 0.35), transparent 60%);
 }
 .mx-compass-landing[data-layout='cover'] .mx-compass-brand { color: #fff; }
-.mx-compass-landing[data-layout='cover'] .mx-compass-aud {
-  background: rgba(255, 255, 255, 0.14);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.26);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
-}
 .mx-compass-landing[data-layout='cover'] .mx-compass-eyebrow { color: rgba(255, 255, 255, 0.78); }
 .mx-compass-landing[data-layout='cover'] .mx-compass-title { color: #fff; text-shadow: 0 2px 24px rgba(0, 0, 0, 0.25); }
 .mx-compass-landing[data-layout='cover'] .mx-compass-body { color: rgba(255, 255, 255, 0.84); }
-.mx-compass-landing[data-layout='cover'] .mx-compass-head { text-align: center; justify-items: center; padding-top: clamp(16px, 6vh, 56px); }
 .mx-compass-landing[data-layout='cover'] .mx-compass-card {
   background: rgba(255, 255, 255, 0.94);
   border-color: rgba(255, 255, 255, 0.5);
   box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.55);
 }
-.mx-compass-landing[data-layout='cover'] .mx-compass-foot { color: rgba(255, 255, 255, 0.6); }
+.mx-compass-landing[data-layout='cover'] .mx-compass-foot { color: rgba(255, 255, 255, 0.6); text-align: left; }
 
 /* ── Mall: Färgpanel ───────────────────────────────────────────────── */
 .mx-compass-landing[data-layout='panel'] { --mx-compass-max: 1040px; }
@@ -1703,11 +1723,6 @@ select.mx-input:focus {
   overflow: visible;
 }
 .mx-compass-landing[data-layout='minimal'] .mx-compass-card-chat { border-top: none; padding-top: 0; }
-.mx-compass-landing[data-layout='minimal'] .mx-compass-aud {
-  background: transparent;
-  color: var(--mx-ink);
-  border-color: var(--mx-line-strong);
-}
 .mx-compass-landing[data-layout='minimal'] .mx-qchoice { border-radius: 10px; }
 
 /* Rörelse av för den som bett om det */
@@ -1729,28 +1744,80 @@ select.mx-input:focus {
   }
   .mx-compass-landing[data-layout='split_left'] .mx-compass-chatbox,
   .mx-compass-landing[data-layout='split_right'] .mx-compass-chatbox { height: 70vh; min-height: 480px; }
+  .mx-compass-landing[data-layout='cover'] .mx-compass-content { grid-template-columns: minmax(0, 1fr); gap: 22px; }
+  .mx-compass-landing[data-layout='cover'] .mx-compass-head { position: static; padding-top: 0; }
   .mx-compass-panel.has-media { grid-template-columns: minmax(0, 1fr); }
   .mx-compass-panel .mx-compass-visual { aspect-ratio: 16 / 9; }
   .mx-compass-landing[data-layout='panel'] .mx-compass-content { margin-left: 8px; margin-right: 8px; }
 }
+/* Mobil — flödet ligger INLINE på sidan (inget svävande kort): vänsterställd
+   rubrik, hårlinje, frågorna direkt på canvasen i full bredd. */
 @media (max-width: 640px) {
-  .mx-compass-landing { padding: 0 14px 56px; }
-  .mx-compass-wrap { gap: 22px; padding-top: 18px; }
-  .mx-compass-stage, .mx-compass-content { gap: 18px; }
-  .mx-compass-topbar { gap: 10px; }
+  .mx-compass-landing { padding: 0 18px 40px; }
+  .mx-compass-topbar-page { padding: 14px 0 0; gap: 10px; }
+  .mx-compass-topbar-page + .mx-compass-wrap { padding-top: 22px; }
+  .mx-compass-lang a { padding: 6px 10px; font-size: 12.5px; }
+  .mx-compass-lang-ico { display: none; }
+  .mx-compass-wrap { gap: 24px; padding-top: 18px; }
+  .mx-compass-stage, .mx-compass-content { gap: 20px; }
   .mx-compass-head { gap: 10px; }
-  .mx-compass-title { font-size: clamp(24px, 7vw, 32px); line-height: 1.1; }
-  .mx-compass-body { font-size: 15px; line-height: 1.55; }
-  .mx-compass-card { padding: 20px 16px; border-radius: var(--mx-r-md); }
+  .mx-compass-title { font-size: clamp(26px, 7.6vw, 34px); line-height: 1.12; }
+  .mx-compass-body { font-size: 15.5px; line-height: 1.55; }
+  .mx-compass-foot { text-align: left; }
+  .mx-compass-card {
+    background: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    border: none;
+    border-top: 1px solid var(--mx-line-strong);
+    border-radius: 0;
+    box-shadow: none;
+    padding: 22px 0 0;
+    overflow: visible;
+  }
+  .mx-compass-card-chat { border-top: none; padding-top: 0; }
   .mx-compass-landing[data-layout='classic'] .mx-compass-visual { height: clamp(150px, 42vw, 220px); border-radius: var(--mx-r-md); }
   .mx-compass-landing[data-layout='minimal'] .mx-compass-title { font-size: clamp(28px, 8vw, 36px); }
+  /* Färgpanel: kortet överlappar panelen och behöver sin yta. */
   .mx-compass-panel { padding: 22px 18px; padding-bottom: 60px; border-radius: var(--mx-r-md); }
   .mx-compass-landing[data-layout='panel'] .mx-compass-content { margin: -44px 0 0; }
-  .mx-compass-landing[data-layout='cover'] .mx-compass-head { padding-top: 8px; }
-  .mx-compass-chatbox { min-height: 460px; }
-  /* Knapprad i quiz/wizard staplar snyggt och fyller bredden på mobil. */
+  .mx-compass-landing[data-layout='panel'] .mx-compass-card {
+    background: var(--mx-paper);
+    border: 1px solid var(--mx-line);
+    border-radius: var(--mx-r-md);
+    box-shadow: var(--mx-sh-2);
+    padding: 20px 16px;
+  }
+  /* Heltäckande: rubriken över bilden, flödet som ett ark kant i kant. */
+  /* Arket fyller alltid ned till skärmens nederkant, även vid kort innehåll. */
+  .mx-compass-landing[data-layout='cover'] { padding-bottom: 0; display: flex; flex-direction: column; }
+  .mx-compass-landing[data-layout='cover'] .mx-compass-wrap { gap: 0; flex: 1; grid-template-rows: 1fr auto; }
+  .mx-compass-landing[data-layout='cover'] .mx-compass-content { gap: 22px; grid-template-rows: auto 1fr; align-items: stretch; }
+  .mx-compass-landing[data-layout='cover'] .mx-compass-card {
+    margin: 0 -18px;
+    padding: 24px 18px 20px;
+    background: var(--mx-paper);
+    border: none;
+    border-radius: 22px 22px 0 0;
+    box-shadow: none;
+    min-height: 46vh;
+  }
+  .mx-compass-landing[data-layout='cover'] .mx-compass-card-chat { padding: 0; min-height: 0; }
+  .mx-compass-landing[data-layout='cover'] .mx-compass-card-chat .mx-chat { border-radius: 22px 22px 0 0; box-shadow: none; }
+  .mx-compass-landing[data-layout='cover'] .mx-compass-foot {
+    margin: 0 -18px;
+    padding: 4px 18px 28px;
+    background: var(--mx-paper);
+    color: var(--mx-muted-2);
+  }
+  .mx-compass-chatbox { height: calc(100dvh - 190px); min-height: 440px; }
+  .mx-qprompt { font-size: 20px; }
+  .mx-qchoice { padding: 14px 14px; font-size: 15px; }
+  /* Knappar fyller bredden och är lätta att träffa med tummen. */
   .mx-compass-card .mx-consent-cta { width: 100%; }
   .mx-compass-card .mx-consent-cta .mx-btn { flex: 1 1 auto; justify-content: center; }
+  .mx-compass-card form > .mx-flex:last-child > .mx-btn { min-height: 46px; padding-left: 20px; padding-right: 20px; }
+  .mx-compass-card form > .mx-flex:last-child > .mx-btn.mx-primary { flex: 1 1 auto; justify-content: center; }
 }
 
 
