@@ -50,6 +50,12 @@ Ingen serveråtgärd krävs — Coolify-instansen var frisk hela tiden.
   sync-pocketbase.yml) och `coolify-production` (deploy-production.yml +
   sync-pocketbase-production.yml), `cancel-in-progress: false` — deployer
   mot samma miljö serialiseras, en manuell sync kan inte racea en deploy.
+  **Följdfix (samma dag, run 45590771368):** en anropad reusable workflow
+  med SAMMA workflow-nivå-grupp som anroparen deadlockar — GitHub köar den
+  bakom anroparen som väntar på den, sync-jobben skapas aldrig och körningen
+  faller. Sync-workflowsen delar därför gruppen BARA vid fristående
+  `workflow_dispatch` (`github.workflow` = eget namn); vid `workflow_call`
+  används en unik grupp per run (anroparens grupp serialiserar redan).
 
 ## Lärdomar
 

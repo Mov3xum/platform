@@ -23,11 +23,16 @@ on:
 permissions:
   contents: read
 
-# Samma concurrency-grupp som staging-deployen: en manuellt startad sync får
-# inte raceas av en pågående deploy (eller tvärtom). Vid workflow_call gäller
-# anroparens grupp (deploy.yml).
+# Serialisera mot deployen BARA när denna workflow körs fristående
+# (workflow_dispatch). Vid workflow_call ÄRVS anroparens grupp (deploy.yml
+# håller redan coolify-staging) — samma grupp här deadlockar då anropet:
+# GitHub köar den anropade workflowen bakom anroparen, som väntar på den
+# (incident 2026-11-25, run 45590771368: sync-jobben skapades aldrig och
+# körningen föll). `github.workflow` är anroparens namn vid workflow_call,
+# så villkoret matchar bara fristående körningar. Håll strängen i synk med
+# `name:` överst.
 concurrency:
-  group: coolify-staging
+  group: ${{ github.workflow == 'Sync PocketBase schema' && 'coolify-staging' || format('coolify-staging-call-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:
