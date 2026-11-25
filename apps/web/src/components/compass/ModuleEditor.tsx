@@ -590,72 +590,50 @@ export function ModuleEditor({
               />
             </label>
 
-            <div className="mx-label">
-              Dina uppgifter — avsnittet sist i flödet
-              <span className="mx-t-xs mx-muted" style={{ display: 'block', marginTop: 4, fontWeight: 400 }}>
-                Välj vilka uppgifter besökaren fyller i efter frågorna och vilka som är
-                obligatoriska. Gäller alla flödestyper: i AI-chatten som avslutssteg efter samtalet
-                (med sammanfattning som PDF/e-post), i formulär och quiz som sista steg.
-              </span>
-              <table style={{ marginTop: 8, width: '100%', borderCollapse: 'collapse' }}>
-                <tbody>
-                  {CONTACT_FIELD_KEYS.map((key) => {
-                    const meta = CONTACT_FIELD_META[key];
-                    const current = contactSection[key];
-                    return (
-                      <tr key={key}>
-                        <td style={{ padding: '6px 8px 6px 0', verticalAlign: 'top' }}>
-                          <span className="mx-t-13 mx-fw-6">{meta.label}</span>
-                          {key === 'founder_gender' && (
-                            <span className="mx-t-xs mx-muted" style={{ display: 'block', fontWeight: 400 }}>
-                              Kvinna / Man / Mixat team / Vill inte ange. Kan vara obligatoriskt —
-                              besökaren kan alltid välja &quot;Vill inte ange&quot;. Används bara för
-                              Vinnovas statistik, aldrig i bedömningen.
-                            </span>
-                          )}
-                          {key === 'attachments' && (
-                            <span className="mx-t-xs mx-muted" style={{ display: 'block', fontWeight: 400 }}>
-                              Pitch deck, affärsplan m.m. — PDF, PowerPoint, Word, Excel eller bild, högst
-                              5 filer à 25 MB. Filerna syns på leadet och kan laddas ned av personalen.
-                            </span>
-                          )}
-                          {key === 'other_info' && (
-                            <span className="mx-t-xs mx-muted" style={{ display: 'block', fontWeight: 400 }}>
-                              Fritextruta där idébäraren kan lägga till det som inte fått plats i frågorna.
-                            </span>
-                          )}
-                        </td>
-                        <td style={{ padding: '6px 0', whiteSpace: 'nowrap' }}>
-                          {CONTACT_FIELD_MODES.filter((m) => !(meta.neverRequired && m === 'required')).map(
-                            (mode) => (
-                              <label
-                                key={mode}
-                                className="mx-t-12"
-                                style={{ marginRight: 12, cursor: 'pointer', fontWeight: 400 }}
-                              >
-                                <input
-                                  type="radio"
-                                  name={`contact_${key}`}
-                                  value={mode}
-                                  defaultChecked={current === mode}
-                                  style={{ marginRight: 4 }}
-                                />
-                                {CONTACT_FIELD_MODE_LABEL[mode]}
-                              </label>
-                            )
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              <span className="mx-t-xs mx-muted" style={{ display: 'block', marginTop: 6 }}>
-                Kön, kommun och kontaktväg är fasta val. Övriga teammedlemmar är en fritextruta
-                (namn + e-post). Hemsidan kontrolleras som en webbadress. Kön på grundare och teammedlemmar når aldrig AI-analysen och
-                exporteras inte per lead.
-              </span>
-            </div>
+            <section className="mx-cfields" aria-labelledby="cfields-title">
+              <header className="mx-cfields-head">
+                <h3 id="cfields-title" className="mx-cfields-title">
+                  Dina uppgifter
+                </h3>
+                <p className="mx-cfields-lead">
+                  Avsnittet sist i flödet. Välj vad besökaren fyller i och vad som krävs.
+                </p>
+              </header>
+              <div className="mx-cfields-list">
+                {CONTACT_FIELD_KEYS.map((key) => {
+                  const meta = CONTACT_FIELD_META[key];
+                  const current = contactSection[key];
+                  const help = CONTACT_FIELD_HELP[key];
+                  return (
+                    <div key={key} className="mx-cfields-row" role="radiogroup" aria-label={meta.label}>
+                      <div className="mx-cfields-text">
+                        <span className="mx-cfields-name">{meta.label}</span>
+                        {help && <span className="mx-cfields-help">{help}</span>}
+                      </div>
+                      <div className="mx-cfields-seg">
+                        {CONTACT_FIELD_MODES.filter((m) => !(meta.neverRequired && m === 'required')).map(
+                          (mode) => (
+                            <label key={mode} className="mx-cfields-opt" data-mode={mode}>
+                              <input
+                                type="radio"
+                                name={`contact_${key}`}
+                                value={mode}
+                                defaultChecked={current === mode}
+                              />
+                              <span>{CONTACT_FIELD_MODE_LABEL[mode]}</span>
+                            </label>
+                          )
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="mx-cfields-foot">
+                Kön på grundare och teammedlemmar når aldrig AI-analysen och exporteras inte per
+                lead.
+              </p>
+            </section>
 
             <label className="mx-label">
               Samtyckestext (GDPR)
@@ -928,6 +906,18 @@ export function ModuleEditor({
     </div>
   );
 }
+
+/** Korta hjälptexter per fält i "Dina uppgifter" (steg 4). */
+const CONTACT_FIELD_HELP: Partial<Record<(typeof CONTACT_FIELD_KEYS)[number], string>> = {
+  founder_gender:
+    'Fasta val med "Vill inte ange". Bara för Vinnovas statistik, aldrig i bedömningen.',
+  team_members: 'Fritextruta för namn och e-post.',
+  kommun: 'Fasta val.',
+  referral_channel: 'Fasta val.',
+  website: 'Kontrolleras som webbadress.',
+  other_info: 'Fritextruta för det som inte fått plats i frågorna.',
+  attachments: 'Pitch deck m.m. — PDF, Office eller bild, högst 5 filer à 25 MB.'
+};
 
 function Step({ active, children }: { active: boolean; children: React.ReactNode }) {
   // Inaktiva steg döljs men ligger kvar i DOM:en så submit postar alla fält.
