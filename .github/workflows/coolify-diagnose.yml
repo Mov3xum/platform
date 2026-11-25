@@ -1,0 +1,89 @@
+name: Diagnose Coolify resources
+
+# TILLFÄLLIG diagnos (incident 2026-11-25): listar Coolify-resurserna och
+# visar vad COOLIFY_APP_UUID_STAGING/_PRODUCTION faktiskt pekar på
+# (typ, build pack, repo/gren, Dockerfile-/compose-sökväg). Bygglogg-
+# utdraget bevisade att staging-resursen bygger en legacy-Dockerfile med
+# ARG POCKETBASE_SUPERUSER_PASSWORD — den här workflowen visar var repots
+# compose-stack (infra/coolify.yml) finns, eller att den saknas.
+# Skriver ALDRIG något — bara GET. Ta bort filen när incidenten är stängd.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Lista Coolify-resurser och inspektera deploy-målen
+        env:
+          COOLIFY_BASE_URL: ${{ secrets.COOLIFY_BASE_URL }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+          UUID_STAGING: ${{ secrets.COOLIFY_APP_UUID_STAGING || secrets.COOLIFY_PROJECT_ID_STAGING }}
+          UUID_PRODUCTION: ${{ secrets.COOLIFY_APP_UUID_PRODUCTION || secrets.COOLIFY_PROJECT_ID_PRODUCTION }}
+        run: |
+          set -euo pipefail
+          base="${COOLIFY_BASE_URL%/}"
+          if [ -z "$base" ] || [ -z "${COOLIFY_TOKEN:-}" ]; then
+            echo "::error::COOLIFY_BASE_URL/COOLIFY_TOKEN saknas."
+            exit 1
+          fi
+
+          get() {
+            curl -sS --connect-timeout 10 --max-time 60 \
+              -H "Authorization: Bearer $COOLIFY_TOKEN" \
+              -H "Accept: application/json" \
+              "$base$1" || true
+          }
+
+          summarize() {
+            # Skriver bara ofarliga konfigurationsfält — aldrig envs/tokens.
+            node -e '
+              let raw = "";
+              process.stdin.on("data", (d) => (raw += d));
+              process.stdin.on("end", () => {
+                let data;
+                try { data = JSON.parse(raw); } catch { console.log("(icke-JSON-svar)", raw.slice(0, 200)); return; }
+                const pick = (a) => ({
+                  uuid: a.uuid,
+                  name: a.name,
+                  build_pack: a.build_pack,
+                  status: a.status,
+                  git_repository: a.git_repository,
+                  git_branch: a.git_branch,
+                  base_directory: a.base_directory,
+                  dockerfile_location: a.dockerfile_location,
+                  docker_compose_location: a.docker_compose_location,
+                  fqdn: a.fqdn
+                });
+                const list = Array.isArray(data) ? data : [data];
+                for (const item of list) console.log(JSON.stringify(pick(item)));
+              });
+            '
+          }
+
+          echo "=== Alla applications ==="
+          get /api/v1/applications | summarize
+
+          echo ""
+          echo "=== Alla services (one-click) ==="
+          get /api/v1/services | summarize
+
+          echo ""
+          echo "=== Resursen bakom COOLIFY_APP_UUID_STAGING ==="
+          if [ -n "${UUID_STAGING:-}" ]; then
+            get "/api/v1/applications/${UUID_STAGING%%:*}" | summarize
+          else
+            echo "(secret saknas)"
+          fi
+
+          echo ""
+          echo "=== Resursen bakom COOLIFY_APP_UUID_PRODUCTION ==="
+          if [ -n "${UUID_PRODUCTION:-}" ]; then
+            get "/api/v1/applications/${UUID_PRODUCTION%%:*}" | summarize
+          else
+            echo "(secret saknas)"
+          fi
