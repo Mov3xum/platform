@@ -1211,6 +1211,25 @@ function resolveChoices(formData: FormData, inputType: string): ParsedChoice[] |
   return choicesRaw ? parseQuestionChoices(choicesRaw) : undefined;
 }
 
+/** Temarubriken ovanför frågan (§ 23.15): en rad, högst 80 tecken. */
+function cleanQuestionTopic(raw: FormDataEntryValue | null): string {
+  return String(raw || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80);
+}
+
+/** PB släpper okända fält tyst — säg till när `topic` saknas i schemat. */
+function assertTopicStored(saved: unknown, topic: string) {
+  if (!topic) return;
+  const stored = (saved as { topic?: unknown } | null)?.topic;
+  if (stored !== topic) {
+    throw new Error(
+      'frågan sparades, men temarubriken kunde inte sparas — fältet saknas i databasen (kör migration 1700000219).'
+    );
+  }
+}
+
 export async function addQuestionAction(formData: FormData) {
   const user = await requireUser();
   if (!hasRole(user.roles, [...MANAGE_ROLES])) {
@@ -1221,6 +1240,7 @@ export async function addQuestionAction(formData: FormData) {
   const key = slugify(String(formData.get('key') || ''));
   const prompt = String(formData.get('prompt') || '').trim();
   const helpText = String(formData.get('help_text') || '').trim();
+  const topic = cleanQuestionTopic(formData.get('topic'));
   const inputType = String(formData.get('input_type') || 'short_text');
   const required = formData.get('required') === 'on';
 
@@ -1243,18 +1263,20 @@ export async function addQuestionAction(formData: FormData) {
     // frågan läggs SIST. Den tidigare `Date.now() % 1e6`-stämpeln börjar om
     // från 0 var tusende sekund → en ny fråga kunde hamna först.
     const sortOrder = await nextCompassQuestionSortOrder(pb, moduleId);
-    await writeWithFallback(pb, (c) =>
+    const saved = await writeWithFallback(pb, (c) =>
       c.collection('compass_questions').create({
         module: moduleId,
         key,
         prompt,
         help_text: helpText || undefined,
+        topic,
         input_type: inputType,
         required,
         choices,
         sort_order: sortOrder
       })
     );
+    assertTopicStored(saved, topic);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Okänt fel';
     throw new Error(`Kunde inte skapa fråga: ${msg}`);
@@ -1274,6 +1296,7 @@ export async function updateQuestionAction(formData: FormData) {
   const key = slugify(String(formData.get('key') || ''));
   const prompt = String(formData.get('prompt') || '').trim();
   const helpText = String(formData.get('help_text') || '').trim();
+  const topic = cleanQuestionTopic(formData.get('topic'));
   const inputType = String(formData.get('input_type') || 'short_text');
   const required = formData.get('required') === 'on';
 
@@ -1313,16 +1336,18 @@ export async function updateQuestionAction(formData: FormData) {
   }
 
   try {
-    await writeWithFallback(pb, (c) =>
+    const saved = await writeWithFallback(pb, (c) =>
       c.collection('compass_questions').update(id, {
         key,
         prompt,
         help_text: helpText || undefined,
+        topic,
         input_type: inputType,
         required,
         choices
       })
     );
+    assertTopicStored(saved, topic);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Okänt fel';
     throw new Error(`Kunde inte uppdatera fråga: ${msg}`);

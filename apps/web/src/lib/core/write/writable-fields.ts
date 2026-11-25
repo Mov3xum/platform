@@ -186,6 +186,7 @@ const POLICIES: Record<string, Record<string, FieldPolicy>> = {
   compass_questions: {
     prompt: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
     help_text: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
+    topic: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } },
     required: { user: { kind: 'roles', roles: COMPASS_MANAGE }, agent: { kind: 'allow' } }
   },
   // Kanban-kort (§ 15.7/§ 29.4). Agenten får flytta kort mellan kolumner

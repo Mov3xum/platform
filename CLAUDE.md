@@ -4468,6 +4468,26 @@ resultatprofilen besökaren får.
   leadet. Flödet är inte kört mot Mistral från byggmiljön — testa i
   förhandsgranskningen (`/inflode/m/<slug>`) innan publicering.
 
+### 23.15 Temarubrik ovanför frågan (2026-11-25)
+
+Varje fråga kan få en liten rubrik ovanför frågetexten, t.ex.
+"Marknadspotential", så besökaren förstår vilket tema frågan hör till.
+
+- **Fält:** `compass_questions.topic` (text ≤ 80, valfri; migration
+  **1700000219**, speglad i `setup-via-api.mjs`, asserterad i
+  `verify-baseline.mjs` `REQUIRED_APP_FIELDS`). Tomt ⇒ ingen rubrik.
+- **Sätts** i modul-admin steg 3 ("Temarubrik ovanför frågan", både ny fråga
+  och redigering) eller av chatten (`add_compass_question`, parametern
+  `topic`; `writable-fields.ts`). Actionerna plattar till en rad och kapar
+  vid 80 tecken, och kastar ett fel som namnger migrationen om fältet inte
+  fastnade (§ 24.4-invarianten).
+- **Visas** med klassen `.mx-qtopic` (versaler i modulens accentfärg) i
+  formulär, quiz och chattens avslutssteg. AI-chattens frågebank får raden
+  "Tema: …".
+- **Engelska (§ 23.13):** översätts som övriga frågetexter, nyckel
+  `q.<id>.topic`.
+- Ingen PII, ingen ny dataväg; riskklass n/a.
+
 ---
 
 ## 24. AI-sorterat filarkiv — ämnes-/bolagsmappar (/filer)

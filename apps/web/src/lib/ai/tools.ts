@@ -1026,6 +1026,11 @@ export function buildChatTools(
                 'email, phone. Default short_text.'
             },
             help_text: { type: 'string', description: 'Valfri hjälptext under frågan.' },
+            topic: {
+              type: 'string',
+              description:
+                'Valfri liten temarubrik ovanför frågan (högst 80 tecken), t.ex. "Marknadspotential".'
+            },
             required: { type: 'boolean', description: 'Måste besökaren svara? Default nej.' },
             choices: {
               type: 'array',
@@ -4501,6 +4506,7 @@ async function runAddCompassQuestion(
     inputType: typeof args.input_type === 'string' ? args.input_type : undefined,
     key: typeof args.key === 'string' ? args.key : undefined,
     helpText: typeof args.help_text === 'string' ? args.help_text : undefined,
+    topic: typeof args.topic === 'string' ? args.topic : undefined,
     required: typeof args.required === 'boolean' ? args.required : undefined,
     choices: args.choices,
     position

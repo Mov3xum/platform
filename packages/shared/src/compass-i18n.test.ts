@@ -32,6 +32,7 @@ const questions = [
     key: 'idea',
     prompt: 'Vad är idén?',
     help_text: 'Kort',
+    topic: 'Marknadspotential',
     choices: [
       { value: 'a', label: 'Produkt' },
       { value: 'b', label: 'Tjänst' }
@@ -57,6 +58,8 @@ test('compassTranslatableEntries: stabila nycklar, tomma källor hoppas över', 
   assert.ok(keys.includes('q.q1.prompt'));
   assert.ok(keys.includes('q.q1.help'));
   assert.ok(!keys.includes('q.q2.help'));
+  assert.ok(keys.includes('q.q1.topic'));
+  assert.ok(!keys.includes('q.q2.topic'));
   assert.ok(keys.includes('q.q1.c.a'));
   assert.ok(keys.includes('b.tidig.title'));
   assert.ok(keys.includes('b.tidig.tip.0'));
@@ -71,6 +74,7 @@ test('apply: översatta texter ersätter, saknade faller tillbaka på svenska, v
   const q = applyCompassQuestionTranslation(questions, texts);
   assert.equal(q[0].prompt, 'What is the idea?');
   assert.equal(q[0].help_text, 'Kort');
+  assert.equal(q[0].topic, 'Marknadspotential');
   assert.deepEqual(q[0].choices?.map((c) => c.value), ['a', 'b']);
   assert.deepEqual(q[0].choices?.map((c) => c.label), ['Product', 'Tjänst']);
   assert.equal(q[1].prompt, 'Vad heter du?');

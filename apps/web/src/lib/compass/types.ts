@@ -303,6 +303,8 @@ export interface CompassQuestion {
   key: string;
   prompt: string;
   help_text?: string;
+  /** Liten temarubrik ovanför frågan, t.ex. "Marknadspotential" (§ 23.15). */
+  topic?: string;
   input_type: 'short_text' | 'long_text' | 'choice' | 'multi_choice' | 'scale' | 'email' | 'phone';
   // `score`/`bucket`/`buckets` driver quiz-poängsättningen (packages/shared/compass-quiz.ts).
   // `buckets` = multi-hink (ett val fördelar poäng över flera profiler).
