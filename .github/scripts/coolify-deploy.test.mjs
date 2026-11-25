@@ -253,3 +253,134 @@ test('http:// ger en klartextvarning men blockerar inte', async () => {
     await mock.close();
   }
 });
+
+// --- COOLIFY_WAIT: vänta på att den köade deployen byggs klart -------------
+
+const DEPLOY_OK_WITH_UUID = {
+  status: 200,
+  body: { deployments: [{ message: 'Deployment queued.', resource_uuid: UUID, deployment_uuid: 'dep111' }] },
+};
+
+test('COOLIFY_WAIT=true: pollar /api/v1/deployments tills finished → exit 0', async () => {
+  const mock = await startMock({
+    'GET /api/v1/version': VERSION_OK,
+    [`POST /api/v1/deploy?uuid=${UUID}&force=false`]: DEPLOY_OK_WITH_UUID,
+    'GET /api/v1/deployments/dep111': [
+      { status: 200, body: { status: 'queued' } },
+      { status: 200, body: { status: 'in_progress' } },
+      { status: 200, body: { status: 'finished' } },
+    ],
+  });
+  try {
+    const { code, out } = await run({
+      COOLIFY_BASE_URL: mock.baseUrl,
+      COOLIFY_APP_UUID: UUID,
+      COOLIFY_WAIT: 'true',
+      COOLIFY_WAIT_INTERVAL: '0',
+      COOLIFY_WAIT_TIMEOUT: '30',
+    });
+    assert.equal(code, 0, out);
+    assert.match(out, /Väntar på att Coolify-bygget dep111 blir klart/);
+    assert.match(out, /✓ Coolify-bygget dep111 är klart\./);
+    assert.equal(mock.seen.filter((s) => s.key === 'GET /api/v1/deployments/dep111').length, 3);
+  } finally {
+    await mock.close();
+  }
+});
+
+test('COOLIFY_WAIT=true: bygget failed → exit 1 med diagnos', async () => {
+  const mock = await startMock({
+    'GET /api/v1/version': VERSION_OK,
+    [`POST /api/v1/deploy?uuid=${UUID}&force=false`]: DEPLOY_OK_WITH_UUID,
+    'GET /api/v1/deployments/dep111': { status: 200, body: { status: 'failed' } },
+  });
+  try {
+    const { code, out } = await run({
+      COOLIFY_BASE_URL: mock.baseUrl,
+      COOLIFY_APP_UUID: UUID,
+      COOLIFY_WAIT: 'true',
+      COOLIFY_WAIT_INTERVAL: '0',
+    });
+    assert.equal(code, 1);
+    assert.match(out, /::error::Coolify-bygget dep111 misslyckades \(status: failed\)/);
+  } finally {
+    await mock.close();
+  }
+});
+
+test('COOLIFY_WAIT=true: timeout → exit 1 ("gamla containern"-diagnos)', async () => {
+  const mock = await startMock({
+    'GET /api/v1/version': VERSION_OK,
+    [`POST /api/v1/deploy?uuid=${UUID}&force=false`]: DEPLOY_OK_WITH_UUID,
+    'GET /api/v1/deployments/dep111': { status: 200, body: { status: 'in_progress' } },
+  });
+  try {
+    const { code, out } = await run({
+      COOLIFY_BASE_URL: mock.baseUrl,
+      COOLIFY_APP_UUID: UUID,
+      COOLIFY_WAIT: 'true',
+      COOLIFY_WAIT_INTERVAL: '0',
+      COOLIFY_WAIT_TIMEOUT: '0',
+    });
+    assert.equal(code, 1);
+    assert.match(out, /::error::Coolify-bygget dep111 blev inte klart inom 0s.*GAMLA containern/);
+  } finally {
+    await mock.close();
+  }
+});
+
+test('COOLIFY_WAIT=true utan deployment_uuid i svaret → varning + exit 0', async () => {
+  const mock = await startMock({
+    'GET /api/v1/version': VERSION_OK,
+    [`POST /api/v1/deploy?uuid=${UUID}&force=false`]: DEPLOY_OK,
+  });
+  try {
+    const { code, out } = await run({
+      COOLIFY_BASE_URL: mock.baseUrl,
+      COOLIFY_APP_UUID: UUID,
+      COOLIFY_WAIT: 'true',
+    });
+    assert.equal(code, 0, out);
+    assert.match(out, /::warning::COOLIFY_WAIT=true men deploy-svaret innehöll ingen deployment_uuid/);
+    assert.equal(mock.seen.filter((s) => s.key.startsWith('GET /api/v1/deployments/')).length, 0);
+  } finally {
+    await mock.close();
+  }
+});
+
+test('COOLIFY_WAIT=true via webhook: pollar med COOLIFY_BASE_URL', async () => {
+  const mock = await startMock({
+    'POST /webhooks/deploy/xyz?force=false': DEPLOY_OK_WITH_UUID,
+    'GET /api/v1/deployments/dep111': { status: 200, body: { status: 'finished' } },
+  });
+  try {
+    const { code, out } = await run({
+      COOLIFY_DEPLOY_WEBHOOK: `${mock.baseUrl}/webhooks/deploy/xyz?force=false`,
+      COOLIFY_BASE_URL: mock.baseUrl,
+      COOLIFY_WAIT: 'true',
+      COOLIFY_WAIT_INTERVAL: '0',
+    });
+    assert.equal(code, 0, out);
+    assert.match(out, /✓ Coolify-bygget dep111 är klart\./);
+    assert.deepEqual(mock.seen.map((s) => s.key), [
+      'POST /webhooks/deploy/xyz?force=false',
+      'GET /api/v1/deployments/dep111',
+    ]);
+  } finally {
+    await mock.close();
+  }
+});
+
+test('utan COOLIFY_WAIT ändras ingenting: ingen statuspollning', async () => {
+  const mock = await startMock({
+    'GET /api/v1/version': VERSION_OK,
+    [`POST /api/v1/deploy?uuid=${UUID}&force=false`]: DEPLOY_OK_WITH_UUID,
+  });
+  try {
+    const { code, out } = await run({ COOLIFY_BASE_URL: mock.baseUrl, COOLIFY_APP_UUID: UUID });
+    assert.equal(code, 0, out);
+    assert.equal(mock.seen.filter((s) => s.key.startsWith('GET /api/v1/deployments/')).length, 0);
+  } finally {
+    await mock.close();
+  }
+});

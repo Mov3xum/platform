@@ -20,10 +20,21 @@
 #                            mellanslagsseparerade. Default "10 20 30 60 60"
 #                            (~3 min — täcker en Coolify-omstart/auto-update).
 #   COOLIFY_CONNECT_TIMEOUT / COOLIFY_MAX_TIME  curl-timeouts (s). Default 10 / 60.
+#   COOLIFY_WAIT             "true" → vänta tills den köade deployen faktiskt
+#                            byggts klart (pollar /api/v1/deployments/<uuid>).
+#                            Krävs när efterföljande steg (schema-sync,
+#                            verify-baseline) måste köra mot den NYA stacken —
+#                            annars racear de mot den gamla containern
+#                            (incident 2026-11-19: "tenant-vakten är inte
+#                            aktiv" för att verify körde mot PB-containern
+#                            FÖRE ombygget med repots hooks).
+#   COOLIFY_WAIT_TIMEOUT     Max väntan i sekunder. Default 1800.
+#   COOLIFY_WAIT_INTERVAL    Sekunder mellan statuskontroller. Default 15.
 #
 # Utfall:
-#   exit 0  deploy köad (2xx från Coolify)
-#   exit 1  konfigurationsfel, auth-fel, 4xx eller Coolify nere efter alla försök
+#   exit 0  deploy köad (2xx från Coolify) — och klar, när COOLIFY_WAIT=true
+#   exit 1  konfigurationsfel, auth-fel, 4xx, Coolify nere efter alla försök,
+#           eller (med COOLIFY_WAIT=true) bygget misslyckades/tog för lång tid
 #
 # Princip: vi provar ALDRIG andra origins än den konfigurerade. Coolify-API:et
 # finns bara på sin egen lyssnare (port 8000 eller instansens FQDN via Traefik);
@@ -43,6 +54,14 @@ case "$force" in
   true|1|yes) force="true" ;;
   *) force="false" ;;
 esac
+
+wait_for_completion="${COOLIFY_WAIT:-false}"
+case "$wait_for_completion" in
+  true|1|yes) wait_for_completion="true" ;;
+  *) wait_for_completion="false" ;;
+esac
+wait_timeout="${COOLIFY_WAIT_TIMEOUT:-1800}"
+wait_interval="${COOLIFY_WAIT_INTERVAL:-15}"
 
 read -r -a retry_delays <<< "${COOLIFY_RETRY_DELAYS:-10 20 30 60 60}"
 
@@ -138,6 +157,108 @@ describe_host() {
   ' "$1"
 }
 
+# --- Vänta på att den köade deployen byggs klart ---------------------------
+# Coolifys deploy-anrop KÖAR bara ett bygge och svarar direkt. Efterföljande
+# workflow-steg (setup-via-api, verify-baseline) kör annars mot den GAMLA
+# containern medan stacken byggs om i bakgrunden. Med COOLIFY_WAIT=true
+# plockas deployment_uuid ur svaret och /api/v1/deployments/<uuid> pollas
+# tills status är finished (eller failed/cancelled → exit 1).
+
+extract_deployment_uuids() {
+  node -e '
+    const fs = require("fs");
+    let raw = "";
+    try { raw = fs.readFileSync(process.argv[1], "utf8"); } catch {}
+    const out = [];
+    try {
+      const data = JSON.parse(raw);
+      const list = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.deployments) ? data.deployments : [data];
+      for (const item of list) {
+        const id = item?.deployment_uuid ?? item?.deployment?.deployment_uuid;
+        if (typeof id === "string" && id && !out.includes(id)) out.push(id);
+      }
+    } catch {}
+    process.stdout.write(out.join(" "));
+  ' "$body_file"
+}
+
+extract_deployment_status() {
+  node -e '
+    const fs = require("fs");
+    let raw = "";
+    try { raw = fs.readFileSync(process.argv[1], "utf8"); } catch {}
+    try {
+      const data = JSON.parse(raw);
+      const status = data?.status ?? data?.deployment?.status;
+      process.stdout.write(typeof status === "string" ? status : "");
+    } catch { process.stdout.write(""); }
+  ' "$body_file"
+}
+
+# wait_for_deployments "<uuid> [uuid...]"
+# Returnerar 0 när alla bygget blivit klara (eller väntan inte går att göra —
+# då med ::warning), 1 när ett bygge misslyckades eller timeouten nåddes.
+wait_for_deployments() {
+  local uuids="$1"
+  if [ "$wait_for_completion" != "true" ]; then
+    return 0
+  fi
+  local poll_base="${COOLIFY_BASE_URL:-}"
+  poll_base="${poll_base%/}"
+  if [ -z "$uuids" ]; then
+    gh_warning "COOLIFY_WAIT=true men deploy-svaret innehöll ingen deployment_uuid — kan inte följa bygget. Efterföljande steg kan köra mot den gamla containern."
+    return 0
+  fi
+  if [ -z "$poll_base" ]; then
+    gh_warning "COOLIFY_WAIT=true men COOLIFY_BASE_URL saknas — kan inte följa bygget. Efterföljande steg kan köra mot den gamla containern."
+    return 0
+  fi
+  local deadline=$(( $(date +%s) + wait_timeout ))
+  local uuid status_value
+  for uuid in $uuids; do
+    log "Väntar på att Coolify-bygget $uuid blir klart (timeout ${wait_timeout}s)..."
+    while :; do
+      if request GET "$poll_base/api/v1/deployments/$uuid"; then
+        case "$http_code" in
+          2??)
+            status_value="$(extract_deployment_status)"
+            case "$status_value" in
+              finished)
+                log "✓ Coolify-bygget $uuid är klart."
+                break
+                ;;
+              failed|cancelled*)
+                gh_error "Coolify-bygget $uuid misslyckades (status: $status_value). Kontrollera bygg-loggen i Coolify (Deployments) — schema-sync/verify avbryts så de inte kör mot den gamla containern."
+                return 1
+                ;;
+              *)
+                log "Bygget $uuid: status ${status_value:-okänd} — väntar ${wait_interval}s..."
+                ;;
+            esac
+            ;;
+          404)
+            gh_warning "Coolify-bygget $uuid hittas inte via /api/v1/deployments (äldre Coolify-API?). Kan inte följa bygget — fortsätter utan att vänta."
+            break
+            ;;
+          *)
+            log "Statuskoll för $uuid svarade HTTP $http_code — försöker igen om ${wait_interval}s..."
+            ;;
+        esac
+      else
+        log "Statuskoll för $uuid: kunde inte nå Coolify (${curl_error:-okänt fel}) — försöker igen om ${wait_interval}s..."
+      fi
+      if [ "$(date +%s)" -ge "$deadline" ]; then
+        gh_error "Coolify-bygget $uuid blev inte klart inom ${wait_timeout}s. Efterföljande schema-sync/verify skulle köra mot den GAMLA containern — avbryter. Kontrollera bygget i Coolify och kör om workflowen när det är klart."
+        return 1
+      fi
+      sleep "$wait_interval"
+    done
+  done
+  return 0
+}
+
 explain_unreachable() {
   local url="$1" hostport
   hostport="$(describe_host "$url")"
@@ -171,6 +292,8 @@ if [ -n "${COOLIFY_DEPLOY_WEBHOOK:-}" ]; then
       2??)
         print_body
         log "✓ Coolify-deploy köad via webhook."
+        queued_uuids="$(extract_deployment_uuids)"
+        wait_for_deployments "$queued_uuids" || exit 1
         exit 0
         ;;
       401|403)
@@ -282,6 +405,7 @@ try_deploy() {
     2??)
       print_body
       log "✓ Coolify-deploy köad${label:+ ($label)}."
+      queued_uuids="$(extract_deployment_uuids)"
       return 0
       ;;
     404)
@@ -301,8 +425,10 @@ try_deploy() {
 }
 
 status=0
+queued_uuids=""
 try_deploy "$deploy_v4" || status=$?
 if [ "$status" -eq 0 ]; then
+  wait_for_deployments "$queued_uuids" || exit 1
   exit 0
 fi
 if [ "$status" -ne 2 ]; then
@@ -320,6 +446,7 @@ print_body
 status=0
 try_deploy "$deploy_legacy" || status=$?
 if [ "$status" -eq 0 ]; then
+  wait_for_deployments "$queued_uuids" || exit 1
   exit 0
 fi
 if [ "$status" -eq 2 ]; then

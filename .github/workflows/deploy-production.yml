@@ -10,6 +10,11 @@ on:
       - main
   workflow_dispatch:
 
+# Serialisera produktionsdeployer (samma grupp som sync-pocketbase-production).
+concurrency:
+  group: coolify-production
+  cancel-in-progress: false
+
 jobs:
   build-image:
     permissions:
@@ -49,6 +54,9 @@ jobs:
           COOLIFY_DEPLOY_WEBHOOK: ${{ secrets.COOLIFY_DEPLOY_WEBHOOK_PRODUCTION }}
           COOLIFY_TARGET_LABEL: production
           COOLIFY_UUID_SECRET_NAME: COOLIFY_APP_UUID_PRODUCTION
+          # Vänta tills stacken faktiskt byggts klart — PB-bootstrap/verify
+          # nedan ska köra mot den NYA containern, inte den gamla.
+          COOLIFY_WAIT: 'true'
         run: bash .github/scripts/coolify-deploy.sh
 
       - name: Bootstrap PocketBase schema for production
