@@ -25,6 +25,8 @@ import { getRecordInTenant, writeWithFallback } from './helpers';
 import type { Actor, WriteResult } from './types';
 import { fail, ok } from './types';
 import type { ValidationResult } from './validators';
+import { registerRecordSafe } from './register';
+import { procurementRegistration } from '@/lib/register/sources';
 
 /**
  * Upphandlingar & avrop (§ 39) via det delade skrivlagret — UI:s server
@@ -295,6 +297,15 @@ export async function createProcurement(
     record_id: created.id,
     after_value: procurementAuditValue(payload)
   });
+
+  // Diariet (§ 60): upphandlingsärendet registreras när det läggs upp.
+  await registerRecordSafe(
+    procurementRegistration(
+      { id: created.id, tenant: actor.tenant, title: payload.title, supplier: payload.supplier, procedure: payload.procedure, diarienummer: payload.diarienummer, created: new Date().toISOString() },
+      { actorId: actor.id },
+      'auto'
+    )
+  );
 
   return ok({ procurementId: created.id, title: String(payload.title), path: procurementPath(created.id) });
 }

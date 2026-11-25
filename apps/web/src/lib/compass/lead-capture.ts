@@ -16,6 +16,14 @@ import { logAiUsage } from '@/lib/ai/usage';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import { countSessionAttachments, linkSessionAttachments } from './attachments';
 import type { CompassModule, CompassQuestion, ContactPreference, Lead } from './types';
+import { registerRecordSafe } from '@/lib/core/write/register';
+import { PREVIEW_SOURCE, leadRegistration } from '@/lib/register/sources';
+
+/** Diariet (§ 60): en slutförd lead är en inkommen handling. Förhandsgranskningar registreras inte. */
+async function registerLead(tenant: string, lead: Lead): Promise<void> {
+  if (lead.source_key === PREVIEW_SOURCE) return;
+  await registerRecordSafe(leadRegistration({ ...lead, tenant, created: new Date().toISOString() }, 'auto'));
+}
 
 /* ────────────────────────────────────────────────────────────────────
    Delad lead-fångst-kärna (CLAUDE.md § 23.6 — ingen divergerande kopia)
@@ -216,6 +224,7 @@ export async function finalizeLead(
     if (updated) {
       await patchConversation(pb, existing.id, { status: 'completed' });
       await linkSessionAttachments(tenant, input.moduleSlug, token, updated.id);
+      await registerLead(tenant, updated);
       return { lead: updated, created: false };
     }
     // Leadet försvann (raderat av personal) — skapa ett nytt nedan.
@@ -229,5 +238,6 @@ export async function finalizeLead(
   }
   // Bilagor som laddats upp under flödet (§ 23.12) följer med leadet.
   await linkSessionAttachments(tenant, input.moduleSlug, token, lead.id);
+  await registerLead(tenant, lead);
   return { lead, created: true };
 }

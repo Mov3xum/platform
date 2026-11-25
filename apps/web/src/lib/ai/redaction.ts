@@ -118,6 +118,11 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   'screening_requests',
   // Ärenden i Bedömning excellens (§ 51.10): underlag + manuella svar per bolag.
   'screening_cases',
+  // Diariet (§ 60): handlingsposter bär motpart (kan vara en enskild person)
+  // och sekretessmarkeringar; utlämnandeloggen bär fri text om begäran.
+  // Planen, ärendena och förteckningen är läsbara.
+  'register_entries',
+  'register_disclosures',
   // Deltagarlistor och e-postkampanjer (§ 53.5, § 55): deltagarrader bär
   // e-post och gästens kost/allergi (kan vara art. 9), mottagarrader bär
   // hashade adresser och leveransstatus, spärrlistan maskade adresser,

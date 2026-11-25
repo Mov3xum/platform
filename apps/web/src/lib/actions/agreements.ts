@@ -12,6 +12,8 @@ import { hasRole } from '@/lib/rbac';
 import { recordActivity } from '@/lib/actions/record-activity';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { notify, notifyStartupMembers } from '@/lib/notifications-server';
+import { registerRecordSafe } from '@/lib/core/write/register';
+import { agreementRegistration } from '@/lib/register/sources';
 import {
   AGREEMENT_PARTY_LABELS,
   SIGNATURE_INTENT_TEXT,
@@ -246,6 +248,17 @@ export async function signAgreementAction(
     title: `${AGREEMENT_PARTY_LABELS[party]} signerade avtal: ${agreement.title}`,
     meta: fullySigned ? 'fullt signerat' : 'väntar på motpart'
   });
+
+  // Diariet (§ 60): avtalet är upprättat när alla parter signerat.
+  if (fullySigned) {
+    await registerRecordSafe(
+      agreementRegistration(
+        { id: agreementId, startup: startupId, title: agreement.title, signed_at: now, document_hash: (agreement as { document_hash?: string }).document_hash, kind: (agreement as { kind?: string }).kind },
+        { tenant: user.tenant, startupName, actorId: user.id },
+        'auto'
+      )
+    );
+  }
 
   // Notiser (§ 50). Fullt signerat → avsändaren, utpekad signatär och bolaget.
   // Bolaget signerade först → Movexum-sidan får "avtal att signera".

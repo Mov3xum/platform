@@ -191,6 +191,13 @@ async function verifyCollectionsExist() {
     'screening_requests',
     // Ärenden i Bedömning excellens (§ 51.10, migration 1700000200).
     'screening_cases',
+    // Diarium, plan och arkivförteckning (§ 60, migration 1700000219).
+    'record_types',
+    'register_cases',
+    'register_entries',
+    'register_disclosures',
+    'archive_profiles',
+    'archive_versions',
     // Impact Navigator (§ 56, migration 1700000206) — hållbarhetsanalysen per bolag.
     'sustainability_assessments',
     'sustainability_gap_questions',
@@ -740,6 +747,13 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   // Ärenden i Bedömning excellens (§ 51.10, migration 1700000200) — internt
   // statsstödsunderlag per bolag → staff/observer-only.
   'screening_cases',
+  // Diarium, plan och arkivförteckning (§ 60) — internt register → staff/observer-only.
+  'record_types',
+  'register_cases',
+  'register_entries',
+  'register_disclosures',
+  'archive_profiles',
+  'archive_versions',
   // Studentprofiler (§ 54, migration 1700000201): privatpersoners uppgifter —
   // bolaget ser dem BARA anonymiserat via kod, aldrig via RLS.
   'student_profiles',
@@ -774,7 +788,8 @@ const MUST_SCOPE_CROSS_TENANT = [
 // agent-versionshistorik (§ 16.6) får aldrig kunna skrivas om via API:t.
 // `ai_usage_monthly` (§ 9.6) skrivs bara av PB-hooken/superuser — månadstaket
 // läser den, så aggregatet får aldrig gå att manipulera via API:t.
-const MUST_BE_IMMUTABLE = ['agreement_signatures', 'tool_versions', 'support_check_revisions', 'ai_usage_monthly'];
+// Diariet (§ 60): ingen användartoken får ändra eller ta bort en post.
+const MUST_BE_IMMUTABLE = ['agreement_signatures', 'tool_versions', 'support_check_revisions', 'ai_usage_monthly', 'record_types', 'register_cases', 'register_entries', 'register_disclosures', 'archive_profiles', 'archive_versions'];
 
 // Migration 1700000175: update/delete på compass-barnkollektionerna måste bära
 // samma förälder-tenant-join som list/view (en coach kunde annars ändra en
@@ -844,7 +859,7 @@ function verifyImmutableCollections(collections) {
 // ingen användarsession, och ett intresse får aldrig förfalskas av ett bolag.
 // Användaraktivitet (§ 57, migration 1700000209): bara servern skriver raderna
 // (en användare ska inte kunna PATCH:a sin egen eller någon annans aktivitet).
-const MUST_BE_SERVER_CREATE_ONLY = ['notifications', 'student_profiles', 'talent_interests', 'user_activity', 'compass_lead_attachments'];
+const MUST_BE_SERVER_CREATE_ONLY = ['notifications', 'student_profiles', 'talent_interests', 'user_activity', 'compass_lead_attachments', 'record_types', 'register_cases', 'register_entries', 'register_disclosures', 'archive_profiles', 'archive_versions'];
 const MUST_BE_OWNER_ONLY = ['notifications', 'notification_preferences'];
 
 function verifyNotificationRules(collections) {
@@ -990,6 +1005,7 @@ const AI_DENYLIST = new Set([
   'sustainability_documents', 'sustainability_ai_jobs',
   'export_documents', 'export_ai_jobs',
   'compass_lead_attachments',
+  'register_entries', 'register_disclosures',
   'user_activity'
 ]);
 
