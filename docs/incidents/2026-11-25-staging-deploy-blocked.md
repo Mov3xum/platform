@@ -61,6 +61,18 @@ att falla på tenant-vakt-provet tills det är åtgärdat.
    web-appen — eller så återskapas inte containern trots ombyggd image).
    Kan inte avgöras från repot; se "Åtgärd på servern".
 
+   **BEKRÄFTAT (run 45599886104, via bygglogg-utdraget):** Coolify-bygget
+   kör `docker build --no-cache -f /artifacts/…` mot en Dockerfile med
+   `ARG "POCKETBASE_SUPERUSER_PASSWORD"` och `ARG "POCKETBASE_ENCRYPTION_KEY"`
+   på raderna 11/15, 50/54 och 97/101 — **den filen finns inte i repot**
+   (varken `backend/pocketbase-schema/Dockerfile` eller `apps/web/Dockerfile`
+   har de ARG:en). Coolify-resursen är alltså en LEGACY-app med en egen,
+   i Coolify sparad Dockerfile från det tidiga enkelcontainer-upplägget
+   (som dessutom bakar in PB-lösenordet som build-ARG — flaggas av
+   BuildKit:s SecretsUsedInArgOrEnv). Den bygger ALDRIG repots
+   `infra/coolify.yml`-stack → PB-containern får aldrig repots
+   migrationer/hooks, oavsett hur många "lyckade" rebuilds som körs.
+
 ## Åtgärder (i repot)
 
 - **Typfelet:** `summarizeStepResult`-parametern i
@@ -96,30 +108,37 @@ att falla på tenant-vakt-provet tills det är åtgärdat.
   (är `notifications.kind` fortfarande select är imagen byggd före migration
   1700000186) + serverrunbooken nedan.
 
-## Åtgärd på servern (kvarstår)
+## Åtgärd på servern (kvarstår — ENDA kvarvarande steget)
 
-SSH:a till UpCloud-hosten och kontrollera, för staging och produktion:
+Grundorsaken är bekräftad (se ovan): Coolify-resursen bakom
+`COOLIFY_APP_UUID_STAGING` bygger en legacy-Dockerfile sparad i Coolify,
+inte repots compose-stack. Fixen görs i Coolify-UI:t (~10 min per miljö):
 
-1. **Pekar `COOLIFY_APP_UUID_STAGING`/`_PRODUCTION` på rätt resurs?** Öppna
-   Coolify → resursen vars UUID står i GitHub-secreten. Det MÅSTE vara
-   docker-compose-stacken med `pocketbase`-tjänsten (infra/coolify.yml),
-   inte web-appen. Nästa körning loggar resursnamnet ("Bygget … gäller
-   resursen: …") — stämmer det inte: uppdatera secreten.
-2. **Återskapas PB-containern?**
-   `docker ps --format '{{.Names}}\t{{.CreatedAt}}' | grep pocketbase` —
-   CreatedAt ska vara från senaste bygget. Är den gammal trots "finished":
-   kontrollera i Coolify att compose-appen inte har pocketbase-tjänsten
-   exkluderad, och trigga en redeploy med force.
-3. **Finns hookarna i imagen?**
-   `docker exec moveum-pocketbase ls /pb/pb_hooks` — ska lista
-   `tenant_guard.pb.js` m.fl. ur repots `backend/pocketbase-schema/hooks/`.
-4. **Startar PB utan migrationsfel?**
-   `docker logs moveum-pocketbase --tail 100` — ett "Failed to apply
-   migration …" vid start betyder att containern aldrig kommer upp på den
-   nya imagen.
-5. När PB-containern kör rätt image: kör om "Deploy to Coolify Staging"
-   (och dispatcha produktionsdeployen) — verify-baseline ska då ge
+1. **Skapa/peka om till compose-stacken.** Coolify → projektet → skapa en
+   resurs av typen **Docker Compose** med GitHub-repot `Mov3xum/platform`,
+   gren `staging` (produktion: samma repo, taggen/grenen för produktion)
+   och **Docker Compose Location** `infra/coolify.yml`. Sätt env-variablerna
+   från den gamla resursen (POCKETBASE_ENCRYPTION_KEY,
+   APP_ADMIN_INITIAL_PASSWORD, MOVEXUM_* m.fl.) och se till att
+   `pb_data`-volymen återanvänds/migreras så datat följer med.
+2. **Uppdatera GitHub-secreten** `COOLIFY_APP_UUID_STAGING`
+   (resp. `_PRODUCTION`) till den NYA resursens UUID.
+3. **Stäng av/ta bort legacy-resursen** (den med egen Dockerfile och
+   `ARG POCKETBASE_SUPERUSER_PASSWORD` — lösenord ska aldrig vara
+   build-ARG, A.8.24).
+4. Kör om "Deploy to Coolify Staging" (resp. dispatcha produktionsdeployen
+   från `staging`). Bygglogg-utdraget i Actions ska nu visa
+   `Container moveum-pocketbase Recreated`, och verify-baseline ska ge
    "✓ tenant-vakt aktiv".
+
+Kontroller på hosten om något ändå strular:
+
+1. `docker ps --format '{{.Names}}\t{{.CreatedAt}}' | grep pocketbase` —
+   CreatedAt ska vara från senaste bygget.
+2. `docker exec moveum-pocketbase ls /pb/pb_hooks` — ska lista
+   `tenant_guard.pb.js` m.fl. ur repots `backend/pocketbase-schema/hooks/`.
+3. `docker logs moveum-pocketbase --tail 100` — inget "Failed to apply
+   migration …" vid start.
 
 **Separat observation (eget ärende):** en HELT FÄRSK installation (tom
 pb_data) faller på migration `1700000051_create_mission_comments.js`
