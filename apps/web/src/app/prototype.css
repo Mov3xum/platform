@@ -3155,3 +3155,104 @@ html.dark .mx-tab-badge {
   box-shadow: var(--mx-sh-1);
 }
 .mx-chat-closing .mx-qchoices { margin-top: 0; }
+
+/* ── Startupkompassen — modul-admin steg 4: "Dina uppgifter" ───────────── */
+.mx-cfields {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--mx-r-md);
+  background: var(--color-surface);
+  overflow: hidden;
+}
+.mx-cfields-head { padding: 16px 18px 12px; }
+.mx-cfields-title {
+  font-family: var(--mx-display);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-foreground);
+  margin: 0;
+}
+.mx-cfields-lead,
+.mx-cfields-foot {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--color-foreground-subtle);
+  margin: 4px 0 0;
+}
+.mx-cfields-foot {
+  margin: 0;
+  padding: 10px 18px 12px;
+  border-top: 1px solid var(--color-border-default);
+  background: var(--color-canvas-subtle);
+}
+.mx-cfields-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--color-border-default);
+}
+.mx-cfields-text { min-width: 0; display: grid; gap: 2px; }
+.mx-cfields-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-foreground);
+}
+.mx-cfields-help {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-foreground-subtle);
+}
+/* Fält som inte visas tonas ned så listan går att läsa av på en blick. */
+.mx-cfields-row:has(input[value="hidden"]:checked) .mx-cfields-name {
+  color: var(--color-foreground-subtle);
+  font-weight: 500;
+}
+.mx-cfields-row:has(input[value="hidden"]:checked) .mx-cfields-help { display: none; }
+
+.mx-cfields-seg {
+  flex: none;
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border-radius: var(--mx-r-pill);
+  background: var(--color-canvas-muted);
+}
+.mx-cfields-opt { position: relative; cursor: pointer; }
+.mx-cfields-opt input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+}
+.mx-cfields-opt span {
+  display: block;
+  padding: 5px 12px;
+  border-radius: var(--mx-r-pill);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--color-foreground-muted);
+  transition: background-color 0.12s, color 0.12s;
+}
+.mx-cfields-opt:hover span { color: var(--color-foreground); }
+.mx-cfields-opt input:checked + span {
+  background: var(--color-brand);
+  color: var(--color-brand-foreground);
+}
+.mx-cfields-opt[data-mode="hidden"] input:checked + span {
+  background: var(--color-surface);
+  color: var(--color-foreground-muted);
+  box-shadow: 0 0 0 1px var(--color-border-strong);
+}
+.mx-cfields-opt input:focus-visible + span {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+}
+@media (max-width: 640px) {
+  .mx-cfields-row { flex-direction: column; align-items: stretch; gap: 8px; }
+  .mx-cfields-seg { display: flex; }
+  .mx-cfields-opt { flex: 1; text-align: center; }
+  .mx-cfields-opt span { padding: 7px 6px; }
+}
