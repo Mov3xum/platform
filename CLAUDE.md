@@ -6125,10 +6125,12 @@ förklaring i tooltip:en**; den döljs aldrig tyst (en osynlig knapp går inte a
 felsöka). Samma sak om webbläsaren saknar `MediaRecorder`.
 
 **Konfiguration:** `MISTRAL_API_KEY` (befintlig) räcker.
-`MISTRAL_VOICE_MODEL` (valfri, default `voxtral-mini-latest`),
+`MISTRAL_VOICE_MODEL` (valfri — en eller flera modeller, kommaseparerat, som
+provas FÖRE standardlistan; **lämna tom**),
 `MISTRAL_VOICE_LANGUAGE` (valfri, default `sv`; `auto` = inget hint) och
 `MISTRAL_API_BASE_URL` (befintlig) kan överstyra i Coolify — aldrig i kod
-(ISO 27001 A.8.24). Saknas nyckeln felar röstinmatningen **tydligt** (503,
+(ISO 27001 A.8.24). `/api/health` → `speech.candidates` visar vilka modeller
+som provas, i ordning (leverantör, modell, språkhint — aldrig nycklar). Saknas nyckeln felar röstinmatningen **tydligt** (503,
 "röstinmatning är inte konfigurerad") i stället för att tyst göra ingenting
 (SOC 2 availability, § 10.4).
 
@@ -6147,9 +6149,43 @@ processen (`LanguageHintMemory`, 6 h TTL) så efterföljande segment går rätt
 från början; (2) annat 400 med extraparametrar (kontext-bias/diarisering) →
 utan dem; (3) tomt svar med hint → ett omförsök med autodetekt (bokförs);
 (4) 429/5xx/nätverk → backoff-retry, uttömt → **failover till nästa
-provider** (aldrig vid 4xx, samma princip som § 9.2). Svaret bär modellens
+provider** (då: aldrig vid 4xx — utökat 2026-11-26, se nästa stycke). Svaret bär modellens
 rapporterade `language`; mötespanelen varnar när ett avsnitt tolkats som ett
 annat språk än svenska.
+
+**Voxtral 3 är standard — svenska stöds (incident 2026-11-26).** Felet
+kom tillbaka: Mistral hade bytt felformulering ("Got unsupported language
+`sv`" → "Model 'voxtral-mini-transcribe-2602' does not support language
+'sv'"), tolkningen matchade en exakt fras och slog aldrig till, så
+röstknappen och varje mötessegment föll igen. Två ändringar, båda
+verifierade mot docs.mistral.ai (lästa 2026-11-26):
+- **Modellen.** `voxtral-mini-latest` pekar på Voxtral Transcribe 2 (13 språk,
+  inte svenska) — vi körde svenska möten på en modell som inte stöder
+  svenska. Voxtral 3 (2026-10-20) stöder 53 språk inklusive svenska (`sv`).
+  Standardlistan (`DEFAULT_VOICE_MODELS`) är nu `voxtral-small-transcribe-3`
+  (mest träffsäker, $0,004/min) → `voxtral-mini-transcribe-3` ($0,0035/min) →
+  `voxtral-mini-latest` (äldre alias, autodetekt — sista reserv om kontot
+  saknar Voxtral 3). `resolveSpeechProviders` ger en **kandidat per
+  (leverantör, modell)**; en modell kontot inte når ("Invalid model") hoppas
+  över och minns i 6 h.
+- **Trappan hänger inte på ordalydelsen.** Kedjan bor i
+  `lib/ai/voice-ladder.ts` (injicerbar `fetch`/`sleep`/klocka, enhetstestad
+  mot leverantörens verkliga svar i `voice-ladder.test.ts`; `voice.ts` är en
+  tunn server-only-omslag). Ett avvisat anrop (400/422) degraderas steg för
+  steg: felet gäller språket (känd formulering ELLER bara ordet `language`)
+  → hintet släpps; okänd modell → nästa kandidat; extraparametrar → stryks;
+  hintet kvar → släpps som sista utväg. Anropet slutar alltid som det nakna
+  (modell + fil) innan det ger upp. Formuleringen avgör bara vad som
+  **minns**: känd formulering direkt, annars först när omförsöket utan hint
+  lyckats. Därefter provas nästa kandidat — vid otillgänglighet, okänd
+  modell, fel nyckel hos EN leverantör eller avvisat i enklaste form. Ett
+  tomt transkript växlar aldrig (ljudet är då redan debiterat). Total
+  tidsbudget 70 s innan fler kandidater provas.
+- Felet till användaren är API:ets läsbara `message`
+  (`extractApiErrorMessage`), aldrig rå JSON.
+- **Lägg aldrig till en ny exakt felfras som ENDA väg** — mönstren i
+  `parseUnsupportedLanguage`/`isInvalidModelError` är en optimering
+  (minne), inte grinden.
 
 **Kontext-bias ("egen ordlista").** Voxtral tar `context_bias` (lista av
 termer modellen ska föredra), Whisper-servrar tar samma termer som `prompt`.
@@ -6158,17 +6194,42 @@ Vinnova, Almi, de minimis, IRL-nivå …) och — i mötesläget — bolagets na
 (whitelistat fält, § 9.3). ALDRIG mötestitel, personnamn eller annan PII
 (GDPR § 5); `buildContextBias` dedupe:ar och cappar (40 termer/60 tecken).
 
-**Självhostad svensk modell (valfri EU-provider, dormant tills env är satt).**
-Voxtral listar inte svenska bland sina officiellt stödda språk; för svensk
-transkribering i klass med dedikerade svenska tjänster kan operatören peka
-en **självhostad, OpenAI-kompatibel** endpoint (speaches / faster-whisper-
-server / whisper.cpp med **KB-Whisper**, Kungliga bibliotekets svensktränade
-Whisper, Apache 2.0) på UpCloud (EU): `MOVEXUM_STT_BASE_URL` (+ valfri
-`MOVEXUM_STT_API_KEY`, `MOVEXUM_STT_MODEL` default `KBLab/kb-whisper-large`,
-`MOVEXUM_STT_LANGUAGE` default `sv`). Den går då FÖRST och Voxtral blir
-fallback vid nätverk/kapacitet (`resolveSpeechProviders`, enhetstestad).
-Ingen ny tredjepart, inget ljud lämnar EU, samma dataflöde (§ 10.2); usage
-loggas med providerns modellnamn (0 tokens → 0 kostnad).
+**Svensktränad modell (valfri EU-endpoint, dormant tills env är satt).**
+Räcker inte Voxtral 3 för svenska möten kan operatören peka en
+**OpenAI-kompatibel** endpoint med **KB-Whisper** (Kungliga bibliotekets
+svensktränade Whisper, Apache 2.0; KB:s egen mätning: WER 4–5 % på svenska
+mot 8–11 % för whisper-large-v3): `MOVEXUM_STT_BASE_URL` (+ `MOVEXUM_STT_API_KEY`,
+`MOVEXUM_STT_MODEL` default `KBLab/kb-whisper-large`, `MOVEXUM_STT_LANGUAGE`
+default `sv`, `MOVEXUM_STT_USD_PER_MINUTE` för kostnadsloggen). Den går då
+FÖRST och Voxtral blir reserv (`resolveSpeechProviders`, enhetstestad). Två
+sätt att få en sådan endpoint:
+- **Självhostad** på UpCloud (speaches / faster-whisper-server / whisper.cpp)
+  — ingen ny tredjepart, inget ljud lämnar vår drift.
+- **Berget AI** (svenskt bolag, drift i Stockholm): `https://api.berget.ai`,
+  `POST /v1/audio/transcriptions`, modell `KBLab/kb-whisper-large`,
+  €3/1000 min (berget.ai/llms.txt, läst 2026-11-26). **Ny
+  personuppgiftsbiträde** — DPA + leverantörsbedömning (§ 10.3 A.5.19) och
+  uppdaterad DPIA (`docs/privacy/dpia-meeting-transcription.md`) FÖRE
+  aktivering. Basen får sluta på `/v1` (tolereras).
+
+**Klang (klang.ai) — utrett 2026-11-26, inte motorn för inspelning i
+plattformen.** Klangs publika REST-API 1.0 (`app.klang.ai/api/v1`,
+docs.klang.ai/openapi.yaml) LÄSER samtal (`GET /conversations`,
+`/conversations/{id}` med transkript + sammanfattning) och skickar en
+mötesbot till Teams/Meet/Zoom (`POST /bots`); webhooks `conversation.ready`.
+Det finns **ingen REST-endpoint för att ladda upp ljud** — filuppladdning
+finns bara som MCP-verktyg för assistenter (`create-upload`), och varje
+uppladdning blir ett sparat samtal i Klangs arbetsyta (ljud + transkript
+lagras hos Klang, asynkront, 60 anrop/min på Pro). Det går inte ihop med
+mötesläget, som skickar 60–90 s-avsnitt, visar texten live och aldrig lagrar
+ljud (§ 34.2). Två sätt Klang KAN användas, inget byggt: (1) **mötesbot +
+import** — skicka Klangs bot till ett Teams-möte och hämta transkriptet in i
+granskningen (§ 34.3 steg 4) när `conversation.ready` kommer; (2) **import
+av samtal** som spelats in i Klangs egna appar. Båda är en per-användare-
+integration (§ 14, Klang har OAuth "Connect with Klang"), kräver Klang-konto
+(Pro eller högre), DPA och DPIA-tillägg. Klangs egen svenska modell
+(Pianissimo, öppna vikter) finns som realtids-API hos Berget — ett möjligt
+nästa steg för ord-för-ord-text under mötet.
 
 ### 31.3 Nya skrivverktyg (Startupkompassen + workshops)
 
@@ -6233,9 +6294,15 @@ INNAN fallbacken används.
 - **Robusthet (art. 15 / SOC 2):** rate-limit per användare, hårt storleks-
   (20 MB) och längdtak (120 s), 60 s request-timeout, retry med backoff på
   429/5xx och tydliga svenska fel i stället för tysta misslyckanden.
-- **Kostnad:** röst-tokens loggas i `ai_usage_events` och omfattas av
-  månadstaket per tenant (§ 9.6). `estimateCostUsd` har egna Voxtral-rader så
-  transkriberingen inte prissätts som Large-tier.
+- **Kostnad:** transkribering debiteras per **ljudminut**, inte per token.
+  Routarna loggar därför känd kostnad (`logAiUsage({ costUsd })` ←
+  `speechCostUsd` → `estimateSpeechCostUsd`: Mistrals listpris per minut ×
+  ljudlängden som API:et rapporterar, annars klippets uppmätta längd) och
+  det räknas mot månadstaket per tenant (§ 9.6). Tokens bokförs som förut
+  (Voxtral 3 redovisar ljudtokens för sig — de räknas in i `tokens_in`).
+  Saknas ljudlängd faller loggen tillbaka på `estimateCostUsd`, som har
+  Voxtral-rader så transkriberingen inte prissätts som Large-tier. En
+  timmes möte på standardmodellen ≈ $0,24.
 - **Säker konfiguration (A.8.9):** `Permissions-Policy` öppnar mikrofonen
   enbart för samma origin (`microphone=(self)`); kameran är fortsatt helt
   avstängd. CSP:s `connect-src 'self'` täcker fetchen — ingen ändring behövdes.
@@ -6246,11 +6313,13 @@ INNAN fallbacken används.
   utan granskning skulle ta bort människa-i-loopen precis där agenten kan
   skriva i databasen.
 - Talsyntes (agenten som svarar med röst) är inte i scope.
-- Språkhintet är svenska som default (`MISTRAL_VOICE_LANGUAGE`, § 31.2) men
-  Voxtral Transcribe 2 stödjer det INTE — hintet släpps då automatiskt och
-  modellen autodetekterar (svenskan transkriberas då utanför modellens
-  officiellt stödda språk; kvaliteten kan variera). Den svensktränade
-  självhostade providern (§ 31.2) är vägen till dedikerad svensk kvalitet.
+- Språkhintet är svenska som default (`MISTRAL_VOICE_LANGUAGE`, § 31.2) och
+  stöds av Voxtral 3. **Kvaliteten på svenska möten med Voxtral 3 är inte
+  uppmätt av oss** — Mistral listar språket som stött men publicerar ingen
+  svensk felkvot, och API:t går inte att anropa från byggmiljön. Stäm av mot
+  ett riktigt möte; räcker det inte är KB-Whisper (§ 31.2) nästa steg.
+  Faller kedjan ned på den äldre modellen (`voxtral-mini-latest`) släpps
+  hintet och svenskan transkriberas utanför modellens stödda språk.
   Ett språkval per användare kan läggas till senare utan brytande ändring.
 - Resultatprofiler för quiz (`result_buckets`) och publicering ställs in i
   modul-admin, inte via chatten.
@@ -6579,7 +6648,13 @@ segment).
    ägar-verifierad, samma Voxtral-klient + validering som § 31), texten
    **personnummer-saneras** (§ 15.6-regexen — folk säger personnummer högt) och
    appendas på raden. Live-transkriptet växer i panelen. Robusthet: wake lock,
-   beforeunload-varning, retry per segment; ett förlorat segment blir en
+   beforeunload-varning, retry per segment, och **ljudet för ett avsnitt som
+   inte kunde transkriberas hålls kvar i flikens minne** (högst 24 avsnitt,
+   aldrig på disk eller server) och försöks igen när nästa avsnitt går
+   igenom samt en sista gång innan mötet avslutas — ett kort avbrott hos
+   AI-tjänsten kostar inte längre en del av mötet (2026-11-26; tidigare
+   kastades ljudet efter ett omförsök på 1,5 s). Ett avsnitt som ändå inte
+   går blir en
    **explicit lucka-markör** (saknat index ⇒ `MEETING_GAP_MARKER` i
    `assembleMeetingTranscript`) — aldrig ett tyst hål, och serverns
    FELORSAK visas i panelen (inspelnings- OCH granskningsvyn) i stället för

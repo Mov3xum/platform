@@ -22,6 +22,11 @@ interface LogAiUsageParams {
   tokensOut: number;
   /** Optional länk till tool_runs när surface=toolbox/tool_chat */
   toolRunId?: string;
+  /**
+   * Känd kostnad i USD när anropet INTE debiteras per token (tal-till-text
+   * debiteras per ljudminut, § 31). Utelämnad ⇒ token-uppskattningen.
+   */
+  costUsd?: number;
 }
 
 /**
@@ -35,11 +40,10 @@ export async function logAiUsage(
   params: LogAiUsageParams
 ): Promise<void> {
   try {
-    const cost = estimateCostUsd(
-      params.model,
-      params.tokensIn,
-      params.tokensOut
-    );
+    const cost =
+      typeof params.costUsd === 'number' && Number.isFinite(params.costUsd) && params.costUsd >= 0
+        ? params.costUsd
+        : estimateCostUsd(params.model, params.tokensIn, params.tokensOut);
     await pb.collection('ai_usage_events').create({
       tenant: params.tenant,
       user: params.userId || null,

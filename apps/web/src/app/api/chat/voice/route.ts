@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { transcribeSpeech, VoiceError, voiceModel } from '@/lib/ai/voice';
+import { speechCostUsd, transcribeSpeech, VoiceError, voiceModel } from '@/lib/ai/voice';
 import { MEETING_CONTEXT_VOCABULARY, buildContextBias } from '@/lib/ai/voice-transcription';
 import { logAiUsage } from '@/lib/ai/usage';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
@@ -15,7 +15,7 @@ import type { Role } from '@platform/shared';
 
 /**
  * Röstinmatning i chatten (CLAUDE.md § 31). Tar emot ett inspelat ljudklipp,
- * transkriberar det med Voxtral (Mistral, EU) och returnerar TEXTEN — inget
+ * transkriberar det med Voxtral 3 (Mistral, EU) och returnerar TEXTEN — inget
  * mer. Klienten lägger texten i chattrutan där människan läser igenom och
  * skickar den själv (människa-i-loopen, EU AI Act art. 14): en felhörd mening
  * får aldrig tyst utlösa en skrivning.
@@ -110,7 +110,9 @@ export async function POST(request: Request): Promise<Response> {
       surface: 'dashboard_chat',
       model: result.model || voiceModel(),
       tokensIn: result.usage.tokensIn,
-      tokensOut: result.usage.tokensOut
+      tokensOut: result.usage.tokensOut,
+      // Debiteras per ljudminut, inte per token (§ 31.4).
+      costUsd: speechCostUsd(result, level?.seconds)
     });
 
     return NextResponse.json({ text: result.text, language: result.language });
@@ -125,7 +127,8 @@ export async function POST(request: Request): Promise<Response> {
           surface: 'dashboard_chat',
           model: err.model || voiceModel(),
           tokensIn: err.usage.tokensIn,
-          tokensOut: err.usage.tokensOut
+          tokensOut: err.usage.tokensOut,
+          costUsd: speechCostUsd(err, level?.seconds)
         });
       }
       return NextResponse.json({ error: err.message }, { status: err.status });

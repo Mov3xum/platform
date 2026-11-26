@@ -529,7 +529,12 @@ export function estimateCostUsd(
     'voxtral-mini-latest': [0.04, 0.04],
     'voxtral-small-latest': [0.1, 0.3]
   };
-  const [inPrice, outPrice] = pricing[model] ?? [2.0, 6.0];
+  // Övriga Voxtral-modeller (Voxtral 3 m.fl.) debiteras per ljudminut och
+  // bokförs med känd kostnad (`logAiUsage({ costUsd })`, voice-transcription
+  // .ts). Den här raden är bara reserv när ljudlängden saknas — hellre
+  // mini-nivån än Large-nivån som okända modeller annars får.
+  const fallback: [number, number] = /^voxtral/i.test(model) ? [0.04, 0.04] : [2.0, 6.0];
+  const [inPrice, outPrice] = pricing[model] ?? fallback;
   return (tokensIn / 1_000_000) * inPrice + (tokensOut / 1_000_000) * outPrice;
 }
 

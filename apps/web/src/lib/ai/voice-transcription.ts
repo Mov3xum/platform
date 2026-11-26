@@ -20,9 +20,39 @@
  * tomt transkript. Nu tolkas felet, hintet släpps och anropet görs om direkt
  * (ett 400 avvisas innan ljudet bearbetas — ingen kostnad), och avvisningen
  * minns per provider+modell så efterföljande segment går rätt från början.
+ *
+ * Incident 2026-11-26: samma fel kom tillbaka. Mistral hade bytt
+ * felformulering ("Got unsupported language `sv`" → "Model '…' does not
+ * support language 'sv'"), tolkningen ovan matchade en exakt fras och slog
+ * aldrig till — röstknappen och varje mötessegment föll igen. Två lärdomar som
+ * nu är inbyggda:
+ *   1. Trappan får aldrig hänga på en leverantörs ORDALYDELSE. Ett avvisat
+ *      anrop (400/422) degraderas steg för steg ned till det nakna anropet
+ *      (modell + fil) oavsett vad felet säger; ordalydelsen avgör bara om
+ *      avvisningen ska MINNAS.
+ *   2. Vi körde svenska möten på en modell som inte stöder svenska.
+ *      `voxtral-mini-latest` pekar på Voxtral Transcribe 2 (13 språk, inte
+ *      svenska). Voxtral 3 (2026-10-20) stöder 53 språk inklusive svenska
+ *      (`sv`) — standardmodellen är därför Voxtral 3, med äldre modeller som
+ *      reserv.
  */
 
-export const DEFAULT_VOICE_MODEL = 'voxtral-mini-latest';
+/**
+ * Mistral-modeller i prioritetsordning (källa: docs.mistral.ai → Speech to
+ * Text / Languages / Migrate from Voxtral 2, läst 2026-11-26):
+ *   - `voxtral-small-transcribe-3` — mest träffsäker, 53 språk inkl. svenska
+ *   - `voxtral-mini-transcribe-3`  — snabbare/billigare, samma språk
+ *   - `voxtral-mini-latest`        — äldre alias (Voxtral Transcribe 2, INTE
+ *     svenska; autodetekt). Sista reserv om kontot saknar Voxtral 3.
+ * En modell kontot inte når ("Invalid model") hoppas över och minns.
+ */
+export const DEFAULT_VOICE_MODELS: readonly string[] = [
+  'voxtral-small-transcribe-3',
+  'voxtral-mini-transcribe-3',
+  'voxtral-mini-latest'
+];
+
+export const DEFAULT_VOICE_MODEL = DEFAULT_VOICE_MODELS[0];
 
 /** Movexum är svenskspråkigt — hintet höjer träffsäkerheten när modellen stödjer det. */
 export const DEFAULT_VOICE_LANGUAGE = 'sv';
@@ -42,7 +72,12 @@ export const LANGUAGE_HINT_MEMORY_MS = 6 * 60 * 60 * 1000;
 export type SpeechProviderKind = 'mistral' | 'openai';
 
 export interface SpeechProvider {
-  /** `sovereign` = självhostad EU-endpoint (env), `mistral` = Voxtral på api.mistral.ai. */
+  /**
+   * `sovereign` = egen OpenAI-kompatibel EU-endpoint ur env (självhostad
+   * KB-Whisper, eller en svensk/EU-värd som Berget AI), `mistral` = Voxtral
+   * på api.mistral.ai. Flera poster kan ha samma label — en per modell i
+   * prioritetsordning.
+   */
   label: 'sovereign' | 'mistral';
   /** Styr vilka extraparametrar som skickas (context_bias/diarize vs prompt/response_format). */
   kind: SpeechProviderKind;
@@ -59,12 +94,36 @@ export interface SpeechProvider {
 type SpeechEnv = Record<string, string | undefined>;
 
 function trimBase(base: string): string {
-  return base.trim().replace(/\/+$/, '');
+  // Tolererar att basen redan slutar på `/v1` (OpenAI-SDK-konventionen, t.ex.
+  // `https://api.berget.ai/v1`) — annars blir det `/v1/v1/…` och ett 404.
+  return base
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/v1$/i, '');
 }
 
 /** OpenAI-kompatibel transkriberings-URL (Mistral använder samma path). */
 export function transcriptionsUrlFor(base: string): string {
   return `${trimBase(base)}/v1/audio/transcriptions`;
+}
+
+/**
+ * Modellista ur env (`MISTRAL_VOICE_MODEL`): en eller flera modeller,
+ * komma-/blankstegsseparerade, i prioritetsordning. Standardmodellerna läggs
+ * alltid till EFTER som reserv (utan dubbletter), så en felstavad eller
+ * avvecklad modell i env aldrig stoppar röstinmatningen. Tomt = bara
+ * standardlistan.
+ */
+export function resolveVoiceModels(raw: string | undefined): string[] {
+  const listed = (raw ?? '')
+    .split(/[\s,;]+/)
+    .map((m) => m.trim())
+    .filter((m) => /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/.test(m));
+  const out: string[] = [];
+  for (const model of [...listed, ...DEFAULT_VOICE_MODELS]) {
+    if (!out.includes(model)) out.push(model);
+  }
+  return out;
 }
 
 /**
@@ -79,17 +138,20 @@ export function normalizeLanguageHint(raw: string | null | undefined): string {
 }
 
 /**
- * Ordnad providerlista för tal-till-text. Den självhostade EU-providern
- * (`MOVEXUM_STT_BASE_URL`) går FÖRST när den är satt — hela poängen med den
- * är en svensktränad modell — och Voxtral blir fallback vid nätverks-/
- * kapacitetsfel. Utan env är beteendet oförändrat: bara Voxtral.
+ * Ordnad kandidatlista för tal-till-text — en post per (leverantör, modell).
+ * Den egna EU-endpointen (`MOVEXUM_STT_BASE_URL`) går FÖRST när den är satt
+ * — hela poängen med den är en svensktränad modell — därefter Voxtral-
+ * modellerna i prioritetsordning. Klienten (`voice.ts`) går vidare till nästa
+ * kandidat när en inte kan leverera. Utan env: bara Voxtral.
  *
  * Env (aldrig i kod, ISO 27001 A.8.24):
  *   MISTRAL_API_KEY / MISTRAL_API_BASE_URL — som övriga Mistral-anrop
- *   MISTRAL_VOICE_MODEL      — default voxtral-mini-latest
+ *   MISTRAL_VOICE_MODEL      — en eller flera modeller (kommaseparerat) som
+ *                              provas före standardlistan. Lämna tomt.
  *   MISTRAL_VOICE_LANGUAGE   — språkhint till Voxtral (default sv; `auto` = av).
  *                              Ett hint modellen avvisar släpps automatiskt.
- *   MOVEXUM_STT_BASE_URL     — självhostad OpenAI-kompatibel EU-endpoint
+ *   MOVEXUM_STT_BASE_URL     — OpenAI-kompatibel EU-endpoint (självhostad
+ *                              KB-Whisper, eller t.ex. https://api.berget.ai)
  *   MOVEXUM_STT_API_KEY      — nyckel för den (valfri för lokal endpoint)
  *   MOVEXUM_STT_MODEL        — default KBLab/kb-whisper-large
  *   MOVEXUM_STT_LANGUAGE     — språkhint till den (default sv)
@@ -112,14 +174,16 @@ export function resolveSpeechProviders(env: SpeechEnv): SpeechProvider[] {
   const mistralKey = env.MISTRAL_API_KEY?.trim();
   if (mistralKey) {
     const base = env.MISTRAL_API_BASE_URL?.trim() || 'https://api.mistral.ai';
-    providers.push({
-      label: 'mistral',
-      kind: 'mistral',
-      url: transcriptionsUrlFor(base),
-      apiKey: mistralKey,
-      model: env.MISTRAL_VOICE_MODEL?.trim() || DEFAULT_VOICE_MODEL,
-      language: languageFromEnv(env.MISTRAL_VOICE_LANGUAGE)
-    });
+    for (const model of resolveVoiceModels(env.MISTRAL_VOICE_MODEL)) {
+      providers.push({
+        label: 'mistral',
+        kind: 'mistral',
+        url: transcriptionsUrlFor(base),
+        apiKey: mistralKey,
+        model,
+        language: languageFromEnv(env.MISTRAL_VOICE_LANGUAGE)
+      });
+    }
   }
 
   return providers;
@@ -135,34 +199,131 @@ function languageFromEnv(raw: string | undefined): string {
 }
 
 export interface UnsupportedLanguageInfo {
-  /** Språkkoden API:et avvisade. */
+  /** Språkkoden API:et avvisade ('' när felet inte namnger den). */
   language: string;
   /** Listan API:et angav som giltig (kan vara tom om den inte gick att tolka). */
   supported: string[];
 }
 
+const LANG_CODE = '([a-z]{2,3}(?:-[a-z]{2,4})?)';
+const QUOTE = '[`\'"]?';
+
+// Kända formuleringar för "språket stöds inte". Listan är avsiktligt bred —
+// Mistral har bytt ordalydelse en gång (incident 2026-11-26) och gör det igen.
+const UNSUPPORTED_LANGUAGE_PATTERNS: RegExp[] = [
+  // "Got unsupported language `sv`, should be one of: [...]" (Voxtral 2, 2026-09)
+  new RegExp(`unsupported\\s+language\\s*:?\\s*${QUOTE}\\s*${LANG_CODE}\\b`, 'i'),
+  // "Model '…' does not support language 'sv', should be one of: [...]" (2026-11)
+  new RegExp(
+    `(?:does\\s+not|doesn'?t|do\\s+not)\\s+support\\s+(?:the\\s+)?language\\s*:?\\s*${QUOTE}\\s*${LANG_CODE}\\b`,
+    'i'
+  ),
+  // "language 'sv' is not supported"
+  new RegExp(`language\\s*:?\\s*${QUOTE}\\s*${LANG_CODE}\\s*${QUOTE}\\s+is\\s+not\\s+supported`, 'i')
+];
+
+// Formuleringar utan språkkod: "Invalid language alpha2 code" (Voxtral 3, 422),
+// "invalid language", "language not supported".
+const UNSUPPORTED_LANGUAGE_BARE =
+  /invalid\s+language|language\s+(?:is\s+)?not\s+supported|unsupported\s+language/i;
+
 /**
- * Tolkar Mistrals 400-svar för ett språkhint modellen inte stödjer:
- *   {"object":"error","message":"Got unsupported language `sv`, should be one
- *    of: ['ar', 'en', ...]", ...}
- * Tolerant mot citattecken/backticks/whitespace och mot att listan saknas.
- * Returnerar null för alla andra fel (formatfel etc.) — de ska INTE utlösa
- * ett omförsök utan hint.
+ * Tolkar ett 400/422-svar som säger att språkhintet inte stöds, t.ex.:
+ *   {"object":"error","message":"Model 'voxtral-mini-transcribe-2602' does not
+ *    support language 'sv', should be one of: ['ar', 'en', ...]", ...}
+ * Tolerant mot citattecken/backticks/whitespace, mot att listan saknas och
+ * mot att koden inte nämns. Returnerar null för andra fel (format, modell,
+ * auth). En träff här betyder att avvisningen MINNS; klienten släpper
+ * dessutom hintet som sista utväg även när inget mönster matchar (se
+ * `mentionsLanguage` och parametertrappan i `voice.ts`).
  */
 export function parseUnsupportedLanguage(body: string): UnsupportedLanguageInfo | null {
   if (!body) return null;
-  const match =
-    /unsupported\s+language\s*:?\s*[`'"]?\s*([a-z]{2,3}(?:-[a-z]{2,4})?)\s*[`'"]?/i.exec(body);
-  if (!match) return null;
-  const language = match[1].toLowerCase();
+  let language: string | null = null;
+  for (const pattern of UNSUPPORTED_LANGUAGE_PATTERNS) {
+    const match = pattern.exec(body);
+    if (match) {
+      language = match[1].toLowerCase();
+      break;
+    }
+  }
+  if (language === null) {
+    if (!UNSUPPORTED_LANGUAGE_BARE.test(body)) return null;
+    language = '';
+  }
   const list = /one\s+of\s*:?\s*\[([^\]]*)\]/i.exec(body);
   const supported = list
     ? list[1]
         .split(',')
-        .map((s) => s.replace(/[`'"\s]/g, '').toLowerCase())
+        .map((s) => s.replace(/[`'"\\\s]/g, '').toLowerCase())
         .filter((s) => /^[a-z]{2,3}(-[a-z]{2,4})?$/.test(s))
     : [];
   return { language, supported };
+}
+
+/**
+ * Nämner felet språkparametern över huvud taget? Svagare än
+ * `parseUnsupportedLanguage`: räcker för att släppa hintet i DET anropet
+ * (ett avvisat anrop kostar inget), men avvisningen minns först när
+ * omförsöket utan hint faktiskt lyckas.
+ */
+export function mentionsLanguage(body: string): boolean {
+  return /\blanguage\b/i.test(body);
+}
+
+/**
+ * Säger felet att MODELLEN inte finns/inte är tillgänglig för kontot?
+ * Mistral: 400 `Invalid model: <model>`; OpenAI-kompatibla servrar: 404
+ * "model … not found" / `model_not_found`. Då provas nästa modell.
+ */
+export function isInvalidModelError(body: string): boolean {
+  if (!body) return false;
+  return (
+    /invalid[\s_]+model|unknown\s+model|model_not_found|no\s+such\s+model/i.test(body) ||
+    /model\b[^.{}]{0,120}?(?:not\s+found|does\s+not\s+exist|is\s+not\s+available|not\s+available|no\s+access|not\s+a\s+transcription)/i.test(
+      body
+    )
+  );
+}
+
+/**
+ * Plockar den läsbara felorsaken ur ett API-felsvar så användaren slipper rå
+ * JSON: `{"message":"…"}`, Mistrals 422 (`message.detail[].msg`), OpenAI-
+ * formatet (`error.message`) och FastAPI (`detail`). Annat ⇒ texten som den
+ * är. Enradig och kapad.
+ */
+export function extractApiErrorMessage(body: string, max = 220): string {
+  const flatten = (v: string) => v.replace(/\s+/g, ' ').trim();
+  let text = flatten(body ?? '');
+  if (!text) return '';
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    const picked = pickErrorMessage(parsed);
+    if (picked) text = flatten(picked);
+  } catch {
+    // Inte JSON — använd texten som den är.
+  }
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+function pickErrorMessage(value: unknown, depth = 0): string {
+  if (depth > 4 || value == null) return '';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => pickErrorMessage(item, depth + 1))
+      .filter(Boolean)
+      .slice(0, 3)
+      .join('; ');
+  }
+  if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    for (const key of ['msg', 'message', 'detail', 'error']) {
+      const picked = pickErrorMessage(obj[key], depth + 1);
+      if (picked) return picked;
+    }
+  }
+  return '';
 }
 
 /**
@@ -357,16 +518,31 @@ export function parseTranscriptionPayload(
     language?: unknown;
     model?: unknown;
     segments?: unknown;
+    duration?: unknown;
     usage?: {
       prompt_tokens?: unknown;
       completion_tokens?: unknown;
+      total_tokens?: unknown;
       prompt_audio_seconds?: unknown;
     };
   };
   const text = typeof data.text === 'string' ? data.text.trim() : '';
-  const tokensIn = Number(data.usage?.prompt_tokens);
+  const promptTokens = Number(data.usage?.prompt_tokens);
   const tokensOut = Number(data.usage?.completion_tokens);
-  const audioSeconds = Number(data.usage?.prompt_audio_seconds);
+  const totalTokens = Number(data.usage?.total_tokens);
+  // Voxtral 3 redovisar ljudet för sig (`prompt_tokens_details.audio_tokens`)
+  // och `prompt_tokens` är då bara några få texttokens. Ingången = allt som
+  // inte är utdata, så ljudtokens räknas med (bokför det faktiska värdet).
+  const outSafe = Number.isFinite(tokensOut) && tokensOut > 0 ? tokensOut : 0;
+  const promptSafe = Number.isFinite(promptTokens) && promptTokens > 0 ? promptTokens : 0;
+  const tokensIn =
+    Number.isFinite(totalTokens) && totalTokens - outSafe > promptSafe
+      ? totalTokens - outSafe
+      : promptSafe;
+  // Mistral: `usage.prompt_audio_seconds`; Whisper-servrar (verbose_json): `duration`.
+  const audioSecondsRaw = Number(data.usage?.prompt_audio_seconds);
+  const audioSeconds =
+    Number.isFinite(audioSecondsRaw) && audioSecondsRaw > 0 ? audioSecondsRaw : Number(data.duration);
   const turns = turnsFromSegments(data.segments);
 
   return {
@@ -375,10 +551,7 @@ export function parseTranscriptionPayload(
     provider: provider.label,
     language:
       typeof data.language === 'string' && data.language ? data.language.toLowerCase() : undefined,
-    usage: {
-      tokensIn: Number.isFinite(tokensIn) && tokensIn > 0 ? tokensIn : 0,
-      tokensOut: Number.isFinite(tokensOut) && tokensOut > 0 ? tokensOut : 0
-    },
+    usage: { tokensIn, tokensOut: outSafe },
     audioSeconds: Number.isFinite(audioSeconds) && audioSeconds > 0 ? audioSeconds : undefined,
     turns
   };
@@ -392,6 +565,42 @@ export function parseTranscriptionPayload(
 export function isDiarizationEnabled(env: SpeechEnv): boolean {
   const raw = (env.MOVEXUM_MEETING_DIARIZATION ?? '').trim().toLowerCase();
   return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
+}
+
+/**
+ * Listpris per ljudminut (USD) för tal-till-text. Transkribering debiteras
+ * per MINUT ljud, inte per token — token-tabellen i `estimateCostUsd` ger fel
+ * belopp (okänd modell prissätts dessutom som Large). Källa: modellsidorna på
+ * docs.mistral.ai, lästa 2026-11-26 (Voxtral Mini Transcribe 3 $0,0035/min,
+ * Voxtral Small Transcribe 3 $0,004/min). Ändras bara mot en ny källa.
+ */
+const SPEECH_USD_PER_MINUTE: Array<[RegExp, number]> = [
+  [/^voxtral-small/i, 0.004],
+  [/^voxtral/i, 0.0035]
+];
+
+/**
+ * Uppskattad kostnad för en transkribering, eller null när priset inte är
+ * känt (anroparen faller då tillbaka på token-uppskattningen). För den egna
+ * EU-endpointen anges priset i `MOVEXUM_STT_USD_PER_MINUTE` (t.ex. 0.0033 för
+ * Berget AI:s €3/1000 min; självhostat = 0) — utan värde: null.
+ */
+export function estimateSpeechCostUsd(
+  model: string,
+  provider: SpeechProvider['label'],
+  audioSeconds: number | undefined,
+  env: SpeechEnv = {}
+): number | null {
+  if (!audioSeconds || !Number.isFinite(audioSeconds) || audioSeconds <= 0) return null;
+  let perMinute: number | null = null;
+  if (provider === 'sovereign') {
+    const raw = (env.MOVEXUM_STT_USD_PER_MINUTE ?? '').trim().replace(',', '.');
+    const parsed = raw ? Number(raw) : NaN;
+    perMinute = Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+  } else {
+    perMinute = SPEECH_USD_PER_MINUTE.find(([pattern]) => pattern.test(model))?.[1] ?? null;
+  }
+  return perMinute === null ? null : (audioSeconds / 60) * perMinute;
 }
 
 /** Summerar två förbrukningar (omförsök bokförs alltid, § 9.6). */
