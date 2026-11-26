@@ -116,7 +116,7 @@ function countLabel(n: number, singular: string, plural: string): string {
 /** Vad steget gav — visas när steget är klart. Bara storlekar, aldrig värden. */
 export function summarizeStepResult(
   tool: string,
-  result: { ok: boolean; data?: unknown; repeated?: boolean }
+  result: { ok: boolean; data?: unknown; error?: string; repeated?: boolean }
 ): string | undefined {
   if (!result.ok) return 'misslyckades';
   if (result.repeated) return 'samma anrop igen — återanvände resultatet';
