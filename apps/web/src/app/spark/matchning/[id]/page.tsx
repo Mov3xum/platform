@@ -5,7 +5,7 @@ import { CrumbLabels } from '@/components/proto/CrumbLabels';
 import { SPARK_SHARING_LABELS, SPARK_TESTBED_KIND_LABELS, effectiveSparkTrl, sparkShareableName } from '@platform/shared';
 import { loadSparkRegistry, sparkUserNames, type SparkActorRow } from '@/lib/spark/data';
 import { Chip, Panel } from '@/components/talent/ui';
-import { MatchForm } from '@/components/spark/controls';
+import { IntroDraftPanel, MatchForm } from '@/components/spark/controls';
 import { AreaChips, MatchStatusChip, requireSparkStaff, sparkTabs } from '../../_shared';
 
 export const dynamic = 'force-dynamic';
@@ -78,6 +78,11 @@ export default async function SparkMatchPage({ params }: { params: Promise<{ id:
           ) : null}
           {testbed ? (
             <Party role={SPARK_TESTBED_KIND_LABELS[testbed.kind]} actor={reg.actorById.get(testbed.actor)} title={SPARK_TESTBED_KIND_LABELS[testbed.kind]} text={testbed.description} extra={<AreaChips areas={testbed.areas} />} />
+          ) : null}
+          {canManage && match.solution ? (
+            <Panel title="Utkast till introduktion">
+              <IntroDraftPanel matchId={match.id} hasNeedSide={Boolean(match.need || match.testbed)} hasSolution={Boolean(match.solution)} />
+            </Panel>
           ) : null}
           {match.reasons.length > 0 ? (
             <Panel title="Därför föreslogs matchningen">

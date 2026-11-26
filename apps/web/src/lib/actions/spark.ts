@@ -11,6 +11,10 @@ import {
   createSparkMatch,
   deleteSparkInterview,
   deleteSparkMatch,
+  draftSparkIntroduction,
+  reindexSparkEmbeddings,
+  suggestSparkAssessment,
+  suggestSparkAssessments,
   importSparkInterviews,
   saveSparkInterview,
   setSparkRecordStatus,
@@ -45,6 +49,16 @@ function revalidate() {
   revalidatePath('/spark', 'layout');
 }
 
+/**
+ * Håller likhetsindexet (§ 61.7) aktuellt när registret fått nya poster.
+ * Best-effort: saknad AI-nyckel, nått kostnadstak eller ett AI-fel får aldrig
+ * fälla det som just sparades — indexet kan alltid läsas in från Matchning.
+ */
+async function refreshIndex(pb: Awaited<ReturnType<typeof getServerPb>>, actor: Actor): Promise<void> {
+  if (!canManageSpark(actor.roles)) return;
+  await reindexSparkEmbeddings(pb, actor).catch(() => undefined);
+}
+
 export async function saveSparkInterviewAction(input: {
   id?: string | null;
   answers: unknown;
@@ -62,6 +76,7 @@ export async function saveSparkInterviewAction(input: {
     submit: input.submit
   });
   if (!res.ok) return { error: res.error };
+  if (res.value.applied) await refreshIndex(pb, ctx.actor);
   revalidate();
   const { status, applied, warning, interviewId } = res.value;
   let notice = 'Utkastet är sparat.';
@@ -76,8 +91,10 @@ export async function saveSparkInterviewAction(input: {
 export async function applySparkInterviewAction(interviewId: string): Promise<SparkActionState> {
   const ctx = await session();
   if ('error' in ctx) return { error: ctx.error };
-  const res = await applySparkInterview(await getServerPb(), ctx.actor, interviewId);
+  const pb = await getServerPb();
+  const res = await applySparkInterview(pb, ctx.actor, interviewId);
   if (!res.ok) return { error: res.error };
+  await refreshIndex(pb, ctx.actor);
   revalidate();
   const a = res.value;
   return { ok: true, id: a.actorId, notice: `${a.actorName} är ${a.actorCreated ? 'tillagd i' : 'uppdaterad i'} registret: ${a.needs} behov, ${a.solutions} lösningar, ${a.testbeds} testmiljöer.` };
@@ -119,7 +136,7 @@ export async function assessSparkSolutionAction(solutionId: string, input: { trl
   return { ok: true, notice: 'Bedömningen är sparad.' };
 }
 
-export async function createSparkMatchAction(input: { needId?: string; solutionId?: string; testbedId?: string }): Promise<SparkActionState> {
+export async function createSparkMatchAction(input: { needId?: string; solutionId?: string; testbedId?: string; semantic?: string }): Promise<SparkActionState> {
   const ctx = await session();
   if ('error' in ctx) return { error: ctx.error };
   const res = await createSparkMatch(await getServerPb(), ctx.actor, input);
@@ -163,6 +180,58 @@ export async function saveSparkOrganizationAction(organization: string): Promise
   return { ok: true, notice: 'Sparat.' };
 }
 
+// ── AI-lagret (§ 61.7) — alltid på en människas klick ────────────────────────
+
+export async function suggestSparkAssessmentAction(solutionId: string): Promise<SparkActionState> {
+  const ctx = await session();
+  if ('error' in ctx) return { error: ctx.error };
+  const res = await suggestSparkAssessment(await getServerPb(), ctx.actor, solutionId);
+  if (!res.ok) return { error: res.error };
+  revalidate();
+  return { ok: true, notice: 'AI-förslaget är klart. Läs motiveringen och spara er egen bedömning.' };
+}
+
+export async function suggestSparkAssessmentsAction(): Promise<SparkActionState> {
+  const ctx = await session();
+  if ('error' in ctx) return { error: ctx.error };
+  const res = await suggestSparkAssessments(await getServerPb(), ctx.actor);
+  revalidate();
+  if (!res.ok) return { error: res.error };
+  const { done, skipped, remaining } = res.value;
+  return {
+    ok: true,
+    notice: done === 0 && skipped === 0 ? 'Det finns inga lösningar utan förslag.' : `${done} lösningar fick ett AI-förslag.${remaining ? ` ${remaining} återstår — kör igen.` : ''}`,
+    warning: skipped ? `${skipped} gav inget tolkbart svar.` : undefined
+  };
+}
+
+export interface SparkIntroState extends SparkActionState {
+  text?: string;
+  anonymous?: boolean;
+}
+
+export async function draftSparkIntroAction(matchId: string, recipient: 'need' | 'solution'): Promise<SparkIntroState> {
+  const ctx = await session();
+  if ('error' in ctx) return { error: ctx.error };
+  if (recipient !== 'need' && recipient !== 'solution') return { error: 'Ogiltig mottagare.' };
+  const res = await draftSparkIntroduction(await getServerPb(), ctx.actor, matchId, recipient);
+  if (!res.ok) return { error: res.error };
+  return { ok: true, text: res.value.text, anonymous: res.value.anonymous, warning: res.value.caution };
+}
+
+export async function reindexSparkAction(): Promise<SparkActionState> {
+  const ctx = await session();
+  if ('error' in ctx) return { error: ctx.error };
+  const res = await reindexSparkEmbeddings(await getServerPb(), ctx.actor);
+  if (!res.ok) return { error: res.error };
+  revalidate();
+  const r = res.value;
+  return {
+    ok: true,
+    notice: r.embedded === 0 ? 'Likhetsindexet är redan aktuellt.' : `${r.embedded} beskrivningar lästes in.${r.remaining ? ` ${r.remaining} återstår — kör igen.` : ''}`
+  };
+}
+
 export interface SparkImportPreview {
   error?: string;
   rows?: SparkImportRow[];
@@ -191,8 +260,10 @@ export async function commitSparkImportAction(input: { rows: { line: number; ans
     .filter((r) => r && typeof r === 'object')
     // Raderna kommer från klienten — skrivlagret normaliserar varje svar på nytt.
     .map((r) => ({ line: Number(r.line) || 0, answers: r.answers as never }));
-  const res = await importSparkInterviews(await getServerPb(), ctx.actor, rows, { interviewerOrg: input.interviewerOrg });
+  const pb = await getServerPb();
+  const res = await importSparkInterviews(pb, ctx.actor, rows, { interviewerOrg: input.interviewerOrg });
   if (!res.ok) return { error: res.error };
+  if (res.value.applied > 0) await refreshIndex(pb, ctx.actor);
   revalidate();
   const s = res.value;
   const manage = canManageSpark(ctx.user.roles);

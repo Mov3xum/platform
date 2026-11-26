@@ -128,6 +128,12 @@ export interface SparkSolutionRow {
   accelerator_category: string;
   accelerator_note: string;
   assessed_at: string | null;
+  /** AI:ns förslag (§ 61.7) — skilt från Movexums bedömning ovan. */
+  ai_trl: number | null;
+  ai_category: string;
+  ai_rationale: string;
+  ai_confidence: number;
+  ai_suggested_at: string | null;
   verified: string;
   needs: string[];
   barriers: string;
@@ -271,6 +277,7 @@ export function normalizeSparkNeed(r: Raw): SparkNeedRow {
 
 export function normalizeSparkSolution(r: Raw): SparkSolutionRow {
   const category = str(r.accelerator_category);
+  const aiCategory = str(r.ai_category);
   return {
     id: str(r.id),
     tenant: str(r.tenant),
@@ -289,6 +296,11 @@ export function normalizeSparkSolution(r: Raw): SparkSolutionRow {
     accelerator_category: SPARK_ACCELERATOR_CATEGORIES.some((c) => c.id === category) ? category : '',
     accelerator_note: str(r.accelerator_note),
     assessed_at: dateOnly(r.assessed_at),
+    ai_trl: level(r.ai_trl, 9),
+    ai_category: SPARK_ACCELERATOR_CATEGORIES.some((c) => c.id === aiCategory) ? aiCategory : '',
+    ai_rationale: str(r.ai_rationale),
+    ai_confidence: typeof r.ai_confidence === 'number' ? r.ai_confidence : 0,
+    ai_suggested_at: dateOnly(r.ai_suggested_at),
     verified: str(r.verified),
     needs: sanitizeSparkList(r.needs, SPARK_SOLUTION_NEEDS),
     barriers: str(r.barriers),

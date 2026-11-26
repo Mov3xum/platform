@@ -12,7 +12,7 @@ import {
 } from '@platform/shared';
 import { SPARK_MIGRATION_HINT, loadSparkRegistry } from '@/lib/spark/data';
 import { Chip, Notice, Panel, btnGhost } from '@/components/talent/ui';
-import { AssessSolutionForm } from '@/components/spark/controls';
+import { AiNote, AiSuggestAllButton, AiSuggestButton, AssessSolutionForm } from '@/components/spark/controls';
 import { AreaChips, Empty, SPARK_TITLE, requireSparkStaff, sparkTabs } from '../_shared';
 
 export const dynamic = 'force-dynamic';
@@ -43,6 +43,7 @@ export default async function SparkAcceleratorPage({ searchParams }: { searchPar
     .sort((a, b) => Number(Boolean(a.category)) - Number(Boolean(b.category)) || (b.trl ?? 0) - (a.trl ?? 0));
   const byTrl = SPARK_TRL.map((t) => ({ id: t.id, n: rows.filter((r) => String(r.trl ?? '') === t.id).length }));
   const maxTrl = Math.max(1, ...byTrl.map((b) => b.n));
+  const unassessed = rows.filter((r) => !r.category && !r.s.ai_suggested_at && r.s.description.trim().length >= 40).length;
   const chip = (id: string | null, label: string, n: number) => (
     <Link key={label} href={id ? `/spark/accelerator?kategori=${id}` : '/spark/accelerator'} className={`${btnGhost} ${filter === id ? 'border-strong text-foreground' : ''}`}>
       {label} <span className="mx-tnum text-foreground-subtle">{n}</span>
@@ -58,6 +59,19 @@ export default async function SparkAcceleratorPage({ searchParams }: { searchPar
           Lösningar från innovationsaktörer som kan vara aktuella för acceleratorprogrammet. TRL kommer från intervjun och kan justeras av er. Förslaget till
           kategori bygger på TRL (1–3 tidig, 4–7 kandidat, 8–9 marknadsredo) — ni bekräftar eller ändrar.
         </p>
+        {canManage ? (
+          <div className="rounded-2xl border border-default bg-canvas-subtle p-4">
+            <p className="text-sm text-foreground-muted">
+              AI kan läsa lösningens beskrivning och föreslå TRL och kategori med en motivering. Förslaget sparas bredvid er bedömning och ersätter den aldrig.
+            </p>
+            <div className="mt-3">
+              <AiSuggestAllButton count={unassessed} />
+            </div>
+            <div className="mt-2">
+              <AiNote>AI-förslag är beslutsstöd — ni bedömer.</AiNote>
+            </div>
+          </div>
+        ) : null}
 
         <Panel title="Fördelning per TRL">
           <div className="flex items-end gap-2" role="img" aria-label="Antal lösningar per TRL-nivå">
@@ -105,10 +119,37 @@ export default async function SparkAcceleratorPage({ searchParams }: { searchPar
                     <AreaChips areas={s.areas} />
                     {actor.support_needs.length ? <p className="text-xs text-foreground-subtle">Stödbehov: {actor.support_needs.map((n) => SPARK_SUPPORT_NEED_LABELS[n]).join(', ')}</p> : null}
                     {s.accelerator_note ? <p className="text-xs text-foreground-muted">Motivering: {s.accelerator_note}</p> : null}
+                    {s.ai_suggested_at ? (
+                      <div className="rounded-2xl border border-default bg-canvas-subtle p-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Chip tone="accent">AI-förslag</Chip>
+                          {s.ai_trl ? <span className="text-xs font-semibold text-foreground">TRL {s.ai_trl}</span> : <span className="text-xs text-foreground-muted">Underlaget räcker inte för en TRL</span>}
+                          {s.ai_category ? <span className="text-xs text-foreground-muted">{SPARK_ACCELERATOR_CATEGORY_LABELS[s.ai_category]}</span> : null}
+                          {s.ai_confidence < 0.5 ? <Chip tone="warning">Osäkert</Chip> : null}
+                          {s.trl_assessed && s.ai_trl && s.trl_assessed !== s.ai_trl ? <span className="text-xs text-foreground-subtle">ni bedömde TRL {s.trl_assessed}</span> : null}
+                        </div>
+                        {s.ai_rationale ? <p className="mt-1.5 text-xs leading-relaxed text-foreground-muted">{s.ai_rationale}</p> : null}
+                        <div className="mt-1.5">
+                          <AiNote />
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                   {canManage ? (
                     <div className="rounded-2xl border border-default bg-canvas-subtle p-4">
-                      <AssessSolutionForm solutionId={s.id} trl={s.trl_assessed ? String(s.trl_assessed) : ''} category={category} note={s.accelerator_note} suggested={suggested} />
+                      <AssessSolutionForm
+                        key={`${s.id}-${s.ai_suggested_at ?? ''}-${s.ai_trl ?? ''}`}
+                        solutionId={s.id}
+                        trl={s.trl_assessed ? String(s.trl_assessed) : ''}
+                        category={category}
+                        note={s.accelerator_note}
+                        suggested={suggested}
+                        aiTrl={s.ai_trl ? String(s.ai_trl) : ''}
+                        aiCategory={s.ai_category}
+                      />
+                      <div className="mt-3 border-t border-default pt-3">
+                        <AiSuggestButton solutionId={s.id} hasSuggestion={Boolean(s.ai_suggested_at)} />
+                      </div>
                     </div>
                   ) : null}
                 </div>

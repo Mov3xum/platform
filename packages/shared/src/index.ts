@@ -1959,6 +1959,7 @@ export * from './talent';
 export * from './spark';
 export * from './spark-matching';
 export * from './spark-import';
+export * from './spark-ai';
 export * from './agent-memory';
 export * from './funding';
 export * from './support-checks';

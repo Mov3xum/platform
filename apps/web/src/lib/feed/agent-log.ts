@@ -1076,6 +1076,9 @@ function mapRow(
     case 'spark_testbeds':
       return { title: `SPARK: status ${changedVerb} på ${row.collection === 'spark_needs' ? `behovet "${str(after.label)}"` : 'en testmiljö'}`, href: '/spark/matchning', icon: 'bolt' };
     case 'spark_solutions': {
+      if (row.field === 'ai_suggestion') {
+        return { title: `SPARK: AI föreslog TRL och kategori för "${str(after.label)}"`, detail: Number(after.ai_trl) ? `TRL ${Number(after.ai_trl)}` : 'Underlaget räckte inte', href: '/spark/accelerator', icon: 'sparkle' };
+      }
       if (row.field === 'accelerator') {
         return { title: `SPARK: "${str(after.label)}" bedömdes inför acceleratorn`, detail: Number(after.trl_assessed) ? `TRL ${Number(after.trl_assessed)}` : undefined, href: '/spark/accelerator', icon: 'star' };
       }
@@ -1087,6 +1090,7 @@ function mapRow(
       if (action === 'create') {
         return { title: `SPARK: ny matchning föreslagen${str(after.need) && str(after.solution) ? ` — "${str(after.need)}" och "${str(after.solution)}"` : ''}`, href, icon: 'link' };
       }
+      if (row.field === 'intro_draft') return { title: 'SPARK: AI skrev ett utkast till introduktion', href, icon: 'sparkle' };
       if (row.field === 'status') return { title: `SPARK: en matchning — ${(str(after.status_label) || 'ny status').toLowerCase()}`, href, icon: str(after.status) === 'completed' ? 'check' : 'link' };
       return { title: `SPARK: en matchning ${changedVerb}`, href, icon: 'link' };
     }

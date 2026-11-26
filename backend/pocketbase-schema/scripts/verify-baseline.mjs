@@ -221,6 +221,7 @@ async function verifyCollectionsExist() {
     'spark_solutions',
     'spark_testbeds',
     'spark_matches',
+    'spark_embeddings',
     // Studenter & talang (§ 54, migration 1700000201).
     'talent_needs',
     'student_profiles',
@@ -770,6 +771,7 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   'spark_solutions',
   'spark_testbeds',
   'spark_matches',
+  'spark_embeddings',
   'student_profiles',
   // Finansieringsprojekt/arbetspaket och stödcheck-regler (§ 46). Intern
   // projektekonomi och uppföljningsstyrning → staff/observer-only.
@@ -1016,7 +1018,7 @@ const AI_DENYLIST = new Set([
   'org_knowledge', 'org_knowledge_chunks', 'agent_memory',
   'notifications', 'notification_preferences', 'rate_limits', 'app_locks',
   'student_profiles', 'talent_interests',
-  'spark_interviews',
+  'spark_interviews', 'spark_embeddings',
   'sustainability_documents', 'sustainability_ai_jobs',
   'export_documents', 'export_ai_jobs',
   'compass_lead_attachments',

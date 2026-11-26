@@ -141,6 +141,7 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   // (aktörer, behov, lösningar, testmiljöer, matchningar) är läsbart med
   // fältmaskning (e-post, telefon, org-nr).
   'spark_interviews',
+  'spark_embeddings', // vektorer för innehållslikhet — inget läsvärde (§ 61.7)
   'agent_memory' // agentens tvärsessions-scratchpad (1700000079)
 ]);
 

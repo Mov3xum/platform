@@ -10,11 +10,14 @@ import {
   rankNeedsForSolution,
   rankSolutionsForNeed,
   rankTestbedsForSolution,
+  sparkEmbeddingText,
+  sparkSemanticFor,
   type SparkSuggestion
 } from '@platform/shared';
 import { SPARK_MIGRATION_HINT, loadSparkRegistry, type SparkRegistry } from '@/lib/spark/data';
 import { Chip, Notice, btnGhost, fmtDate } from '@/components/talent/ui';
-import { CreateMatchButton } from '@/components/spark/controls';
+import { loadSparkVectors } from '@/lib/spark/ai.server';
+import { AiNote, CreateMatchButton, ReindexButton } from '@/components/spark/controls';
 import { AreaChips, Empty, SPARK_TITLE, requireSparkStaff, sparkTabs } from '../_shared';
 
 export const dynamic = 'force-dynamic';
@@ -47,7 +50,14 @@ export default async function SparkMatchingPage({ searchParams }: { searchParams
   const { user, pb, canManage } = await requireSparkStaff();
   const sp = await searchParams;
   const view: View = sp.losning ? 'losningar' : sp.behov ? 'behov' : sp.vy === 'losningar' || sp.vy === 'tavla' ? sp.vy : 'behov';
-  const reg = await loadSparkRegistry(pb, user.tenant);
+  const [reg, vectors] = await Promise.all([loadSparkRegistry(pb, user.tenant), loadSparkVectors(pb, user.tenant)]);
+  // AI-lagret (§ 61.7): likhet mellan beskrivningarna som en extra signal.
+  const actorOf = { need: new Map(reg.needs.map((n) => [n.id, n.actor])), solution: new Map(reg.solutions.map((s) => [s.id, s.actor])) };
+  const indexable = [
+    ...reg.needs.filter((n) => n.status === 'open' || n.status === 'matched').map((n) => ({ has: vectors.needs.has(n.id), text: sparkEmbeddingText('need', n) })),
+    ...reg.solutions.filter((s) => s.status === 'active').map((s) => ({ has: vectors.solutions.has(s.id), text: sparkEmbeddingText('solution', s) }))
+  ].filter((x) => x.text.length >= 20);
+  const notIndexed = indexable.filter((x) => !x.has).length;
 
   const matchedSolutions = new Map<string, Set<string>>();
   const matchedNeeds = new Map<string, Set<string>>();
@@ -78,6 +88,23 @@ export default async function SparkMatchingPage({ searchParams }: { searchParams
           Förslagen räknas på energiområde, bransch, mognad, tidshorisont och intresse av pilot — skälen står vid varje förslag. Ni avgör, och båda parter
           tillfrågas innan de presenteras för varandra.
         </p>
+        {view !== 'tavla' ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-default bg-canvas-subtle px-4 py-3">
+            <div className="min-w-0">
+              <p className="text-sm text-foreground">
+                <span className="font-semibold">AI-likhet:</span>{' '}
+                {vectors.missing
+                  ? 'inte tillgänglig — databasen saknar AI-lagret (migration 1700000224).'
+                  : indexable.length === 0
+                    ? 'inga beskrivningar att läsa in än.'
+                    : `${indexable.length - notIndexed} av ${indexable.length} beskrivningar inlästa.`}
+              </p>
+              <p className="text-xs text-foreground-subtle">Hittar behov och lösningar som handlar om samma sak trots olika kategorier. Skäl som börjar med &quot;AI:&quot; kommer härifrån.</p>
+              <AiNote>AI-likhet är en extra signal — ni avgör.</AiNote>
+            </div>
+            {canManage && !vectors.missing && indexable.length > 0 ? <ReindexButton stale={notIndexed} /> : null}
+          </div>
+        ) : null}
         <div className="flex flex-wrap gap-2 text-xs">
           {tab('behov', 'Utgå från behov', reg.needs.filter((n) => n.status === 'open' || n.status === 'matched').length)}
           {tab('losningar', 'Utgå från lösningar', reg.solutions.filter((s) => s.status === 'active').length)}
@@ -95,7 +122,8 @@ export default async function SparkMatchingPage({ searchParams }: { searchParams
           ) : (
             <ul className="space-y-4">
               {needs.map((n) => {
-                const suggestions = rankSolutionsForNeed(n, reg.solutions, reg.actorById, { exclude: matchedSolutions.get(n.id), limit });
+                const semantic = sparkSemanticFor(vectors.needs.get(n.id), vectors.solutions, (id) => actorOf.solution.get(id) === n.actor);
+                const suggestions = rankSolutionsForNeed(n, reg.solutions, reg.actorById, { exclude: matchedSolutions.get(n.id), limit, semantic });
                 return (
                   <li key={n.id} className="rounded-3xl border border-default bg-surface p-5">
                     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -134,7 +162,7 @@ export default async function SparkMatchingPage({ searchParams }: { searchParams
                               <span className="text-xs font-semibold text-foreground-subtle mx-tnum" title="Matchningspoäng">
                                 {s.score} p
                               </span>
-                              {canManage ? <CreateMatchButton needId={n.id} solutionId={s.item.id} /> : null}
+                              {canManage ? <CreateMatchButton needId={n.id} solutionId={s.item.id} semantic={semantic.get(s.item.id)} /> : null}
                             </div>
                           </li>
                         ))}
@@ -153,7 +181,8 @@ export default async function SparkMatchingPage({ searchParams }: { searchParams
           ) : (
             <ul className="space-y-4">
               {solutions.map((s) => {
-                const needSuggestions = rankNeedsForSolution(s, reg.needs, reg.actorById, { exclude: matchedNeeds.get(s.id), limit });
+                const semantic = sparkSemanticFor(vectors.solutions.get(s.id), vectors.needs, (id) => actorOf.need.get(id) === s.actor);
+                const needSuggestions = rankNeedsForSolution(s, reg.needs, reg.actorById, { exclude: matchedNeeds.get(s.id), limit, semantic });
                 const bedSuggestions = rankTestbedsForSolution(s, reg.testbeds, reg.actorById, { exclude: matchedTestbeds.get(s.id), limit });
                 const trl = effectiveSparkTrl(s);
                 return (
@@ -189,7 +218,7 @@ export default async function SparkMatchingPage({ searchParams }: { searchParams
                                   <span className="ml-2 text-xs text-foreground-subtle">{actorName(reg, n.item.actor)}</span>
                                   <Reasons s={n} />
                                 </div>
-                                {canManage ? <CreateMatchButton needId={n.item.id} solutionId={s.id} /> : null}
+                                {canManage ? <CreateMatchButton needId={n.item.id} solutionId={s.id} semantic={semantic.get(n.item.id)} /> : null}
                               </li>
                             ))}
                           </ul>

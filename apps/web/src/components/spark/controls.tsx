@@ -24,6 +24,10 @@ import {
   createSparkMatchAction,
   deleteSparkInterviewAction,
   deleteSparkMatchAction,
+  draftSparkIntroAction,
+  reindexSparkAction,
+  suggestSparkAssessmentAction,
+  suggestSparkAssessmentsAction,
   previewSparkImportAction,
   saveSparkOrganizationAction,
   setSparkRecordStatusAction,
@@ -95,12 +99,12 @@ export function DeleteInterviewButton({ interviewId }: { interviewId: string }) 
   );
 }
 
-export function CreateMatchButton({ needId, solutionId, testbedId, label = 'Skapa matchning' }: { needId?: string; solutionId?: string; testbedId?: string; label?: string }) {
+export function CreateMatchButton({ needId, solutionId, testbedId, semantic, label = 'Skapa matchning' }: { needId?: string; solutionId?: string; testbedId?: string; semantic?: string; label?: string }) {
   const { pending, state, run } = useAction();
   if (state.ok) return <span className="text-xs font-semibold text-movexum-morkgron dark:text-movexum-pastell-gron">Tillagd som förslag</span>;
   return (
     <span className="inline-flex flex-col items-end gap-1">
-      <button type="button" className={btnGhost} disabled={pending} onClick={() => run(() => createSparkMatchAction({ needId, solutionId, testbedId }))}>
+      <button type="button" className={btnGhost} disabled={pending} onClick={() => run(() => createSparkMatchAction({ needId, solutionId, testbedId, semantic }))}>
         <Icon name="plus" size={12} /> {pending ? 'Skapar …' : label}
       </button>
       {state.error ? <span className="max-w-xs text-right text-xs text-movexum-morkorange dark:text-movexum-pastell-orange">{state.error}</span> : null}
@@ -271,8 +275,26 @@ export function MatchForm({ matchId, initial, hasNeedSide, hasSolution, canDelet
   );
 }
 
-export function AssessSolutionForm({ solutionId, trl, category, note, suggested }: { solutionId: string; trl: string; category: string; note: string; suggested: string | null }) {
-  const [v, setV] = useState({ trl, category: category || suggested || '', note });
+export function AssessSolutionForm({
+  solutionId,
+  trl,
+  category,
+  note,
+  suggested,
+  aiTrl,
+  aiCategory
+}: {
+  solutionId: string;
+  trl: string;
+  category: string;
+  note: string;
+  suggested: string | null;
+  /** AI:ns förslag — förifyller formuläret tills Movexum sparat en egen bedömning. */
+  aiTrl?: string;
+  aiCategory?: string;
+}) {
+  const prefilled = !trl && !category && Boolean(aiTrl || aiCategory);
+  const [v, setV] = useState({ trl: trl || aiTrl || '', category: category || aiCategory || suggested || '', note });
   const { pending, state, run } = useAction();
   return (
     <form
@@ -307,8 +329,9 @@ export function AssessSolutionForm({ solutionId, trl, category, note, suggested 
       <div className="sm:col-span-2">
         <input className={inputClass} maxLength={1000} placeholder="Motivering (valfri)" value={v.note} onChange={(e) => setV((p) => ({ ...p, note: e.target.value }))} />
       </div>
+      {prefilled && !state.ok ? <p className="text-xs text-foreground-subtle sm:col-span-2">Förifyllt från AI-förslaget. Ändra om ni bedömer annorlunda — det är er bedömning som sparas.</p> : null}
       <div className="flex items-center gap-3 sm:col-span-2">
-        <button type="submit" className={btnGhost} disabled={pending}>
+        <button type="submit" className={btnPrimary} disabled={pending}>
           {pending ? 'Sparar …' : 'Spara bedömning'}
         </button>
         {state.error ? <span className="text-xs text-movexum-morkorange dark:text-movexum-pastell-orange">{state.error}</span> : null}
@@ -479,6 +502,120 @@ export function ImportForm({ canApply }: { canApply: boolean }) {
           >
             {pending ? 'Importerar …' : canApply ? `Importera ${rows.length} företag och för in i registret` : `Importera ${rows.length} företag och skicka till Movexum`}
           </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Fast rad under allt AI-genererat i SPARK (§ 9.7). */
+export function AiNote({ children }: { children?: ReactNode }) {
+  return (
+    <p className="text-[11px] text-foreground-subtle">
+      {children ?? 'Genererat av AI – verifiera innan delning.'} Drivs av Mistral (Frankrike, EU).
+    </p>
+  );
+}
+
+export function AiSuggestButton({ solutionId, hasSuggestion }: { solutionId: string; hasSuggestion: boolean }) {
+  const { pending, state, run } = useAction();
+  return (
+    <span className="inline-flex flex-col gap-1">
+      <button type="button" className={btnGhost} disabled={pending} onClick={() => run(() => suggestSparkAssessmentAction(solutionId))}>
+        <Icon name="sparkle" size={12} /> {pending ? 'AI läser …' : hasSuggestion ? 'Nytt AI-förslag' : 'Föreslå med AI'}
+      </button>
+      {state.error ? <span className="max-w-xs text-xs text-movexum-morkorange dark:text-movexum-pastell-orange">{state.error}</span> : null}
+    </span>
+  );
+}
+
+export function AiSuggestAllButton({ count }: { count: number }) {
+  const { pending, state, run } = useAction();
+  if (count === 0 && !state.notice && !state.error) return null;
+  return (
+    <div className="space-y-2">
+      <button type="button" className={btnGhost} disabled={pending || count === 0} onClick={() => run(() => suggestSparkAssessmentsAction())}>
+        <Icon name="sparkle" size={12} /> {pending ? 'AI går igenom lösningarna …' : `Låt AI föreslå för ${Math.min(count, 20)} av ${count} obedömda`}
+      </button>
+      <Feedback state={state} />
+    </div>
+  );
+}
+
+export function ReindexButton({ stale }: { stale: number }) {
+  const { pending, state, run } = useAction();
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2">
+      <button type="button" className={btnGhost} disabled={pending} onClick={() => run(() => reindexSparkAction())}>
+        <Icon name="sparkle" size={12} /> {pending ? 'Läser in …' : stale > 0 ? `Läs in ${stale} beskrivningar` : 'Uppdatera'}
+      </button>
+      {state.error ? <span className="text-xs text-movexum-morkorange dark:text-movexum-pastell-orange">{state.error}</span> : null}
+      {state.notice ? <span className="text-xs text-foreground-muted">{state.notice}</span> : null}
+    </span>
+  );
+}
+
+export function IntroDraftPanel({ matchId, hasNeedSide, hasSolution }: { matchId: string; hasNeedSide: boolean; hasSolution: boolean }) {
+  const [pending, start] = useTransition();
+  const [draft, setDraft] = useState('');
+  const [recipient, setRecipient] = useState<'need' | 'solution' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [caution, setCaution] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const run = (to: 'need' | 'solution') =>
+    start(async () => {
+      setError(null);
+      setCaution(null);
+      try {
+        const res = await draftSparkIntroAction(matchId, to);
+        if (res.error) {
+          setError(res.error);
+          return;
+        }
+        setRecipient(to);
+        setDraft(res.text ?? '');
+        setCaution(res.warning ?? null);
+      } catch (err) {
+        setError(actionErrorMessage(err, 'Något gick fel. Försök igen.'));
+      }
+    });
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-foreground-muted">Låt AI skriva ett utkast till frågan om parten vill bli presenterad. Du läser, ändrar och skickar själv — ingenting skickas härifrån.</p>
+      <div className="flex flex-wrap gap-2">
+        {hasNeedSide && hasSolution ? (
+          <button type="button" className={btnGhost} disabled={pending} onClick={() => run('need')}>
+            <Icon name="sparkle" size={12} /> Till behovsägaren
+          </button>
+        ) : null}
+        {hasSolution ? (
+          <button type="button" className={btnGhost} disabled={pending} onClick={() => run('solution')}>
+            <Icon name="sparkle" size={12} /> Till innovationsaktören
+          </button>
+        ) : null}
+        {pending ? <span className="self-center text-xs text-foreground-subtle">AI skriver …</span> : null}
+      </div>
+      {error ? <Notice kind="error">{error}</Notice> : null}
+      {caution ? <Notice kind="warning">{caution}</Notice> : null}
+      {draft ? (
+        <div className="space-y-2">
+          <label className={labelClass}>Utkast till {recipient === 'need' ? 'behovsägaren' : 'innovationsaktören'}</label>
+          <textarea className={`${inputClass} min-h-64`} value={draft} onChange={(e) => setDraft(e.target.value)} />
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              className={btnGhost}
+              onClick={() =>
+                navigator.clipboard?.writeText(draft).then(() => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                })
+              }
+            >
+              <Icon name="copy" size={12} /> {copied ? 'Kopierad' : 'Kopiera texten'}
+            </button>
+            <AiNote />
+          </div>
         </div>
       ) : null}
     </div>

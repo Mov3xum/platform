@@ -5607,6 +5607,9 @@ await ensureCollection({
       { name: 'trl', type: 'number', required: false, min: 0, max: 9, onlyInt: true },
       { name: 'trl_assessed', type: 'number', required: false, min: 0, max: 9, onlyInt: true },
       text('accelerator_category', 30), text('accelerator_note', 1000), user('assessed_by'), date('assessed_at'), text('verified', 20),
+      // Migration 1700000224 (§ 61.7): AI:ns förslag — skilt från Movexums bedömning.
+      { name: 'ai_trl', type: 'number', required: false, min: 0, max: 9, onlyInt: true }, text('ai_category', 30), text('ai_rationale', 1000),
+      { name: 'ai_confidence', type: 'number', required: false, min: 0, max: 1 }, text('ai_model', 60), date('ai_suggested_at'),
       json('needs'), text('barriers', 2000), text('expansion', 1000), select('status', ['active', 'paused', 'closed'], true), user('created_by')
     ],
     indexes: childIndexes('spark_solutions'),
@@ -5645,6 +5648,22 @@ await ensureCollection({
       'CREATE UNIQUE INDEX idx_spark_matches_pair ON spark_matches (need, solution, testbed)'
     ],
     ...REGISTRY_RULES
+  });
+  // Migration 1700000224 (§ 61.7): embeddings för innehållslikhet i matchningen.
+  await ensureCollection({
+    id: 'spark_embeddings_collection',
+    name: 'spark_embeddings',
+    type: 'base',
+    fields: [
+      ...autodate, tenant, select('kind', ['need', 'solution'], true), text('record_id', 15, true), text('text_hash', 16), text('model', 60),
+      json('embedding', 80000), user('created_by')
+    ],
+    indexes: ['CREATE UNIQUE INDEX idx_spark_embeddings_record ON spark_embeddings (tenant, kind, record_id)'],
+    listRule: READ,
+    viewRule: READ,
+    createRule: PINNED_CREATE,
+    updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
+    deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`
   });
 }
 
@@ -6845,6 +6864,7 @@ const FORCE_CREATE_RULES = {
   spark_solutions: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
   spark_testbeds: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
   spark_matches: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  spark_embeddings: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
   spark_interviews:
     `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id` +
     ' && (@request.body.status:isset = false || @request.body.status = "draft" || @request.body.status = "submitted")' +

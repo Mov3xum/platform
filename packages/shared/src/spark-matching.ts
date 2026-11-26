@@ -5,6 +5,7 @@
 // Ingen AI-inferens. Ren logik, enhetstestad i spark-matching.test.ts.
 
 import { SPARK_ENERGY_AREA_LABELS, SPARK_KOMMUN_LABELS, SPARK_MATURITY_LABELS, SPARK_SECTOR_LABELS } from './spark';
+import type { SparkSemanticLevel } from './spark-ai';
 
 export interface MatchableActor {
   id: string;
@@ -73,12 +74,15 @@ function listLabels(values: readonly string[], map: Record<string, string>): str
 /**
  * Poängsätter ett behov mot en lösning. `null` = paret ska inte föreslås:
  * samma aktör, någon part har sagt nej till matchning, eller varken
- * energiområde eller bransch stämmer.
+ * energiområde eller bransch stämmer. `semantic` är AI-lagrets signal om att
+ * beskrivningarna liknar varandra (§ 61.7): den ger extra poäng, och en
+ * TYDLIG likhet räcker för att föreslå ett par som saknar gemensam kategori.
  */
 export function scoreNeedSolution(
   need: MatchableNeed,
   solution: MatchableSolution,
-  actors: ReadonlyMap<string, MatchableActor>
+  actors: ReadonlyMap<string, MatchableActor>,
+  semantic?: SparkSemanticLevel
 ): SparkPairScore | null {
   if (need.actor === solution.actor) return null;
   const needActor = actors.get(need.actor);
@@ -88,7 +92,7 @@ export function scoreNeedSolution(
 
   const sharedAreas = shared(need.areas, solution.areas);
   const sectorFit = Boolean(needActor?.sector && solution.target_sectors.includes(needActor.sector));
-  if (sharedAreas.length === 0 && !sectorFit) return null;
+  if (sharedAreas.length === 0 && !sectorFit && semantic !== 'strong') return null;
 
   let score = 0;
   const reasons: string[] = [];
@@ -97,8 +101,17 @@ export function scoreNeedSolution(
   if (sharedAreas.length > 0) {
     score += Math.min(sharedAreas.length, AREA_CAP) * AREA_WEIGHT;
     reasons.push(`Samma energiområde: ${listLabels(sharedAreas, SPARK_ENERGY_AREA_LABELS)}`);
-  } else {
+  } else if (sectorFit) {
     cautions.push('Inget gemensamt energiområde — bara branschen stämmer');
+  } else {
+    cautions.push('Varken energiområde eller bransch stämmer — föreslås bara för att beskrivningarna liknar varandra');
+  }
+  if (semantic === 'strong') {
+    score += 3;
+    reasons.push('AI: beskrivningarna handlar tydligt om samma sak');
+  } else if (semantic === 'some') {
+    score += 2;
+    reasons.push('AI: beskrivningarna liknar varandra');
   }
   if (sectorFit && needActor?.sector) {
     score += 3;
@@ -169,6 +182,8 @@ export interface SparkRankOptions {
   limit?: number;
   /** Id:n som redan är matchade mot utgångsposten och inte ska föreslås igen. */
   exclude?: ReadonlySet<string>;
+  /** AI-lagrets likhetssignal per kandidat-id (§ 61.7). */
+  semantic?: ReadonlyMap<string, SparkSemanticLevel>;
 }
 
 export function rankSolutionsForNeed(
@@ -181,7 +196,7 @@ export function rankSolutionsForNeed(
     solutions
       .filter((s) => (s.status ?? 'active') === 'active' && !opts.exclude?.has(s.id))
       .map((s) => {
-        const scored = scoreNeedSolution(need, s, actors);
+        const scored = scoreNeedSolution(need, s, actors, opts.semantic?.get(s.id));
         return scored ? { item: s, ...scored } : null;
       }),
     opts.limit ?? SPARK_SUGGESTION_LIMIT
@@ -201,7 +216,7 @@ export function rankNeedsForSolution(
         return (status === 'open' || status === 'matched') && !opts.exclude?.has(n.id);
       })
       .map((n) => {
-        const scored = scoreNeedSolution(n, solution, actors);
+        const scored = scoreNeedSolution(n, solution, actors, opts.semantic?.get(n.id));
         return scored ? { item: n, ...scored } : null;
       }),
     opts.limit ?? SPARK_SUGGESTION_LIMIT

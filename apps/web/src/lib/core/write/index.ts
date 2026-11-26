@@ -203,6 +203,13 @@ export {
   type SparkMatchPatch,
   type SparkRecordKind
 } from './spark';
+export {
+  suggestSparkAssessment,
+  suggestSparkAssessments,
+  draftSparkIntroduction,
+  reindexSparkEmbeddings,
+  type SparkIntroDraft
+} from './spark-ai';
 export { logAgentAction } from './audit';
 export {
   canWriteField,

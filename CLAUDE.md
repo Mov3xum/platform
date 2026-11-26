@@ -1020,6 +1020,7 @@ omsättning.
 | `create_funding_project` / `create_support_check_type` / `create_support_check_application` (chatt-verktyg, § 46) | n/a | Deterministiska utkast via skrivlagret (checktyp inaktiv, ansökan `draft`); inskick, bedömning, finansiering och beslut är agent-nekade |
 | Impact Navigator (`lib/ai/impact-analysis.ts`, § 56) | begränsad | Hållbarhetsanalys av BOLAG (väsentlighet, tillräcklighet, slutanalys, uppdatering) via Mistral; människan startar varje steg, granskar väsentligheten och slutanalysen; ingen autopublicering |
 | Export Lab (`lib/ai/export-analysis.ts`, § 58) | begränsad | Internationaliseringsanalys av BOLAG (exportprofil & marknadsurval, informationsgap, exportplan, uppdatering) via Mistral, byggd på namngivna forskningsramverk och bolagets KTH IRL; människan startar varje steg, granskar marknaderna och planen; ingen autopublicering; regelverk/tull/kultur ska verifieras |
+| SPARK:s AI-lager (`lib/ai/spark-ai.ts`, § 61.7) | begränsad | Förslag på TRL och acceleratorkategori för en LÖSNING (aldrig en person), utkast till introduktionstext och innehållslikhet som extra signal i matchningen; allt på en människas klick, förslagen sparas bredvid — aldrig i — Movexums bedömning, ingenting skickas eller publiceras automatiskt |
 | `edu_irl_levels` | minimal | Generellt utbildningsmaterial |
 | `template_pitch_deck` | n/a | Statisk mall, ingen AI-inferens |
 
@@ -11451,6 +11452,7 @@ presenteras för varandra. Företag ser aldrig varandra i systemet.
 | `apps/web/src/lib/spark/{data,public.server}.ts` | Läsvägen (RLS) + kurerad vy över anmälningar via en delningslänk; den publika anmälan |
 | `apps/web/src/lib/actions/spark.ts`, `app/spark/**`, `components/spark/**` | Actions, sidor, formuläret (`InterviewForm`), kontroller |
 | `app/energi/[tenant]/page.tsx`, `app/api/public/energi/[tenant]/route.ts` | Publik sida + anmälan |
+| `packages/shared/src/spark-ai.ts`, `lib/ai/spark-ai.ts`, `lib/core/write/spark-ai.ts` | AI-lagret (§ 61.7) |
 
 ### 61.1 Det adaptiva formuläret (en definition, tre användningar)
 
@@ -11573,10 +11575,61 @@ bedöms med KTH IRL (§ 52.2). CRL används inte här.
 - **Innan Högskolans intervjudata tas in** ska avtalet mellan projekten vara
   klart: svar på företagsnivå, att företagen informerats om användningen i
   SPARK, och hur indikatorutfall fördelas (ingen dubbelrapportering).
-- **Inte byggt:** AI-lager (semantisk likhet på fritext, utkast till
-  introduktionstext, intervju ur mötesinspelning), personlig länk där
+- **Inte byggt:** intervju ur mötesinspelning, personlig länk där
   företaget själv uppdaterar sin profil, koppling av stödinsatsen till
   stödcheckar/de minimis (§ 46/§ 20 kräver i dag ett bolagskort — för
   stödmottagare utanför portföljen bekräftas stödet med kryssruta och
   referens), kontaktpersoner i kontaktboken (§ 45), uppslag i bolagsregistret
   vid org-nr och chattverktyg.
+
+### 61.7 AI-lagret — likhet, TRL-förslag och introduktionsutkast (2026-11)
+
+Tre AI-stöd ovanpå registret, alla **på en människas klick** och bara för
+Movexum (admin/incubator_lead/coach). Agenten har inga verktyg här.
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/spark-ai.ts` (+ `.test.ts`) | REN: embeddingtext, kontrollsumma, cosinus, relativa likhetssignaler (`sparkSemanticLevels`/`sparkSemanticFor`), strikt tolkning av AI-svar (`parseSparkAssessmentSuggestion`), rensning av utkast |
+| `apps/web/src/lib/ai/spark-ai.ts` | Två isolerade Mistral-körningar: `suggestSolutionAssessment`, `draftIntroduction` (medium → small, inga verktyg) |
+| `apps/web/src/lib/spark/ai.server.ts` | `indexSparkEmbeddings` / `loadSparkVectors` mot `spark_embeddings` |
+| `apps/web/src/lib/core/write/spark-ai.ts` | Grind (roll, kostnadstak § 9.6, usage-logg, audit): `suggestSparkAssessment(s)`, `draftSparkIntroduction`, `reindexSparkEmbeddings` |
+| `backend/pocketbase-schema/migrations/1700000224_spark_ai_layer.js` | `spark_embeddings` + `spark_solutions.ai_*` |
+
+- **Innehållslikhet i matchningen.** Varje öppet behov och aktiv lösning får
+  en embedding (`mistral-embed`, EU) av sin verksamhetstext — rubrik,
+  beskrivning, energiområden; **aldrig aktörens namn eller kontakt**.
+  `text_hash` gör att bara ändrade texter läses in igen; indexet uppdateras
+  best-effort när en intervju förs in och kan läsas in från Matchning.
+  Likheten är en EXTRA signal i `scoreNeedSolution`: *viss* likhet +2, *tydlig*
+  +3, och bara en tydlig likhet får föreslå ett par som saknar gemensamt
+  energiområde och bransch — då med en varning. Skälen märks "AI:".
+  **Tröskeln är relativ** (standardavvikelser över kandidaternas medel, minst
+  fem kandidater, plus en absolut marginal och ett golv) eftersom
+  embeddingmodellers likhetstal ligger högt och tätt. Trösklarna
+  (`SPARK_SEMANTIC_*`) är en arbetshypotes som **inte är kalibrerad mot
+  verkliga data** — stäm av mot de första riktiga matchningarna.
+- **Förslag på TRL och kategori.** AI läser lösningens beskrivning, företagets
+  egen uppgift och hinder, och föreslår TRL 1–9 + kategori med en motivering
+  och en säkerhet. Prompten kräver den högsta nivå underlaget *belägger* och
+  `trl: null` när det inte räcker. Förslaget sparas i `spark_solutions.ai_*`
+  — **bredvid, aldrig i** `trl_assessed`/`accelerator_category`, som alltid
+  sätts av en människa. Formuläret förifylls från förslaget tills Movexum
+  sparat sin egen bedömning; avviker ni syns båda. Enstaka eller upp till 20
+  obedömda per körning. Bara innovationsaktörer utanför portföljen (§ 61.5).
+- **Utkast till introduktion.** Ett kort utkast till frågan om en part vill bli
+  presenterad. Motparten beskrivs enligt sin **delningsnivå**: med namn bara
+  vid `named`, annars anonymt (bransch, kommun, storlek) och då utan
+  lösningens namn i underlaget; vid `none` skrivs inget utkast (deterministisk
+  spärr före AI-anropet). Texten lämnas i en ruta att läsa, ändra och kopiera
+  — **ingenting skickas från plattformen** och utkastet sparas inte.
+- **Regelefterlevnad.** Riskklass **begränsad** (§ 10.1): bedömer lösningar
+  och företag, aldrig individer; förslagen är beslutsstöd och varje AI-yta
+  bär raden "Genererat av AI – verifiera" + leverantör (§ 9.7). Underlaget är
+  data, inte instruktioner (§ 9.3); svaren tolkas strikt (okänd kategori eller
+  TRL utanför 1–9 ⇒ inget förslag). Tokens loggas i `ai_usage_events`
+  (surface `suggestions`) och månadstaket prövas före varje körning.
+  `spark_embeddings` är denylistad för AI-chatten. Audit bär lösningens namn,
+  föreslagen nivå och modell — aldrig underlaget eller utkastets text.
+- **Inte verifierat:** AI-anropen är inte körda mot Mistral från byggmiljön.
+  Prompterna, tolkningen och likhetslogiken är enhetstestade; kvaliteten på
+  förslagen ska bedömas på riktiga lösningar innan de används brett.

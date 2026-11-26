@@ -594,7 +594,7 @@ export async function assessSparkSolution(
 export async function createSparkMatch(
   pb: PocketBase,
   actor: Actor,
-  input: { needId?: string | null; solutionId?: string | null; testbedId?: string | null }
+  input: { needId?: string | null; solutionId?: string | null; testbedId?: string | null; semantic?: string | null }
 ): Promise<WriteResult<{ matchId: string }>> {
   const no = requireManage<{ matchId: string }>(actor);
   if (no) return no;
@@ -640,7 +640,9 @@ export async function createSparkMatch(
     const ids = [need.actor, solution.actor];
     const actorRows = await Promise.all(ids.map((id) => getRecordInTenant<{ id: string; tenant: string }>(pb, actor, SPARK_ACTORS, id, '*')));
     const map = new Map(actorRows.filter(Boolean).map((r) => [r!.id, normalizeSparkActor(r as unknown as Raw)]));
-    const scored = scoreNeedSolution(need, solution, map);
+    // AI-likheten (§ 61.7) kommer från sidan och påverkar bara skälen som sparas — ingen behörighet.
+    const semantic = input.semantic === 'strong' || input.semantic === 'some' ? input.semantic : undefined;
+    const scored = scoreNeedSolution(need, solution, map, semantic);
     if (scored) {
       score = scored.score;
       reasons = scored.reasons;
