@@ -419,3 +419,65 @@ test('COOLIFY_WAIT=true: bygglogg utan pocketbase-rader → varning om fel resur
     await mock.close();
   }
 });
+
+test('COOLIFY_WAIT=true: timeout visar var bygget står (loggslut, maskade hemligheter, 5xx under bygget)', async () => {
+  const stuck = {
+    status: 200,
+    body: {
+      status: 'in_progress',
+      logs: JSON.stringify([
+        { command: 'docker login -p hunter2', output: 'internt', hidden: true },
+        { output: '#12 [builder 5/9] RUN yarn build' },
+        { output: 'ARG POCKETBASE_SUPERUSER_PASSWORD=supersecret\n#13 exporting layers' },
+      ]),
+    },
+  };
+  const mock = await startMock({
+    'GET /api/v1/version': VERSION_OK,
+    [`POST /api/v1/deploy?uuid=${UUID}&force=false`]: DEPLOY_OK_WITH_UUID,
+    'GET /api/v1/deployments/dep111': [stuck, { status: 500, body: { message: 'Server Error' } }, stuck, stuck, stuck],
+  });
+  try {
+    const { code, out } = await run({
+      COOLIFY_BASE_URL: mock.baseUrl,
+      COOLIFY_APP_UUID: UUID,
+      COOLIFY_WAIT: 'true',
+      COOLIFY_WAIT_INTERVAL: '1',
+      COOLIFY_WAIT_TIMEOUT: '2',
+    });
+    assert.equal(code, 1);
+    assert.match(out, /::error::Coolify-bygget dep111 blev inte klart inom 2s/);
+    assert.match(out, /Byggloggen har inte fått någon ny rad på \d+s/);
+    assert.match(out, /::warning::Coolify svarade inte normalt på 1 statuskontroller under bygget/);
+    assert.match(out, /sista raderna ur Coolify-byggloggen \(dep111\)/);
+    assert.match(out, /#12 \[builder 5\/9\] RUN yarn build/);
+    assert.match(out, /POCKETBASE_SUPERUSER_PASSWORD=\*\*\*/);
+    assert.doesNotMatch(out, /supersecret|hunter2/);
+    assert.match(out, /avbryt den \(Cancel\)/);
+  } finally {
+    await mock.close();
+  }
+});
+
+test('COOLIFY_WAIT=true: failed visar slutet av byggloggen', async () => {
+  const mock = await startMock({
+    'GET /api/v1/version': VERSION_OK,
+    [`POST /api/v1/deploy?uuid=${UUID}&force=false`]: DEPLOY_OK_WITH_UUID,
+    'GET /api/v1/deployments/dep111': {
+      status: 200,
+      body: { status: 'failed', logs: JSON.stringify([{ output: 'error: process "yarn build" did not complete: exit code 137' }]) },
+    },
+  });
+  try {
+    const { code, out } = await run({
+      COOLIFY_BASE_URL: mock.baseUrl,
+      COOLIFY_APP_UUID: UUID,
+      COOLIFY_WAIT: 'true',
+      COOLIFY_WAIT_INTERVAL: '0',
+    });
+    assert.equal(code, 1);
+    assert.match(out, /exit code 137/);
+  } finally {
+    await mock.close();
+  }
+});
