@@ -3008,6 +3008,7 @@ await ensureCollection({
     { name: 'key', type: 'text', required: true, max: 100 },
     { name: 'prompt', type: 'text', required: true, max: 2000 },
     { name: 'help_text', type: 'text', required: false, max: 1000 },
+    { name: 'topic', type: 'text', required: false, max: 80 },
     { name: 'input_type', type: 'select', required: true, maxSelect: 1, values: ['short_text', 'long_text', 'choice', 'multi_choice', 'scale', 'email', 'phone'] },
     { name: 'choices', type: 'json', required: false, maxSize: 50000 },
     { name: 'required', type: 'bool', required: false },

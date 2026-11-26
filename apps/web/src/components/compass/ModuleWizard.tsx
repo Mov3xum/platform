@@ -227,6 +227,7 @@ export function ModuleWizard({
           <>
             {/* Question */}
             <div>
+              {q.topic && <div className="mx-qtopic">{q.topic}</div>}
               <div className="mx-qprompt">{q.prompt}</div>
               {q.help_text && (
                 <div className="mx-t-13 mx-muted" style={{ marginTop: 8, lineHeight: 1.5 }}>

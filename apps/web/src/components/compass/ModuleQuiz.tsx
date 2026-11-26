@@ -305,6 +305,7 @@ export function ModuleQuiz({
         </div>
       ) : (
         <div>
+          {questions[step]?.topic && <div className="mx-qtopic">{questions[step]?.topic}</div>}
           <div className="mx-qprompt">{questions[step]?.prompt}</div>
           {questions[step]?.help_text && (
             <div className="mx-t-13 mx-muted" style={{ marginTop: 8, lineHeight: 1.5 }}>

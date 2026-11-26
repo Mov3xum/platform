@@ -124,6 +124,7 @@ export function ChatClosingForm({ config, moduleSlug, sessionToken, consent, con
 
       {questions.map((q) => (
         <div key={q.key}>
+          {q.topic && <div className="mx-qtopic">{q.topic}</div>}
           <div className="mx-qprompt" style={{ fontSize: 15 }}>
             {q.prompt} *
           </div>

@@ -349,6 +349,7 @@ export function buildModuleChatSystemPrompt(
       .map((question, index) => {
         const lines = [`${index + 1}. ${question.key}: ${question.prompt}`];
         lines.push(`   Typ: ${question.input_type}${question.required ? ' (obligatorisk)' : ''}`);
+        if (question.topic) lines.push(`   Tema: ${question.topic}`);
         if (question.help_text) lines.push(`   Hjälp: ${question.help_text}`);
         if (question.choices?.length) {
           lines.push(

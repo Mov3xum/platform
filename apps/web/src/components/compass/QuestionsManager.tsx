@@ -322,6 +322,7 @@ function NewQuestionForm({
   const [key, setKey] = useState('');
   const [prompt, setPrompt] = useState('');
   const [helpText, setHelpText] = useState('');
+  const [topic, setTopic] = useState('');
   const [inputType, setInputType] = useState<CompassQuestion['input_type']>('short_text');
   const [required, setRequired] = useState(false);
   const [pending, start] = useTransition();
@@ -330,6 +331,7 @@ function NewQuestionForm({
     setKey('');
     setPrompt('');
     setHelpText('');
+    setTopic('');
     setInputType('short_text');
     setRequired(false);
   }
@@ -342,6 +344,7 @@ function NewQuestionForm({
     fd.set('key', key);
     fd.set('prompt', prompt);
     fd.set('help_text', helpText);
+    fd.set('topic', topic);
     fd.set('input_type', inputType);
     if (required) fd.set('required', 'on');
     start(async () => {
@@ -411,6 +414,18 @@ function NewQuestionForm({
           </select>
         </label>
       </div>
+      <label className="mx-label">
+        Temarubrik ovanför frågan (valfri)
+        <input
+          type="text"
+          className="mx-input"
+          style={{ marginTop: 4 }}
+          placeholder="Marknadspotential"
+          maxLength={80}
+          value={topic}
+          onChange={(e) => setTopic(e.target.value)}
+        />
+      </label>
       <label className="mx-label">
         Fråga (texten som visas)
         <input
@@ -519,6 +534,7 @@ function QuestionCard({
   const [key, setKey] = useState(question.key);
   const [prompt, setPrompt] = useState(question.prompt);
   const [helpText, setHelpText] = useState(question.help_text ?? '');
+  const [topic, setTopic] = useState(question.topic ?? '');
   const [inputType, setInputType] = useState<CompassQuestion['input_type']>(question.input_type);
   const [required, setRequired] = useState(!!question.required);
   const [choices, setChoices] = useState<EditableChoice[]>(() => toEditableChoices(question));
@@ -538,6 +554,7 @@ function QuestionCard({
     key,
     prompt,
     helpText,
+    topic,
     inputType,
     required,
     hasChoices(inputType) ? choices : null
@@ -599,6 +616,7 @@ function QuestionCard({
     fd.set('key', key);
     fd.set('prompt', prompt);
     fd.set('help_text', helpText);
+    fd.set('topic', topic);
     fd.set('input_type', inputType);
     if (required) fd.set('required', 'on');
     if (hasChoices(inputType)) {
@@ -769,6 +787,19 @@ function QuestionCard({
 
       {open && (
       <div className="mx-qcard-body">
+      <label className="mx-label">
+        Temarubrik ovanför frågan (valfri)
+        <input
+          type="text"
+          className="mx-input"
+          style={{ marginTop: 4 }}
+          placeholder="Marknadspotential"
+          maxLength={80}
+          value={topic}
+          onChange={(e) => setTopic(e.target.value)}
+        />
+      </label>
+
       <label className="mx-label">
         Fråga (texten som visas)
         <input type="text" className="mx-input" style={{ marginTop: 4 }} value={prompt} onChange={(e) => setPrompt(e.target.value)} />

@@ -157,13 +157,15 @@ export interface TranslatableQuestion {
   id: string;
   key?: string;
   prompt: string;
+  /** Liten temarubrik ovanför frågan (§ 23.16). */
+  topic?: string | null;
   help_text?: string | null;
   choices?: { value: string; label: string }[] | null;
 }
 
 /**
  * Alla texter i modulen som besökaren ser, med stabila nycklar:
- * `m.<fält>`, `q.<frågans id>.prompt|help`, `q.<id>.c.<svarsvärde>`,
+ * `m.<fält>`, `q.<frågans id>.prompt|help|topic`, `q.<id>.c.<svarsvärde>`,
  * `b.<profil>.title|body|cta`, `b.<profil>.tip.<n>`. Tomma källor hoppas
  * över (inget att översätta).
  */
@@ -180,6 +182,7 @@ export function compassTranslatableEntries(
   for (const q of questions) {
     push(`q.${q.id}.prompt`, q.prompt);
     push(`q.${q.id}.help`, q.help_text);
+    push(`q.${q.id}.topic`, q.topic);
     for (const c of q.choices ?? []) {
       if (!c || typeof c.value !== 'string') continue;
       push(`q.${q.id}.c.${c.value}`, c.label);
@@ -285,6 +288,7 @@ export function applyCompassQuestionTranslation<Q extends TranslatableQuestion>(
     ...q,
     prompt: pick(texts, `q.${q.id}.prompt`, q.prompt),
     help_text: q.help_text ? pick(texts, `q.${q.id}.help`, q.help_text) : q.help_text,
+    topic: q.topic ? pick(texts, `q.${q.id}.topic`, q.topic) : q.topic,
     choices: Array.isArray(q.choices)
       ? q.choices.map((c) => ({ ...c, label: pick(texts, `q.${q.id}.c.${c.value}`, c.label) }))
       : q.choices

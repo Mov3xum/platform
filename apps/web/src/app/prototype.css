@@ -1456,6 +1456,16 @@ select.mx-input:focus {
   background: var(--mx-accent, #002c40);
   transition: width 320ms cubic-bezier(0.2, 0.7, 0.2, 1);
 }
+/* Liten temarubrik ovanför frågan (§ 23.16). */
+.mx-qtopic {
+  font-family: var(--mx-mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--mx-accent);
+  margin-bottom: 6px;
+}
 .mx-qprompt {
   font-family: var(--mx-display);
   font-size: clamp(20px, 2vw, 24px);

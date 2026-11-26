@@ -351,6 +351,8 @@ export interface AddCompassQuestionParams {
   inputType?: string;
   key?: string;
   helpText?: string;
+  /** Liten temarubrik ovanför frågan (§ 23.16). */
+  topic?: string;
   required?: boolean | string;
   /** Endast för choice/multi_choice. Etiketter eller {label, value, score, buckets}. */
   choices?: unknown;
@@ -562,6 +564,9 @@ export async function addCompassQuestion(
   const helpText = validateOptionalText(params.helpText, 'help_text', 1000);
   if (!helpText.ok) return fail('INVALID_VALUE', helpText.error);
 
+  const topic = validateOptionalText(params.topic, 'topic', 80);
+  if (!topic.ok) return fail('INVALID_VALUE', topic.error);
+
   const required = validateBool(params.required, false);
   if (!required.ok) return fail('INVALID_VALUE', required.error);
 
@@ -617,6 +622,7 @@ export async function addCompassQuestion(
         sort_order: order
       };
       if (helpText.value) payload.help_text = helpText.value;
+      if (topic.value) payload.topic = topic.value;
       if (choices.value) payload.choices = choices.value;
 
       const created = await writeWithFallback(pb, (client) =>

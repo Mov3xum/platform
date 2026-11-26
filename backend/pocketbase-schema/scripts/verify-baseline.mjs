@@ -1414,6 +1414,7 @@ const REQUIRED_APP_FIELDS = [
   { collection: 'compass_leads', fields: ['website', 'other_info'] },
   // Engelsk version av publika moduler (migration 1700000216, § 23.13).
   { collection: 'compass_modules', fields: ['translations'] },
+  { collection: 'compass_questions', fields: ['topic'] },
   // Önskemål & buggar (§ 49, migration 1700000208): testare + återkoppling —
   // utan fälten "pekas testaren ut" tyst bort och återkopplingen försvinner.
   { collection: 'feedback_items', fields: ['tester', 'test_note', 'tested_at'] },
