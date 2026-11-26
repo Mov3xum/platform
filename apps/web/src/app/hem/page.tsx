@@ -12,6 +12,7 @@ import { loadCompanyNews } from '@/lib/feed/activity-feed';
 import { fetchWebFeedItems, listWebSources } from '@/lib/ai/web';
 import { listAnnualWheelCategories } from '@/lib/annual-wheel/categories';
 import { computeMetric, computeMetrics } from '@/lib/metrics/registry';
+import { loadPortfolioMap } from '@/lib/portfolio-map.server';
 import type { DashboardActivity } from '@/components/DashboardChat';
 import {
   ORG_POST_AUTHOR_ROLES,
@@ -139,6 +140,9 @@ export default async function HemPage({
   const metricCtx = { pb, tenant: user.tenant, userId: user.id, today: todayKey };
   const leadPeriods = trailingPeriods(todayKey, 7);
 
+  // Portföljkartan (§ 37.7) visas bara för den som når bolagen.
+  const canSeePortfolio = canAccessModuleForUser(user.roles, 'startups', user.enabledModules);
+
   const [
     postsRes,
     feedRes,
@@ -148,7 +152,8 @@ export default async function HemPage({
     eventsRes,
     snapshotMetrics,
     leadsNow,
-    leadsBefore
+    leadsBefore,
+    portfolio
   ] = await Promise.all([
     listOrgPosts(pb, user.tenant).catch(() => [] as OrgPost[]),
     // Bolagsnytt: bara människopublicerade nyheter om bolagen (§ 37.1), de
@@ -176,7 +181,15 @@ export default async function HemPage({
       .catch(() => ({ items: [] as EventRow[] })),
     computeMetrics(['active_startups', 'workshops_in_progress', 'my_open_tasks'], metricCtx),
     computeMetric('leads_in_period', { ...metricCtx, period: leadPeriods.current }),
-    computeMetric('leads_in_period', { ...metricCtx, period: leadPeriods.previous })
+    computeMetric('leads_in_period', { ...metricCtx, period: leadPeriods.previous }),
+    canSeePortfolio
+      ? loadPortfolioMap(user.id, todayKey).catch((err) => {
+          console.error('[hem] portfolio map failed', {
+            status: typeof err === 'object' && err && 'status' in err ? (err as { status?: number }).status : undefined
+          });
+          return { error: 'Portföljkartan kunde inte läsas just nu.' };
+        })
+      : Promise.resolve(null)
   ]);
 
   const allPosts = postsRes;
@@ -297,6 +310,7 @@ export default async function HemPage({
       counts={{ activeStartups, newLeads, leadsDelta, myOpenTasks }}
       agendaItems={agendaItems}
       windowDays={windowDays}
+      portfolio={portfolio}
       tabs={tabs}
       initialTab={initialTab}
       byTab={byTab}
