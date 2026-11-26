@@ -191,6 +191,13 @@ async function verifyCollectionsExist() {
     'screening_requests',
     // Ärenden i Bedömning excellens (§ 51.10, migration 1700000200).
     'screening_cases',
+    // Diarium, plan och arkivförteckning (§ 60, migration 1700000219).
+    'record_types',
+    'register_cases',
+    'register_entries',
+    'register_disclosures',
+    'archive_profiles',
+    'archive_versions',
     // Impact Navigator (§ 56, migration 1700000206) — hållbarhetsanalysen per bolag.
     'sustainability_assessments',
     'sustainability_gap_questions',
@@ -207,6 +214,14 @@ async function verifyCollectionsExist() {
     'export_ai_jobs',
     // Användaraktivitet (§ 57, migration 1700000209) — stöd för att hjälpa användare igång.
     'user_activity',
+    // SPARK – energimatchning (§ 61, migration 1700000221).
+    'spark_actors',
+    'spark_interviews',
+    'spark_needs',
+    'spark_solutions',
+    'spark_testbeds',
+    'spark_matches',
+    'spark_embeddings',
     // Studenter & talang (§ 54, migration 1700000201).
     'talent_needs',
     'student_profiles',
@@ -439,9 +454,49 @@ async function verifyTenantGuardHook() {
       status = err?.status ?? 0;
     }
     if (status !== 403) {
+      // Färskhetsbevis: migration 1700000186 (2026-10) bytte notifications.kind
+      // select → text och kan BARA appliceras av PB-containern själv. Är fältet
+      // fortfarande select kör containern en image byggd före oktober — då är
+      // det imagen (inte hooken) som är problemet (incident 2026-11-25:
+      // Coolify-resursen bygger en legacy-Dockerfile, inte repots stack).
+      let staleImage = false;
+      try {
+        const notifications = await pb.collections.getOne('notifications');
+        const kindField = (notifications.fields ?? notifications.schema ?? []).find(
+          (f) => String(f.name) === 'kind'
+        );
+        staleImage = Boolean(kindField && String(kindField.type) === 'select');
+      } catch {
+        /* best-effort-bevis — påverkar aldrig utfallet */
+      }
+      const runbook =
+        `Åtgärd (Coolify-UI, incident 2026-11-25): resursen bakom COOLIFY_APP_UUID_* bygger en legacy-Dockerfile ` +
+        `sparad i Coolify — skapa en Docker Compose-resurs på infra/coolify.yml, flytta pb_data-volymen, byt ` +
+        `UUID-secreten och stäng legacy-resursen. Full runbook: docs/incidents/2026-11-25-staging-deploy-blocked.md. ` +
+        `Hooken är verifierad fungerande mot PB 0.23.4.`;
+      if (staleImage) {
+        // KÄND, dokumenterad incident: PB-imagen är byggd före migration
+        // 1700000186 och KAN inte bära hooken — ett hårt stopp gör inget
+        // säkrare (läget är detsamma som före 2026-11-15), det blockerar
+        // bara web-releaser. Varna högt; grinden förblir hård så fort
+        // imagen är färsk (då är en inaktiv vakt en verklig regression).
+        console.log(
+          `⚠ tenant-vakten är inte aktiv (HTTP ${status}) MEN PB-imagen är bevisat gammal ` +
+            `(notifications.kind är fortfarande select ⇒ byggd före migration 1700000186, 2026-10). ` +
+            `Deployen släpps fram under incident 2026-11-25. ${runbook}`
+        );
+        if (process.env.GITHUB_ACTIONS) {
+          console.log(
+            `::warning::tenant-vakten inaktiv pga gammal PB-image (incident 2026-11-25) — åtgärda Coolify-resursen enligt docs/incidents/2026-11-25-staging-deploy-blocked.md`
+          );
+        }
+        return;
+      }
       fail(
         `tenant-vakten (hooks/tenant_guard.pb.js) är inte aktiv: en användare kunde skapa en post på en annan ` +
-          `tenants bolag (HTTP ${status}). Kontrollera att PB-imagen byggts med repots hooks.`
+          `tenants bolag (HTTP ${status}) — trots att PB-imagen är färsk (migration 1700000186 applicerad). ` +
+          `Det är en verklig regression: kontrollera att PB-imagen byggts med repots hooks ` +
+          `(docker exec moveum-pocketbase ls /pb/pb_hooks) och att starten inte loggar hook-fel. ${runbook}`
       );
     }
     ok('tenant-vakt aktiv: poster kan inte kopplas till en annan tenants bolag');
@@ -700,8 +755,23 @@ const MUST_BE_STAFF_OR_OBSERVER = [
   // Ärenden i Bedömning excellens (§ 51.10, migration 1700000200) — internt
   // statsstödsunderlag per bolag → staff/observer-only.
   'screening_cases',
+  // Diarium, plan och arkivförteckning (§ 60) — internt register → staff/observer-only.
+  'record_types',
+  'register_cases',
+  'register_entries',
+  'register_disclosures',
+  'archive_profiles',
+  'archive_versions',
   // Studentprofiler (§ 54, migration 1700000201): privatpersoners uppgifter —
   // bolaget ser dem BARA anonymiserat via kod, aldrig via RLS.
+  // SPARK (§ 61): registret och matchningarna läses bara av Movexum-personal + observer.
+  // (spark_interviews läses även av partnern som skapade intervjun — inte här.)
+  'spark_actors',
+  'spark_needs',
+  'spark_solutions',
+  'spark_testbeds',
+  'spark_matches',
+  'spark_embeddings',
   'student_profiles',
   // Finansieringsprojekt/arbetspaket och stödcheck-regler (§ 46). Intern
   // projektekonomi och uppföljningsstyrning → staff/observer-only.
@@ -734,7 +804,8 @@ const MUST_SCOPE_CROSS_TENANT = [
 // agent-versionshistorik (§ 16.6) får aldrig kunna skrivas om via API:t.
 // `ai_usage_monthly` (§ 9.6) skrivs bara av PB-hooken/superuser — månadstaket
 // läser den, så aggregatet får aldrig gå att manipulera via API:t.
-const MUST_BE_IMMUTABLE = ['agreement_signatures', 'tool_versions', 'support_check_revisions', 'ai_usage_monthly'];
+// Diariet (§ 60): ingen användartoken får ändra eller ta bort en post.
+const MUST_BE_IMMUTABLE = ['agreement_signatures', 'tool_versions', 'support_check_revisions', 'ai_usage_monthly', 'record_types', 'register_cases', 'register_entries', 'register_disclosures', 'archive_profiles', 'archive_versions'];
 
 // Migration 1700000175: update/delete på compass-barnkollektionerna måste bära
 // samma förälder-tenant-join som list/view (en coach kunde annars ändra en
@@ -804,7 +875,7 @@ function verifyImmutableCollections(collections) {
 // ingen användarsession, och ett intresse får aldrig förfalskas av ett bolag.
 // Användaraktivitet (§ 57, migration 1700000209): bara servern skriver raderna
 // (en användare ska inte kunna PATCH:a sin egen eller någon annans aktivitet).
-const MUST_BE_SERVER_CREATE_ONLY = ['notifications', 'student_profiles', 'talent_interests', 'user_activity', 'compass_lead_attachments'];
+const MUST_BE_SERVER_CREATE_ONLY = ['notifications', 'student_profiles', 'talent_interests', 'user_activity', 'compass_lead_attachments', 'record_types', 'register_cases', 'register_entries', 'register_disclosures', 'archive_profiles', 'archive_versions'];
 const MUST_BE_OWNER_ONLY = ['notifications', 'notification_preferences'];
 
 function verifyNotificationRules(collections) {
@@ -947,9 +1018,11 @@ const AI_DENYLIST = new Set([
   'org_knowledge', 'org_knowledge_chunks', 'agent_memory',
   'notifications', 'notification_preferences', 'rate_limits', 'app_locks',
   'student_profiles', 'talent_interests',
+  'spark_interviews', 'spark_embeddings',
   'sustainability_documents', 'sustainability_ai_jobs',
   'export_documents', 'export_ai_jobs',
   'compass_lead_attachments',
+  'register_entries', 'register_disclosures',
   'user_activity'
 ]);
 

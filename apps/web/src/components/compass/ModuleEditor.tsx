@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Icon } from '@/components/proto';
 import { updateModuleAction } from '@/lib/actions/compass';
-import { QuestionsManager } from './QuestionsManager';
+import { QuestionsManager, type QuestionsManagerHandle } from './QuestionsManager';
 import { ResultBucketsEditor } from './ResultBucketsEditor';
 import { HeroMediaUploader } from './HeroMediaUploader';
 import { LayoutPicker } from './LayoutPicker';
@@ -70,8 +70,8 @@ interface Props {
  * Stegvis modul-editor: ETT steg synligt i taget — inklusive frågorna, som
  * har ett eget steg. Alla formulärfält ligger kvar i DOM:en (dolda steg får
  * display:none) så en enda Spara postar allt till updateModuleAction.
- * Frågor sparas direkt per fråga (egna server actions) och media laddas upp
- * direkt vid val (route handler) — de behöver ingen Spara.
+ * Frågor har egna server actions — Spara (och stegbyte) sparar alla ändrade
+ * frågor först. Media laddas upp direkt vid val (route handler).
  *
  * Spara stannar på samma steg och visar en "Sparat"-ruta (actionen
  * returnerar utfallet, ingen redirect). Publicering sker BARA via knappen
@@ -113,11 +113,13 @@ export function ModuleEditor({
     const t = window.setTimeout(() => setNotice(null), 3500);
     return () => window.clearTimeout(t);
   }, [notice]);
+  const questionsRef = useRef<QuestionsManagerHandle>(null);
 
-  // Submit via transition så knapparna kan visa pending-läge trots att de
-  // ligger UTANFÖR <form> (form-attributet; useFormStatus når dem inte).
-  // Knappens name/value (intent) skickas med explicit — FormData(form,
-  // submitter) stöds inte i alla webbläsare.
+  // Spara = ändrade frågor FÖRST (de har egna server actions), sedan hela
+  // modulformuläret. Actionen returnerar kvittot (ingen redirect), så editorn
+  // står kvar på samma steg med allt ifyllt. Knapparna ligger UTANFÖR <form>
+  // (form-attributet), därför transition i stället för useFormStatus; knappens
+  // intent skickas explicit (FormData(form, submitter) stöds inte överallt).
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = e.currentTarget;
@@ -129,6 +131,7 @@ export function ModuleEditor({
     setNotice(null);
     startTransition(async () => {
       try {
+        const questionsOk = (await questionsRef.current?.saveDirty()) ?? true;
         const res = await updateModuleAction(fd);
         if (!res.ok) {
           setNotice({ kind: 'error', text: res.error });
@@ -139,7 +142,15 @@ export function ModuleEditor({
           } else if (res.result === 'unpublished') {
             setPublicEnabled(false);
           }
-          setNotice({ kind: 'ok', text: SAVED_TEXT[res.result] });
+          if (!questionsOk) {
+            setStep(2);
+            setNotice({
+              kind: 'error',
+              text: 'Modulen är sparad, men minst en fråga kunde inte sparas — se felet vid frågorna.'
+            });
+          } else {
+            setNotice({ kind: 'ok', text: SAVED_TEXT[res.result] });
+          }
           router.refresh();
         }
       } catch {
@@ -150,6 +161,20 @@ export function ModuleEditor({
       } finally {
         setPendingIntent(null);
       }
+    });
+  }
+
+  // Lämnar man frågesteget sparas ändrade frågor först; går det inte står
+  // man kvar så felet syns.
+  function goToStep(next: number) {
+    if (next === step) return;
+    if (step !== 2) {
+      setStep(next);
+      return;
+    }
+    startTransition(async () => {
+      const ok = (await questionsRef.current?.saveDirty()) ?? true;
+      if (ok) setStep(next);
     });
   }
 
@@ -181,7 +206,7 @@ export function ModuleEditor({
             <button
               key={s.key}
               type="button"
-              onClick={() => setStep(i)}
+              onClick={() => goToStep(i)}
               className="mx-t-13"
               style={{
                 textAlign: 'left',
@@ -533,7 +558,7 @@ export function ModuleEditor({
                 defaultValue={mod.target_audience || ''}
                 className="mx-input"
                 style={{ marginTop: 4 }}
-                placeholder="Vem är modulen till för? Visas på landningssidan."
+                placeholder="Vem är modulen till för? Bara för er — visas inte för besökaren."
               />
             </label>
             <label className="mx-label">
@@ -624,6 +649,9 @@ export function ModuleEditor({
                 style={{ marginTop: 4, minHeight: 50 }}
                 placeholder="Du samtycker till att Movexum kontaktar dig och lagrar dina uppgifter inom EU."
               />
+              <span className="mx-muted mx-t-xs" style={{ display: 'block', marginTop: 4 }}>
+                Visas i slutet, där besökaren skickar in: ”När du slutför bekräftar du …”.
+              </span>
             </label>
             </Section>
           </Step>
@@ -805,11 +833,12 @@ export function ModuleEditor({
             title="Frågor"
             desc={
               flowType === 'chat'
-                ? 'Frågorna används som intervjuguide i samtalet. Klicka på en fråga för att öppna den. Varje fråga sparas för sig.'
-                : 'Visas för besökaren i den här ordningen. Klicka på en fråga för att öppna den. Varje fråga sparas för sig.'
+                ? 'Frågorna används som intervjuguide i samtalet. Klicka på en fråga för att öppna den. Ändrade frågor sparas med Spara fråga, med Spara längst ned eller när du byter steg.'
+                : 'Visas för besökaren i den här ordningen. Klicka på en fråga för att öppna den. Ändrade frågor sparas med Spara fråga, med Spara längst ned eller när du byter steg.'
             }
           >
             <QuestionsManager
+              ref={questionsRef}
               moduleId={mod.id}
               moduleSlug={mod.slug}
               flowType={flowType}
@@ -833,7 +862,7 @@ export function ModuleEditor({
           type="button"
           className="mx-btn"
           disabled={step === 0}
-          onClick={() => setStep((s) => Math.max(0, s - 1))}
+          onClick={() => goToStep(Math.max(0, step - 1))}
         >
           ← Föregående
         </button>
@@ -864,7 +893,7 @@ export function ModuleEditor({
               key="next"
               type="button"
               className="mx-btn mx-primary"
-              onClick={() => setStep((s) => Math.min(steps.length - 1, s + 1))}
+              onClick={() => goToStep(Math.min(steps.length - 1, step + 1))}
             >
               Nästa →
             </button>

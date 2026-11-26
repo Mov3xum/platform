@@ -1,5 +1,7 @@
 'use server';
 
+import { registerRecordSafe } from '@/lib/core/write/register';
+import { screeningRegistration } from '@/lib/register/sources';
 import type PocketBase from 'pocketbase';
 import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole } from '@/lib/rbac';
@@ -772,6 +774,23 @@ async function completeCaseLocked(
     file_name: archived.file.filename.slice(0, 200)
   });
   if (!res.ok) return { code: 'status' };
+  // Diariet (§ 60): slutbedömningen är upprättad när ärendet klarmarkeras.
+  await registerRecordSafe(
+    screeningRegistration(
+      {
+        id: caseId,
+        tenant: user.tenant,
+        startup: current.row.startup,
+        subject_name: current.row.subject_name,
+        completed_at: new Date().toISOString(),
+        file_id: archived.file.id,
+        state_aid_outcome: archived.result?.stateAid?.outcome,
+        vinnova_outcome: archived.result?.vinnova?.outcome
+      },
+      { actorId: user.id },
+      'auto'
+    )
+  );
   return { code: 'done', startupId: archived.subject.startupId };
 }
 

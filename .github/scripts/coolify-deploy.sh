@@ -20,10 +20,25 @@
 #                            mellanslagsseparerade. Default "10 20 30 60 60"
 #                            (~3 min — täcker en Coolify-omstart/auto-update).
 #   COOLIFY_CONNECT_TIMEOUT / COOLIFY_MAX_TIME  curl-timeouts (s). Default 10 / 60.
+#   COOLIFY_WAIT             "true" → vänta tills den köade deployen faktiskt
+#                            byggts klart (pollar /api/v1/deployments/<uuid>).
+#                            Krävs när efterföljande steg (schema-sync,
+#                            verify-baseline) måste köra mot den NYA stacken —
+#                            annars racear de mot den gamla containern
+#                            (incident 2026-11-19: "tenant-vakten är inte
+#                            aktiv" för att verify körde mot PB-containern
+#                            FÖRE ombygget med repots hooks).
+#   COOLIFY_WAIT_TIMEOUT     Max väntan i sekunder. Default 1800. Vid timeout
+#                            (och vid failed) skrivs slutet av byggloggen ut,
+#                            hur länge loggen stått still och om Coolify
+#                            svarade 5xx under bygget — så loggen visar om
+#                            bygget är långsamt eller hängt.
+#   COOLIFY_WAIT_INTERVAL    Sekunder mellan statuskontroller. Default 15.
 #
 # Utfall:
-#   exit 0  deploy köad (2xx från Coolify)
-#   exit 1  konfigurationsfel, auth-fel, 4xx eller Coolify nere efter alla försök
+#   exit 0  deploy köad (2xx från Coolify) — och klar, när COOLIFY_WAIT=true
+#   exit 1  konfigurationsfel, auth-fel, 4xx, Coolify nere efter alla försök,
+#           eller (med COOLIFY_WAIT=true) bygget misslyckades/tog för lång tid
 #
 # Princip: vi provar ALDRIG andra origins än den konfigurerade. Coolify-API:et
 # finns bara på sin egen lyssnare (port 8000 eller instansens FQDN via Traefik);
@@ -43,6 +58,14 @@ case "$force" in
   true|1|yes) force="true" ;;
   *) force="false" ;;
 esac
+
+wait_for_completion="${COOLIFY_WAIT:-false}"
+case "$wait_for_completion" in
+  true|1|yes) wait_for_completion="true" ;;
+  *) wait_for_completion="false" ;;
+esac
+wait_timeout="${COOLIFY_WAIT_TIMEOUT:-1800}"
+wait_interval="${COOLIFY_WAIT_INTERVAL:-15}"
 
 read -r -a retry_delays <<< "${COOLIFY_RETRY_DELAYS:-10 20 30 60 60}"
 
@@ -138,6 +161,256 @@ describe_host() {
   ' "$1"
 }
 
+# --- Vänta på att den köade deployen byggs klart ---------------------------
+# Coolifys deploy-anrop KÖAR bara ett bygge och svarar direkt. Efterföljande
+# workflow-steg (setup-via-api, verify-baseline) kör annars mot den GAMLA
+# containern medan stacken byggs om i bakgrunden. Med COOLIFY_WAIT=true
+# plockas deployment_uuid ur svaret och /api/v1/deployments/<uuid> pollas
+# tills status är finished (eller failed/cancelled → exit 1).
+
+extract_deployment_uuids() {
+  node -e '
+    const fs = require("fs");
+    let raw = "";
+    try { raw = fs.readFileSync(process.argv[1], "utf8"); } catch {}
+    const out = [];
+    try {
+      const data = JSON.parse(raw);
+      const list = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.deployments) ? data.deployments : [data];
+      for (const item of list) {
+        const id = item?.deployment_uuid ?? item?.deployment?.deployment_uuid;
+        if (typeof id === "string" && id && !out.includes(id)) out.push(id);
+      }
+    } catch {}
+    process.stdout.write(out.join(" "));
+  ' "$body_file"
+}
+
+extract_deployment_status() {
+  node -e '
+    const fs = require("fs");
+    let raw = "";
+    try { raw = fs.readFileSync(process.argv[1], "utf8"); } catch {}
+    try {
+      const data = JSON.parse(raw);
+      const status = data?.status ?? data?.deployment?.status;
+      process.stdout.write(typeof status === "string" ? status : "");
+    } catch { process.stdout.write(""); }
+  ' "$body_file"
+}
+
+# Resursnamnet ur status-svaret — gör en felpekad UUID synlig i loggen
+# (incident 2026-11-25: bygget blev "klart" men PB-containern förnyades
+# aldrig; vilken resurs som faktiskt byggdes måste gå att läsa ut).
+extract_deployment_resource() {
+  node -e '
+    const fs = require("fs");
+    let raw = "";
+    try { raw = fs.readFileSync(process.argv[1], "utf8"); } catch {}
+    try {
+      const data = JSON.parse(raw);
+      const d = data?.deployment ?? data;
+      const name = d?.application_name ?? d?.name ?? d?.application?.name;
+      process.stdout.write(typeof name === "string" ? name : "");
+    } catch { process.stdout.write(""); }
+  ' "$body_file"
+}
+
+# Coolify-byggloggen (deployment.logs) ur ett status-svar. Tre lägen:
+#   pb    pocketbase-raderna — avgör UTAN SSH om pocketbase-tjänsten faktiskt
+#         byggdes/återskapades. "__NOLOGS__" när svaret saknar logg,
+#         "__NOPB__" när loggen finns men inte nämner pocketbase.
+#   tail  de sista raderna — visar VAR ett hängt/misslyckat bygge står
+#         (incident 2026-11-25, produktion: 30 min "in_progress" utan ledtråd).
+#         Dolda poster (hidden=true, Coolifys interna kommandon) tas inte med
+#         och värden efter *PASSWORD/SECRET/TOKEN/KEY* maskas (A.8.24).
+#         "__NOLOGS__" när svaret saknar logg.
+#   size  loggens längd i tecken — används för att se om bygget rör sig.
+deployment_log() {
+  local mode="$1" file="${2:-$body_file}"
+  node -e '
+    const fs = require("fs");
+    const [file, mode] = process.argv.slice(1);
+    let raw = "";
+    try { raw = fs.readFileSync(file, "utf8"); } catch {}
+    let entries = [];
+    try {
+      const data = JSON.parse(raw);
+      const d = data?.deployment ?? data;
+      let logs = d?.logs;
+      if (typeof logs === "string") {
+        try {
+          const arr = JSON.parse(logs);
+          logs = Array.isArray(arr) ? arr : logs;
+        } catch {}
+      }
+      if (Array.isArray(logs)) entries = logs;
+      else if (typeof logs === "string") entries = [{ output: logs }];
+    } catch {}
+    const textOf = (list) =>
+      list.map((e) => [e?.command, e?.output].filter((v) => typeof v === "string" && v).join("\n")).join("\n");
+    if (mode === "size") {
+      process.stdout.write(String(textOf(entries).length));
+      process.exit(0);
+    }
+    if (mode === "tail") {
+      const visible = entries.filter((e) => e?.hidden !== true);
+      const redact = (l) =>
+        l
+          .replace(/((?:[A-Za-z0-9_]*(?:PASSWORD|SECRET|TOKEN|KEY|CREDENTIAL)[A-Za-z0-9_]*)\s*[=:]\s*)("[^"]*"|\x27[^\x27]*\x27|\S+)/gi, "$1***")
+          .replace(/(Bearer\s+)\S+/gi, "$1***");
+      const lines = textOf(visible)
+        .split(/\r?\n/)
+        .map((l) => l.trimEnd())
+        .filter(Boolean)
+        .slice(-15)
+        .map((l) => redact(l).slice(0, 240));
+      process.stdout.write(lines.length ? lines.join("\n") : "__NOLOGS__");
+      process.exit(0);
+    }
+    const text = textOf(entries);
+    if (!text.trim()) { process.stdout.write("__NOLOGS__"); process.exit(0); }
+    const lines = text
+      .split(/\r?\n/)
+      .filter((l) => /pocketbase/i.test(l))
+      .slice(0, 40)
+      .map((l) => l.slice(0, 300));
+    process.stdout.write(lines.length ? lines.join("\n") : "__NOPB__");
+  ' "$file" "$mode"
+}
+
+# Skriver ut slutet av byggloggen ur det senaste lyckade status-svaret.
+print_build_log_tail() {
+  local uuid="$1" file="$2" tail_text
+  if [ ! -s "$file" ]; then
+    log "(ingen bygglogg hann läsas för $uuid — öppna Deployments i Coolify)"
+    return 0
+  fi
+  tail_text="$(deployment_log tail "$file")"
+  if [ "$tail_text" = "__NOLOGS__" ]; then
+    log "(status-svaret för $uuid innehöll ingen bygglogg — öppna Deployments i Coolify)"
+    return 0
+  fi
+  log "— sista raderna ur Coolify-byggloggen ($uuid) —"
+  printf '%s\n' "$tail_text"
+  log "— slut på utdrag —"
+}
+
+# wait_for_deployments "<uuid> [uuid...]"
+# Returnerar 0 när alla bygget blivit klara (eller väntan inte går att göra —
+# då med ::warning), 1 när ett bygge misslyckades eller timeouten nåddes.
+wait_for_deployments() {
+  local uuids="$1"
+  if [ "$wait_for_completion" != "true" ]; then
+    return 0
+  fi
+  local poll_base="${COOLIFY_BASE_URL:-}"
+  poll_base="${poll_base%/}"
+  if [ -z "$uuids" ]; then
+    gh_warning "COOLIFY_WAIT=true men deploy-svaret innehöll ingen deployment_uuid — kan inte följa bygget. Efterföljande steg kan köra mot den gamla containern."
+    return 0
+  fi
+  if [ -z "$poll_base" ]; then
+    gh_warning "COOLIFY_WAIT=true men COOLIFY_BASE_URL saknas — kan inte följa bygget. Efterföljande steg kan köra mot den gamla containern."
+    return 0
+  fi
+  local deadline=$(( $(date +%s) + wait_timeout ))
+  local uuid status_value resource_name resource_logged pb_log
+  local last_ok_file="$tmpdir/last-status" poll_errors log_size last_log_size last_progress_at now idle
+  for uuid in $uuids; do
+    log "Väntar på att Coolify-bygget $uuid blir klart (timeout ${wait_timeout}s)..."
+    resource_logged="false"
+    poll_errors=0
+    last_log_size=-1
+    last_progress_at="$(date +%s)"
+    : > "$last_ok_file"
+    while :; do
+      if request GET "$poll_base/api/v1/deployments/$uuid"; then
+        case "$http_code" in
+          2??)
+            if [ "$resource_logged" != "true" ]; then
+              resource_name="$(extract_deployment_resource)"
+              if [ -n "$resource_name" ]; then
+                log "Bygget $uuid gäller resursen: $resource_name"
+              fi
+              resource_logged="true"
+            fi
+            status_value="$(extract_deployment_status)"
+            # Spara svaret + notera om byggloggen växt sedan förra kollen —
+            # vid timeout avgör det om bygget är LÅNGSAMT eller HÄNGT.
+            cp "$body_file" "$last_ok_file"
+            log_size="$(deployment_log size)"
+            if [ "$log_size" != "$last_log_size" ]; then
+              last_log_size="$log_size"
+              last_progress_at="$(date +%s)"
+            fi
+            case "$status_value" in
+              finished)
+                log "✓ Coolify-bygget $uuid är klart."
+                pb_log="$(deployment_log pb)"
+                case "$pb_log" in
+                  __NOLOGS__)
+                    log "(byggloggen kunde inte läsas ur API-svaret — kontrollera pocketbase-tjänsten i Coolify-UI:t)"
+                    ;;
+                  __NOPB__)
+                    gh_warning "Coolify-byggloggen för $uuid nämner aldrig pocketbase — resursen byggde sannolikt INTE pocketbase-tjänsten. Kontrollera att UUID:t pekar på compose-stacken (infra/coolify.yml), inte bara web-appen."
+                    ;;
+                  *)
+                    log "— pocketbase-rader ur Coolify-byggloggen ($uuid) —"
+                    printf '%s\n' "$pb_log"
+                    log "— slut på utdrag —"
+                    ;;
+                esac
+                break
+                ;;
+              failed|cancelled*)
+                gh_error "Coolify-bygget $uuid misslyckades (status: $status_value). Kontrollera bygg-loggen i Coolify (Deployments) — schema-sync/verify avbryts så de inte kör mot den gamla containern."
+                print_build_log_tail "$uuid" "$last_ok_file"
+                return 1
+                ;;
+              *)
+                log "Bygget $uuid: status ${status_value:-okänd} — väntar ${wait_interval}s..."
+                ;;
+            esac
+            ;;
+          404)
+            gh_warning "Coolify-bygget $uuid hittas inte via /api/v1/deployments (äldre Coolify-API?). Kan inte följa bygget — fortsätter utan att vänta."
+            break
+            ;;
+          *)
+            poll_errors=$((poll_errors + 1))
+            log "Statuskoll för $uuid svarade HTTP $http_code — försöker igen om ${wait_interval}s..."
+            ;;
+        esac
+      else
+        poll_errors=$((poll_errors + 1))
+        log "Statuskoll för $uuid: kunde inte nå Coolify (${curl_error:-okänt fel}) — försöker igen om ${wait_interval}s..."
+      fi
+      now="$(date +%s)"
+      if [ "$now" -ge "$deadline" ]; then
+        gh_error "Coolify-bygget $uuid blev inte klart inom ${wait_timeout}s. Efterföljande schema-sync/verify skulle köra mot den GAMLA containern — avbryter. Kontrollera bygget i Coolify och kör om workflowen när det är klart."
+        idle=$((now - last_progress_at))
+        if [ "$last_log_size" -ge 0 ]; then
+          log "Byggloggen har inte fått någon ny rad på ${idle}s (${last_log_size} tecken totalt)."
+        fi
+        if [ "$poll_errors" -gt 0 ]; then
+          gh_warning "Coolify svarade inte normalt på $poll_errors statuskontroller under bygget — instansen startade om eller var överbelastad (t.ex. minnesbrist medan imagen byggdes på samma server). Ett bygge som pågick då blir ofta kvar som in_progress utan att någonsin avslutas."
+        fi
+        print_build_log_tail "$uuid" "$last_ok_file"
+        log "Gör så här:"
+        log "  1. Coolify → resursen → Deployments: står $uuid kvar som In progress, avbryt den (Cancel) — den blockerar nästa deploy i kön."
+        log "  2. På servern: free -m && df -h; docker logs coolify --tail 200; dmesg | grep -i 'out of memory'"
+        log "  3. Kör om workflowen när ingen deploy pågår."
+        return 1
+      fi
+      sleep "$wait_interval"
+    done
+  done
+  return 0
+}
+
 explain_unreachable() {
   local url="$1" hostport
   hostport="$(describe_host "$url")"
@@ -171,6 +444,8 @@ if [ -n "${COOLIFY_DEPLOY_WEBHOOK:-}" ]; then
       2??)
         print_body
         log "✓ Coolify-deploy köad via webhook."
+        queued_uuids="$(extract_deployment_uuids)"
+        wait_for_deployments "$queued_uuids" || exit 1
         exit 0
         ;;
       401|403)
@@ -282,6 +557,7 @@ try_deploy() {
     2??)
       print_body
       log "✓ Coolify-deploy köad${label:+ ($label)}."
+      queued_uuids="$(extract_deployment_uuids)"
       return 0
       ;;
     404)
@@ -301,8 +577,10 @@ try_deploy() {
 }
 
 status=0
+queued_uuids=""
 try_deploy "$deploy_v4" || status=$?
 if [ "$status" -eq 0 ]; then
+  wait_for_deployments "$queued_uuids" || exit 1
   exit 0
 fi
 if [ "$status" -ne 2 ]; then
@@ -320,6 +598,7 @@ print_body
 status=0
 try_deploy "$deploy_legacy" || status=$?
 if [ "$status" -eq 0 ]; then
+  wait_for_deployments "$queued_uuids" || exit 1
   exit 0
 fi
 if [ "$status" -eq 2 ]; then

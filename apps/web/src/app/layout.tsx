@@ -81,7 +81,9 @@ export default async function RootLayout({
     pathname.startsWith('/e/') ||
     // Studentsidan (§ 54) — publik, oinloggad yta för studenter.
     pathname === '/s' ||
-    pathname.startsWith('/s/');
+    pathname.startsWith('/s/') ||
+    // SPARK:s publika anmälan (§ 61) — sprids av partner till företagen.
+    pathname.startsWith('/energi/');
 
   // Inloggningssidan är en fristående, helsides split-screen-yta (bild +
   // formulär) som bär sin egen branding — den ska aldrig visa den utloggade

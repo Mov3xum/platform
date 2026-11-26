@@ -22,6 +22,7 @@ export const NOTIFICATION_CATEGORIES = [
   'kontakter',
   'stodcheckar',
   'talang',
+  'spark',
   'plattform'
 ] as const;
 export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
@@ -64,6 +65,11 @@ export const NOTIFICATION_CATEGORY_META: Record<
     label: 'Stödcheckar',
     description: 'Ansökningar, kompletteringar, kommentarer och beslut.',
     icon: 'shield'
+  },
+  spark: {
+    label: 'SPARK – energimatchning',
+    description: 'Intervjuer och anmälningar som väntar på att föras in i registret.',
+    icon: 'bolt'
   },
   talang: {
     label: 'Studenter & talang',
@@ -136,7 +142,9 @@ export const NOTIFICATION_KINDS = [
   'talent_interest',
   'talent_need_review',
   'talent_need_published',
-  'talent_student_response'
+  'talent_student_response',
+  // SPARK – energimatchning (§ 61)
+  'spark_interview_submitted'
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
@@ -440,6 +448,16 @@ export const NOTIFICATION_CATALOG: Record<NotificationKind, NotificationKindMeta
     category: 'talang',
     priority: 'normal',
     audience: 'all',
+    groupable: true,
+    defaults: NORMAL_DEFAULTS
+  },
+  spark_interview_submitted: {
+    label: 'Ny intervju eller anmälan i SPARK',
+    description: 'När en partner skickar in en intervju eller ett företag anmäler sig på den publika sidan — väntar på att föras in i registret.',
+    icon: 'bolt',
+    category: 'spark',
+    priority: 'normal',
+    audience: 'staff',
     groupable: true,
     defaults: NORMAL_DEFAULTS
   }

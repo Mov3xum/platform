@@ -7,6 +7,7 @@ import { closingQuestions, missingClosingField } from '@/lib/compass/completion'
 import { QuestionInput } from './QuestionInput';
 import { ContactPreferencePicker } from './ContactPreferencePicker';
 import { ContactSection } from './ContactSection';
+import { ConsentNotice } from './ConsentNotice';
 import { useCompassLocale } from './locale';
 
 export interface ChatClosingConfig {
@@ -30,6 +31,8 @@ interface Props {
   moduleSlug: string;
   sessionToken: string;
   consent?: boolean;
+  /** Modulens samtyckestext — visas ovanför Skicka. */
+  consentNote?: string;
   attribution: Attribution;
   onDone: (result: ChatClosingResult) => void;
 }
@@ -41,7 +44,7 @@ interface Props {
  * mejlad till den adress hen själv anger. Samma `missingClosingField` körs
  * server-side; klienten ger bara snabb feedback.
  */
-export function ChatClosingForm({ config, moduleSlug, sessionToken, consent, attribution, onDone }: Props) {
+export function ChatClosingForm({ config, moduleSlug, sessionToken, consent, consentNote, attribution, onDone }: Props) {
   const { locale, t } = useCompassLocale();
   const questions = closingQuestions(config.questions);
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
@@ -164,6 +167,8 @@ export function ChatClosingForm({ config, moduleSlug, sessionToken, consent, att
           <span>{t.sendSummary}</span>
         </label>
       )}
+
+      <ConsentNotice note={consentNote} />
 
       {error && (
         <div

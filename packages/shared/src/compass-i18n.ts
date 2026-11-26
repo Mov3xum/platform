@@ -330,6 +330,10 @@ export interface CompassUiStrings {
   flowLabel: Record<'chat' | 'quiz' | 'wizard', string>;
   flowWord: Record<'chat' | 'quiz' | 'wizard', string>;
   startUnderstand: string;
+  /** Inleder samtyckestexten vid sista steget (formulär/quiz/chattens avslut). */
+  consentOnSubmit: string;
+  /** Inleder samtyckestexten under chattens skrivfält. */
+  consentOnChat: string;
   start: string;
   footChat: string;
   footForm: string;
@@ -416,6 +420,8 @@ export const COMPASS_UI: Record<CompassLocale, CompassUiStrings> = {
     flowLabel: { chat: 'AI-assisterad chatt', quiz: 'Quiz', wizard: 'Formulär' },
     flowWord: { chat: 'AI-chatt', quiz: 'Quiz', wizard: 'Formulär' },
     startUnderstand: 'Jag förstår, starta',
+    consentOnSubmit: 'När du slutför bekräftar du att du har tagit del av hur vi hanterar dina uppgifter:',
+    consentOnChat: 'När du skriver i chatten bekräftar du att du har tagit del av hur vi hanterar dina uppgifter:',
     start: 'Starta',
     footChat: 'Drivs av Mistral / Le Chat (EU-suveränt) · Genererat av AI – verifiera innan delning',
     footForm: 'Dina svar hanteras inom EU och delas aldrig vidare.',
@@ -512,6 +518,8 @@ export const COMPASS_UI: Record<CompassLocale, CompassUiStrings> = {
     flowLabel: { chat: 'AI-assisted chat', quiz: 'Quiz', wizard: 'Form' },
     flowWord: { chat: 'AI chat', quiz: 'Quiz', wizard: 'Form' },
     startUnderstand: 'I understand, start',
+    consentOnSubmit: 'By completing, you confirm that you have read how we handle your information:',
+    consentOnChat: 'By writing in the chat, you confirm that you have read how we handle your information:',
     start: 'Start',
     footChat: 'Powered by Mistral / Le Chat (EU-sovereign) · AI-generated – verify before sharing',
     footForm: 'Your answers are handled within the EU and never shared with third parties.',

@@ -16,7 +16,8 @@ function isShellLess(pathname: string): boolean {
     pathname.startsWith('/m/') ||
     pathname.startsWith('/u/') ||
     pathname.startsWith('/e/') ||
-    pathname.startsWith('/s/')
+    pathname.startsWith('/s/') ||
+    pathname.startsWith('/energi/')
   );
 }
 

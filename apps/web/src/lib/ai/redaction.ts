@@ -118,6 +118,11 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   'screening_requests',
   // Ärenden i Bedömning excellens (§ 51.10): underlag + manuella svar per bolag.
   'screening_cases',
+  // Diariet (§ 60): handlingsposter bär motpart (kan vara en enskild person)
+  // och sekretessmarkeringar; utlämnandeloggen bär fri text om begäran.
+  // Planen, ärendena och förteckningen är läsbara.
+  'register_entries',
+  'register_disclosures',
   // Deltagarlistor och e-postkampanjer (§ 53.5, § 55): deltagarrader bär
   // e-post och gästens kost/allergi (kan vara art. 9), mottagarrader bär
   // hashade adresser och leveransstatus, spärrlistan maskade adresser,
@@ -132,6 +137,11 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   // (`talent_needs`) är bolagens egna annonser och förblir läsbara.
   'student_profiles',
   'talent_interests',
+  // SPARK (§ 61): råa intervjusvar — fritext och kontaktuppgifter. Registret
+  // (aktörer, behov, lösningar, testmiljöer, matchningar) är läsbart med
+  // fältmaskning (e-post, telefon, org-nr).
+  'spark_interviews',
+  'spark_embeddings', // vektorer för innehållslikhet — inget läsvärde (§ 61.7)
   'agent_memory' // agentens tvärsessions-scratchpad (1700000079)
 ]);
 

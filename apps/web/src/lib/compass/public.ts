@@ -55,7 +55,6 @@ export type PublicCompassModule = Pick<
   | 'start_page_body'
   | 'hero_image'
   | 'hero_video'
-  | 'target_audience'
   | 'consent_note'
   | 'intro_message'
   | 'chat_persona'
@@ -100,7 +99,6 @@ export function toPublicModule(m: CompassModule): PublicCompassModule {
     start_page_body: m.start_page_body,
     hero_image: m.hero_image,
     hero_video: m.hero_video,
-    target_audience: m.target_audience,
     consent_note: m.consent_note,
     intro_message: m.intro_message,
     chat_persona: m.chat_persona,

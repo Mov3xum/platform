@@ -1437,9 +1437,9 @@ export interface ModuleGroup {
 
 export const RAIL_GROUPS: ModuleGroup[] = [
   { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'mal', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
-  { label: 'Portfölj', modules: ['startups', 'kontakter', 'talang', 'de_minimis', 'bedomning_excellens', 'impactnavigator', 'exportlab', 'checkar', 'projekt', 'upphandlingar', 'investerare'] },
+  { label: 'Portfölj', modules: ['startups', 'kontakter', 'spark', 'talang', 'de_minimis', 'bedomning_excellens', 'impactnavigator', 'exportlab', 'checkar', 'projekt', 'upphandlingar', 'investerare'] },
   { label: 'Innehåll', modules: ['education', 'howspace', 'rapporter'] },
-  { label: 'System', modules: ['agenter', 'kunskapsbas', 'onskemal', 'installningar', 'min_profil'] }
+  { label: 'System', modules: ['agenter', 'kunskapsbas', 'diarium', 'onskemal', 'installningar', 'min_profil'] }
 ];
 
 /**
@@ -1632,6 +1632,14 @@ export const coreModules: ModuleDefinition[] = [
     route: '/projekt'
   },
   {
+    id: 'spark',
+    title: 'SPARK – energimatchning',
+    description:
+      'Regional behovs- och innovationsdatabas inom energi: intervjuer och anmälningar via ett adaptivt formulär, register över behov, lösningar och testmiljöer, förklarbar matchning och TRL-bedömning inför acceleratorprogrammet. Partner (högskola, kommuner) registrerar och sprider — allt går via Movexum.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'observer', 'partner'],
+    route: '/spark'
+  },
+  {
     id: 'talang',
     title: 'Studenter & talang',
     description:
@@ -1683,6 +1691,14 @@ export const coreModules: ModuleDefinition[] = [
       'AI-stödd internationaliseringsanalys per bolag (CLAUDE.md § 58): exportprofil och marknadsurval (Uppsala, Born Global, CAGE), informationsgap, en första exportplan med inträdesform, regelverk, kulturell spelbok och affärsförutsättningar per marknad — kopplad till bolagets KTH IRL. Beslutsstöd för coachen — människan granskar marknaderna och planen.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer', 'startup_member'],
     route: '/exportlab'
+  },
+  {
+    id: 'diarium',
+    title: 'Diarium & arkiv',
+    description:
+      'Diarium, informationshanteringsplan och arkivförteckning (CLAUDE.md § 60): handlingar registreras automatiskt när de blir allmänna, med diarienummer, kontrollsumma, sekretessmarkering och gallringsfrist. Granskningsvyn visar vad som saknas inför en arkivtillsyn.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
+    route: '/diarium'
   },
   {
     id: 'onskemal',
@@ -1940,6 +1956,11 @@ export * from './export-lab-inputs';
 export * from './export-lab-mock';
 export * from './compass-start-page';
 export * from './talent';
+export * from './kth-trl';
+export * from './spark';
+export * from './spark-matching';
+export * from './spark-import';
+export * from './spark-ai';
 export * from './agent-memory';
 export * from './funding';
 export * from './support-checks';
@@ -1989,3 +2010,4 @@ export * from './program-stages';
 
 export * from './user-activity';
 export * from './howspace';
+export * from './records-register';
