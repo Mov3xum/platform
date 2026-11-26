@@ -13,6 +13,7 @@ import {
 import { SPARK_MIGRATION_HINT, loadSparkRegistry } from '@/lib/spark/data';
 import { Chip, Notice, Panel, btnGhost } from '@/components/talent/ui';
 import { AiNote, AiSuggestAllButton, AiSuggestButton, AssessSolutionForm } from '@/components/spark/controls';
+import { TrlReference } from '@/components/spark/TrlReference';
 import { AreaChips, Empty, SPARK_TITLE, requireSparkStaff, sparkTabs } from '../_shared';
 
 export const dynamic = 'force-dynamic';
@@ -87,6 +88,8 @@ export default async function SparkAcceleratorPage({ searchParams }: { searchPar
           </div>
           <p className="mt-3 text-xs text-foreground-subtle">Markerade staplar (TRL 4–7) är nivåerna där test och verifiering ger mest — det acceleratorn och testbäddarna är till för.</p>
         </Panel>
+
+        <TrlReference />
 
         <div className="flex flex-wrap gap-2 text-xs">
           {chip(null, 'Alla', rows.length)}

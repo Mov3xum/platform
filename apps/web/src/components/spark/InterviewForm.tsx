@@ -63,7 +63,9 @@ function FieldInput({ field, value, onChange, disabled }: { field: SparkField; v
       );
     }
     const stacked = options.some((o) => o.hint);
+    const selected = options.find((o) => o.id === current);
     return (
+      <>
       <div className={stacked ? (options.length >= 5 ? 'grid gap-2 sm:grid-cols-2' : 'grid gap-2') : 'flex flex-wrap gap-2'} role="radiogroup">
         {options.map((o) => {
           const on = current === o.id;
@@ -85,6 +87,24 @@ function FieldInput({ field, value, onChange, disabled }: { field: SparkField; v
           );
         })}
       </div>
+      {selected?.detail?.length ? (
+        <div className="mt-3 rounded-2xl border border-default bg-canvas-subtle p-4" aria-live="polite">
+          <p className="text-xs font-semibold uppercase tracking-wide text-foreground-subtle">Nivån är nådd när</p>
+          <ul className="mt-2 space-y-1.5">
+            {selected.detail.map((line) => (
+              <li key={line} className="flex gap-2 text-sm leading-relaxed text-foreground-muted">
+                <span className="mt-0.5 shrink-0 text-brand">
+                  <Icon name="check" size={14} />
+                </span>
+                <span>{line}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-xs text-foreground-subtle">Stämmer inte allt? Välj nivån under.</p>
+          {field.source ? <p className="mt-1 text-[11px] leading-relaxed text-foreground-subtle">{field.source}</p> : null}
+        </div>
+      ) : null}
+      </>
     );
   }
   if (field.type === 'multi') {

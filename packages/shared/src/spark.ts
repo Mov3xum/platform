@@ -12,11 +12,14 @@
 // nedan (migration 1700000221).
 
 import { KOMMUN_OPTIONS } from './compass-contact';
+import { KTH_TRL_SOURCE, kthTrlCriteria } from './kth-trl';
 
 export interface SparkOption {
   id: string;
   label: string;
   hint?: string;
+  /** Kriterier som visas när alternativet är valt (t.ex. TRL-nivåns krav). */
+  detail?: readonly string[];
 }
 
 const ids = <T extends readonly SparkOption[]>(list: T): string[] => list.map((o) => o.id);
@@ -75,23 +78,28 @@ export const SPARK_MATURITY = [
 export const SPARK_MATURITY_LABELS = labels(SPARK_MATURITY);
 
 /**
- * Technology Readiness Level 1–9 — Movexums formuleringar (TRL-bladet).
+ * Technology Readiness Level 1–9. Namn och kort text är Movexums
+ * formuleringar (TRL-bladet); `detail` är de utförliga kriterierna ur KTH
+ * Innovation Readiness Level™ (`kth-trl.ts`) — det är DEM en nivå prövas mot,
+ * av företaget, av Movexum och av AI-förslaget.
  * Används för LÖSNINGAR hos innovationsaktörer som kan vara aktuella för
  * acceleratorprogrammet. Behovsägare bedöms inte, och portföljbolag bedöms
  * med KTH IRL på bolagskortet (§ 52.2) — inte här.
  */
 export const SPARK_TRL = [
-  { id: '1', label: 'TRL 1 — Basforskning', hint: 'Principer finns antagna men experimentella belägg saknas.' },
-  { id: '2', label: 'TRL 2 — Teknologikoncept', hint: 'Teknologikoncept finns formulerat. Både koncept och applikationer finns definierade.' },
-  { id: '3', label: 'TRL 3 — Experimentella belägg', hint: 'Tillämpad forskning. De första laboratorietesterna är gjorda.' },
-  { id: '4', label: 'TRL 4 — Bekräftad i labb', hint: 'Teknologin bekräftad i labb. Småskaliga prototyper finns konstruerade.' },
-  { id: '5', label: 'TRL 5 — Validerad i relevant miljö', hint: 'Storskaliga prototyper testade i avsedd miljö.' },
-  { id: '6', label: 'TRL 6 — Demonstrerad i relevant miljö', hint: 'Prototypsystem testade i avsedd miljö och med avsedd prestanda.' },
-  { id: '7', label: 'TRL 7 — Systemprototyp i operationell miljö', hint: 'Demonstrerad i avsedd operationell miljö i för-kommersiell skala.' },
-  { id: '8', label: 'TRL 8 — Systemet komplett och bekräftat', hint: 'Tekniklösning som är den första i sitt slag. Tillverkningsproblem lösta.' },
-  { id: '9', label: 'TRL 9 — Beprövat i operationell miljö', hint: 'Fullt kommersiellt gångbar applikation, teknologin tillgänglig för kunden.' }
+  { id: '1', label: 'TRL 1 — Basforskning', hint: 'Principer finns antagna men experimentella belägg saknas.', detail: kthTrlCriteria(1) },
+  { id: '2', label: 'TRL 2 — Teknologikoncept', hint: 'Teknologikoncept finns formulerat. Både koncept och applikationer finns definierade.', detail: kthTrlCriteria(2) },
+  { id: '3', label: 'TRL 3 — Experimentella belägg', hint: 'Tillämpad forskning. De första laboratorietesterna är gjorda.', detail: kthTrlCriteria(3) },
+  { id: '4', label: 'TRL 4 — Bekräftad i labb', hint: 'Teknologin bekräftad i labb. Småskaliga prototyper finns konstruerade.', detail: kthTrlCriteria(4) },
+  { id: '5', label: 'TRL 5 — Validerad i relevant miljö', hint: 'Storskaliga prototyper testade i avsedd miljö.', detail: kthTrlCriteria(5) },
+  { id: '6', label: 'TRL 6 — Demonstrerad i relevant miljö', hint: 'Prototypsystem testade i avsedd miljö och med avsedd prestanda.', detail: kthTrlCriteria(6) },
+  { id: '7', label: 'TRL 7 — Systemprototyp i operationell miljö', hint: 'Demonstrerad i avsedd operationell miljö i för-kommersiell skala.', detail: kthTrlCriteria(7) },
+  { id: '8', label: 'TRL 8 — Systemet komplett och bekräftat', hint: 'Tekniklösning som är den första i sitt slag. Tillverkningsproblem lösta.', detail: kthTrlCriteria(8) },
+  { id: '9', label: 'TRL 9 — Beprövat i operationell miljö', hint: 'Fullt kommersiellt gångbar applikation, teknologin tillgänglig för kunden.', detail: kthTrlCriteria(9) }
 ] as const satisfies readonly SparkOption[];
 export const SPARK_TRL_LABELS = labels(SPARK_TRL);
+/** Källhänvisning som visas där TRL-kriterierna visas (licenskrav, CC BY-NC-SA). */
+export const SPARK_TRL_SOURCE = KTH_TRL_SOURCE;
 export function isSparkTrl(n: unknown): n is number {
   return typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= 9;
 }
@@ -421,6 +429,8 @@ export interface SparkField {
   help?: string;
   type: SparkFieldType;
   options?: readonly SparkOption[];
+  /** Källhänvisning under alternativens kriterier (`SparkOption.detail`). */
+  source?: string;
   /** Krävs när intervjun skickas in (aldrig för ett utkast). */
   required?: boolean;
   max?: number;
@@ -543,7 +553,14 @@ export const SPARK_INTERVIEW_SECTIONS: readonly SparkSection[] = [
         { key: 'target_sectors', code: 'D3', label: 'Vilka branscher eller verksamheter kan ha nytta av lösningen?', type: 'multi', options: SPARK_SECTORS },
         { key: 'contributions', code: 'D4', label: 'Hur bidrar lösningen till energiomställningen?', type: 'multi', options: SPARK_CONTRIBUTIONS },
         { key: 'maturity', code: 'D5', label: 'Hur långt har lösningen kommit?', type: 'single', options: SPARK_MATURITY, required: true },
-        { key: 'trl', label: 'Teknikens mognad (TRL)', help: 'Välj den nivå som bäst beskriver var tekniken är i dag.', type: 'single', options: SPARK_TRL },
+        {
+          key: 'trl',
+          label: 'Teknikens mognad (TRL)',
+          help: 'Välj den nivå som bäst beskriver var tekniken är i dag. En nivå är nådd först när dess kriterier är uppfyllda — välj nivån under om ni är osäkra.',
+          type: 'single',
+          options: SPARK_TRL,
+          source: SPARK_TRL_SOURCE
+        },
         { key: 'verified', code: 'D6', label: 'Är lösningen testad eller verifierad i en verklig användarmiljö?', type: 'single', options: YES_PARTLY_NO },
         { key: 'needs', code: 'D7', label: 'Vad behövs för att ta nästa steg?', type: 'multi', options: SPARK_SOLUTION_NEEDS },
         { key: 'barriers', code: 'D8', label: 'Vilka är de största hindren för att kommersialisera eller skala upp?', type: 'longtext', max: 2000 },

@@ -11453,6 +11453,7 @@ presenteras för varandra. Företag ser aldrig varandra i systemet.
 | `apps/web/src/lib/actions/spark.ts`, `app/spark/**`, `components/spark/**` | Actions, sidor, formuläret (`InterviewForm`), kontroller |
 | `app/energi/[tenant]/page.tsx`, `app/api/public/energi/[tenant]/route.ts` | Publik sida + anmälan |
 | `packages/shared/src/spark-ai.ts`, `lib/ai/spark-ai.ts`, `lib/core/write/spark-ai.ts` | AI-lagret (§ 61.7) |
+| `packages/shared/src/kth-trl.ts`, `components/spark/TrlReference.tsx` | TRL-kriterierna ur KTH Innovation Readiness Level (§ 61.5) |
 
 ### 61.1 Det adaptiva formuläret (en definition, tre användningar)
 
@@ -11536,7 +11537,22 @@ storlek).
 
 Lösningar bär **TRL 1–9** (Movexums formuleringar, `SPARK_TRL`): företagets
 egen uppgift ur formuläret (`trl`) och Movexums bedömning (`trl_assessed`, som
-gäller när den finns — `effectiveSparkTrl`). Movexum kategoriserar varje
+gäller när den finns — `effectiveSparkTrl`). **Varje nivå prövas mot KTH:s
+utförliga kriterier** (`packages/shared/src/kth-trl.ts`: `KTH_TRL_LEVELS` med
+kort formulering + kriterier per nivå, `KTH_TRL_TERMS` med begreppen
+laboratoriemiljö / relevant miljö / operationell miljö / faktisk drift /
+prototyp / komplett teknik) — TRL-axeln ur KTH Innovation Readiness Level™ i
+Movexums översättning. EN text, tre användningar: formuläret visar den valda
+nivåns kriterier ("Nivån är nådd när …", `SparkOption.detail`), Movexums
+bedömning visar vald nivå + vad nästa kräver (`TrlCriteria`), acceleratorsidan
+har hela skalan som uppslag (`TrlReference`) och AI-förslaget (§ 61.7) får
+samma kriterier i prompten (`kthTrlPromptLines`). Regeln är KTH:s: en nivå är
+nådd först när kriterierna är uppfyllda, annars gäller nivån under. Nivåernas
+namn och korta text är fortsatt Movexums (TRL-bladet). Materialet är
+© KTH Innovation under CC BY-NC-SA — **källan (`KTH_TRL_SOURCE`) ska visas
+där kriterierna visas**, texten ändras bara mot en ny utgåva från KTH, och
+bara TRL-axeln används i SPARK (CRL och övriga axlar hör till bolagskortets
+IRL, § 52.2). Movexum kategoriserar varje
 lösning: *Kandidat till acceleratorn · Tidig — följ upp · Marknadsredo · Inte
 aktuell*. `suggestSparkAcceleratorCategory` ger ett FÖRSLAG ur TRL (1–3 tidig,
 4–7 kandidat, 8–9 marknadsredo) — gränserna är en arbetshypotes som justeras
@@ -11611,7 +11627,10 @@ Movexum (admin/incubator_lead/coach). Agenten har inga verktyg här.
 - **Förslag på TRL och kategori.** AI läser lösningens beskrivning, företagets
   egen uppgift och hinder, och föreslår TRL 1–9 + kategori med en motivering
   och en säkerhet. Prompten kräver den högsta nivå underlaget *belägger* och
-  `trl: null` när det inte räcker. Förslaget sparas i `spark_solutions.ai_*`
+  `trl: null` när det inte räcker. Skalan i prompten är KTH:s kriterier per
+  nivå med begreppsdefinitionerna (§ 61.5) — samma text som människan
+  bedömer mot — och motiveringen ska säga vilka kriterier som beläggs och
+  vilket som saknas för nivån över. Förslaget sparas i `spark_solutions.ai_*`
   — **bredvid, aldrig i** `trl_assessed`/`accelerator_category`, som alltid
   sätts av en människa. Formuläret förifylls från förslaget tills Movexum
   sparat sin egen bedömning; avviker ni syns båda. Enstaka eller upp till 20

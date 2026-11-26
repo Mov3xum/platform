@@ -1956,6 +1956,7 @@ export * from './export-lab-inputs';
 export * from './export-lab-mock';
 export * from './compass-start-page';
 export * from './talent';
+export * from './kth-trl';
 export * from './spark';
 export * from './spark-matching';
 export * from './spark-import';

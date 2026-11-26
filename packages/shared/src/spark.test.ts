@@ -2,8 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   SPARK_ENERGY_AREAS,
+  SPARK_INTERVIEW_SECTIONS,
   SPARK_SUPPORT_NEEDS,
   SPARK_TRL,
+  SPARK_TRL_SOURCE,
   computeSparkIndicators,
   deriveSparkRecords,
   effectiveSparkTrl,
@@ -15,6 +17,7 @@ import {
   suggestSparkAcceleratorCategory,
   visibleSparkSections
 } from './spark.ts';
+import { KTH_TRL_LEVELS, KTH_TRL_TERMS, kthTrlCriteria, kthTrlLevel, kthTrlPromptLines } from './kth-trl.ts';
 import { rankNeedsForSolution, rankSolutionsForNeed, rankTestbedsForSolution, scoreNeedSolution, sparkAreaBalance } from './spark-matching.ts';
 import { buildSparkImportTemplateCsv, parseSparkImportRows, SPARK_IMPORT_COLUMNS } from './spark-import.ts';
 
@@ -26,6 +29,34 @@ test('kategorierna följer intervjuguiden och TRL-bladet', () => {
   assert.equal(SPARK_ENERGY_AREAS.length, 12);
   assert.equal(SPARK_SUPPORT_NEEDS.length, 16);
   assert.equal(SPARK_TRL.length, 9);
+});
+
+test('varje TRL-nivå bär KTH:s kriterier — samma text för formulär, bedömning och AI', () => {
+  assert.deepEqual(KTH_TRL_LEVELS.map((l) => l.level), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  for (const option of SPARK_TRL) {
+    const level = kthTrlLevel(option.id);
+    assert.ok(level, `TRL ${option.id} saknar kriterier`);
+    assert.ok(level.summary.length > 10);
+    assert.ok(level.criteria.length >= 2, `TRL ${option.id} ska ha minst två kriterier`);
+    assert.deepEqual(option.detail, level.criteria);
+    assert.deepEqual(kthTrlCriteria(Number(option.id)), level.criteria);
+  }
+  // Okända värden ger aldrig kriterier (formuläret visar då ingenting).
+  assert.deepEqual(kthTrlCriteria('10'), []);
+  assert.deepEqual(kthTrlCriteria(''), []);
+  assert.equal(kthTrlLevel('2.5'), null);
+  // Begreppen som skiljer nivåerna åt ska finnas med, liksom källan (licenskrav).
+  const terms = KTH_TRL_TERMS.map((t) => t.term);
+  for (const term of ['Laboratoriemiljö', 'Relevant miljö', 'Operationell miljö', 'Faktisk drift']) assert.ok(terms.includes(term), term);
+  assert.match(SPARK_TRL_SOURCE, /KTH Innovation Readiness Level/);
+  assert.match(SPARK_TRL_SOURCE, /CC BY-NC-SA/);
+  // Promptunderlaget bär alla nio nivåer och begreppen.
+  const prompt = kthTrlPromptLines().join('\n');
+  for (let n = 1; n <= 9; n++) assert.ok(prompt.includes(`TRL ${n}:`));
+  assert.ok(prompt.includes('Relevant miljö:'));
+  // TRL-frågan i formuläret visar källan.
+  const trlField = SPARK_INTERVIEW_SECTIONS.flatMap((s) => s.repeat?.fields ?? []).find((f) => f.key === 'trl');
+  assert.equal(trlField?.source, SPARK_TRL_SOURCE);
 });
 
 test('avsnitten formas efter rollerna som anges i början', () => {

@@ -37,6 +37,7 @@ import {
 } from '@/lib/actions/spark';
 import { actionErrorMessage } from '@/lib/action-error';
 import { Notice, btnDanger, btnGhost, btnPrimary, inputClass, labelClass } from '@/components/talent/ui';
+import { TrlCriteria } from './TrlReference';
 
 /** Klientkontroller för SPARK (CLAUDE.md § 61) — tunna omslag kring server actions. */
 
@@ -326,6 +327,11 @@ export function AssessSolutionForm({
           ))}
         </select>
       </div>
+      {v.trl ? (
+        <div className="sm:col-span-2">
+          <TrlCriteria trl={v.trl} />
+        </div>
+      ) : null}
       <div className="sm:col-span-2">
         <input className={inputClass} maxLength={1000} placeholder="Motivering (valfri)" value={v.note} onChange={(e) => setV((p) => ({ ...p, note: e.target.value }))} />
       </div>

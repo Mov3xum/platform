@@ -5,8 +5,8 @@ import {
   SPARK_ENERGY_AREA_LABELS,
   SPARK_MATURITY_LABELS,
   SPARK_SOLUTION_NEED_LABELS,
-  SPARK_TRL,
   cleanSparkIntroDraft,
+  kthTrlPromptLines,
   parseSparkAssessmentSuggestion,
   type SparkAssessmentSuggestion
 } from '@platform/shared';
@@ -40,13 +40,14 @@ const ASSESS_SYSTEM = [
   'Du hjälper en inkubator att bedöma teknikmognad (TRL) för energirelaterade lösningar inför ett acceleratorprogram.',
   DATA_RULE,
   'Bedöm tekniken och lösningen, aldrig personer eller företaget som sådant.',
-  'TRL-skalan:',
-  ...SPARK_TRL.map((t) => `- ${t.label}: ${t.hint}`),
+  'TRL-skalan (KTH Innovation Readiness Level) med kriterier per nivå:',
+  ...kthTrlPromptLines(),
+  'En nivå är nådd först när underlaget belägger nivåns kriterier. Saknas belägg för ett kriterium gäller nivån under. Var noga med skillnaden mellan laboratoriemiljö, relevant miljö, operationell miljö och faktisk drift.',
   'Kategorier:',
   ...SPARK_ACCELERATOR_CATEGORIES.map((c) => `- ${c.id}: ${c.label} — ${c.hint}`),
   'Välj den HÖGSTA nivå som underlaget faktiskt belägger. Företagets egen uppgift är en ledtråd, inget facit: stöds den inte av beskrivningen ska du välja lägre och säga varför.',
   'Räcker underlaget inte för en bedömning svarar du med "trl": null och förklarar vad som saknas. Har lösningen ingen koppling till energi är kategorin "not_relevant".',
-  'Svara ENBART med ett JSON-objekt: {"trl": 1–9 eller null, "category": "candidate" | "early" | "market_ready" | "not_relevant", "rationale": "två till fyra meningar på svenska: vad i underlaget som stöder nivån och vad som saknas", "confidence": 0–1}'
+  'Svara ENBART med ett JSON-objekt: {"trl": 1–9 eller null, "category": "candidate" | "early" | "market_ready" | "not_relevant", "rationale": "två till fyra meningar på svenska: vilka kriterier underlaget belägger och vilket kriterium som saknas för nivån över", "confidence": 0–1}'
 ].join('\n');
 
 export interface SparkAssessmentInput {
