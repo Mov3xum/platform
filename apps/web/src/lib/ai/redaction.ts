@@ -137,6 +137,10 @@ export const COLLECTION_DENYLIST: ReadonlySet<string> = new Set<string>([
   // (`talent_needs`) är bolagens egna annonser och förblir läsbara.
   'student_profiles',
   'talent_interests',
+  // SPARK (§ 61): råa intervjusvar — fritext och kontaktuppgifter. Registret
+  // (aktörer, behov, lösningar, testmiljöer, matchningar) är läsbart med
+  // fältmaskning (e-post, telefon, org-nr).
+  'spark_interviews',
   'agent_memory' // agentens tvärsessions-scratchpad (1700000079)
 ]);
 

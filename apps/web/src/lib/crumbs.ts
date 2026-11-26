@@ -36,7 +36,14 @@ export const ID_PLACEHOLDER = '…';
 export const STATIC_ROUTE_LABELS: Readonly<Record<string, string>> = {
   '/impactnavigator/ny': 'Nytt bolag',
   '/impactnavigator/jamfor': 'Jämförelser',
-  '/exportlab/ny': 'Starta exportanalys'
+  '/exportlab/ny': 'Starta exportanalys',
+  '/spark/intervjuer': 'Intervjuer',
+  '/spark/intervjuer/ny': 'Ny intervju',
+  '/spark/aktorer': 'Aktörer',
+  '/spark/matchning': 'Matchning',
+  '/spark/accelerator': 'Accelerator',
+  '/spark/dela': 'Dela',
+  '/spark/import': 'Import'
 };
 
 function humanize(segment: string): string {

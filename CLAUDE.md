@@ -11425,3 +11425,158 @@ granskningen varnar tills raderna bekräftats och en version fastställts.
   manuellt registrerade handlingar, registrering av expedierade
   e-postkampanjer och kompletteringsbegäran. Migration 1700000220 backfillar
   modulen i sparade sidmenyer (§ 36.3).
+
+---
+
+## 61. SPARK — energimatchning: adaptivt formulär, register, matchning & TRL (2026-11)
+
+`/spark` (modul `spark`, titel **SPARK – energimatchning**, "Portfölj"-railen;
+admin/incubator_lead/coach, observer läser, **partner** registrerar och
+sprider) är den regionala behovs- och innovationsdatabasen inom energi för
+projektet SPARK (ERUF, AP 1–6). En aktör registreras **en gång** och kan ha
+flera behov, flera lösningar och testmiljöer — rollen (behovsägare,
+innovationsaktör, testmiljö/pilotkund) följer av vad som registrerats, den är
+ingen etikett. **Allt går via Movexum:** partner och företag skickar in,
+Movexum för in i registret, matchar och frågar båda parter innan de
+presenteras för varandra. Företag ser aldrig varandra i systemet.
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/spark.ts` (+ `.test.ts`) | Kategorier (12 energiområden, 16 stödbehov, 6 utvecklingsstadier, **TRL 1–9**), det ADAPTIVA formuläret (`SPARK_INTERVIEW_SECTIONS`, `visibleSparkSections`, `normalizeSparkInterview`), svar → poster (`deriveSparkRecords`), anonym presentation, acceleratorkategorier, projektindikatorer |
+| `packages/shared/src/spark-matching.ts` | Förklarbar matchning: `scoreNeedSolution`, `rankSolutionsForNeed`, `rankNeedsForSolution`, `rankTestbedsForSolution`, `sparkAreaBalance` (luckorna) |
+| `packages/shared/src/spark-import.ts` | Import från Excel/CSV: kolumner, rubrik-/värdetolkning, mall |
+| `backend/pocketbase-schema/migrations/1700000221_create_spark_matching.js` | `spark_actors`, `spark_interviews`, `spark_needs`, `spark_solutions`, `spark_testbeds`, `spark_matches` |
+| `…/1700000222_backfill_enabled_modules_spark.js`, `…/1700000223_extend_users_organization.js` | Modulen i sparade sidmenyer (§ 36.3); `users.organization` |
+| `apps/web/src/lib/core/write/spark.ts` | Skrivlagret: spara/skicka in intervju, föra in i registret, import, aktör, status, TRL-bedömning, matchningar |
+| `apps/web/src/lib/spark/{data,public.server}.ts` | Läsvägen (RLS) + kurerad vy över anmälningar via en delningslänk; den publika anmälan |
+| `apps/web/src/lib/actions/spark.ts`, `app/spark/**`, `components/spark/**` | Actions, sidor, formuläret (`InterviewForm`), kontroller |
+| `app/energi/[tenant]/page.tsx`, `app/api/public/energi/[tenant]/route.ts` | Publik sida + anmälan |
+
+### 61.1 Det adaptiva formuläret (en definition, tre användningar)
+
+Första steget frågar efter företaget och **vad som stämmer in** (en eller
+flera roller). Avsnitten räknas ur rollerna (`visibleSparkSections`):
+alltid *Företaget · Verksamhet och energi (A) · Fortsatt kontakt (F)*;
+behovsägare får *Energiutmaningar (B)* och *Testmiljöer & samverkan (C)*;
+innovationsaktör får *Lösningar (D)* och *Stödbehov (E)*; testmiljö får *C*.
+Enskilda frågor visas på villkor (`showIf`: beskriv testmiljön bara om en
+finns, kontaktperson bara om företaget får kontaktas). Behov och lösningar är
+upprepbara poster (högst 5) med stabilt `_id`. Frågorna följer intervjuguiden
+(A1–F5) och bär dess koder.
+
+`normalizeSparkInterview` är EN regel för klient och server: svar för avsnitt
+som inte gäller kastas (byter man roll följer inga gamla svar med), okända
+fält/värden släpps, text kapas, personnummer maskas, org-nr normaliseras.
+`submit` kräver de obligatoriska frågorna; ett utkast får vara ofullständigt.
+Samma komponent (`SparkInterviewForm`) används av Movexum (`staff`), partner
+(`partner`) och den publika sidan (`public`).
+
+### 61.2 Vägar in — och grinden
+
+`spark_interviews` är intaget: råa svar (json) + status `draft → submitted →
+applied`, källa `staff | partner | import | self`.
+
+- **Movexum** intervjuar i `/spark/intervjuer/ny`; "Spara och för in i
+  registret" för in direkt.
+- **Partner** (Högskolan, kommuner — användare med rollen `partner`) ser bara
+  sina EGNA intervjuer, sparar utkast och skickar in. De ser aldrig registret.
+  Inskick ger notisen `spark_interview_submitted` till ledningen.
+- **Import** (`/spark/import`): mall (CSV som öppnas i Excel) med samma frågor
+  och fasta svarskategorier; förhandsgranskning → bekräfta. Varje rad blir ett
+  intervjusvar som går samma väg. Movexums import förs in direkt, en partners
+  väntar på Movexum. Okända värden varnas per kolumn och rad (aldrig värden).
+- **Företagets egen anmälan** på `/energi/<tenant-slug>` (publik, rate-limit
+  8/10 min och IP, samtycke krävs, tenant ur sluggen, superuser — § 23.2-
+  mönstret). Landar som inskickad.
+
+**Föra in i registret** (`applySparkInterview`, bara Movexum): aktören hittas
+på intervjuns koppling → org-nr → exakt namn (olika org-nr = olika företag),
+annars skapas den. Tomma svar skriver aldrig över befintliga värden; rollerna
+unioneras; ett nej till kontakt tar bort kontaktuppgifterna. Behov, lösningar
+och testmiljöer upsertas på `(interview, source_key)` så en ändrad intervju
+kan föras in igen utan dubbletter. Poster som tagits bort ur intervjun lämnas
+kvar i registret (de kan ha matchningar) — stäng dem med status.
+
+### 61.3 Dela med kommuner (`/spark/dela`)
+
+Varje partner och medarbetare har en egen länk `/energi/<slug>?via=<användar-
+id>` med QR-kod (genereras lokalt) och en färdig text att skicka vidare.
+`via` godtas bara för en partner/personal i samma tenant; företaget ser "Du
+har fått länken av <organisation>" (`users.organization`, självservice på
+delningssidan; annars visningsnamnet) och anmälan stämplas `referred_by`.
+Partnern ser **att** ett företag anmält sig via länken (namn, datum, status —
+`listSparkReferrals`, kurerad superuser-vy) men **aldrig svaren**; företaget
+får veta det i samtyckestexten.
+
+### 61.4 Matchning — förklarbar, människan beslutar
+
+`scoreNeedSolution` ger poäng med skäl i klartext: gemensamt energiområde
+(4 p, högst tre; "Annat" räknas inte), lösningens målbransch = behovsägarens
+bransch (3), mognad mot tidshorisont (−1 till +2), behovet saknar lösning på
+marknaden (1), lösningen söker pilotkund och behovsägaren vill vara det (2),
+hög prioritet (1), samma kommun (1). Föreslås aldrig: samma aktör, någon part
+har sagt nej till matchning, arkiverad aktör, eller varken område eller bransch
+stämmer. `sparkAreaBalance` visar behov utan lösning och lösning utan behov
+per energiområde (översikten). Ingen AI-inferens.
+
+En matchning (`spark_matches`: behov × lösning × testmiljö, minst två parter
+från olika aktörer) skapas som **förslag** av Movexum och följs upp med
+status, nästa steg, anteckningar och resultat. Två spärrar i skrivlagret:
+(1) parterna kan inte bli *introducerade* förrän båda sidor **tackat ja**
+(`need_consent`/`solution_consent`); (2) en pilot med **företagsindividuell
+stödinsats** (`support_kind = de_minimis`, AP 3/AP 5) kan inte starta förrän
+stödet är bekräftat registrerat (`support_confirmed`). Kartläggning och
+matchning är systeminsatser (AP 1, 2, 4). Aktörskortet visar hur parten får
+presenteras för motparten utifrån delningsnivån (anonymt: bransch, kommun,
+storlek).
+
+### 61.5 TRL och kategorisering inför acceleratorn (`/spark/accelerator`)
+
+Lösningar bär **TRL 1–9** (Movexums formuleringar, `SPARK_TRL`): företagets
+egen uppgift ur formuläret (`trl`) och Movexums bedömning (`trl_assessed`, som
+gäller när den finns — `effectiveSparkTrl`). Movexum kategoriserar varje
+lösning: *Kandidat till acceleratorn · Tidig — följ upp · Marknadsredo · Inte
+aktuell*. `suggestSparkAcceleratorCategory` ger ett FÖRSLAG ur TRL (1–3 tidig,
+4–7 kandidat, 8–9 marknadsredo) — gränserna är en arbetshypotes som justeras
+i `spark.ts`; människan bekräftar. **Bara innovationsaktörer utanför
+portföljen bedöms** (`sparkAcceleratorEligible`): inte behovsägare, och inte
+aktörer kopplade till ett bolagskort (`spark_actors.startup`) — portföljbolag
+bedöms med KTH IRL (§ 52.2). CRL används inte här.
+
+### 61.6 Regler och regelefterlevnad
+
+- **RLS (§ 21.3):** registret och matchningarna list/view staff/observer
+  (`MUST_BE_STAFF_OR_OBSERVER`); intervjuer dessutom den som skapade dem.
+  createRules pinnar tenant + skapare (inga roll-checks), intervjuer kan bara
+  skapas som utkast/inskickade utan registerfält; update = Movexum-personal,
+  eller ägaren av en ännu inte införd intervju med registerfälten låsta;
+  flyttlås på tenant (§ 21.8). Rollen prövas i skrivlagret
+  (`canManageSpark` = admin/incubator_lead/coach; partner bara egna
+  intervjuer). Bolagsmedlemmar når ingenting.
+- **GDPR § 5:** organisationer, inte privatpersoner. Kontaktpersonens namn,
+  roll, e-post och telefon lagras på aktören bara när företaget sagt ja till
+  kontakt (berättigat intresse: matchning inom projektet). Fritext
+  personnummer-saneras. `spark_interviews` (råa svar) är **denylistad för AI**;
+  registret är läsbart med fältmaskning (e-post, telefon, org-nr). Audit i
+  `agent_actions` bär företagsnamn, antal och status — aldrig kontaktpersoner
+  eller fritext. cascade tenant → aktör → behov/lösningar/testmiljöer →
+  matchningar.
+- **EU AI Act:** ingen AI-inferens → riskklass n/a. Agenten har inga verktyg
+  (`writable-fields.ts`: deny).
+- **Mätning (§ 41):** `spark_actors`, `spark_open_needs`,
+  `spark_active_matches`; projektets indikatorer ur ansökan (10 behovsägare,
+  20 företag med stöd, 30 användare, 5 forskarsamverkan) räknas på distinkta
+  aktörer i `computeSparkIndicators` och visas på översikten.
+- **Speglat** i `setup-via-api.mjs` (defs + `FORCE_CREATE_RULES` +
+  `users.organization`), asserterat i `verify-baseline.mjs` (must-exist,
+  staff/observer, AI-denylist).
+- **Innan Högskolans intervjudata tas in** ska avtalet mellan projekten vara
+  klart: svar på företagsnivå, att företagen informerats om användningen i
+  SPARK, och hur indikatorutfall fördelas (ingen dubbelrapportering).
+- **Inte byggt:** AI-lager (semantisk likhet på fritext, utkast till
+  introduktionstext, intervju ur mötesinspelning), personlig länk där
+  företaget själv uppdaterar sin profil, koppling av stödinsatsen till
+  stödcheckar/de minimis (§ 46/§ 20 kräver i dag ett bolagskort — för
+  stödmottagare utanför portföljen bekräftas stödet med kryssruta och
+  referens), kontaktpersoner i kontaktboken (§ 45), uppslag i bolagsregistret
+  vid org-nr och chattverktyg.

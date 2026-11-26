@@ -48,6 +48,7 @@ test('denylist håller ute auth-, credential- och privat-innehåll-kollektioner'
     'register_disclosures', // logg över utlämnanden (§60)
     'student_profiles', // studenter = privatpersoner: namn, e-post, fritext (§54)
     'talent_interests', // intresseanmälningar med meddelanden (§54)
+    'spark_interviews', // råa intervjusvar med kontaktuppgifter och fritext (§61)
     'sustainability_documents', // text ur uppladdade dokument i Hållbarhetsanalysen (§56)
     'sustainability_ai_jobs', // rå modellutdata från Hållbarhetsanalysen (§56)
     'export_documents', // text ur uppladdade dokument i Export Lab (§58)
