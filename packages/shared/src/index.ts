@@ -1437,7 +1437,7 @@ export interface ModuleGroup {
 
 export const RAIL_GROUPS: ModuleGroup[] = [
   { label: 'Översikt', modules: ['hem', 'idag', 'min_oversikt', 'inkorg', 'mal', 'arshjul', 'filer', 'inflode', 'uppdrag'] },
-  { label: 'Portfölj', modules: ['startups', 'kontakter', 'talang', 'de_minimis', 'bedomning_excellens', 'impactnavigator', 'exportlab', 'checkar', 'projekt', 'upphandlingar', 'investerare'] },
+  { label: 'Portfölj', modules: ['startups', 'kontakter', 'spark', 'talang', 'de_minimis', 'bedomning_excellens', 'impactnavigator', 'exportlab', 'checkar', 'projekt', 'upphandlingar', 'investerare'] },
   { label: 'Innehåll', modules: ['education', 'howspace', 'rapporter'] },
   { label: 'System', modules: ['agenter', 'kunskapsbas', 'diarium', 'onskemal', 'installningar', 'min_profil'] }
 ];
@@ -1630,6 +1630,14 @@ export const coreModules: ModuleDefinition[] = [
       'Projekt och arbetspaket som stöd tas ur (Vinnova Excellens, TVV, EoI …) med budget, upparbetning och kassabok över beviljade checkar.',
     rolesAllowed: ['admin', 'incubator_lead', 'coach', 'mentor', 'observer'],
     route: '/projekt'
+  },
+  {
+    id: 'spark',
+    title: 'SPARK – energimatchning',
+    description:
+      'Regional behovs- och innovationsdatabas inom energi: intervjuer och anmälningar via ett adaptivt formulär, register över behov, lösningar och testmiljöer, förklarbar matchning och TRL-bedömning inför acceleratorprogrammet. Partner (högskola, kommuner) registrerar och sprider — allt går via Movexum.',
+    rolesAllowed: ['admin', 'incubator_lead', 'coach', 'observer', 'partner'],
+    route: '/spark'
   },
   {
     id: 'talang',
@@ -1948,6 +1956,11 @@ export * from './export-lab-inputs';
 export * from './export-lab-mock';
 export * from './compass-start-page';
 export * from './talent';
+export * from './kth-trl';
+export * from './spark';
+export * from './spark-matching';
+export * from './spark-import';
+export * from './spark-ai';
 export * from './agent-memory';
 export * from './funding';
 export * from './support-checks';

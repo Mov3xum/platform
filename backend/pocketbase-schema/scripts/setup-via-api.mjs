@@ -848,7 +848,9 @@ await patchUsersCollection([
   { name: 'competence_tags', type: 'json', required: false, maxSize: 8000 },
   { name: 'development_interests', type: 'json', required: false, maxSize: 2000 },
   // Migration 1700000179: när kompetensprofilen senast sparades (inaktuell-påminnelse).
-  { name: 'competence_updated_at', type: 'date', required: false }
+  { name: 'competence_updated_at', type: 'date', required: false },
+  // Migration 1700000223 (§ 61): organisationen användaren företräder (SPARK:s delningslänk).
+  { name: 'organization', type: 'text', required: false, max: 120 }
 ]);
 
 // Migration 1700000179 (§ 29.7): missions.needed_tags på befintliga installs.
@@ -5495,6 +5497,176 @@ await ensureCollection({
   });
 }
 
+// Migration 1700000221 (§ 61): SPARK – energimatchning. Aktörsregister,
+// intervjuer (det adaptiva formuläret), behov, lösningar (med TRL och
+// acceleratorkategori), testmiljöer och matchningar. Registret läses av
+// Movexum-personal + observer; intervjuer dessutom av den som skapade dem
+// (partnern). Kategorier är text/json (validerade i packages/shared/src/
+// spark.ts); statusfälten MÅSTE spegla konstanterna där. Flyttlåset på
+// tenant läggs av ensureCollection (withMoveLocks).
+{
+  const READ = `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`;
+  const OWN = 'created_by = @request.auth.id';
+  const PINNED_CREATE = `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`;
+  const unset = (fields) => fields.map((f) => `@request.body.${f}:isset = false`).join(' && ');
+  const REGISTRY_RULES = {
+    listRule: READ,
+    viewRule: READ,
+    createRule: PINNED_CREATE,
+    updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
+    deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+  };
+  const autodate = [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
+  ];
+  const tenant = { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 };
+  const user = (name) => ({ name, type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 });
+  const rel = (name, collectionId, opts = {}) => ({ name, type: 'relation', required: Boolean(opts.required), collectionId, cascadeDelete: Boolean(opts.cascade), minSelect: opts.required ? 1 : 0, maxSelect: 1 });
+  const text = (name, max, required = false) => ({ name, type: 'text', required, max });
+  const json = (name, maxSize = 4000) => ({ name, type: 'json', required: false, maxSize });
+  const select = (name, values, required = false) => ({ name, type: 'select', required, maxSelect: 1, values });
+  const bool = (name) => ({ name, type: 'bool', required: false });
+  const date = (name) => ({ name, type: 'date', required: false });
+
+  await ensureCollection({
+    id: 'spark_actors_collection',
+    name: 'spark_actors',
+    type: 'base',
+    fields: [
+      ...autodate, tenant,
+      text('name', 200, true), text('org_nr', 20), text('actor_type', 40), text('sector', 40), text('business', 500),
+      text('kommun', 40), text('size', 20), json('roles', 500), text('energy_importance', 20), text('energy_work', 20),
+      text('development_areas', 3000), text('pilot_interest', 20), text('academia_interest', 20), text('need_matching', 20),
+      text('solution_matching', 20), json('support_needs', 2000), text('program_interest', 20), bool('info_ok'), bool('events_ok'),
+      bool('contact_ok'), text('sharing', 20), text('contact_name', 120), text('contact_role', 120), text('contact_email', 200),
+      text('contact_phone', 40), text('website', 300), text('notes', 3000), rel('startup', 'startups_collection'),
+      select('status', ['active', 'archived'], true), user('created_by')
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_spark_actors_tenant_orgnr ON spark_actors (tenant, org_nr) WHERE org_nr != ''",
+      'CREATE INDEX idx_spark_actors_tenant_status ON spark_actors (tenant, status)'
+    ],
+    ...REGISTRY_RULES
+  });
+  const sparkActorsId = (await pb.collections.getOne('spark_actors')).id;
+  const READ_OWN = `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || ${OWN})`;
+  await ensureCollection({
+    id: 'spark_interviews_collection',
+    name: 'spark_interviews',
+    type: 'base',
+    fields: [
+      ...autodate, tenant,
+      text('company_name', 200, true), text('org_nr', 20), json('roles', 500), json('answers', 300000),
+      select('status', ['draft', 'submitted', 'applied'], true), select('source', ['staff', 'partner', 'import', 'self'], true),
+      text('interviewer_org', 160), date('interviewed_at'), rel('actor', sparkActorsId), user('referred_by'), date('consent_at'),
+      date('submitted_at'), date('applied_at'), user('applied_by'), user('created_by')
+    ],
+    indexes: [
+      'CREATE INDEX idx_spark_interviews_tenant_status ON spark_interviews (tenant, status)',
+      'CREATE INDEX idx_spark_interviews_created_by ON spark_interviews (created_by)',
+      'CREATE INDEX idx_spark_interviews_referred_by ON spark_interviews (referred_by)'
+    ],
+    listRule: READ_OWN,
+    viewRule: READ_OWN,
+    createRule:
+      `${PINNED_CREATE} && (@request.body.status:isset = false || @request.body.status = "draft" || @request.body.status = "submitted")` +
+      ` && ${unset(['applied_at', 'applied_by', 'actor', 'referred_by'])}`,
+    updateRule:
+      `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_EACH} || (${OWN} && status != "applied" && @request.body.status != "applied"` +
+      ` && ${unset(['applied_at', 'applied_by', 'actor', 'referred_by', 'created_by', 'source'])}))`,
+    deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_LEAD_EACH} || (${OWN} && status = "draft"))`
+  });
+  const sparkInterviewsId = (await pb.collections.getOne('spark_interviews')).id;
+  const child = () => [...autodate, tenant, rel('actor', sparkActorsId, { required: true, cascade: true }), rel('interview', sparkInterviewsId), text('source_key', 40)];
+  const childIndexes = (name) => [
+    `CREATE INDEX idx_${name}_tenant_status ON ${name} (tenant, status)`,
+    `CREATE INDEX idx_${name}_actor ON ${name} (actor)`,
+    `CREATE UNIQUE INDEX idx_${name}_source ON ${name} (interview, source_key) WHERE interview != '' AND source_key != ''`
+  ];
+  await ensureCollection({
+    id: 'spark_needs_collection',
+    name: 'spark_needs',
+    type: 'base',
+    fields: [
+      ...child(), text('title', 160, true), text('description', 4000), json('areas'), text('process_note', 1000), text('unmet', 20),
+      json('consequences'), text('priority', 20), text('horizon', 20), text('tried', 2000),
+      select('status', ['open', 'matched', 'solved', 'closed'], true), user('created_by')
+    ],
+    indexes: childIndexes('spark_needs'),
+    ...REGISTRY_RULES
+  });
+  await ensureCollection({
+    id: 'spark_solutions_collection',
+    name: 'spark_solutions',
+    type: 'base',
+    fields: [
+      ...child(), text('name', 160, true), text('description', 4000), text('problem', 2000), json('areas'), json('target_sectors'),
+      json('contributions'),
+      { name: 'maturity', type: 'number', required: false, min: 0, max: 6, onlyInt: true },
+      { name: 'trl', type: 'number', required: false, min: 0, max: 9, onlyInt: true },
+      { name: 'trl_assessed', type: 'number', required: false, min: 0, max: 9, onlyInt: true },
+      text('accelerator_category', 30), text('accelerator_note', 1000), user('assessed_by'), date('assessed_at'), text('verified', 20),
+      // Migration 1700000224 (§ 61.7): AI:ns förslag — skilt från Movexums bedömning.
+      { name: 'ai_trl', type: 'number', required: false, min: 0, max: 9, onlyInt: true }, text('ai_category', 30), text('ai_rationale', 1000),
+      { name: 'ai_confidence', type: 'number', required: false, min: 0, max: 1 }, text('ai_model', 60), date('ai_suggested_at'),
+      json('needs'), text('barriers', 2000), text('expansion', 1000), select('status', ['active', 'paused', 'closed'], true), user('created_by')
+    ],
+    indexes: childIndexes('spark_solutions'),
+    ...REGISTRY_RULES
+  });
+  await ensureCollection({
+    id: 'spark_testbeds_collection',
+    name: 'spark_testbeds',
+    type: 'base',
+    fields: [
+      ...child(), select('kind', ['test_environment', 'pilot_customer'], true), text('description', 3000), json('areas'),
+      text('conditions', 2000), select('status', ['available', 'paused', 'closed'], true), user('created_by')
+    ],
+    indexes: childIndexes('spark_testbeds'),
+    ...REGISTRY_RULES
+  });
+  const needsId = (await pb.collections.getOne('spark_needs')).id;
+  const solutionsId = (await pb.collections.getOne('spark_solutions')).id;
+  const testbedsId = (await pb.collections.getOne('spark_testbeds')).id;
+  await ensureCollection({
+    id: 'spark_matches_collection',
+    name: 'spark_matches',
+    type: 'base',
+    fields: [
+      ...autodate, tenant, rel('need', needsId, { cascade: true }), rel('solution', solutionsId, { cascade: true }), rel('testbed', testbedsId, { cascade: true }),
+      select('status', ['suggested', 'introduced', 'dialogue', 'pilot_planned', 'pilot_running', 'completed', 'declined'], true),
+      select('need_consent', ['pending', 'yes', 'no']), select('solution_consent', ['pending', 'yes', 'no']), user('owner'),
+      text('next_step', 300), date('next_step_due'), text('notes', 3000), text('outcome', 2000),
+      { name: 'score', type: 'number', required: false }, json('reasons', 4000), select('support_kind', ['none', 'de_minimis']),
+      bool('support_confirmed'), text('support_note', 500), text('work_package', 20), date('status_changed_at'), user('created_by')
+    ],
+    indexes: [
+      'CREATE INDEX idx_spark_matches_tenant_status ON spark_matches (tenant, status)',
+      'CREATE INDEX idx_spark_matches_need ON spark_matches (need)',
+      'CREATE INDEX idx_spark_matches_solution ON spark_matches (solution)',
+      'CREATE UNIQUE INDEX idx_spark_matches_pair ON spark_matches (need, solution, testbed)'
+    ],
+    ...REGISTRY_RULES
+  });
+  // Migration 1700000224 (§ 61.7): embeddings för innehållslikhet i matchningen.
+  await ensureCollection({
+    id: 'spark_embeddings_collection',
+    name: 'spark_embeddings',
+    type: 'base',
+    fields: [
+      ...autodate, tenant, select('kind', ['need', 'solution'], true), text('record_id', 15, true), text('text_hash', 16), text('model', 60),
+      json('embedding', 80000), user('created_by')
+    ],
+    indexes: ['CREATE UNIQUE INDEX idx_spark_embeddings_record ON spark_embeddings (tenant, kind, record_id)'],
+    listRule: READ,
+    viewRule: READ,
+    createRule: PINNED_CREATE,
+    updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
+    deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`
+  });
+}
+
 // Migration 1700000186 (§ 50): notifications.kind blir TEXT — ersätter de
 // tidigare select-unionerna (1700000158/1700000169). Kan REST inte byta typ
 // (validation_field_type_change) unionas select-värdena i stället, så nya
@@ -6685,6 +6857,18 @@ const FORCE_CREATE_RULES = {
     `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id` +
     ' && (@request.body.status:isset = false || @request.body.status = "draft" || @request.body.status = "pending_review")' +
     ' && @request.body.published_at:isset = false && @request.body.reviewed_by:isset = false && @request.body.review_note:isset = false',
+  // SPARK – energimatchning (§ 61, migration 1700000221) — pinnad tenant + skapare;
+  // intervjuer kan bara skapas som utkast/inskickade utan registerfält.
+  spark_actors: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  spark_needs: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  spark_solutions: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  spark_testbeds: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  spark_matches: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  spark_embeddings: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  spark_interviews:
+    `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id` +
+    ' && (@request.body.status:isset = false || @request.body.status = "draft" || @request.body.status = "submitted")' +
+    ' && @request.body.applied_at:isset = false && @request.body.applied_by:isset = false && @request.body.actor:isset = false && @request.body.referred_by:isset = false',
   // Ärenden i Bedömning excellens (§ 51.10, migration 1700000200).
   screening_cases: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
   // Hållbarhetsanalysen (§ 56, migration 1700000206).

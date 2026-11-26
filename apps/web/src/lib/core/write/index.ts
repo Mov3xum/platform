@@ -181,6 +181,35 @@ export {
   type TalentNeedResult,
   type InterestResult
 } from './talent';
+// SPARK – energimatchning (§ 61)
+export {
+  saveSparkInterview,
+  applySparkInterview,
+  deleteSparkInterview,
+  importSparkInterviews,
+  updateSparkActor,
+  setSparkRecordStatus,
+  assessSparkSolution,
+  createSparkMatch,
+  updateSparkMatch,
+  deleteSparkMatch,
+  notifySparkSubmission,
+  canManageSpark,
+  isSparkPartner,
+  type SparkInterviewInput,
+  type SparkInterviewResult,
+  type SparkApplySummary,
+  type SparkImportSummary,
+  type SparkMatchPatch,
+  type SparkRecordKind
+} from './spark';
+export {
+  suggestSparkAssessment,
+  suggestSparkAssessments,
+  draftSparkIntroduction,
+  reindexSparkEmbeddings,
+  type SparkIntroDraft
+} from './spark-ai';
 export { logAgentAction } from './audit';
 export {
   canWriteField,

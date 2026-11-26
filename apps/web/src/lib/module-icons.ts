@@ -17,6 +17,7 @@ export const MODULE_ICONS: Record<string, string> = {
   impactnavigator: 'globe',
   exportlab: 'compass',
   talang: 'cap',
+  spark: 'bolt',
   checkar: 'check',
   projekt: 'graph',
   upphandlingar: 'briefcase',

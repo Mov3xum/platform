@@ -1052,6 +1052,48 @@ function mapRow(
       if (after.deleted === true) return { title: 'En studentprofil togs bort', href: '/talang/studenter', icon: 'trash' };
       return { title: `En studentprofil — ${(isStudentProfileStatus(after.status) ? STUDENT_PROFILE_STATUS_LABELS[after.status] : 'status').toLowerCase()}`, href: row.record_id ? `/talang/studenter/${row.record_id}` : '/talang/studenter', icon: 'cap' };
     }
+    // SPARK – energimatchning (§ 61) — företagsnamn, antal och status; aldrig kontaktpersoner eller fritext.
+    case 'spark_interviews': {
+      const company = str(after.company_name) || 'ett företag';
+      const href = row.record_id ? `/spark/intervjuer/${row.record_id}` : '/spark/intervjuer';
+      if (after.deleted === true) return { title: `SPARK: intervjun med ${company} togs bort`, href: '/spark/intervjuer', icon: 'trash' };
+      if (row.field === 'applied') {
+        return {
+          title: `SPARK: ${company} ${after.actor_created === true ? 'lades till i' : 'uppdaterades i'} registret`,
+          detail: `${Number(after.needs) || 0} behov · ${Number(after.solutions) || 0} lösningar · ${Number(after.testbeds) || 0} testmiljöer`,
+          href,
+          icon: 'check'
+        };
+      }
+      if (action === 'create') return { title: `SPARK: ny intervju med ${company}`, href, icon: 'bolt' };
+      return { title: `SPARK: intervjun med ${company} ${str(after.status) === 'submitted' ? 'skickades in' : changedVerb}`, href, icon: 'bolt' };
+    }
+    case 'spark_import':
+      return { title: `SPARK: ${Number(after.created) || 0} intervjuer importerades`, detail: `${Number(after.applied) || 0} införda i registret`, href: '/spark/intervjuer', icon: 'upload' };
+    case 'spark_actors':
+      return { title: `SPARK: aktören ${str(after.name) || ''} ${changedVerb}`.replace(/\s+/g, ' '), href: row.record_id ? `/spark/aktorer/${row.record_id}` : '/spark/aktorer', icon: 'bolt' };
+    case 'spark_needs':
+    case 'spark_testbeds':
+      return { title: `SPARK: status ${changedVerb} på ${row.collection === 'spark_needs' ? `behovet "${str(after.label)}"` : 'en testmiljö'}`, href: '/spark/matchning', icon: 'bolt' };
+    case 'spark_solutions': {
+      if (row.field === 'ai_suggestion') {
+        return { title: `SPARK: AI föreslog TRL och kategori för "${str(after.label)}"`, detail: Number(after.ai_trl) ? `TRL ${Number(after.ai_trl)}` : 'Underlaget räckte inte', href: '/spark/accelerator', icon: 'sparkle' };
+      }
+      if (row.field === 'accelerator') {
+        return { title: `SPARK: "${str(after.label)}" bedömdes inför acceleratorn`, detail: Number(after.trl_assessed) ? `TRL ${Number(after.trl_assessed)}` : undefined, href: '/spark/accelerator', icon: 'star' };
+      }
+      return { title: `SPARK: status ${changedVerb} på lösningen "${str(after.label)}"`, href: '/spark/matchning?vy=losningar', icon: 'bolt' };
+    }
+    case 'spark_matches': {
+      const href = row.record_id && after.deleted !== true ? `/spark/matchning/${row.record_id}` : '/spark/matchning?vy=tavla';
+      if (after.deleted === true) return { title: 'SPARK: en matchning togs bort', href, icon: 'trash' };
+      if (action === 'create') {
+        return { title: `SPARK: ny matchning föreslagen${str(after.need) && str(after.solution) ? ` — "${str(after.need)}" och "${str(after.solution)}"` : ''}`, href, icon: 'link' };
+      }
+      if (row.field === 'intro_draft') return { title: 'SPARK: AI skrev ett utkast till introduktion', href, icon: 'sparkle' };
+      if (row.field === 'status') return { title: `SPARK: en matchning — ${(str(after.status_label) || 'ny status').toLowerCase()}`, href, icon: str(after.status) === 'completed' ? 'check' : 'link' };
+      return { title: `SPARK: en matchning ${changedVerb}`, href, icon: 'link' };
+    }
     case 'register_entries': {
       const nr = str(after.designation);
       const href = str(after.case) ? `/diarium/${str(after.case)}` : '/diarium';
