@@ -122,10 +122,34 @@ export const QuestionsManager = forwardRef<
   const [orderPending, startOrder] = useTransition();
   const [orderSaved, setOrderSaved] = useState(false);
 
+  // Frågorna är hopfällda som standard (bara rubriken syns) — klick öppnar.
+  const [openIds, setOpenIds] = useState<Set<string>>(() => new Set());
+  const knownIds = useRef<Set<string>>(new Set(initialQuestions.map((q) => q.id)));
+
   // Re-synka när servern levererar nya props (efter router.refresh()).
+  // En fråga som just lagts till öppnas direkt (alternativen fylls i där).
   useEffect(() => {
     setQuestions(initialQuestions);
+    const added = initialQuestions.filter((q) => !knownIds.current.has(q.id)).map((q) => q.id);
+    knownIds.current = new Set(initialQuestions.map((q) => q.id));
+    if (added.length > 0) {
+      setOpenIds((prev) => {
+        const next = new Set(prev);
+        for (const id of added) next.add(id);
+        return next;
+      });
+    }
   }, [initialQuestions]);
+
+  function toggleOpen(id: string) {
+    setOpenIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  const allOpen = questions.length > 0 && questions.every((q) => openIds.has(q.id));
 
   useEffect(() => {
     if (!orderSaved) return;
@@ -191,21 +215,24 @@ export const QuestionsManager = forwardRef<
   );
 
   return (
-    <div style={{ display: 'grid', gap: 16 }}>
-      <div className="mx-muted mx-t-13" style={{ lineHeight: 1.5 }}>
-        {flowType === 'chat'
-          ? 'Frågorna används som intervjuguide i samtalet.'
-          : 'Frågorna visas för besökaren i den här ordningen.'}{' '}
-        Ändringar sparas med Spara fråga, med Spara längst ned eller när du går till ett annat steg.
-        {questions.length > 1 && (
-          <>
-            {' '}
+    <div style={{ display: 'grid', gap: 12 }}>
+      {questions.length > 1 && (
+        <div className="mx-flex mx-items-c mx-gap-2 mx-wrap">
+          <span className="mx-muted mx-t-12" style={{ lineHeight: 1.5 }}>
             Byt plats genom att dra i handtaget{' '}
-            <Icon name="grip" size={11} fill="currentColor" style={{ verticalAlign: '-1px' }} /> uppe till höger på en
-            fråga (eller pil upp/ned när handtaget är i fokus).
-          </>
-        )}
-      </div>
+            <Icon name="grip" size={11} fill="currentColor" style={{ display: 'inline', verticalAlign: '-1px' }} /> till höger
+            (eller pil upp/ned när handtaget är i fokus).
+          </span>
+          <span className="mx-grow" />
+          <button
+            type="button"
+            className="mx-btn mx-sm mx-ghost"
+            onClick={() => setOpenIds(allOpen ? new Set() : new Set(questions.map((q) => q.id)))}
+          >
+            {allOpen ? 'Fäll ihop alla' : 'Öppna alla'}
+          </button>
+        </div>
+      )}
 
       {error && <div className="mx-t-13" style={{ color: 'var(--movexum-morkorange)' }}>{error}</div>}
       {(orderPending || orderSaved) && !error && (
@@ -232,10 +259,12 @@ export const QuestionsManager = forwardRef<
       {questions.length === 0 ? (
         <div className="mx-muted mx-t-13">Inga frågor ännu. Lägg till din första nedan.</div>
       ) : (
-        <div style={{ display: 'grid', gap: 12 }}>
+        <div style={{ display: 'grid', gap: 8 }}>
           {questions.map((q, i) => (
             <QuestionCard
               key={q.id}
+              open={openIds.has(q.id)}
+              onToggle={() => toggleOpen(q.id)}
               index={i}
               count={questions.length}
               question={q}
@@ -442,6 +471,8 @@ function NewQuestionForm({
    ────────────────────────────────────────────────────────────────────── */
 
 function QuestionCard({
+  open,
+  onToggle,
   index,
   count,
   question,
@@ -461,6 +492,8 @@ function QuestionCard({
   onDrop,
   onMove
 }: {
+  open: boolean;
+  onToggle: () => void;
   index: number;
   count: number;
   question: CompassQuestion;
@@ -490,16 +523,25 @@ function QuestionCard({
   const [required, setRequired] = useState(!!question.required);
   const [choices, setChoices] = useState<EditableChoice[]>(() => toEditableChoices(question));
   const [pending, start] = useTransition();
+  const [justSaved, setJustSaved] = useState(false);
 
-  // Osparade ändringar = fälten skiljer sig från det som senast sparades.
-  const snapshot = JSON.stringify({
+  useEffect(() => {
+    if (!justSaved) return;
+    const t = window.setTimeout(() => setJustSaved(false), 2500);
+    return () => window.clearTimeout(t);
+  }, [justSaved]);
+
+  // Osparade ändringar syns även när frågan är hopfälld. Jämförs mot det
+  // som senast sparades HÄRIFRÅN (inte mot serverns normaliserade värden,
+  // som annars kunde ge ett evigt "Ej sparad").
+  const snapshot = JSON.stringify([
     key,
     prompt,
     helpText,
     inputType,
     required,
-    choices: hasChoices(inputType) ? choices : null
-  });
+    hasChoices(inputType) ? choices : null
+  ]);
   const [savedSnapshot, setSavedSnapshot] = useState(snapshot);
   const dirty = snapshot !== savedSnapshot;
 
@@ -592,6 +634,7 @@ function QuestionCard({
     start(async () => {
       try {
         await persist();
+        setJustSaved(true);
         onSaved();
       } catch (e) {
         onError(e instanceof Error ? e.message : 'Kunde inte spara frågan.');
@@ -656,46 +699,33 @@ function QuestionCard({
         e.preventDefault();
         onDrop(placementFromEvent(e));
       }}
+      className={`mx-qcard ${open ? 'is-open' : ''}`}
       style={{
-        padding: 12,
-        borderRadius: 10,
-        background: 'var(--mx-paper-2)',
-        border: '1px solid var(--mx-line-soft)',
-        display: 'grid',
-        gap: 10,
         opacity: dragging ? 0.4 : 1,
         boxShadow: dragging ? dropLine : dropShadow,
         transition: 'opacity .12s ease, box-shadow .12s ease'
       }}
     >
-      <div className="mx-flex mx-items-c mx-gap-2 mx-wrap">
-        <span className="mx-mono mx-t-xs mx-muted" style={{ minWidth: 20 }}>
-          {index + 1}
-        </span>
-        <span
-          className="mx-mono mx-t-xs"
-          style={{
-            padding: '2px 8px',
-            borderRadius: 999,
-            background: 'var(--mx-paper-3, var(--mx-paper-2))',
-            border: '1px solid var(--mx-line-soft)'
-          }}
+      <div className="mx-qcard-head">
+        <button
+          type="button"
+          className="mx-qcard-toggle"
+          aria-expanded={open}
+          onClick={onToggle}
+          title={open ? 'Fäll ihop frågan' : 'Öppna frågan'}
         >
-          {TYPE_LABEL[inputType] ?? inputType}
-        </span>
-        <span className="mx-mono mx-t-xs mx-muted">{key || '(ingen nyckel)'}</span>
-        {required && <span className="mx-mono mx-t-xs mx-muted">· obligatorisk</span>}
-        {dirty && (
-          <span className="mx-t-xs mx-fw-6" style={{ color: 'var(--movexum-morkgul)' }}>
-            · osparade ändringar
-          </span>
-        )}
-        <span className="mx-grow" />
-        <button type="button" className="mx-btn mx-sm" onClick={remove} disabled={pending} style={{ color: '#4b2718' }}>
-          <Icon name="trash" size={11} /> Ta bort
-        </button>
-        <button type="button" className="mx-btn mx-sm mx-primary" onClick={save} disabled={pending}>
-          <Icon name="check" size={11} /> {pending ? 'Sparar…' : 'Spara fråga'}
+          <span className="mx-qcard-num">{index + 1}</span>
+          <span className="mx-qcard-title">{prompt.trim() || '(fråga utan text)'}</span>
+          <span className="mx-chip">{TYPE_LABEL[inputType] ?? inputType}</span>
+          {hasChoices(inputType) && (
+            <span className="mx-t-12 mx-muted" style={{ whiteSpace: 'nowrap' }}>
+              {choices.length} alternativ
+            </span>
+          )}
+          {required && <span className="mx-chip mx-cyan">Obligatorisk</span>}
+          {dirty && !pending && <span className="mx-chip mx-yellow">Ej sparad</span>}
+          {justSaved && !dirty && <span className="mx-chip mx-green">Sparad</span>}
+          <Icon name={open ? 'chevdown' : 'chevron'} size={14} />
         </button>
         {count > 1 && (
           // <span role="button"> i stället för <button>: Firefox startar inte
@@ -737,10 +767,20 @@ function QuestionCard({
         )}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+      {open && (
+      <div className="mx-qcard-body">
+      <label className="mx-label">
+        Fråga (texten som visas)
+        <input type="text" className="mx-input" style={{ marginTop: 4 }} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+      </label>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <label className="mx-label">
           Nyckel
           <input type="text" className="mx-input" style={{ marginTop: 4 }} value={key} onChange={(e) => setKey(e.target.value)} />
+          <span className="mx-t-12 mx-muted" style={{ display: 'block', marginTop: 4 }}>
+            Kopplar svaret till rätt fält på leadet (t.ex. idea, email).
+          </span>
         </label>
         <label className="mx-label">
           Svarstyp
@@ -758,11 +798,6 @@ function QuestionCard({
           </select>
         </label>
       </div>
-
-      <label className="mx-label">
-        Fråga (texten som visas)
-        <input type="text" className="mx-input" style={{ marginTop: 4 }} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-      </label>
 
       <label className="mx-label">
         Hjälptext (valfri)
@@ -785,6 +820,18 @@ function QuestionCard({
           onRemoveChoice={removeChoice}
           onAddBucket={addBucket}
         />
+      )}
+
+      <div className="mx-qcard-foot">
+        <button type="button" className="mx-btn mx-sm" onClick={remove} disabled={pending} style={{ color: 'var(--movexum-morkorange)' }}>
+          <Icon name="trash" size={11} /> Ta bort
+        </button>
+        {dirty && <span className="mx-t-12 mx-muted" style={{ marginLeft: 'auto' }}>Osparade ändringar</span>}
+        <button type="button" className="mx-btn mx-sm mx-primary" onClick={save} disabled={pending} style={dirty ? undefined : { marginLeft: 'auto' }}>
+          <Icon name="check" size={11} /> {pending ? 'Sparar…' : 'Spara fråga'}
+        </button>
+      </div>
+      </div>
       )}
     </div>
   );
@@ -814,18 +861,10 @@ function ChoicesEditor({
   onAddBucket: () => void;
 }) {
   return (
-    <div
-      style={{
-        marginTop: 4,
-        borderTop: '1px solid var(--mx-line-soft)',
-        paddingTop: 10,
-        display: 'grid',
-        gap: 8
-      }}
-    >
+    <div className="mx-choices">
       <div className="mx-flex mx-items-c mx-gap-2 mx-wrap">
         <div>
-          <div className="mx-mono mx-t-xs mx-muted mx-t-up mx-fw-6">Svarsalternativ{showScoring ? ' & poäng' : ''}</div>
+          <div className="mx-choices-title">Svarsalternativ{showScoring ? ' och poäng' : ''}</div>
           {showScoring && (
             <div className="mx-muted mx-t-12" style={{ marginTop: 2 }}>
               Fyll i poäng per resultatprofil. Profilen med flest poäng vinner.
@@ -846,57 +885,61 @@ function ChoicesEditor({
       {choices.length === 0 ? (
         <div className="mx-muted mx-t-12">Inga alternativ än.</div>
       ) : (
-        <div style={{ display: 'grid', gap: 6 }}>
-          {choices.map((c, i) => (
-            <div
-              key={i}
-              className="mx-flex mx-items-c mx-gap-2 mx-wrap"
-              style={{
-                padding: '8px 10px',
-                borderRadius: 10,
-                background: 'var(--mx-paper)',
-                border: '1px solid var(--mx-line-soft)'
-              }}
-            >
-              <input
-                className="mx-input"
-                style={{ width: 70 }}
-                value={c.value}
-                placeholder="a"
-                title="Värde (sparas)"
-                onChange={(e) => onUpdateChoice(i, { value: e.target.value })}
-              />
-              <input
-                className="mx-input"
-                style={{ flex: 1, minWidth: 180 }}
-                value={c.label}
-                placeholder="Svarstext som besökaren ser"
-                onChange={(e) => onUpdateChoice(i, { label: e.target.value })}
-              />
-              {showScoring &&
-                bucketColumns.map((b) => (
-                  <label key={b} className="mx-flex mx-items-c mx-gap-1">
-                    <span className="mx-mono mx-t-xs mx-muted mx-t-up">{b}</span>
+        <div style={{ overflowX: 'auto' }}>
+          <div className="mx-choices-grid" style={{ gridTemplateColumns: `28px 84px minmax(180px, 1fr)${showScoring ? bucketColumns.map(() => ' 72px').join('') : ''} 34px` }}>
+            <span />
+            <span className="mx-choices-th">Värde</span>
+            <span className="mx-choices-th">Svarstext som besökaren ser</span>
+            {showScoring &&
+              bucketColumns.map((b) => (
+                <span key={b} className="mx-choices-th" style={{ textAlign: 'right' }} title={`Poäng för profilen ${b}`}>
+                  {b}
+                </span>
+              ))}
+            <span />
+            {choices.map((c, i) => (
+              <div key={i} style={{ display: 'contents' }}>
+                <span className="mx-choices-num">{i + 1}</span>
+                <input
+                  className="mx-input"
+                  value={c.value}
+                  placeholder="a"
+                  aria-label={`Värde för alternativ ${i + 1}`}
+                  title="Värde (sparas)"
+                  onChange={(e) => onUpdateChoice(i, { value: e.target.value })}
+                />
+                <input
+                  className="mx-input"
+                  value={c.label}
+                  placeholder="Svarstext"
+                  aria-label={`Svarstext för alternativ ${i + 1}`}
+                  onChange={(e) => onUpdateChoice(i, { label: e.target.value })}
+                />
+                {showScoring &&
+                  bucketColumns.map((b) => (
                     <input
+                      key={b}
                       type="number"
                       className="mx-input"
-                      style={{ width: 56, textAlign: 'right' }}
+                      style={{ textAlign: 'right' }}
+                      aria-label={`Poäng ${b} för alternativ ${i + 1}`}
                       value={c.buckets[b] ?? 0}
                       onChange={(e) => onUpdateScore(i, b, Number(e.target.value))}
                     />
-                  </label>
-                ))}
-              <button
-                type="button"
-                className="mx-btn mx-sm"
-                onClick={() => onRemoveChoice(i)}
-                title="Ta bort alternativ"
-                style={{ color: '#4b2718' }}
-              >
-                <Icon name="trash" size={11} />
-              </button>
-            </div>
-          ))}
+                  ))}
+                <button
+                  type="button"
+                  className="mx-btn mx-sm"
+                  onClick={() => onRemoveChoice(i)}
+                  title="Ta bort alternativ"
+                  aria-label={`Ta bort alternativ ${i + 1}`}
+                  style={{ color: 'var(--movexum-morkorange)', padding: '4px 8px' }}
+                >
+                  <Icon name="trash" size={11} />
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

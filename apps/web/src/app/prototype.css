@@ -3155,3 +3155,180 @@ html.dark .mx-tab-badge {
   box-shadow: var(--mx-sh-1);
 }
 .mx-chat-closing .mx-qchoices { margin-top: 0; }
+
+/* ============================================================
+   Startupkompassen — modul-editorn (/inflode/admin/modules/<slug>)
+   Tydliga sektioner, läsbara etiketter, hopfällbara frågor.
+   ============================================================ */
+
+.mx-modedit .mx-label {
+  font-family: var(--mx-ui);
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--mx-ink);
+  font-weight: 600;
+  margin-bottom: 0;
+}
+.mx-modedit .mx-label .mx-muted { font-weight: 400; line-height: 1.45; }
+.mx-modedit .mx-input,
+.mx-modedit .mx-textarea,
+.mx-modedit select.mx-input { border-color: var(--mx-line-strong); }
+
+.mx-modsec {
+  border: 1px solid var(--mx-line-strong);
+  border-radius: var(--mx-r-md);
+  background: var(--mx-paper);
+  overflow: hidden;
+}
+.mx-modsec-head {
+  padding: 12px 16px;
+  background: var(--mx-paper-3);
+  border-bottom: 1px solid var(--mx-line-strong);
+}
+.mx-modsec-title {
+  font-family: var(--mx-display);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--mx-ink);
+  margin: 0;
+}
+.mx-modsec-desc {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--mx-muted);
+}
+.mx-modsec-body { padding: 16px; display: grid; gap: 18px; }
+
+.mx-modedit-table { width: 100%; border-collapse: collapse; }
+.mx-modedit-table td { padding: 10px 12px 10px 0; vertical-align: top; }
+.mx-modedit-table tr + tr td { border-top: 1px solid var(--mx-line); }
+
+/* Hopfällbart kort: fråga / resultatprofil */
+.mx-qcard {
+  border: 1px solid var(--mx-line-strong);
+  border-radius: 12px;
+  background: var(--mx-paper);
+}
+.mx-qcard.is-open { border-color: var(--mx-ink-3); box-shadow: var(--mx-sh-1); }
+.mx-qcard-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px 6px 6px; }
+.mx-qcard-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--mx-ink);
+  text-align: left;
+  cursor: pointer;
+}
+.mx-qcard-toggle:hover { background: var(--mx-paper-2); }
+.mx-qcard-toggle:focus-visible { outline: 2px solid var(--mx-purple); outline-offset: 1px; }
+.mx-qcard-num {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--mx-paper-3);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.mx-qcard.is-open .mx-qcard-num { background: var(--mx-ink); color: var(--mx-paper); }
+.mx-qcard-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mx-qcard-body {
+  padding: 16px;
+  border-top: 1px solid var(--mx-line-strong);
+  display: grid;
+  gap: 16px;
+}
+.mx-qcard-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--mx-line);
+}
+
+/* Svarsalternativ som tabell */
+.mx-choices {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--mx-paper-2);
+  border: 1px solid var(--mx-line);
+}
+.mx-choices-title { font-size: 13px; font-weight: 600; color: var(--mx-ink); }
+.mx-choices-grid { display: grid; gap: 6px 8px; align-items: center; min-width: min-content; }
+.mx-choices-th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--mx-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mx-choices-num {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mx-muted);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* "Sparat"-rutan */
+.mx-savetoast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(24px + var(--mx-bnav-total, 0px));
+  transform: translateX(-50%);
+  z-index: 80;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 10px 16px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--movexum-pastell-gron);
+  color: var(--movexum-morkgron);
+  border: 1px solid var(--movexum-gron);
+  box-shadow: var(--mx-sh-3);
+  animation: mx-savetoast-in .18s ease-out;
+}
+.mx-savetoast.is-error {
+  background: var(--movexum-pastell-orange);
+  color: var(--movexum-morkorange);
+  border-color: var(--movexum-orange);
+}
+.mx-savetoast-close {
+  display: inline-flex;
+  padding: 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+@keyframes mx-savetoast-in {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}

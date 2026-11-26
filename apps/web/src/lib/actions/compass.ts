@@ -683,10 +683,17 @@ function parseSaveIntent(v: unknown): ModuleSaveIntent {
 
 /**
  * Sparar modulformuläret (alla steg postas i ETT anrop, § 23.7) och
- * returnerar ett kvitto (`ok` + resultat eller fel) som editorn visar som
- * banner — användaren får alltid besked, och editorn monteras inte om.
+ * RETURNERAR utfallet — ingen redirect. Editorn står kvar på samma steg och
+ * visar en "Sparat"-ruta. (Tidigare redirectade actionen till `?ok=`, vilket
+ * monterade om editorn och kastade användaren tillbaka till steg 1.)
+ * Behörighets-/indatafel kastas som förut; fel i själva sparningen
+ * returneras med sitt PII-fria meddelande.
  */
-export async function updateModuleAction(formData: FormData) {
+export type ModuleSaveResult =
+  | { ok: true; result: 'saved' | 'published' | 'unpublished' }
+  | { ok: false; error: string };
+
+export async function updateModuleAction(formData: FormData): Promise<ModuleSaveResult> {
   const user = await requireUser();
   if (!hasRole(user.roles, [...MANAGE_ROLES])) {
     throw new Error('Forbidden');
@@ -710,16 +717,10 @@ export async function updateModuleAction(formData: FormData) {
   revalidatePath('/inflode/admin/modules');
   revalidatePath(`/inflode/admin/modules/${existing.slug}`);
 
-  // Returnerar kvittot i stället för att redirecta: en redirect till
-  // `?ok=…` byter sidans segmentnyckel och monterar om hela editorn, så
-  // steget hoppade tillbaka till "Grunder" och osparade frågor försvann.
-  if (errorMessage) return { ok: false as const, error: errorMessage.slice(0, 300) };
+  if (errorMessage) return { ok: false, error: errorMessage.slice(0, 300) };
   return {
-    ok: true as const,
-    result: (intent === 'publish' ? 'published' : intent === 'unpublish' ? 'unpublished' : 'saved') as
-      | 'saved'
-      | 'published'
-      | 'unpublished'
+    ok: true,
+    result: intent === 'publish' ? 'published' : intent === 'unpublish' ? 'unpublished' : 'saved'
   };
 }
 
@@ -1312,7 +1313,7 @@ export async function updateQuestionAction(formData: FormData) {
       c.collection('compass_questions').update(id, {
         key,
         prompt,
-        help_text: helpText,
+        help_text: helpText || undefined,
         input_type: inputType,
         required,
         choices
