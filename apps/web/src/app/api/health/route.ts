@@ -5,6 +5,7 @@ import { probePocketBase, probeSummary } from '@/lib/pb-health';
 import { resolveSender, senderAddress } from '@/lib/mail-sender';
 import { isEmailConfigured, resendKeyLooksValid } from '@/lib/email';
 import { describeSuperuserConfig } from '@/lib/integrations/credentials';
+import { resolveSpeechProviders } from '@/lib/ai/voice-transcription';
 
 // Driftdiagnos för web-appen (publik, undantagen auth-redirect + force-https i
 // middleware). Svarar vilken PocketBase-adress servern resolvat för sin miljö
@@ -55,6 +56,17 @@ export async function GET(): Promise<NextResponse> {
       // Auth-gaten mot PocketBase (§ 21.8): `true` = web-appen skickar headern.
       // PB kräver den först när samma värde även satts på PB-resursen.
       pb_auth_gate: { web_secret_set: isPbAuthGateConfigured() },
+      // Tal-till-text (§ 31.2/§ 34): vilka modeller röstinmatning och
+      // mötesläget provar, i ordning. Bara leverantör, modell och språkhint
+      // — aldrig nycklar eller adresser. Tom lista = MISTRAL_API_KEY saknas.
+      speech: {
+        configured: resolveSpeechProviders(process.env).length > 0,
+        candidates: resolveSpeechProviders(process.env).map((p) => ({
+          provider: p.label,
+          model: p.model,
+          language: p.language || 'auto'
+        }))
+      },
       checked_at: new Date().toISOString()
     },
     { status: ok ? 200 : 503, headers: { 'cache-control': 'no-store' } }

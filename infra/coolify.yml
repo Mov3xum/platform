@@ -79,17 +79,22 @@ services:
       MOVEXUM_ALLOW_INSECURE_COOKIES: ${MOVEXUM_ALLOW_INSECURE_COOKIES:-}
       MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
       # Tal-till-text (CLAUDE.md § 31.2/§ 34). Alla valfria — utan dem körs
-      # Voxtral (voxtral-mini-latest) med autodetekt när modellen avvisar
-      # språkhintet `sv`. MOVEXUM_STT_BASE_URL pekar en självhostad,
-      # OpenAI-kompatibel EU-endpoint med svensktränad modell (KB-Whisper) som
-      # då går först; Voxtral blir fallback. Diarisering är AV tills
-      # MOVEXUM_MEETING_DIARIZATION=1 (maintainer-beslut, DPIA § 6).
+      # Voxtral 3 (voxtral-small-transcribe-3, svenska stöds) med äldre
+      # modeller som reserv. LÄMNA MISTRAL_VOICE_MODEL TOM om det inte finns
+      # ett skäl: ett värde här provas FÖRE standardlistan.
+      # MOVEXUM_STT_BASE_URL pekar en OpenAI-kompatibel EU-endpoint med
+      # svensktränad modell (KB-Whisper — självhostad eller
+      # https://api.berget.ai) som då går först; Voxtral blir reserv.
+      # MOVEXUM_STT_USD_PER_MINUTE = dess pris för kostnadsloggen. Diarisering
+      # är AV tills MOVEXUM_MEETING_DIARIZATION=1 (maintainer-beslut, DPIA § 6).
+      # Kontroll: /api/health → speech.candidates.
       MISTRAL_VOICE_MODEL: ${MISTRAL_VOICE_MODEL:-}
       MISTRAL_VOICE_LANGUAGE: ${MISTRAL_VOICE_LANGUAGE:-}
       MOVEXUM_STT_BASE_URL: ${MOVEXUM_STT_BASE_URL:-}
       MOVEXUM_STT_API_KEY: ${MOVEXUM_STT_API_KEY:-}
       MOVEXUM_STT_MODEL: ${MOVEXUM_STT_MODEL:-}
       MOVEXUM_STT_LANGUAGE: ${MOVEXUM_STT_LANGUAGE:-}
+      MOVEXUM_STT_USD_PER_MINUTE: ${MOVEXUM_STT_USD_PER_MINUTE:-}
       MOVEXUM_MEETING_DIARIZATION: ${MOVEXUM_MEETING_DIARIZATION:-}
       # E-post via Resend (CLAUDE.md § 53.5). Utan RESEND_API_KEY skickas inga
       # inbjudningar/enkäter/notiser. Avsändaren MÅSTE ligga på en domän som är

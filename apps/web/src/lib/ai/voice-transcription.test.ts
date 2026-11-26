@@ -3,26 +3,63 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_SOVEREIGN_STT_MODEL,
   DEFAULT_VOICE_MODEL,
+  DEFAULT_VOICE_MODELS,
   LanguageHintMemory,
   MAX_CONTEXT_BIAS_TERMS,
   MEETING_CONTEXT_VOCABULARY,
   addUsage,
   buildContextBias,
+  estimateSpeechCostUsd,
+  extractApiErrorMessage,
   isDiarizationEnabled,
+  isInvalidModelError,
+  mentionsLanguage,
   normalizeLanguageHint,
   parseTranscriptionPayload,
   parseUnsupportedLanguage,
   resolveSpeechProviders,
+  resolveVoiceModels,
   transcriptionsUrlFor,
   turnsFromSegments
 } from './voice-transcription';
 
 // Låser tal-till-text-logiken (CLAUDE.md § 31/§ 34): providerresolvning,
-// språkhint-hantering (incidenten 2026-09-11) och tolkning av API-svar.
+// språkhint-hantering (incidenterna 2026-09-11 och 2026-11-26) och tolkning
+// av API-svar. Hela anropskedjan testas i `voice-ladder.test.ts`.
 
 test('transcriptionsUrlFor trimmar trailing slash och lägger rätt path', () => {
   assert.equal(transcriptionsUrlFor('https://api.mistral.ai'), 'https://api.mistral.ai/v1/audio/transcriptions');
   assert.equal(transcriptionsUrlFor('https://stt.eu.local//'), 'https://stt.eu.local/v1/audio/transcriptions');
+  // OpenAI-SDK-konventionen: basen slutar redan på /v1 (t.ex. Berget AI).
+  assert.equal(transcriptionsUrlFor('https://api.berget.ai/v1'), 'https://api.berget.ai/v1/audio/transcriptions');
+  assert.equal(transcriptionsUrlFor('https://api.berget.ai/v1/'), 'https://api.berget.ai/v1/audio/transcriptions');
+});
+
+test('standardmodellen är Voxtral 3 (svenska stöds) — den gamla aliasen är bara sista reserv', () => {
+  assert.equal(DEFAULT_VOICE_MODEL, 'voxtral-small-transcribe-3');
+  assert.deepEqual(DEFAULT_VOICE_MODELS, [
+    'voxtral-small-transcribe-3',
+    'voxtral-mini-transcribe-3',
+    'voxtral-mini-latest'
+  ]);
+});
+
+test('resolveVoiceModels: env-modeller först, standardlistan som reserv, inga dubbletter', () => {
+  assert.deepEqual(resolveVoiceModels(undefined), [...DEFAULT_VOICE_MODELS]);
+  assert.deepEqual(resolveVoiceModels('   '), [...DEFAULT_VOICE_MODELS]);
+  assert.deepEqual(resolveVoiceModels('voxtral-mini-transcribe-3'), [
+    'voxtral-mini-transcribe-3',
+    'voxtral-small-transcribe-3',
+    'voxtral-mini-latest'
+  ]);
+  assert.deepEqual(resolveVoiceModels('egen-modell, voxtral-mini-latest').slice(0, 2), [
+    'egen-modell',
+    'voxtral-mini-latest'
+  ]);
+  // Tecken som inte hör hemma i ett modellnamn släpps — standardlistan finns
+  // alltid kvar. (Ett okänt men välformat namn provas och hoppas över som
+  // "Invalid model", se voice-ladder.test.ts.)
+  assert.deepEqual(resolveVoiceModels('"!!!", <script>'), [...DEFAULT_VOICE_MODELS]);
 });
 
 test('normalizeLanguageHint: auto/tomt/skräp ⇒ autodetekt, ISO-kod ⇒ gemener', () => {
@@ -41,9 +78,14 @@ test('resolveSpeechProviders: utan nycklar finns inga providers', () => {
   assert.deepEqual(resolveSpeechProviders({}), []);
 });
 
-test('resolveSpeechProviders: default = exakt EN provider (Voxtral, EU) med sv-hint', () => {
+test('resolveSpeechProviders: default = bara Voxtral (EU), en kandidat per modell, med sv-hint', () => {
   const providers = resolveSpeechProviders({ MISTRAL_API_KEY: 'k1' });
-  assert.equal(providers.length, 1);
+  assert.equal(providers.length, DEFAULT_VOICE_MODELS.length);
+  assert.ok(providers.every((p) => p.label === 'mistral' && p.language === 'sv'));
+  assert.deepEqual(
+    providers.map((p) => p.model),
+    [...DEFAULT_VOICE_MODELS]
+  );
   assert.equal(providers[0].label, 'mistral');
   assert.equal(providers[0].kind, 'mistral');
   assert.equal(providers[0].url, 'https://api.mistral.ai/v1/audio/transcriptions');
@@ -77,7 +119,7 @@ test('resolveSpeechProviders: självhostad EU-provider går FÖRST, Voxtral blir
     MISTRAL_API_KEY: 'k1',
     MOVEXUM_STT_BASE_URL: 'https://stt.upcloud.local'
   });
-  assert.equal(providers.length, 2);
+  assert.equal(providers.length, 1 + DEFAULT_VOICE_MODELS.length);
   assert.equal(providers[0].label, 'sovereign');
   assert.equal(providers[0].kind, 'openai');
   assert.equal(providers[0].url, 'https://stt.upcloud.local/v1/audio/transcriptions');
@@ -111,6 +153,62 @@ test('parseUnsupportedLanguage tolkar Mistrals faktiska 400-svar (incidenten)', 
   assert.deepEqual(info.supported, [
     'ar', 'en', 'de', 'es', 'fr', 'hi', 'it', 'nl', 'pt', 'zh', 'ru', 'ko', 'ja'
   ]);
+});
+
+test('parseUnsupportedLanguage tolkar formuleringen från 2026-11-26 (skärmbilden)', () => {
+  const body =
+    '{"object":"error","message":"Model \'voxtral-mini-transcribe-2602\' does not support language \'sv\', ' +
+    "should be one of: ['ar', 'en', 'de', 'es', 'fr', 'hi', 'it', 'nl', 'pt', 'zh', 'ru', 'ko', 'ja']\"," +
+    '"type":"invalid_request_error","param":null,"code":null}';
+  const info = parseUnsupportedLanguage(body);
+  assert.ok(info);
+  assert.equal(info.language, 'sv');
+  assert.equal(info.supported.length, 13);
+  assert.ok(!info.supported.includes('sv'));
+  // Felet nämner en modell men är INTE ett "modellen finns inte"-fel.
+  assert.equal(isInvalidModelError(body), false);
+});
+
+test('parseUnsupportedLanguage: övriga kända formuleringar, även utan språkkod', () => {
+  assert.equal(parseUnsupportedLanguage("language 'sv' is not supported")?.language, 'sv');
+  assert.equal(parseUnsupportedLanguage('This model doesn\'t support language: sv')?.language, 'sv');
+  // Voxtral 3 (422): namnger inte koden.
+  assert.deepEqual(
+    parseUnsupportedLanguage('{"message":{"detail":[{"msg":"Invalid language alpha2 code"}]}}'),
+    { language: '', supported: [] }
+  );
+  assert.deepEqual(parseUnsupportedLanguage('Language not supported'), { language: '', supported: [] });
+});
+
+test('mentionsLanguage: svag signal — räcker för att släppa hintet i ett anrop', () => {
+  assert.equal(mentionsLanguage('{"loc":["body","language"],"msg":"bad value"}'), true);
+  assert.equal(mentionsLanguage('Unsupported audio format'), false);
+  assert.equal(mentionsLanguage(''), false);
+});
+
+test('isInvalidModelError: Mistral ("Invalid model: x") och OpenAI-kompatibla servrar', () => {
+  assert.equal(isInvalidModelError('{"object":"error","message":"Invalid model: voxtral-small-transcribe-3"}'), true);
+  assert.equal(isInvalidModelError('{"error":{"message":"The model `kb-whisper` does not exist","code":"model_not_found"}}'), true);
+  assert.equal(isInvalidModelError('Model KBLab/kb-whisper-large not found'), true);
+  assert.equal(isInvalidModelError('{"message":"Unsupported audio format"}'), false);
+  assert.equal(isInvalidModelError('Word-level segments are not enabled for this model'), false);
+  assert.equal(isInvalidModelError(''), false);
+});
+
+test('extractApiErrorMessage: läsbar text ur JSON-fel — aldrig rå JSON till användaren', () => {
+  assert.equal(
+    extractApiErrorMessage('{"object":"error","message":"Invalid model: x","type":"invalid_model"}'),
+    'Invalid model: x'
+  );
+  assert.equal(
+    extractApiErrorMessage('{"object":"error","message":{"detail":[{"loc":["body","language"],"msg":"Invalid language alpha2 code"}]}}'),
+    'Invalid language alpha2 code'
+  );
+  assert.equal(extractApiErrorMessage('{"error":{"message":"No such model","type":"x"}}'), 'No such model');
+  assert.equal(extractApiErrorMessage('{"detail":"Not Found"}'), 'Not Found');
+  assert.equal(extractApiErrorMessage('  Bad\n gateway '), 'Bad gateway');
+  assert.equal(extractApiErrorMessage(''), '');
+  assert.equal(extractApiErrorMessage('x'.repeat(500)).length, 221);
 });
 
 test('parseUnsupportedLanguage: tolerant mot citattecken och saknad lista', () => {
@@ -220,6 +318,51 @@ test('parseTranscriptionPayload läser text, språk, usage och turer; usage sakn
 
   const empty = parseTranscriptionPayload(null, provider);
   assert.equal(empty.text, '');
+});
+
+test('parseTranscriptionPayload: Voxtral 3 redovisar ljudtokens för sig — de räknas in i ingången', () => {
+  // Exempelsvaret ur docs.mistral.ai (File transcription), 34 s ljud.
+  const result = parseTranscriptionPayload(
+    {
+      model: 'voxtral-mini-transcribe-3',
+      text: 'Thanks for calling.',
+      language: null,
+      segments: [],
+      usage: {
+        prompt_audio_seconds: 34,
+        prompt_tokens: 3,
+        total_tokens: 879,
+        completion_tokens: 126,
+        prompt_tokens_details: { cached_tokens: 1, audio_tokens: 750 }
+      }
+    },
+    { label: 'mistral', model: 'voxtral-small-transcribe-3' }
+  );
+  assert.deepEqual(result.usage, { tokensIn: 753, tokensOut: 126 });
+  assert.equal(result.audioSeconds, 34);
+  assert.equal(result.language, undefined);
+  // Whisper-servrar (verbose_json) rapporterar längden som `duration`.
+  const whisper = parseTranscriptionPayload(
+    { text: 'hej', duration: 12.5 },
+    { label: 'sovereign', model: 'KBLab/kb-whisper-large' }
+  );
+  assert.equal(whisper.audioSeconds, 12.5);
+});
+
+test('estimateSpeechCostUsd: per ljudminut (Mistrals listpris), null när priset inte är känt', () => {
+  const close = (a: number | null, b: number) => assert.ok(a !== null && Math.abs(a - b) < 1e-9, `${a} ≠ ${b}`);
+  close(estimateSpeechCostUsd('voxtral-small-transcribe-3', 'mistral', 60), 0.004);
+  close(estimateSpeechCostUsd('voxtral-mini-transcribe-3-0', 'mistral', 3600), 0.21);
+  close(estimateSpeechCostUsd('voxtral-mini-transcribe-2602', 'mistral', 90), 0.00525);
+  assert.equal(estimateSpeechCostUsd('voxtral-small-transcribe-3', 'mistral', undefined), null);
+  assert.equal(estimateSpeechCostUsd('voxtral-small-transcribe-3', 'mistral', 0), null);
+  // Egen endpoint: priset anges av operatören (självhostat = 0); annars okänt.
+  assert.equal(estimateSpeechCostUsd('KBLab/kb-whisper-large', 'sovereign', 60), null);
+  close(
+    estimateSpeechCostUsd('KBLab/kb-whisper-large', 'sovereign', 600, { MOVEXUM_STT_USD_PER_MINUTE: '0,0033' }),
+    0.033
+  );
+  close(estimateSpeechCostUsd('KBLab/kb-whisper-large', 'sovereign', 600, { MOVEXUM_STT_USD_PER_MINUTE: '0' }), 0);
 });
 
 test('isDiarizationEnabled: AV som default, på för 1/true/on/yes', () => {

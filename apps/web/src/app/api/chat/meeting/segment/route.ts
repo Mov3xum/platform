@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser, getServerPb } from '@/lib/auth.server';
 import { hasRole } from '@/lib/rbac';
-import { transcribeSpeech, VoiceError, voiceModel } from '@/lib/ai/voice';
+import { speechCostUsd, transcribeSpeech, VoiceError, voiceModel } from '@/lib/ai/voice';
 import {
   MEETING_CONTEXT_VOCABULARY,
   buildContextBias,
@@ -30,7 +30,7 @@ import type { Role } from '@platform/shared';
 
 /**
  * Mötesläge (CLAUDE.md § 34): tar emot ETT inspelat mötessegment (~90 s),
- * transkriberar det med Voxtral (Mistral, EU) och appendar TEXTEN på det
+ * transkriberar det med Voxtral 3 (Mistral, EU) och appendar TEXTEN på det
  * pågående mötets `meeting_transcripts`-rad. Ljudet är transient — det lagras
  * aldrig, varken här eller hos Mistral (§ 31-principen oförändrad).
  *
@@ -176,7 +176,9 @@ export async function POST(request: Request): Promise<Response> {
         surface: 'dashboard_chat',
         model,
         tokensIn: result.usage.tokensIn,
-        tokensOut: result.usage.tokensOut
+        tokensOut: result.usage.tokensOut,
+        // Debiteras per ljudminut, inte per token (§ 31.4).
+        costUsd: speechCostUsd(result, measured?.seconds)
       });
     } catch (err) {
       if (err instanceof VoiceError && err.status === 422) {
@@ -191,7 +193,8 @@ export async function POST(request: Request): Promise<Response> {
             surface: 'dashboard_chat',
             model: err.model || model,
             tokensIn: err.usage.tokensIn,
-            tokensOut: err.usage.tokensOut
+            tokensOut: err.usage.tokensOut,
+            costUsd: speechCostUsd(err, measured?.seconds)
           });
         }
         text = '';

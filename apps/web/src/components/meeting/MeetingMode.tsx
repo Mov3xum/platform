@@ -129,6 +129,9 @@ interface WakeLockSentinelLike {
   release: () => Promise<void>;
 }
 
+// Så många avsnitt (à högst ~2,9 MB WAV) hålls kvar i minnet för nya försök.
+const MAX_RETAINED_SEGMENTS = 24;
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -153,7 +156,14 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
   // fallerat segment bara "tomt transkript" utan förklaring).
   const [segmentError, setSegmentError] = useState<string | null>(null);
   const segmentErrorRef = useRef<string | null>(null);
-  const failedCountRef = useRef(0);
+  // Index för avsnitt som just nu saknar transkript (uppladdning/transkribering föll).
+  const failedIdxRef = useRef<Set<number>>(new Set());
+  // Ljudet för avsnitt som inte kunde transkriberas hålls kvar i FLIKENS minne
+  // (aldrig på disk, aldrig på servern) så de kan försökas igen när tjänsten
+  // svarar — ett tillfälligt avbrott hos AI-tjänsten ska inte kosta en del av
+  // mötet. Töms när mötet avslutas, kastas eller startas om.
+  const retainedRef = useRef<Map<number, { blob: Blob; mime: string }>>(new Map());
+  const retryingRef = useRef(false);
   // Segment som kom tillbaka TOMMA: tysta (ingen ljudnivå) respektive med ljud
   // men utan tolkbart tal — avgör vilken förklaring granskningen ska ge när
   // transkriptet blev tomt.
@@ -363,9 +373,9 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     mime: string,
     index: number,
     attempt = 0
-  ): Promise<void> {
+  ): Promise<boolean> {
     const meetingId = meetingIdRef.current;
-    if (!meetingId || discardedRef.current) return;
+    if (!meetingId || discardedRef.current) return false;
     try {
       const form = new FormData();
       form.append('meetingId', meetingId);
@@ -400,21 +410,59 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
         warning: !text && !data.silent ? data.warning || undefined : undefined,
         language: text && data.language ? data.language : undefined
       });
+      retainedRef.current.delete(index);
+      if (failedIdxRef.current.delete(index) && failedIdxRef.current.size === 0) {
+        segmentErrorRef.current = null;
+        setSegmentError(null);
+      }
+      return true;
     } catch (err) {
       if (attempt === 0 && !discardedRef.current) {
         await sleep(1500);
         return uploadSegment(blob, mime, index, 1);
       }
-      // Segmentet är förlorat — servern markerar luckan i transkriptet
-      // (saknat index ⇒ lucka-markör), så coachen ser aldrig ett tyst hål.
-      // ORSAKEN visas för användaren (Voxtral-/konfigurations-/behörighetsfel
-      // ska aldrig sväljas till ett oförklarat tomt transkript).
+      // Avsnittet gick inte att transkribera just nu. Ljudet hålls kvar i
+      // minnet och försöks igen (`retryRetained`); går det inte heller då
+      // markerar servern luckan i transkriptet (saknat index ⇒ lucka-markör),
+      // så coachen ser aldrig ett tyst hål. ORSAKEN visas för användaren
+      // (tjänste-/konfigurations-/behörighetsfel ska aldrig sväljas till ett
+      // oförklarat tomt transkript).
       const message =
         err instanceof Error && err.message ? err.message : 'Uppladdningen misslyckades.';
       segmentErrorRef.current = message;
-      failedCountRef.current += 1;
+      failedIdxRef.current.add(index);
+      if (
+        blob &&
+        !retainedRef.current.has(index) &&
+        retainedRef.current.size < MAX_RETAINED_SEGMENTS
+      ) {
+        retainedRef.current.set(index, { blob, mime });
+      }
       setSegmentError(message);
       updateSegment(index, { status: 'failed' });
+      return false;
+    }
+  }
+
+  /**
+   * Försöker igen med de avsnitt vars ljud hålls kvar (äldst först). Avbryts
+   * vid första misslyckandet — svarar tjänsten fortfarande inte är det ingen
+   * idé att skicka resten. Körs i uppladdningskön, aldrig parallellt.
+   */
+  async function retryRetained(): Promise<void> {
+    if (retryingRef.current || discardedRef.current) return;
+    retryingRef.current = true;
+    try {
+      const indexes = Array.from(retainedRef.current.keys()).sort((a, b) => a - b);
+      for (const index of indexes) {
+        const kept = retainedRef.current.get(index);
+        if (!kept || discardedRef.current) continue;
+        updateSegment(index, { status: 'pending' });
+        const ok = await uploadSegment(kept.blob, kept.mime, index, 1);
+        if (!ok) break;
+      }
+    } finally {
+      retryingRef.current = false;
     }
   }
 
@@ -428,13 +476,17 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     setSegments((prev) => [...prev, { index: segment.index, text: '', status: 'pending' }]);
     uploadChainRef.current = uploadChainRef.current.then(async () => {
       if (isEffectivelySilent(segment.level)) {
-        return uploadSegment(null, VOICE_WAV_MIME, segment.index);
+        await uploadSegment(null, VOICE_WAV_MIME, segment.index);
+        return;
       }
       const converted = await renderSamplesToWavDetailed(segment.samples, segment.sampleRate);
       if (isEffectivelySilent(converted.level)) {
-        return uploadSegment(null, VOICE_WAV_MIME, segment.index);
+        await uploadSegment(null, VOICE_WAV_MIME, segment.index);
+        return;
       }
-      return uploadSegment(converted.wav, VOICE_WAV_MIME, segment.index);
+      const ok = await uploadSegment(converted.wav, VOICE_WAV_MIME, segment.index);
+      // Tjänsten svarar igen — ta igen avsnitt som föll bort tidigare.
+      if (ok && retainedRef.current.size > 0) await retryRetained();
     });
   }
 
@@ -502,7 +554,8 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     recordingRef.current = true;
     elapsedRef.current = 0;
     segmentErrorRef.current = null;
-    failedCountRef.current = 0;
+    failedIdxRef.current.clear();
+    retainedRef.current.clear();
     silentCountRef.current = 0;
     emptyWithAudioRef.current = 0;
     micSilentSinceRef.current = null;
@@ -538,6 +591,10 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     releaseWakeLock();
     // Vänta in transkriberingskön så granskningen visar hela mötet.
     await uploadChainRef.current;
+    // Sista chansen för avsnitt som föll bort: efter att mötet avslutats tar
+    // servern inte emot fler avsnitt, och ljudet släpps här.
+    if (retainedRef.current.size > 0) await retryRetained();
+    retainedRef.current.clear();
     const meetingId = meetingIdRef.current;
     if (!meetingId) {
       setPhase('setup');
@@ -554,10 +611,11 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     if (ended.startupId) setStartupId((cur) => cur || ended.startupId);
     // Föll segment bort ska granskningen förklara VARFÖR — särskilt när hela
     // transkriptet blev tomt (ett kort möte har bara ett enda segment).
-    if (failedCountRef.current > 0) {
+    const failedCount = failedIdxRef.current.size;
+    if (failedCount > 0) {
       const reason = segmentErrorRef.current;
       setError(
-        `${failedCountRef.current} segment kunde inte transkriberas` +
+        `${failedCount} segment kunde inte transkriberas` +
           (reason ? `: ${reason}` : '.') +
           (ended.transcript.trim()
             ? ' De markeras som luckor i transkriptet.'
@@ -609,6 +667,7 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
     if (tickRef.current) clearInterval(tickRef.current);
     stopCapture();
     releaseWakeLock();
+    retainedRef.current.clear();
     const meetingId = meetingIdRef.current;
     if (meetingId) await discardMeetingAction(meetingId);
     onClose();
@@ -975,7 +1034,8 @@ export default function MeetingMode({ initial, onClose, onSendToChat }: Props) {
                 {failedSegments.length > 0 && (
                   <p className="text-[12px] text-movexum-morkorange">
                     {failedSegments.length} segment kunde inte transkriberas
-                    {segmentError ? ` (${segmentError})` : ''} — de markeras som luckor i
+                    {segmentError ? ` (${segmentError})` : ''}. Ljudet hålls kvar och
+                    försöks igen automatiskt; det som ändå inte går markeras som luckor i
                     transkriptet.
                   </p>
                 )}
