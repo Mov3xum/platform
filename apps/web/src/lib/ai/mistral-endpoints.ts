@@ -56,6 +56,33 @@ export function primaryBase(env: MistralEnv): string {
   return raw ? raw : DEFAULT_MISTRAL_BASE;
 }
 
+export type InferenceRegion = 'global' | 'eu' | 'us' | 'custom';
+
+/**
+ * Vilken av Mistrals endpoints bas-URL:en pekar på (docs.mistral.ai →
+ * Regional inference, läst 2026-11-26):
+ *   - `api.mistral.ai`    = GLOBAL: Mistral åtar sig ingen bestämd plats för
+ *                           inferensen.
+ *   - `api.eu.mistral.ai` = EU/EFTA-datacenter (10 % påslag; bara function
+ *                           calling som verktyg, inga Agents/Conversations/
+ *                           Batch/Files; modellutbudet varierar).
+ *   - `api.us.mistral.ai` = USA.
+ * Allt annat (självhostat, proxy) = custom. Visas i /api/health så att det
+ * går att se var anropen faktiskt går.
+ */
+export function inferenceRegion(base: string): InferenceRegion {
+  let host = '';
+  try {
+    host = new URL(trimBase(base)).hostname.toLowerCase();
+  } catch {
+    return 'custom';
+  }
+  if (host === 'api.mistral.ai') return 'global';
+  if (host === 'api.eu.mistral.ai') return 'eu';
+  if (host === 'api.us.mistral.ai') return 'us';
+  return 'custom';
+}
+
 /**
  * Ordnad lista av chat-completions-providers: primär först, sedan en valfri
  * EU-fallback. Tom när ingen API-nyckel finns (anroparen kastar samma

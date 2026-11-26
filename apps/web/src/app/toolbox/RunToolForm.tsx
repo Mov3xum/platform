@@ -61,7 +61,7 @@ export function RunToolForm({
     e.preventDefault();
     setError(null);
     if (visionMismatch) {
-      setError('Vald modell saknar stöd för bilder. Byt till Mistral Medium eller Pixtral Large.');
+      setError('Vald modell saknar stöd för bilder. Välj en modell som läser bilder.');
       return;
     }
 
@@ -190,7 +190,7 @@ export function RunToolForm({
           )}
           {visionMismatch && (
             <p className="mt-2 text-xs text-movexum-morkorange dark:text-movexum-pastell-orange">
-              Du har bifogat bilder. Välj Mistral Medium eller Pixtral Large.
+              Du har bifogat bilder. Välj en modell som läser bilder.
             </p>
           )}
         </div>

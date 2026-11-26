@@ -20,6 +20,7 @@ import {
   type ImpactUpdateAnalysisAIInput
 } from '@platform/shared';
 import { callMistralWithFallback, MistralError } from './mistral';
+import { QUALITY_MODEL_CHAIN } from './models';
 import { IMPACT_MOCK_MODEL, isImpactMockMode } from './impact-runtime';
 import { mockImpactFinalAnalysis, mockImpactMateriality, mockImpactSufficiency, mockImpactUpdateAnalysis } from '@platform/shared';
 
@@ -46,7 +47,7 @@ import { mockImpactFinalAnalysis, mockImpactMateriality, mockImpactSufficiency, 
 // människa granskar varje steg).
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const IMPACT_MODELS = ['mistral-large-latest', 'mistral-medium-latest'];
+export const IMPACT_MODELS: string[] = [...QUALITY_MODEL_CHAIN];
 const MAX_TOKENS = 8000;
 const TEMPERATURE = 0.2;
 /** Originalets steg-standarder: 240 s per försök, högst 2 omförsök vid kapacitet/utfall. */
@@ -189,7 +190,14 @@ async function runStep<T>(step: ImpactPromptStep, input: unknown, normalize: (ra
               { role: 'system', content: system },
               { role: 'user', content: user }
             ],
-            { temperature: TEMPERATURE, maxTokens: MAX_TOKENS, responseFormat: 'json_object' }
+            // Analysen är kvalitetskritisk och körs en gång per steg: högsta
+            // resonemangsnivån (Mistrals rekommendation för Large 4).
+            {
+              temperature: TEMPERATURE,
+              maxTokens: MAX_TOKENS,
+              responseFormat: 'json_object',
+              reasoningEffort: 'high'
+            }
           ),
         config.timeoutMs
       );

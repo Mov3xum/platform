@@ -21,7 +21,14 @@ import {
   WEB_SEARCH_OFF_HINT
 } from './guidance';
 import { routeChatModels } from './model-router';
-import { getModelMeta, isAllowedModel, modelSupportsVision } from './models';
+import {
+  FAST_MODEL_CHAIN,
+  MODEL_SMALL,
+  QUALITY_MODEL_CHAIN,
+  getModelMeta,
+  modelSupportsVision,
+  resolveSelectableModel
+} from './models';
 import { fetchWebContext as fetchEuWebSources, type WebFetchResult } from './web';
 import { withAttachedImages } from './chat-input';
 import { logAiUsage } from './usage';
@@ -45,14 +52,10 @@ import type {
 // en divergerande kopia av prompt-injection-skyddet vore en regression
 // (CLAUDE.md § 9.3, § 10).
 
-export const CHAT_FALLBACK_MODELS = [
-  'mistral-small-latest',
-  'mistral-medium-latest',
-  'mistral-large-latest'
-];
-// Vision-kapabla modeller när bilder bifogas (båda stödjer function calling).
-// Bara registrerade modeller (lib/ai/models.ts) — pris och etikett blir rätt.
-export const VISION_FALLBACK_MODELS = ['mistral-medium-latest', 'pixtral-large-latest'];
+export const CHAT_FALLBACK_MODELS: string[] = [...FAST_MODEL_CHAIN];
+// Bild-turer: båda modellerna i registret läser bilder och stödjer function
+// calling. Large 4 först (lib/ai/models.ts — pris och etikett blir rätt).
+export const VISION_FALLBACK_MODELS: string[] = [...QUALITY_MODEL_CHAIN];
 // Interaktiv staff-chatt: ett intent-flöde blir lätt search_records →
 // describe_collection → query → aggregate → svar — och kräver ibland ett par
 // självkorrigeringar (fel kollektion/fält först). Taket höjs därför rejält
@@ -299,7 +302,7 @@ export async function generateChatTitle(
   if (!clean) return null;
   try {
     const res = await callMistral(
-      'mistral-small-latest',
+      MODEL_SMALL,
       [
         { role: 'system', content: TITLE_SYSTEM_PROMPT },
         { role: 'user', content: clean.slice(0, 1000) }
@@ -310,7 +313,7 @@ export async function generateChatTitle(
       tenant: user.tenant,
       userId: user.id,
       surface: 'dashboard_chat',
-      model: 'mistral-small-latest',
+      model: MODEL_SMALL,
       tokensIn: res.usage.prompt_tokens,
       tokensOut: res.usage.completion_tokens
     });
@@ -420,11 +423,12 @@ export async function runStaffChatTurn(
 
   // Uttryckligt modellval: bara registrerade modeller (lib/ai/models.ts).
   // Bilder + vald modell utan vision → tydligt fel, aldrig tyst fallback (§ 9.9).
-  const preferredModel = isAllowedModel(opts.model) ? opts.model : undefined;
+  // Ett avvecklat id (sparat val från före 2026-11) tolkas som sin ersättare.
+  const preferredModel = resolveSelectableModel(opts.model);
   if (preferredModel && images.length > 0 && !modelSupportsVision(preferredModel)) {
     return {
       ok: false,
-      error: `${getModelMeta(preferredModel).label} stödjer inte bilder. Välj Mistral Medium eller Pixtral Large — eller "Auto" — för att skicka bilder.`
+      error: `${getModelMeta(preferredModel).label} stödjer inte bilder. Välj "Auto" eller en modell som läser bilder.`
     };
   }
 
@@ -436,10 +440,10 @@ export async function runStaffChatTurn(
     agentId: opts.agentId
   };
 
-  // Bild-turer kör MED verktyg: vision-kedjan (Mistral Medium → Pixtral
-  // Large) stödjer function calling, så "lägg in det här i årshjulet" med en
+  // Bild-turer kör MED verktyg: vision-kedjan (Mistral Large 4 → Small 4)
+  // stödjer function calling, så "lägg in det här i årshjulet" med en
   // skärmdump fungerar. (Tidigare kördes bildturer verktygslöst på en
-  // oregistrerad pixtral-12b — modellen kunde då varken läsa data eller agera.)
+  // oregistrerad bildmodell — modellen kunde då varken läsa data eller agera.)
   const fullTools = buildChatTools(collections, {
     actor,
     includeMemory: true,

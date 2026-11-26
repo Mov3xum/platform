@@ -6,6 +6,8 @@ import { resolveSender, senderAddress } from '@/lib/mail-sender';
 import { isEmailConfigured, resendKeyLooksValid } from '@/lib/email';
 import { describeSuperuserConfig } from '@/lib/integrations/credentials';
 import { resolveSpeechProviders } from '@/lib/ai/voice-transcription';
+import { AVAILABLE_MODELS, resolveApiModelIds, resolveReasoningEffort } from '@/lib/ai/models';
+import { inferenceRegion, primaryBase } from '@/lib/ai/mistral-endpoints';
 
 // Driftdiagnos för web-appen (publik, undantagen auth-redirect + force-https i
 // middleware). Svarar vilken PocketBase-adress servern resolvat för sin miljö
@@ -65,6 +67,18 @@ export async function GET(): Promise<NextResponse> {
           provider: p.label,
           model: p.model,
           language: p.language || 'auto'
+        }))
+      },
+      // AI-modeller (§ 9.9): vilken API-version varje modell körs som, med
+      // vilken resonemangsnivå, och vilken av Mistrals endpoints anropen går
+      // till (`global` = Mistral åtar sig ingen bestämd plats för inferensen;
+      // `eu` = api.eu.mistral.ai). Aldrig nycklar.
+      ai: {
+        endpoint_region: inferenceRegion(primaryBase(process.env)),
+        models: AVAILABLE_MODELS.map((m) => ({
+          id: m.id,
+          api_ids: resolveApiModelIds(m.id, process.env).apiIds,
+          reasoning_effort: resolveReasoningEffort(m.id, undefined, process.env) ?? null
         }))
       },
       checked_at: new Date().toISOString()

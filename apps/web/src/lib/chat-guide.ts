@@ -92,7 +92,7 @@ const GUIDE: ChatGuideSection[] = [
       {
         title: 'Välj AI-modell',
         description:
-          'Modellväljaren i chattrutan (⚡) låter dig välja Mistral Large, Medium, Small eller Pixtral för nästa svar. Auto väljer själv efter frågans komplexitet. Alla modeller körs hos Mistral (EU) och vilken modell som svarade visas under varje svar.',
+          'Modellväljaren i chattrutan (⚡) låter dig välja Mistral Large 4 eller Small 4 för nästa svar — båda läser bilder. Auto väljer själv efter frågans komplexitet. Alla modeller körs hos Mistral (EU) och vilken modell som svarade visas under varje svar.',
         examples: [
           'Jämför de tre mest kapitalintensiva bolagen och sammanställ en styrelserapport'
         ]

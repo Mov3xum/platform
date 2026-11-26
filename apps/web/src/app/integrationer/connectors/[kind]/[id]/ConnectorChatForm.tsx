@@ -49,11 +49,11 @@ export function ConnectorChatForm({
 
   const submit = () => {
     if (visionMismatch) {
-      setError('Vald modell saknar stöd för bilder. Byt till Mistral Medium eller Pixtral Large.');
+      setError('Vald modell saknar stöd för bilder. Välj en modell som läser bilder.');
       return;
     }
     if (builtinMismatch) {
-      setError('Connectors stöds bara av Mistral Large eller Medium.');
+      setError('Connectors stöds bara av Mistral Large.');
       return;
     }
     if (!text.trim() && files.length === 0) {
@@ -133,13 +133,13 @@ export function ConnectorChatForm({
 
       {visionMismatch && (
         <p className="text-xs text-movexum-morkorange dark:text-movexum-pastell-orange">
-          Du har bifogat bilder. Välj Mistral Medium eller Pixtral Large.
+          Du har bifogat bilder. Välj en modell som läser bilder.
         </p>
       )}
 
       {builtinMismatch && (
         <p className="text-xs text-movexum-morkorange dark:text-movexum-pastell-orange">
-          Vald modell stödjer inte connectors. Välj Mistral Large eller Medium.
+          Vald modell stödjer inte connectors. Välj Mistral Large.
         </p>
       )}
 

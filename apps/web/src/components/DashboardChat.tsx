@@ -17,7 +17,7 @@ import VoiceInputButton from '@/components/VoiceInputButton';
 import ChatHelpGuide from '@/components/ChatHelpGuide';
 import {
   AVAILABLE_MODELS,
-  isAllowedModel,
+  resolveSelectableModel,
   modelCostTier,
   modelSupportsVision
 } from '@/lib/ai/models';
@@ -723,7 +723,7 @@ export default function DashboardChat({
   const shownError = localError || error;
   // Bara registrerade modell-id:n räknas som ett val (t.ex. ett gammalt
   // localStorage-värde efter att registret ändrats → Auto).
-  const selectedModel = isAllowedModel(model) ? model : '';
+  const selectedModel = resolveSelectableModel(model) ?? '';
   const hasImageAttachment = attachments.some((a) => a.kind === 'image');
 
   function autoGrow() {
@@ -872,7 +872,7 @@ export default function DashboardChat({
     // avvisar också, § 9.9 — aldrig tyst fallback).
     if (hasImageAttachment && selectedModel && !modelSupportsVision(selectedModel)) {
       setLocalError(
-        `${modelLabel(selectedModel)} stödjer inte bilder. Välj Mistral Medium, Pixtral Large eller Auto.`
+        `${modelLabel(selectedModel)} stödjer inte bilder. Välj Auto eller en modell som läser bilder.`
       );
       return;
     }

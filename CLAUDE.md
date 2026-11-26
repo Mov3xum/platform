@@ -420,13 +420,15 @@ kopplas till bolagskorten och visas i den globala aktivitetsfeeden
 
 ### 9.2 AI-leverantör: Mistral / Le Chat
 
-**EU-suveränt val.** Mistral AI är ett franskt bolag och kör inom EU —
-uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
+**EU-leverantör.** Mistral AI är ett franskt bolag (DPA, § 10.2). **Var
+inferensen körs beror på vilken endpoint som anropas — se "Endpoint och
+region" nedan; standardadressen ger ingen platsgaranti.**
 
 - API: `https://api.mistral.ai/v1/chat/completions` (OpenAI-kompatibelt format)
 - Nyckel: `MISTRAL_API_KEY` i Coolify env (aldrig i koden)
 - Klient: `lib/ai/mistral.ts` — ett tunt fetch-omslag utan npm-deps
-- Hård gräns: `max_tokens=4000`
+- Tak för svaret: `max_tokens=4000` (anroparen kan ange annat). Resonerande
+  modeller får dessutom marginal för resonemanget (se § 9.9).
 - Leverantörsbyte kräver bara en fils ändring (`mistral.ts`) + `tools.model`-värden
 - **Endpoint-resolvning + degraderat läge (`lib/ai/mistral-endpoints.ts`, ren/
   enhetstestad).** Bas-URL:en är env-överstyrbar (`MISTRAL_API_BASE_URL`,
@@ -437,6 +439,23 @@ uppfyller Movexums "ingen Vercel, EU-suveränitet"-policy.
   bara vid kapacitet (429), 5xx eller nätverksutfall — **aldrig** vid 4xx
   (request-/auth-fel). Dormant tills env är satt → inget beteende ändras i
   dagsläget; SOC 2 availability (§ 10.4), EU-suveränt (§ 10.2).
+- **Endpoint och region (utrett 2026-11-26, docs.mistral.ai → Regional
+  inference).** `api.mistral.ai` är Mistrals **globala** endpoint: "Mistral
+  does not commit to a specific inference location for requests sent to this
+  endpoint". Inferens i EU/EFTA garanteras bara på `api.eu.mistral.ai`
+  (10 % påslag på listpriset; bara function calling som verktyg — inga
+  Agents/Conversations/Batch/Files, så chattens `web_search` § 9.8 fungerar
+  inte där; modellutbudet varierar per region och ska kontrolleras med
+  `GET /v1/models` mot den adressen). Tidigare text här och i UI:t ("kör inom
+  EU", "Mistral AI:s EU-infrastruktur") byggde på ett antagande, inte på
+  Mistrals åtagande. **Öppet beslut för maintainer:** sätt
+  `MISTRAL_API_BASE_URL=https://api.eu.mistral.ai` på web-appen (gäller chatt,
+  embeddings och transkribering) efter att modellerna bekräftats finnas där,
+  och avgör hur webbsökningen ska hanteras — eller dokumentera att global
+  inferens accepteras. `/api/health` → `ai.endpoint_region` visar
+  `global`/`eu`/`us`/`custom`. Zero data retention (att Mistral inte sparar
+  in- och utdata) är en SEPARAT inställning som begärs hos Mistrals support
+  och gäller inte Conversations-API:t eller modeller i Labs/Public Preview.
 
 ### 9.3 Säkerhet och dataskydd
 
@@ -610,10 +629,17 @@ canRunTool(userRoles, tool, { isLinkedStartup })
 ### 9.6 Kostnadsuppföljning
 
 Uppskattad kostnad loggas i `tool_runs.cost_estimate_usd` per körning.
-Prissättning (ungefär):
-- Mistral Large: €2/€6 per 1M in/out tokens
-- Mistral Medium: €0.4/€1.2 per 1M in/out tokens
-- Mistral Small: €0.1/€0.3 per 1M in/out tokens
+Listpriser (USD per 1M tokens in/ut, docs.mistral.ai/models, lästa
+2026-11-26) — **en källa: `modelPricePerMillion` i `lib/ai/models.ts`**, som
+`estimateCostUsd` läser:
+- Mistral Large 4: $0,70 / $2,10
+- Mistral Small 4: $0,15 / $0,60
+- mistral-embed: $0,10 in
+- Resonemangstokens räknas som utdata (API:ets `completion_tokens`).
+- Regional endpoint (`api.eu.mistral.ai`) kostar 10 % mer — inte inräknat.
+Före 2026-11-26 stod här och i koden priser för äldre modellgenerationer
+(Large $2/$6, Medium $0,40/$1,20); uppskattningarna i `ai_usage_events` före
+det datumet bygger på dem.
 
 **Hård kostnadsspärr per tenant/månad** (`lib/ai/budget.ts` rent/
 enhetstestat + `budget.server.ts` IO). `assertWithinAiBudget` summerar
@@ -721,7 +747,8 @@ att bara säga "jag har inte tillgång").
   som `<a rel="noopener noreferrer">` — andra protokoll blir aldrig länkar
   (enhetstestat i `safe-html-links.test.ts`).
 - **Opt-in per tur:** verktyget finns bara när användaren slagit på toggeln.
-  Sökmodell: `mistral-medium-latest` med fallback till Large vid 429/5xx;
+  Sökmodell: Mistral Large 4 med Small 4 som reserv vid 429/5xx (lägsta
+  resonemangsnivån);
   `MISTRAL_WEB_SEARCH_TOOL=web_search_premium` (Coolify) byter till
   premium-connectorn. Tokens loggas i `ai_usage_events` (surface
   `dashboard_chat`) och räknas mot månadstaket (§ 9.6). **Känd begränsning:**
@@ -748,10 +775,63 @@ loggas så att transparenskravet (EU AI Act art. 13) hålls.
 
 **Modellregister.** `apps/web/src/lib/ai/models.ts` är källan av sanning
 för vilka modeller som är valbara, deras pris och om de stödjer vision.
-Idag: `mistral-large-latest`, `mistral-medium-latest`,
-`mistral-small-latest`, `pixtral-large-latest`. Vision-capable:
-**Medium** och **Pixtral**. Lägg aldrig till modeller inline i UI —
-extend registret istället.
+Lägg aldrig till modeller inline i UI eller i en anropande fil — använd
+registrets konstanter (`MODEL_LARGE`, `MODEL_SMALL`, `QUALITY_MODEL_CHAIN`,
+`FAST_MODEL_CHAIN`).
+
+**Uppgraderat 2026-11-26 mot Mistrals modellkatalog** (docs.mistral.ai/models):
+
+| Logiskt id (lagras, loggas) | Körs som (fäst API-version) | Modell | Bilder | Pris in/ut per 1M |
+| --- | --- | --- | --- | --- |
+| `mistral-large-latest` | `mistral-large-4-0` | Mistral Large 4 (GA 2026-10-05, 1M kontext) | ja | $0,70 / $2,10 |
+| `mistral-small-latest` | `mistral-small-2603` | Mistral Small 4 (GA 2026-03-16, 256k kontext) | ja | $0,15 / $0,60 |
+
+- **Avvecklat hos Mistral, används inte längre:** Mistral Medium 3.5
+  (`mistral-medium-latest`, avvecklad 2026-10-31, stängs 2027-04-30,
+  ersättare Large 4 — och dyrare: $1,50/$7,50) och Pixtral Large
+  (`pixtral-large-latest`, avvecklad 2026-02-27, stängningsdatum 2026-05-31).
+  Äldre poster som bär id:na körs, prissätts och visas som Large 4
+  (`normalizeModelId`/`resolveSelectableModel`); migration **1700000226**
+  skriver om `tools.model` och `compass_modules.model`. Select-fältens
+  värdelistor är orörda.
+- **Fäst version, alias som reserv.** `-latest`-alias byts tyst av Mistral
+  (beteende och pris). När `mistral-large-latest` gick till Large 4 ändrades
+  svarsformatet under oss (se nästa punkt). Klienten skickar därför den fästa
+  versionen (`ModelMeta.apiId`; GA-modeller ändras inte tyst och avvecklas
+  med sex månaders varsel). Svarar API:t att modellen inte finns provas
+  aliaset, utan resonemangsparameter, och det avvisade id:t minns i 6 h — en
+  stängd version ger aldrig ett avbrott. `MISTRAL_MODEL_LARGE` /
+  `MISTRAL_MODEL_SMALL` (Coolify) byter fäst version utan deploy.
+  **Uppgradera:** ändra `apiId`, pris och etikett i `models.ts` mot en ny
+  källa; kontrollera katalogens sida "Deprecated & retired models" minst
+  kvartalsvis.
+- **Svar i delar (`lib/ai/mistral-content.ts`, ren + enhetstestad).** Large 4
+  resonerar alltid och svarar med `message.content` som en LISTA
+  (`thinking`-del + `text`-del); i en ström är `delta.content` listor under
+  resonemanget och i övergången, strängar därefter. Klienten läste bara
+  strängar — utan ström blev svaret en lista, med ström tappades början av
+  svaret. Nu plockas textdelarna ut (`extractAnswerText`) i `callMistral`,
+  strömläsaren och Conversations-API:t. Resonemanget visas, lagras och loggas
+  aldrig. **Inte gjort:** Mistral rekommenderar att hela assistentsvaret
+  inklusive resonemangsdelen skickas tillbaka i nästa tur; vi skickar bara
+  texten (formen på en återskapad resonemangsdel är inte verifierad mot API:t).
+- **Resonemangsnivå (`reasoning_effort`).** Large 4: `low`/`medium`/`high`
+  (utelämnad = `high` hos Mistral). Small 4: `none`/`high`. Standard hos oss:
+  Large `medium`, Small `none` (`resolveReasoningEffort`; en nivå modellen
+  saknar flyttas nedåt, aldrig uppåt). Avvikelser: `high` för Impact
+  Navigator och Export Lab (§ 56/§ 58), `low` för den publika intag-chatten
+  och webbsökningen. `MISTRAL_LARGE_REASONING_EFFORT` ändrar Large-standarden
+  utan deploy. Resonemanget räknas som utdata och delar `max_tokens` med
+  svaret, så anropet får marginal (`reasoningHeadroomTokens`: 1 000 / 3 000 /
+  8 000) — en arbetshypotes att justera mot utfallet i `ai_usage_events`.
+  Avvisar API:t parametern görs anropet om utan den.
+- **Auto-valet (`model-router.ts`):** enkla uppslag → Small 4; allt annat
+  (medel, hög, bilder, bifogade filer) → Large 4. Den andra modellen är reserv
+  vid kapacitetstak.
+- **Inte verifierat:** inget anrop har gjorts mot Mistrals API från
+  byggmiljön. Modell-id:n, svarsformat, parametrar och priser är lästa i
+  dokumentationen; `mistral.test.ts` kör klienten mot fejkade svar i den
+  formen. `/api/health` → `ai.models` visar vad som skickas.
 
 **Modellval i dashboardchatten (`/chatt`, 2026-09).** Komposern har en
 modellväljare (⚡-chip, `DashboardChat.tsx`) med **Auto** + registrets
@@ -805,10 +885,9 @@ enhetstestade `packages/shared/src/chat-attachments.ts`:
   `read_my_file`/`search_my_files` säger detsamma. Texten skickas aldrig
   tillbaka till webbläsaren (`withoutChatAttachmentText`).
 - **Bilder:** sparas aldrig (bara namn/typ), så modellen får en not om att
-  bilden bara syntes i sin tur. Bildturer kör nu MED verktyg på
-  vision-kedjan Mistral Medium → Pixtral Large (`model-router.ts`; tidigare en
-  oregistrerad `pixtral-12b` helt utan verktyg — en skärmdump kunde varken
-  slås upp mot databasen eller läggas in i årshjulet).
+  bilden bara syntes i sin tur. Bildturer kör MED verktyg på Mistral
+  Large 4 → Small 4 (`model-router.ts`; båda läser bilder och stödjer
+  function calling).
 - **Modellval/skopning** utgår från det användaren skrev, inte från filens
   text; bifogade filer ger minst Medium.
 - **GDPR § 5:** texten personnummer-saneras (§ 15.6-regexen) och styrtecken
@@ -1950,11 +2029,10 @@ lever i `user_mistral_connectors` (vår DB) eftersom vår Mistral-API-nyckel
 ### 13.5 Modell-stöd
 
 - **Built-in tools** stöds bara av modeller med
-  `supportsBuiltinTools: true` (Mistral Large + Medium). UI och
-  server-action validerar — Small och Pixtral disablas i picker.
-- **Vision-bilagor:** kvarstår enligt § 9.9 — bara Medium och Pixtral
-  stödjer bilder, men Pixtral saknar tool-stöd. Bilder + connector kräver
-  alltså Medium.
+  `supportsBuiltinTools: true` — i dag Mistral Large 4. Small 4 listar
+  funktionen i Mistrals katalog men är inte provad hos oss och är avstängd i
+  pickern. UI och server-action validerar.
+- **Vision-bilagor:** båda modellerna läser bilder (§ 9.9).
 
 ### 13.6 Begränsningar (MVP)
 
@@ -2343,7 +2421,7 @@ actor krävs). Tabellen visar vad som tillkommer per yta:
 **Princip (§10):** skrivverktyg exponeras BARA i den interaktiva chatten
 där en människa bekräftar varje åtgärd. Autonoma körningar (toolbox-
 engångskörning, schema) får **aldrig** skriva domändata — de föreslår i
-text. Vision-körningar (pixtral) kör verktygslöst (§13.5). PII-maskning,
+text. PII-maskning,
 denylist och tenant-scope ärvs oförändrat från `lib/ai/schema.ts`
 (§9.3) — även för de nya sök-/aggregat-verktygen.
 
@@ -4764,7 +4842,7 @@ sökning) så det skalar bortom prompt-injektionens storlekstak.
 | `apps/web/src/lib/ai/rag.ts` | `chunkText`, `cosineSimilarity`, `indexOrgKnowledge`, `searchOrgKnowledge` |
 | `apps/web/src/lib/ai/mistral.ts` | `embedTexts()` mot `/v1/embeddings` (mistral-embed, EU) + pris |
 | `apps/web/src/lib/ai/knowledge.ts` | Extraktion + personnummer-sanering (delad pipe; valbart text-tak + `allowImages`) |
-| `apps/web/src/lib/ai/vision.ts` | `extractImageText` — Pixtral-bildigenkänning (transkribering + beskrivning) av PNG/JPG/WebP |
+| `apps/web/src/lib/ai/vision.ts` | `extractImageText` — bildigenkänning med Mistral Large 4 / Small 4 (transkribering + beskrivning) av PNG/JPG/WebP |
 | `backend/pocketbase-schema/migrations/1700000130_extend_org_knowledge_image_mimes.js` | `org_knowledge.file` accepterar bilder (PNG/JPG/WebP) |
 | `apps/web/src/lib/ai/tools.ts` | Verktygen `search_knowledge` (fragment-RAG) + `read_knowledge_document` (lista/läs HELT dokument) + dispatch |
 | `apps/web/src/lib/ai/guidance.ts` | `KNOWLEDGE_GUIDANCE` (delad — kunskapsbas ⨯ databas) |
@@ -4790,13 +4868,13 @@ sökning) så det skalar bortom prompt-injektionens storlekstak.
    **personnummer-saneras** (samma regex som CRM-importen) och cachas i
    `extracted_text`. **Bilduppladdningar** (PNG/JPG/WebP, migration 1700000130 +
    `allowImages` på `extractKnowledgeFromFile`) har inget textlager → texten
-   "extraheras" i stället via **Pixtral-bildigenkänning** (`lib/ai/vision.ts`,
+   "extraheras" i stället via **bildigenkänning** (`lib/ai/vision.ts`,
    `extractImageText`): all synlig text transkriberas och icke-text-innehåll
-   (tabeller, matriser, diagram) beskrivs till sökbar text. Pixtral kör på
-   Mistral AI:s EU-infrastruktur (samma leverantör/DPA, § 10.2); fallback till
-   Mistral Medium (även multimodal) vid 429. Den igenkända texten saneras +
+   (tabeller, matriser, diagram) beskrivs till sökbar text. Modell: Mistral
+   Large 4, Small 4 som reserv vid 429 (samma leverantör/DPA, § 10.2; Pixtral
+   Large är avvecklad av Mistral, § 9.9). Den igenkända texten saneras +
    chunkas + embeddas precis som övriga format. Bilden cachas aldrig i
-   tredjepart; vision-tokens loggas separat i `ai_usage_events` (Pixtral-modell).
+   tredjepart; tokens loggas separat i `ai_usage_events` med modellen som svarade.
 2. `indexOrgKnowledge` chunkar texten (~1500 tecken, overlap 200), embeddar varje
    chunk (`mistral-embed`, batchat) och skriver `org_knowledge_chunks`. Fail-soft:
    en misslyckad indexering gör filen sökbar via nyckelords-fallback i stället.
@@ -4833,17 +4911,17 @@ sökning) så det skalar bortom prompt-injektionens storlekstak.
 
 ### 26.4 Säkerhet och regelefterlevnad
 
-- **EU-suveränitet:** embeddings via `mistral-embed` (Mistral, FR/EU); bild-
-  igenkänning via `pixtral-large-latest` (fallback `mistral-medium-latest`) på
-  samma EU-infrastruktur. Ingen US-tjänst, ingen ny leverantör (§ 10.2).
-- **Bildigenkänning (Pixtral) — riskklass begränsad (EU AI Act art. 11):**
+- **Leverantör:** embeddings via `mistral-embed` och bildigenkänning via
+  Mistral Large 4 (reserv Small 4) — Mistral AI (FR), ingen US-tjänst, ingen ny
+  leverantör (§ 10.2). Var inferensen körs: se § 9.2 "Endpoint och region".
+- **Bildigenkänning — riskklass begränsad (EU AI Act art. 11):**
   deterministiskt syfte (transkribera/beskriva en uppladdad bild till sökbar
   text); ingen profilering av individer, ingen autopublicering (innehållet
   granskas av människa i chatten). Immutabel system-prompt behandlar bilden som
   DATA, inte instruktioner (§ 9.3 — prompt-injection-skydd även för bild-burna
   instruktioner). Den igenkända texten personnummer-saneras före lagring/index;
   bilden cachas aldrig i tredjepart. Vision-tokens loggas i `ai_usage_events`
-  (surface `suggestions`, Pixtral-modell). Gäller bara den tenant-breda
+  (surface `suggestions`). Gäller bara den tenant-breda
   kunskapsbasen (`allowImages`); per-agent-basen (`tool_knowledge`) är oförändrad.
 - **Riskklass (EU AI Act art. 11): begränsad.** Dokument-Q&A med
   människa-i-loopen (chatten granskas av användaren); ingen profilering av
@@ -4922,7 +5000,7 @@ samma set före/efter en retrieval-ändring och jämför.
 **Modellval efter komplexitet:** chatten planerar inte längre default på
 `mistral-small`. `lib/ai/model-router.ts` (ren, enhetstestad) klassar frågans
 komplexitet (heuristik, ingen extra LLM-runda) och väljer startmodell:
-låg → small, medel → medium, hög (analys/rapport/dokument) → large. Kedjan
+låg → Small 4, medel och hög (analys/rapport/dokument) → Large 4 (§ 9.9). Kedjan
 faller fortfarande uppåt vid 429 och har small som sista utväg. Används av både
 `staff-chat.ts` (trådar/streaming) och `lib/actions/chat.ts` (efemär `/idag`).
 
@@ -4934,9 +5012,10 @@ Sök på små chunkar (precision) men returnera mer kontext (svarskvalitet). Av
 default eftersom det blåser upp prompten (tool-resultatet capas ändå nedströms).
 
 **Kvar / kommande steg:**
-- **Bildigenkänning (PNG/JPG/WebP) via Pixtral** — KLAR (juni 2026). Uppladdade
+- **Bildigenkänning (PNG/JPG/WebP)** — KLAR (juni 2026; modell bytt till
+  Mistral Large 4 → Small 4 2026-11, § 9.9). Uppladdade
   bilder i kunskapsbasen transkriberas/beskrivs till sökbar text av
-  `lib/ai/vision.ts` (`extractImageText`, Pixtral → Medium-fallback, EU) och
+  `lib/ai/vision.ts` (`extractImageText`) och
   indexeras som vilket dokument som helst (migration 1700000130 vidgar
   `org_knowledge.file`-whitelisten). **Skannade bild-PDF:er** (PDF utan textlager)
   kräver fortfarande sid-rastrering innan vision — INTE i scope (skulle kräva en
@@ -5177,7 +5256,7 @@ exponering** (best practice), utan att kvalitet tappas:
   längre alla kollektionsnamn som `enum` (namnen finns i indexet; Mistral
   gör ingen constrained decoding på enum — det var bara prompt-tokens).
 - **Vision-turer:** bild-turer kör sedan 2026-10 med samma skopade
-  verktygsyta som textturer (Mistral Medium → Pixtral Large, § 9.9).
+  verktygsyta som textturer (Mistral Large 4 → Small 4, § 9.9).
 - **Djupjobb:** planeraren + varje subtask skopar schemat mot
   instruktionen/delmålet (`buildReadToolSurface({ scopeText })`).
   Toolbox-/schemalagda körningar behåller den fulla sammanfattningen
@@ -6278,8 +6357,19 @@ INNAN fallbacken används.
 - **Transparens (art. 13/50):** mikrofonknappens tooltip anger leverantör
   (Voxtral, Mistral EU), tidsgräns och att texten hamnar i rutan för
   granskning. Chattens befintliga AI-banner (§ 9.7) gäller oförändrat.
-- **GDPR § 5 dataminimering:** ljudklippet är **transient** — det lagras
-  varken i PocketBase, på disk eller hos Mistral (DPA, ingen träning). Bara
+- **GDPR § 5 dataminimering:** ljudklippet är **transient** hos oss — det
+  lagras varken i PocketBase eller på disk. **Hos Mistral gäller ett
+  förbehåll sedan Voxtral 3 (2026-11-26):** modellerna är i *Public Preview*,
+  och Mistrals livscykelpolicy säger att sådana modeller varken stöder
+  "data collection opt-out" eller Zero Data Retention (docs.mistral.ai →
+  Model lifecycle policy / Zero data retention). Påståendet "lagras inte hos
+  Mistral, ingen träning" kan därför INTE göras för mötesljud förrän
+  modellerna är GA eller Mistral bekräftat villkoren skriftligt.
+  **Öppet beslut för maintainer** (mötesljud bär tredje parts röster): (a)
+  acceptera tills Voxtral 3 är GA, med uppdaterad samtyckestext; (b) kör
+  KB-Whisper via `MOVEXUM_STT_BASE_URL` (självhostad eller Berget AI, § 31.2)
+  för möten; eller (c) kontakta Mistral om avtalet. DPIA:n
+  (`docs/privacy/dpia-meeting-transcription.md` § 7) bär samma punkt. Bara
   transkriptet lever vidare, och då som användarens eget chatt-meddelande i
   `chat_threads.messages` (strikt ägaren-bara, § 17.2). Loggarna är PII-fria:
   vi loggar status/modell, aldrig ljudet eller texten.
@@ -11153,7 +11243,7 @@ kodkarta: `docs/integrations/impact-navigator.md`.
   analysen — ledning; bolagskortet finns kvar), Jämförelser
   (`/impactnavigator/jamfor`, sorterbar tabell).
 - **AI (`lib/ai/impact-analysis.ts`):** fyra isolerade Mistral-körningar
-  (`mistral-large-latest` → medium vid 429/5xx, temp 0.2, inga verktyg,
+  (Mistral Large 4 → Small 4 vid 429, högsta resonemangsnivån, temp 0.2, inga verktyg,
   `response_format: json_object` — nytt alternativ i `callMistral`) med
   originalets systemprompt per steg (`buildImpactSystemPrompt`: gemensam
   prompt + stegprompt + frågeregler + OUTPUTFORMAT-block som ersätter Zod

@@ -274,11 +274,23 @@ export type ToolCategory =
   | 'template'
   | 'checklist';
 
-export type ToolModel =
-  | 'mistral-large-latest'
+/**
+ * Valbara chattmodeller (logiska id:n — det som lagras i `tools.model`,
+ * `tool_runs.model` och per tur). Vilken API-modell varje id körs som står i
+ * `apps/web/src/lib/ai/models.ts` (källa av sanning, CLAUDE.md § 9.9).
+ */
+export type ToolModel = 'mistral-large-latest' | 'mistral-small-latest';
+
+/**
+ * Id:n som FÅR finnas i äldre poster men inte längre kan väljas: Mistral har
+ * avvecklat modellerna (Medium 3.5, Pixtral Large). De körs som sin
+ * ersättare (`normalizeModelId` i models.ts) och skrivs om av migration
+ * 1700000226.
+ */
+export type LegacyToolModel =
   | 'mistral-medium-latest'
-  | 'mistral-small-latest'
-  | 'pixtral-large-latest';
+  | 'pixtral-large-latest'
+  | 'pixtral-12b-2409';
 
 export type ToolOutputFormat = 'markdown' | 'json' | 'text';
 
@@ -495,7 +507,9 @@ export interface Tool {
   // USER-meddelandet). Bara admin/incubator_lead får sätta det.
   system_prompt?: string;
   prompt_template?: string;
-  model?: ToolModel;
+  // Kan vara ett äldre id i poster skapade före 2026-11 (LegacyToolModel) —
+  // läs alltid via resolveSelectableModel/normalizeModelId (lib/ai/models.ts).
+  model?: ToolModel | LegacyToolModel;
   // Valfri kvalitetsrubrik (Fas 3). När satt grader-poängsätts svaret mot
   // rubriken och agenten reviderar vid underkänt (människa-i-loopen kvar).
   verify_rubric?: string;

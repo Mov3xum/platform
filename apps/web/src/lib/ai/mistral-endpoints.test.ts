@@ -5,6 +5,7 @@ import {
   chatCompletionsUrl,
   conversationsUrl,
   embeddingsUrl,
+  inferenceRegion,
   primaryBase,
   resolveChatProviders
 } from './mistral-endpoints';
@@ -59,4 +60,12 @@ test('fallback kan ha egen nyckel', () => {
 test('fallback-bas utan någon nyckel ger ingen fallback-provider', () => {
   const providers = resolveChatProviders({ MISTRAL_FALLBACK_BASE_URL: 'https://vllm.eu.local' });
   assert.equal(providers.length, 0);
+});
+
+test('inferenceRegion: global, EU, USA eller egen endpoint', () => {
+  assert.equal(inferenceRegion('https://api.mistral.ai'), 'global');
+  assert.equal(inferenceRegion('https://api.eu.mistral.ai/'), 'eu');
+  assert.equal(inferenceRegion('https://api.us.mistral.ai'), 'us');
+  assert.equal(inferenceRegion('https://llm.intern.example'), 'custom');
+  assert.equal(inferenceRegion('inte en url'), 'custom');
 });

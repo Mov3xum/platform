@@ -4,7 +4,7 @@ import { getServerPb, requireUser } from '@/lib/auth.server';
 import { canAccessModuleForUser, hasRole, canRunTool } from '@/lib/rbac';
 import { ToolRunStatusBadge } from '@/components/Badges';
 import { AI_OUTPUT_WARNING_TEXT } from '@/lib/ai/ui-text';
-import { isAllowedModel } from '@/lib/ai/models';
+import { resolveSelectableModel } from '@/lib/ai/models';
 import { MessageList, legacyMessagesFromRun, type MessageFeedbackMap } from './MessageList';
 import { ContinueChatForm } from './ContinueChatForm';
 import type {
@@ -209,11 +209,7 @@ export default async function ToolRunDetailPage({
                 <ContinueChatForm
                   runId={run.id}
                   defaultModel={
-                    isAllowedModel(run.model)
-                      ? (run.model as ToolModel)
-                      : isAllowedModel(tool?.model)
-                        ? (tool!.model as ToolModel)
-                        : undefined
+                    resolveSelectableModel(run.model) ?? resolveSelectableModel(tool?.model)
                   }
                   disabled={!canContinue}
                   disabledReason={disabledReason}

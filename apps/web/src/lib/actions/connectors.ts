@@ -13,7 +13,7 @@ import {
 } from '@/lib/ai/mistral';
 import {
   defaultModelForConnectors,
-  isAllowedModel,
+  resolveSelectableModel,
   modelSupportsBuiltinTools,
   modelSupportsVision
 } from '@/lib/ai/models';
@@ -378,9 +378,11 @@ function resolveModel(
   override: string | undefined | null,
   fallback: string | undefined | null
 ): ToolModel {
-  if (isAllowedModel(override)) return override;
-  if (isAllowedModel(fallback)) return fallback;
-  return defaultModelForConnectors();
+  return (
+    resolveSelectableModel(override) ??
+    resolveSelectableModel(fallback) ??
+    defaultModelForConnectors()
+  );
 }
 
 /**
@@ -431,7 +433,7 @@ export async function runConnectorTurnAction(formData: FormData): Promise<Connec
   if (!modelSupportsBuiltinTools(selectedModel)) {
     return {
       error:
-        'Vald modell stödjer inte connectors. Välj Mistral Large eller Medium.'
+        'Vald modell stödjer inte connectors. Välj Mistral Large.'
     };
   }
   const supportsVision = modelSupportsVision(selectedModel);

@@ -28,7 +28,7 @@ import {
 import { fetchWebContext, type WebFetchResult } from '@/lib/ai/web';
 import {
   DEFAULT_MODEL,
-  isAllowedModel,
+  resolveSelectableModel,
   modelSupportsVision
 } from '@/lib/ai/models';
 import {
@@ -98,9 +98,7 @@ function resolveModel(
   override: string | undefined | null,
   toolDefault: string | undefined | null
 ): ToolModel {
-  if (isAllowedModel(override)) return override;
-  if (isAllowedModel(toolDefault)) return toolDefault;
-  return DEFAULT_MODEL;
+  return resolveSelectableModel(override) ?? resolveSelectableModel(toolDefault) ?? DEFAULT_MODEL;
 }
 
 function extractFiles(formData: FormData): File[] {
@@ -1115,7 +1113,7 @@ export async function createToolAction(
     // Movexum staff (admin/incubator_lead) sätter agent-roll, datamall och modell.
     data.system_prompt = String(formData.get('system_prompt') || '').trim();
     data.prompt_template = String(formData.get('prompt_template') || '').trim();
-    data.model = String(formData.get('model') || '') || null;
+    data.model = resolveSelectableModel(String(formData.get('model') || '')) ?? null;
     // Valfri kvalitetsrubrik (Fas 3). Tom = ingen grader-pass.
     data.verify_rubric = String(formData.get('verify_rubric') || '').trim();
   } else {
@@ -1185,7 +1183,7 @@ export async function updateToolAction(
       data.prompt_template = String(formData.get('prompt_template') || '').trim();
     }
     if (formData.has('model')) {
-      data.model = String(formData.get('model') || '') || null;
+      data.model = resolveSelectableModel(String(formData.get('model') || '')) ?? null;
     }
     if (formData.has('verify_rubric')) {
       data.verify_rubric = String(formData.get('verify_rubric') || '').trim();

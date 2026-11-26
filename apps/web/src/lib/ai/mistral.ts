@@ -1,5 +1,17 @@
 import 'server-only';
-import { getModelMeta } from './models';
+import {
+  modelPricePerMillion,
+  normalizeModelId,
+  reasoningHeadroomTokens,
+  resolveApiModelIds,
+  resolveReasoningEffort,
+  type ReasoningEffort
+} from './models';
+import {
+  extractAnswerText,
+  isReasoningEffortError,
+  isUnknownModelError
+} from './mistral-content';
 import {
   conversationsUrl,
   embeddingsUrl,
@@ -118,6 +130,14 @@ export interface CallMistralOptions {
    */
   responseFormat?: 'json_object';
   /**
+   * Resonemangsnivå (Mistrals `reasoning_effort`). Utelämnad = modellens
+   * standard i registret (Large 4: medium, Small 4: none). En nivå modellen
+   * saknar flyttas till närmaste lägre (`resolveReasoningEffort`). Resonemanget
+   * räknas som utdatatokens; `max_tokens` får marginal för det
+   * (`reasoningHeadroomTokens`) så svaret inte kapas.
+   */
+  reasoningEffort?: ReasoningEffort;
+  /**
    * När satt strömmas svaret token-för-token: varje text-delta forwardas
    * direkt via `onToken` (för live-utskrift i chatten) medan funktionen ändå
    * returnerar hela det ackumulerade svaret (text + tool_calls + usage). En
@@ -161,13 +181,16 @@ function classifyError(status: number, body: string): MistralError {
     // ignore
   }
   const truncated = body.length > 200 ? body.slice(0, 200) + '…' : body;
+  // rawBody används för att tolka felet (okänd modell, avvisad parameter) —
+  // längre än det som visas, men kapad.
+  const raw = body.length > 1500 ? body.slice(0, 1500) : body;
 
   if (status === 429) {
     return new MistralError(
       'AI-tjänsten är tillfälligt överbelastad. Försök igen om en stund.',
       status,
       code,
-      truncated
+      raw
     );
   }
   if (status === 401 || status === 403) {
@@ -175,15 +198,36 @@ function classifyError(status: number, body: string): MistralError {
       'AI-tjänsten är inte korrekt konfigurerad.',
       status,
       code,
-      truncated
+      raw
     );
   }
   return new MistralError(
     `Mistral API-fel ${status}: ${truncated}`,
     status,
     code,
-    truncated
+    raw
   );
+}
+
+// API-id:n som Mistral avvisat som okända (stängd/avvecklad version) minns i
+// processen så att varje anrop inte börjar med ett dömt försök.
+const REJECTED_MODEL_TTL_MS = 6 * 60 * 60 * 1000;
+const rejectedApiModels = new Map<string, number>();
+
+function isRememberedRejected(apiId: string): boolean {
+  const until = rejectedApiModels.get(apiId);
+  if (!until) return false;
+  if (until < Date.now()) {
+    rejectedApiModels.delete(apiId);
+    return false;
+  }
+  return true;
+}
+
+/** API-id:n att prova: de som inte nyligen avvisats, annars hela listan. */
+function usableApiIds(apiIds: string[]): string[] {
+  const usable = apiIds.filter((id) => !isRememberedRejected(id));
+  return usable.length > 0 ? usable : apiIds;
 }
 
 /**
@@ -205,10 +249,16 @@ export async function callMistral(
     throw new MistralError('MISTRAL_API_KEY saknas i miljövariablerna.', 0);
   }
 
+  // Logiskt id → fäst API-version (+ alias som reserv) och resonemangsnivå
+  // ur modellregistret. Ett avvecklat id (Medium, Pixtral) körs som sin
+  // ersättare; ett id utanför registret skickas som det är.
+  const resolved = resolveApiModelIds(model, process.env);
+  const effort = resolveReasoningEffort(model, options.reasoningEffort, process.env);
+  const answerTokens = options.maxTokens ?? MAX_TOKENS;
+
   const body: Record<string, unknown> = {
-    model,
     messages,
-    max_tokens: options.maxTokens ?? MAX_TOKENS,
+    max_tokens: answerTokens,
     temperature: options.temperature ?? 0.3
   };
   if (options.onToken) body.stream = true;
@@ -245,7 +295,23 @@ export async function callMistral(
   for (let p = 0; p < providers.length; p++) {
     const provider = providers[p];
     try {
-      return await attemptChatProvider(provider, body, options.onToken);
+      if (provider.label === 'primary') {
+        return await attemptPrimaryWithModelLadder(
+          provider,
+          body,
+          resolved.apiIds,
+          effort,
+          answerTokens,
+          options.onToken
+        );
+      }
+      // Självhostad reserv: det logiska id:t, ingen resonemangsparameter
+      // (en OpenAI-kompatibel server känner inte Mistrals fästa versioner).
+      return await attemptChatProvider(
+        provider,
+        { ...body, model: resolved.logicalId || model },
+        options.onToken
+      );
     } catch (err) {
       lastError = err instanceof MistralError ? err : new MistralError(String(err), 0);
       const status = lastError.status;
@@ -260,6 +326,66 @@ export async function callMistral(
     }
   }
   // Unreachable — loopen returnerar eller kastar.
+  throw lastError ?? new MistralError('Okänt fel vid AI-anrop.', 0);
+}
+
+/**
+ * Mistral (primär): prova API-id:na i ordning och degradera ett avvisat anrop
+ * i stället för att ge upp.
+ *   - API:t känner inte igen modellen (stängd/avvecklad fäst version) → nästa
+ *     id (aliaset), utan resonemangsparameter, och det avvisade id:t minns.
+ *   - API:t avvisar `reasoning_effort` → samma modell en gång till utan
+ *     parametern (modellens egen standard).
+ * Allt annat (429/5xx efter omförsök, auth, för lång prompt) kastas vidare.
+ */
+async function attemptPrimaryWithModelLadder(
+  provider: ChatProvider,
+  body: Record<string, unknown>,
+  apiIds: string[],
+  effort: ReasoningEffort | undefined,
+  answerTokens: number,
+  onToken?: (delta: string) => void
+): Promise<MistralResponse> {
+  const ids = usableApiIds(apiIds);
+  let useEffort = effort;
+  let lastError: MistralError | null = null;
+  for (let i = 0; i < ids.length; i++) {
+    const apiId = ids[i];
+    for (;;) {
+      const attemptBody: Record<string, unknown> = { ...body, model: apiId };
+      if (useEffort) {
+        attemptBody.reasoning_effort = useEffort;
+        attemptBody.max_tokens = answerTokens + reasoningHeadroomTokens(useEffort);
+      }
+      try {
+        return await attemptChatProvider(provider, attemptBody, onToken);
+      } catch (err) {
+        lastError = err instanceof MistralError ? err : new MistralError(String(err), 0);
+        const raw = lastError.rawBody ?? '';
+        if (useEffort && isReasoningEffortError(lastError.status, raw)) {
+          console.warn('[mistral] reasoning_effort avvisades, försöker utan', {
+            model: apiId,
+            effort: useEffort,
+            status: lastError.status
+          });
+          useEffort = undefined;
+          continue;
+        }
+        if (isUnknownModelError(lastError.status, raw) && i < ids.length - 1) {
+          rejectedApiModels.set(apiId, Date.now() + REJECTED_MODEL_TTL_MS);
+          console.warn('[mistral] modellen känns inte igen, provar nästa id', {
+            from: apiId,
+            to: ids[i + 1],
+            status: lastError.status
+          });
+          // Aliaset kan peka på en nyare modell med andra nivåer.
+          useEffort = undefined;
+          break;
+        }
+        throw lastError;
+      }
+    }
+  }
   throw lastError ?? new MistralError('Okänt fel vid AI-anrop.', 0);
 }
 
@@ -311,7 +437,9 @@ async function attemptChatProvider(
       const data = (await response.json()) as {
         choices: Array<{
           message: {
-            content: string | null;
+            // Sträng, eller en lista av delar (resonemang + text) från
+            // resonerande modeller — se mistral-content.ts.
+            content: unknown;
             tool_calls?: MistralToolCall[];
           };
           finish_reason: string;
@@ -321,7 +449,7 @@ async function attemptChatProvider(
 
       const choice = data.choices?.[0];
       const message = choice?.message;
-      const text = message?.content ?? '';
+      const text = extractAnswerText(message?.content);
       const toolCalls = message?.tool_calls ?? [];
       const finishReason = choice?.finish_reason ?? '';
       const usage = data.usage ?? { prompt_tokens: 0, completion_tokens: 0 };
@@ -371,7 +499,9 @@ async function readChatStream(
     let json: {
       choices?: Array<{
         delta?: {
-          content?: string | null;
+          // Sträng i svarsfasen; lista av delar under resonemanget och i
+          // övergången (sista thinking-delen + första textdelen).
+          content?: unknown;
           tool_calls?: Array<{
             index?: number;
             id?: string;
@@ -390,9 +520,10 @@ async function readChatStream(
     const choice = json.choices?.[0];
     const delta = choice?.delta;
     if (delta) {
-      if (typeof delta.content === 'string' && delta.content) {
-        text += delta.content;
-        onToken(delta.content);
+      const piece = extractAnswerText(delta.content);
+      if (piece) {
+        text += piece;
+        onToken(piece);
       }
       if (Array.isArray(delta.tool_calls)) {
         for (const tc of delta.tool_calls) {
@@ -477,26 +608,32 @@ export async function callMistralWithFallback(
   messages: MistralMessage[],
   options: CallMistralOptions = {}
 ): Promise<MistralResponse & { modelUsed: string }> {
-  if (models.length === 0) {
+  // Avvecklade id:n körs som sin ersättare; samma modell två gånger i
+  // kedjan vore ett meningslöst omförsök mot samma kapacitetstak.
+  const chain = Array.from(new Set(models.map((m) => normalizeModelId(m)).filter(Boolean)));
+  if (chain.length === 0) {
     throw new MistralError('Ingen modell angiven för fallback-kedja.', 0);
   }
 
   let lastError: unknown = null;
-  for (let i = 0; i < models.length; i++) {
-    const model = models[i];
+  for (let i = 0; i < chain.length; i++) {
+    const model = chain[i];
     try {
       const res = await callMistral(model, messages, options);
       return { ...res, modelUsed: model };
     } catch (err) {
       lastError = err;
-      const isCapacity = err instanceof MistralError && err.status === 429;
-      if (!isCapacity || i === models.length - 1) {
+      // Kapacitetstak, eller en modell API:t inte (längre) känner igen.
+      const isCapacity =
+        err instanceof MistralError &&
+        (err.status === 429 || isUnknownModelError(err.status, err.rawBody ?? ''));
+      if (!isCapacity || i === chain.length - 1) {
         throw err;
       }
       // Logga och fortsätt till nästa modell.
       console.warn('[mistral] capacity exceeded, falling back', {
         from: model,
-        to: models[i + 1]
+        to: chain[i + 1]
       });
     }
   }
@@ -505,36 +642,17 @@ export async function callMistralWithFallback(
 }
 
 /**
- * Estimates cost in USD using the central model registry (lib/ai/models.ts).
- * Unknown models default to the Large-tier pricing.
+ * Uppskattad kostnad i USD ur modellregistrets listpriser
+ * (`modelPricePerMillion` i lib/ai/models.ts — en källa för pris). Ett
+ * avvecklat id prissätts som modellen det faktiskt körs som; en okänd modell
+ * som Large. Resonemangstokens ingår i `tokensOut` (API:ets completion_tokens).
  */
 export function estimateCostUsd(
   model: string,
   tokensIn: number,
   tokensOut: number
 ): number {
-  const pricing: Record<string, [number, number]> = {
-    'mistral-large-latest': [2.0, 6.0],
-    'mistral-medium-latest': [0.4, 1.2],
-    'mistral-small-latest': [0.1, 0.3],
-    'pixtral-large-latest': [0.15, 0.15],
-    // Embeddings: ~€0.1/1M input-tokens, ingen output (vektorn räknas inte som
-    // completion-tokens). Utan denna rad skulle estimateCostUsd defaulta till
-    // Large-tier och kraftigt överskatta RAG-kostnaden.
-    'mistral-embed': [0.1, 0.0],
-    // Voxtral (röstinmatning, § 31). Ljudtokens debiteras som input; en
-    // transkribering ger bara den transkriberade texten som output. Utan
-    // dessa rader skulle estimateCostUsd defaulta till Large-tier och
-    // kraftigt överskatta rösttranskriberingen.
-    'voxtral-mini-latest': [0.04, 0.04],
-    'voxtral-small-latest': [0.1, 0.3]
-  };
-  // Övriga Voxtral-modeller (Voxtral 3 m.fl.) debiteras per ljudminut och
-  // bokförs med känd kostnad (`logAiUsage({ costUsd })`, voice-transcription
-  // .ts). Den här raden är bara reserv när ljudlängden saknas — hellre
-  // mini-nivån än Large-nivån som okända modeller annars får.
-  const fallback: [number, number] = /^voxtral/i.test(model) ? [0.04, 0.04] : [2.0, 6.0];
-  const [inPrice, outPrice] = pricing[model] ?? fallback;
+  const [inPrice, outPrice] = modelPricePerMillion(model);
   return (tokensIn / 1_000_000) * inPrice + (tokensOut / 1_000_000) * outPrice;
 }
 
@@ -567,6 +685,8 @@ export interface CallMistralConversationOptions {
   connectors?: ConversationConnector[];
   temperature?: number;
   maxTokens?: number;
+  /** Se CallMistralOptions.reasoningEffort. */
+  reasoningEffort?: ReasoningEffort;
 }
 
 interface ConversationInputEntry {
@@ -635,20 +755,55 @@ export async function callMistralConversation(
     }
   }
 
-  const body: Record<string, unknown> = {
-    model,
+  // Samma registeruppslag som callMistral: fäst API-version med aliaset som
+  // reserv, och resonemangsnivå (i `completion_args` på det här API:t).
+  const resolved = resolveApiModelIds(model, process.env);
+  const apiIds = usableApiIds(resolved.apiIds.length > 0 ? resolved.apiIds : [model]);
+  let effort = resolveReasoningEffort(model, options.reasoningEffort, process.env);
+  const answerTokens = options.maxTokens ?? MAX_TOKENS;
+
+  const baseBody: Record<string, unknown> = {
     inputs,
     store: false
   };
-  if (instructions) body.instructions = instructions;
-  if (tools.length > 0) body.tools = tools;
+  if (instructions) baseBody.instructions = instructions;
+  if (tools.length > 0) baseBody.tools = tools;
 
-  const completionArgs: Record<string, unknown> = {};
-  if (options.temperature !== undefined) completionArgs.temperature = options.temperature;
-  else completionArgs.temperature = 0.3;
-  completionArgs.max_tokens = options.maxTokens ?? MAX_TOKENS;
-  body.completion_args = completionArgs;
+  let lastError: MistralError | null = null;
+  for (let i = 0; i < apiIds.length; i++) {
+    for (;;) {
+      const completionArgs: Record<string, unknown> = {
+        temperature: options.temperature ?? 0.3,
+        max_tokens: answerTokens + reasoningHeadroomTokens(effort)
+      };
+      if (effort) completionArgs.reasoning_effort = effort;
+      const body = { ...baseBody, model: apiIds[i], completion_args: completionArgs };
+      try {
+        return await attemptConversation(apiKey, body);
+      } catch (err) {
+        lastError = err instanceof MistralError ? err : new MistralError(String(err), 0);
+        const raw = lastError.rawBody ?? '';
+        if (effort && isReasoningEffortError(lastError.status, raw)) {
+          effort = undefined;
+          continue;
+        }
+        if (isUnknownModelError(lastError.status, raw) && i < apiIds.length - 1) {
+          rejectedApiModels.set(apiIds[i], Date.now() + REJECTED_MODEL_TTL_MS);
+          effort = undefined;
+          break;
+        }
+        throw lastError;
+      }
+    }
+  }
+  throw lastError ?? new MistralError('Okänt fel vid AI-anrop.', 0);
+}
 
+/** MAX_ATTEMPTS med backoff mot /v1/conversations för EN färdig begäran. */
+async function attemptConversation(
+  apiKey: string,
+  body: Record<string, unknown>
+): Promise<MistralResponse> {
   let lastError: MistralError | null = null;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     let response: Response;

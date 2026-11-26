@@ -10,6 +10,7 @@ import {
   type ProcurementDraft
 } from '@platform/shared';
 import { callMistralWithFallback, MistralError } from './mistral';
+import { QUALITY_MODEL_CHAIN } from './models';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AI-utkast ur ett uppladdat upphandlingsunderlag (CLAUDE.md § 39.3).
@@ -29,7 +30,7 @@ import { callMistralWithFallback, MistralError } from './mistral';
 // (dataminimering). Riskklass: begränsad (beslutsstöd, granskas av staff).
 // ─────────────────────────────────────────────────────────────────────────────
 
-const MODELS = ['mistral-medium-latest', 'mistral-large-latest'];
+const MODELS: string[] = [...QUALITY_MODEL_CHAIN];
 /** Max tecken av underlaget som matas till modellen. */
 export const MAX_EXTRACT_CHARS = 60_000;
 const MAX_TOKENS = 2500;

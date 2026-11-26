@@ -4,6 +4,7 @@ import PocketBase from 'pocketbase';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { requireUser, getServerPb } from '@/lib/auth.server';
+import { resolveSelectableModel } from '@/lib/ai/models';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { hasRole } from '@/lib/rbac';
 import {
@@ -900,7 +901,8 @@ async function applyModuleUpdate(
   if (effectivePurpose === 'survey' && effectiveFlow === 'chat') {
     throw new Error('En enkät är ett formulär eller quiz — inte en AI-chatt. Byt flödestyp eller syfte.');
   }
-  const model = String(formData.get('model') || '');
+  // Bara modeller ur registret (ett avvecklat id blir sin ersättare).
+  const model = resolveSelectableModel(String(formData.get('model') || ''));
   if (model) patch.model = model;
 
   // Omslagsbild (hero_image): ladda upp en ny bild, eller rensa den befintliga.

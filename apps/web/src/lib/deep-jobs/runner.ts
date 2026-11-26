@@ -2,6 +2,7 @@ import 'server-only';
 import type PocketBase from 'pocketbase';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { estimateCostUsd, type MistralMessage } from '@/lib/ai/mistral';
+import { QUALITY_MODEL_CHAIN } from '@/lib/ai/models';
 import {
   runAgentLoop,
   buildReadToolSurface,
@@ -33,7 +34,7 @@ import type {
 // bara aggregeringssteget får generera dokument (artefakt, ingen
 // domänmutation). Hårda tak (EU AI Act art. 15 / § 10).
 
-const MODELS = ['mistral-large-latest', 'mistral-medium-latest'];
+const MODELS: string[] = [...QUALITY_MODEL_CHAIN];
 const SUBTASK_MAX_ITER = 6;
 const AGG_MAX_ITER = 6;
 const TOTAL_TOKEN_BUDGET = 300_000;

@@ -5,6 +5,7 @@ import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { extractKnowledgeFromFile, KnowledgeError } from '@/lib/ai/knowledge';
 import { indexOrgKnowledge } from '@/lib/ai/rag';
 import { logIndexUsage, logAiUsage } from '@/lib/ai/usage';
+import { MODEL_LARGE } from '@/lib/ai/models';
 import { isFileTopic } from '@platform/shared';
 import type { Role } from '@platform/shared';
 
@@ -53,7 +54,7 @@ export async function POST(request: Request): Promise<Response> {
     extracted = await extractKnowledgeFromFile(fileEntry, {
       maxTextBytes: ORG_MAX_TEXT_BYTES,
       maxFileBytes: ORG_MAX_FILE_BYTES,
-      // Tenant-bred kunskapsbas: bilder (PNG/JPG/WebP) tolkas via Pixtral-
+      // Tenant-bred kunskapsbas: bilder (PNG/JPG/WebP) tolkas via Mistrals bild-
       // bildigenkänning (§ 26 / § 28) till sökbar text.
       allowImages: true
     });
@@ -102,14 +103,14 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: 'Kunde inte spara filen.' }, { status: 500 });
   }
 
-  // Logga ev. bildigenkännings-kostnad (Pixtral) i ai_usage_events per modell —
+  // Logga ev. bildigenkännings-kostnad i ai_usage_events per modell —
   // separat event eftersom modellen skiljer sig från embeddings nedan (§ 28).
   if (extracted.visionUsage) {
     void logAiUsage(pb, {
       tenant: user.tenant,
       userId: user.id,
       surface: 'suggestions',
-      model: extracted.visionModel ?? 'pixtral-large-latest',
+      model: extracted.visionModel ?? MODEL_LARGE,
       tokensIn: extracted.visionUsage.tokensIn,
       tokensOut: extracted.visionUsage.tokensOut
     });

@@ -27,7 +27,7 @@ const ALLOWED_MIME_TYPES = new Set([
 
 // Bilder (PNG/JPG/WebP, `isVisionImageMime`) accepteras BARA när anroparen
 // sätter `allowImages` (den tenant-breda kunskapsbasen, § 26). Texten
-// "extraheras" då via Pixtral-bildigenkänning i stället för en parser. Per-agent-
+// "extraheras" då via bildigenkänning (lib/ai/vision.ts) i stället för en parser. Per-agent-
 // basen (tool_knowledge) lämnas oförändrad.
 
 export class KnowledgeError extends Error {
@@ -51,7 +51,7 @@ export interface ExtractedKnowledge {
   filename: string;
   sizeBytes: number;
   /**
-   * Token-utfall när texten "extraherades" via Pixtral-bildigenkänning (bild-
+   * Token-utfall när texten "extraherades" via bildigenkänning (bild-
    * uppladdning). Sätts bara för bilder så att anroparen kan logga kostnaden i
    * `ai_usage_events` per vision-modell. Undefined för parser-baserade format.
    */
@@ -95,7 +95,7 @@ export async function extractKnowledgeFromFile(
   let visionModel: string | undefined;
 
   if (isImage) {
-    // Bildigenkänning via Pixtral (EU): transkribera + beskriv → sökbar text.
+    // Bildigenkänning via Mistral: transkribera + beskriv → sökbar text.
     try {
       const result = await extractImageText(buf, mime);
       raw = result.text;

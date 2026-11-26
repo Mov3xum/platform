@@ -10,7 +10,7 @@ import {
   friendlyThreadError
 } from '@/lib/ai/thread-turn';
 import type { ChatAttachment } from '@/lib/ai/chat-input';
-import { isAllowedModel } from '@/lib/ai/models';
+import { resolveSelectableModel } from '@/lib/ai/models';
 import { withoutChatAttachmentText, type ChatThread, type ToolRunMessage } from '@platform/shared';
 
 const STAFF_ROLES = ['admin', 'incubator_lead', 'coach', 'mentor'] as const;
@@ -218,8 +218,9 @@ export async function sendThreadMessageAction(
   const t = await getOwnedThread(pb, threadId, user);
   if (!t) return { error: 'Tråden hittades inte.' };
 
-  const model = typeof options.model === 'string' ? options.model.trim() : '';
-  if (model && !isAllowedModel(model)) return { error: 'Okänd modell.' };
+  const rawModel = typeof options.model === 'string' ? options.model.trim() : '';
+  const model = rawModel ? resolveSelectableModel(rawModel) : undefined;
+  if (rawModel && !model) return { error: 'Okänd modell.' };
 
   return executeThreadTurn(pb, user, t, userText, {
     includeWebContext: options.includeWebContext,

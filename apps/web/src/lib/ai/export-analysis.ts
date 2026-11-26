@@ -24,6 +24,7 @@ import {
   type ExportUpdateAnalysis
 } from '@platform/shared';
 import { callMistralWithFallback, MistralError } from './mistral';
+import { QUALITY_MODEL_CHAIN } from './models';
 import { EXPORT_MOCK_MODEL, isExportMockMode } from './export-runtime';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -41,7 +42,7 @@ import { EXPORT_MOCK_MODEL, isExportMockMode } from './export-runtime';
 // begränsad (beslutsstöd om bolag, människa granskar varje steg).
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const EXPORT_MODELS = ['mistral-large-latest', 'mistral-medium-latest'];
+export const EXPORT_MODELS: string[] = [...QUALITY_MODEL_CHAIN];
 const MAX_TOKENS = 12000;
 const TEMPERATURE = 0.2;
 export const EXPORT_DEFAULT_TIMEOUT_MS = 240_000;
@@ -176,7 +177,13 @@ async function runStep<T>(step: ExportStep, input: unknown, normalize: (raw: unk
               { role: 'system', content: system },
               { role: 'user', content: user }
             ],
-            { temperature: TEMPERATURE, maxTokens: MAX_TOKENS, responseFormat: 'json_object' }
+            // Kvalitetskritisk analys, en körning per steg: högsta resonemangsnivån.
+            {
+              temperature: TEMPERATURE,
+              maxTokens: MAX_TOKENS,
+              responseFormat: 'json_object',
+              reasoningEffort: 'high'
+            }
           ),
         config.timeoutMs
       );

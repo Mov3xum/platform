@@ -7,7 +7,7 @@ import {
   friendlyThreadError
 } from '@/lib/ai/thread-turn';
 import type { ChatAttachment } from '@/lib/ai/chat-input';
-import { isAllowedModel } from '@/lib/ai/models';
+import { resolveSelectableModel } from '@/lib/ai/models';
 import { checkRateLimit, recordFailure } from '@/lib/rate-limit';
 import type { ChatThread, Role } from '@platform/shared';
 
@@ -81,9 +81,11 @@ export async function POST(req: Request): Promise<Response> {
 
   // Modellval (§ 9.9): tomt = automatiskt; annat än registrerade modeller
   // avvisas (input-validering § 10.5 p. 7) i stället för att tyst ignoreras.
+  // Ett avvecklat id (en flik med sparat val från före 2026-11) tolkas som
+  // sin ersättare — den som faktiskt svarade visas under svaret.
   const rawModel = typeof body.model === 'string' ? body.model.trim() : '';
-  if (rawModel && !isAllowedModel(rawModel)) return jsonError('Okänd modell.', 400);
-  const model = rawModel || undefined;
+  const model = rawModel ? resolveSelectableModel(rawModel) : undefined;
+  if (rawModel && !model) return jsonError('Okänd modell.', 400);
 
   const includeWebContext = body.includeWebContext === true;
   const attachments = Array.isArray(body.attachments)

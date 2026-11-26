@@ -5,6 +5,7 @@ import {
   type MistralMessage
 } from '@/lib/ai/mistral';
 import { countUserTurns, withExchangeBudget } from './chat-closing';
+import { MODEL_LARGE, MODEL_SMALL, QUALITY_MODEL_CHAIN } from '@/lib/ai/models';
 import { sanitizeVisitorReply, stripStructuredTrailer, VISITOR_REPLY_RULES } from './reply-sanitize';
 import {
   AI_REVIEW_SYSTEM_PROMPT,
@@ -58,16 +59,12 @@ export interface ExtractedLeadData {
   idea_category: string | null;
 }
 
-const SCORING_MODEL = 'mistral-small-latest';
-const REVIEW_MODEL = 'mistral-medium-latest';
+const SCORING_MODEL = MODEL_SMALL;
+const REVIEW_MODEL = MODEL_LARGE;
 
-// Fallback-kedja för intake — large är förstaval (kvalitet), faller
-// tillbaka på medium/small om large är kapacitetsbegränsad hos Mistral.
-const INTAKE_FALLBACK_MODELS = [
-  'mistral-large-latest',
-  'mistral-medium-latest',
-  'mistral-small-latest'
-];
+// Fallback-kedja för intake — Large är förstaval (kvalitet), Small tar över
+// om Large är kapacitetsbegränsad hos Mistral.
+const INTAKE_FALLBACK_MODELS: string[] = [...QUALITY_MODEL_CHAIN];
 
 /** Det publika intake-samtalet — assistent-svar via Mistral. */
 /** Default-namn när modulen inte angett något (och i den interna testchatten). */
@@ -135,7 +132,9 @@ export async function intakeReply(
   // Om anroparen tvingar en specifik modell, försök bara den. Annars
   // gå fallback-kedjan.
   const chain = options.model ? [options.model] : INTAKE_FALLBACK_MODELS;
-  const res = await callMistralWithFallback(chain, messages);
+  // Ett samtal med en besökare: lägsta resonemangsnivån håller svarstiden nere
+  // (Large 4 resonerar alltid; `low` är minimum).
+  const res = await callMistralWithFallback(chain, messages, { reasoningEffort: 'low' });
   return {
     text: sanitizeVisitorReply(res.text) || res.text.trim(),
     tokensIn: res.usage.prompt_tokens,

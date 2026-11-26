@@ -9,6 +9,7 @@ import {
 } from '@/lib/ai/mistral';
 import { runAgentLoop } from '@/lib/ai/agent-runtime';
 import { routeChatModels } from '@/lib/ai/model-router';
+import { FAST_MODEL_CHAIN, QUALITY_MODEL_CHAIN } from '@/lib/ai/models';
 import {
   buildStartupContext,
   buildPortfolioContext,
@@ -83,22 +84,14 @@ interface AgentRecord {
 // INTE längre — bryter mot EU-suveränitetspolicyn.
 const DEFAULT_CHAT_WEB_SOURCES: WebSourceKey[] = ['breakit', 'sifted', 'vinnova'];
 
-const CHAT_FALLBACK_MODELS = [
-  'mistral-small-latest',
-  'mistral-medium-latest',
-  'mistral-large-latest'
-];
-// När bilder är bifogade måste vi använda en vision-kapabel modell.
-// Pixtral 12B stödjer både vision och function calling.
-const VISION_FALLBACK_MODELS = ['pixtral-12b-2409'];
+const CHAT_FALLBACK_MODELS: string[] = [...FAST_MODEL_CHAIN];
+// Bild-turer: båda modellerna i registret läser bilder och stödjer function
+// calling (Mistral Large 4, Small 4). Pixtral är avvecklad av Mistral.
+const VISION_FALLBACK_MODELS: string[] = [...QUALITY_MODEL_CHAIN];
 // Interaktiv chatt: höjt över det autonoma defaulten (4) så ett intent-flöde
 // (search_records → describe_collection → query → aggregate → svar) ryms,
 // inklusive ett par självkorrigeringar. Samma tak som staff-chat.ts.
 const MAX_TOOL_ITERATIONS = 12;
-
-// Modellval för dashboard-chatten
-const STAFF_MODEL = 'mistral-large-latest';
-const VISION_MODEL = 'pixtral-large-latest';
 
 // Bilage-caps (defense-in-depth utöver PB-schemats 10 MB/whitelist)
 const MAX_ATTACHMENTS = 5;

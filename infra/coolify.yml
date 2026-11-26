@@ -78,6 +78,21 @@ services:
       MOVEXUM_FORCE_HTTPS: ${MOVEXUM_FORCE_HTTPS:-}
       MOVEXUM_ALLOW_INSECURE_COOKIES: ${MOVEXUM_ALLOW_INSECURE_COOKIES:-}
       MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      # AI-modeller (CLAUDE.md § 9.9). Alla valfria — utan dem gäller
+      # modellregistret (apps/web/src/lib/ai/models.ts): Mistral Large 4
+      # (mistral-large-4-0) och Small 4 (mistral-small-2603).
+      # MISTRAL_MODEL_LARGE / MISTRAL_MODEL_SMALL byter fäst version utan
+      # deploy (t.ex. när Mistral släpper en ny); MISTRAL_LARGE_REASONING_EFFORT
+      # = low | medium | high (standard medium).
+      # MISTRAL_API_BASE_URL: tom = https://api.mistral.ai (GLOBAL endpoint —
+      # Mistral åtar sig ingen bestämd plats för inferensen).
+      # https://api.eu.mistral.ai = inferens i EU/EFTA (10 % påslag; kontrollera
+      # först att modellerna finns där, och webbsökningen i chatten fungerar
+      # inte på regionala endpoints). Kontroll: /api/health → ai.
+      MISTRAL_API_BASE_URL: ${MISTRAL_API_BASE_URL:-}
+      MISTRAL_MODEL_LARGE: ${MISTRAL_MODEL_LARGE:-}
+      MISTRAL_MODEL_SMALL: ${MISTRAL_MODEL_SMALL:-}
+      MISTRAL_LARGE_REASONING_EFFORT: ${MISTRAL_LARGE_REASONING_EFFORT:-}
       # Tal-till-text (CLAUDE.md § 31.2/§ 34). Alla valfria — utan dem körs
       # Voxtral 3 (voxtral-small-transcribe-3, svenska stöds) med äldre
       # modeller som reserv. LÄMNA MISTRAL_VOICE_MODEL TOM om det inte finns

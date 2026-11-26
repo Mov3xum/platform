@@ -11,6 +11,7 @@ import { buildStartupContext } from '@/lib/ai/context';
 import { logAgentAction } from '@/lib/core/write';
 import { logAiUsage } from '@/lib/ai/usage';
 import { callMistral, estimateCostUsd } from '@/lib/ai/mistral';
+import { MODEL_LARGE, normalizeModelId } from '@/lib/ai/models';
 import { PB_COLLECTIONS } from '@/lib/pocketbase-collections';
 import { notifyStartupMembers } from '@/lib/notifications-server';
 import {
@@ -1483,7 +1484,7 @@ export async function runWorkshopAiChatAction(
 
   try {
     const startupContext = await buildStartupContext(pb, String(assignment.startup), user.tenant);
-    const result = await callMistral('mistral-medium-latest', [
+    const result = await callMistral(MODEL_LARGE, [
       {
         role: 'system',
         content: workshop.ai_system_prompt || DEFAULT_WORKSHOP_SYSTEM_PROMPT
@@ -1514,11 +1515,11 @@ export async function runWorkshopAiChatAction(
     await pb.collection(PB_COLLECTIONS.workshopRuns).update(String(run.id), {
       status: 'succeeded',
       output_md: result.text,
-      model: 'mistral-medium-latest',
+      model: MODEL_LARGE,
       tokens_in: result.usage.prompt_tokens,
       tokens_out: result.usage.completion_tokens,
       cost_estimate_usd: estimateCostUsd(
-        'mistral-medium-latest',
+        MODEL_LARGE,
         result.usage.prompt_tokens,
         result.usage.completion_tokens
       ),
@@ -1634,7 +1635,7 @@ export async function completeWorkshopAction(
   let reportMd = '';
   try {
     const startupContext = await buildStartupContext(pb, String(assignment.startup), user.tenant);
-    const result = await callMistral('mistral-medium-latest', [
+    const result = await callMistral(MODEL_LARGE, [
       {
         role: 'system',
         content: workshop?.ai_system_prompt || DEFAULT_WORKSHOP_SYSTEM_PROMPT
@@ -1664,11 +1665,11 @@ export async function completeWorkshopAction(
       status: 'succeeded',
       input: { type: 'report_generation' },
       output_md: reportMd,
-      model: 'mistral-medium-latest',
+      model: MODEL_LARGE,
       tokens_in: result.usage.prompt_tokens,
       tokens_out: result.usage.completion_tokens,
       cost_estimate_usd: estimateCostUsd(
-        'mistral-medium-latest',
+        MODEL_LARGE,
         result.usage.prompt_tokens,
         result.usage.completion_tokens
       ),
@@ -1789,7 +1790,8 @@ export async function runPipelineBlockAction(
   }
 
   const outputKey = block.pipeline_output_key ?? `pipeline_${blockId}`;
-  const model = (block.pipeline_model ?? 'mistral-medium-latest') as string;
+  // Ett avvecklat modell-id i ett äldre block körs och loggas som sin ersättare.
+  const model = normalizeModelId(block.pipeline_model) || MODEL_LARGE;
   const answers = (assignment.answers_json as Record<string, unknown>) || {};
   const artifacts = (assignment.artifacts_json as Record<string, unknown>) || {};
 
@@ -2183,7 +2185,7 @@ export async function previewWorkshopAiChatAction(
   try {
     // Samma prompt-struktur som runWorkshopAiChatAction — bara kontexten byts
     // mot exempelbolaget, så staff testar exakt det bolaget kommer att möta.
-    const result = await callMistral('mistral-medium-latest', [
+    const result = await callMistral(MODEL_LARGE, [
       {
         role: 'system',
         content: workshop.ai_system_prompt || DEFAULT_WORKSHOP_SYSTEM_PROMPT
@@ -2204,7 +2206,7 @@ export async function previewWorkshopAiChatAction(
       tenant: user.tenant,
       userId: user.id,
       surface: 'workshop_run',
-      model: 'mistral-medium-latest',
+      model: MODEL_LARGE,
       tokensIn: result.usage.prompt_tokens,
       tokensOut: result.usage.completion_tokens
     });
@@ -2233,7 +2235,7 @@ export async function previewPipelineBlockAction(
     return { error: 'AI-pipeline-blocket saknar system-prompt. Konfigurera det i byggaren.' };
   }
 
-  const model = (block.pipeline_model ?? 'mistral-medium-latest') as string;
+  const model = normalizeModelId(block.pipeline_model) || MODEL_LARGE;
   const answers = capPreviewRecord(answersInput);
   const artifacts = capPreviewRecord(artifactsInput);
 
@@ -2320,7 +2322,7 @@ export async function previewWorkshopReportAction(
   try {
     // Samma rapportprompt som completeWorkshopAction — kontexten är
     // exempelbolaget, och rapporten sparas ingenstans (visas bara i testläget).
-    const result = await callMistral('mistral-medium-latest', [
+    const result = await callMistral(MODEL_LARGE, [
       {
         role: 'system',
         content: workshop.ai_system_prompt || DEFAULT_WORKSHOP_SYSTEM_PROMPT
@@ -2344,7 +2346,7 @@ export async function previewWorkshopReportAction(
       tenant: user.tenant,
       userId: user.id,
       surface: 'workshop_run',
-      model: 'mistral-medium-latest',
+      model: MODEL_LARGE,
       tokensIn: result.usage.prompt_tokens,
       tokensOut: result.usage.completion_tokens
     });

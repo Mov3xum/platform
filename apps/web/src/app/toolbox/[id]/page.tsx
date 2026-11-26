@@ -11,7 +11,7 @@ import { markdownToHtml } from '@/lib/safe-html';
 import { RunToolForm } from '../RunToolForm';
 import { ScheduleEditor } from '@/components/ScheduleEditor';
 import type { Tool, ToolModel, ToolRun, WebSourceKey } from '@platform/shared';
-import { isAllowedModel } from '@/lib/ai/models';
+import { resolveSelectableModel } from '@/lib/ai/models';
 
 export default async function ToolDetailPage({
   params,
@@ -190,7 +190,7 @@ export default async function ToolDetailPage({
                 isAiTool={tool.category === 'ai_per_startup' || tool.category === 'ai_system_wide'}
                 startups={startups}
                 defaultStartupId={defaultStartupId}
-                defaultModel={isAllowedModel(tool.model) ? (tool.model as ToolModel) : undefined}
+                defaultModel={resolveSelectableModel(tool.model)}
               />
             </section>
           ) : (

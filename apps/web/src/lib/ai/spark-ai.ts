@@ -11,6 +11,7 @@ import {
   type SparkAssessmentSuggestion
 } from '@platform/shared';
 import { callMistralWithFallback } from './mistral';
+import { QUALITY_MODEL_CHAIN } from './models';
 
 /**
  * SPARK:s AI-anrop (CLAUDE.md § 61.7) — två isolerade Mistral-körningar utan
@@ -25,7 +26,7 @@ import { callMistralWithFallback } from './mistral';
  * `@platform/shared` och en människa bekräftar innan något gäller.
  */
 
-const MODELS = ['mistral-medium-latest', 'mistral-small-latest'];
+const MODELS: string[] = [...QUALITY_MODEL_CHAIN];
 
 export interface SparkAiUsage {
   model: string;

@@ -110,7 +110,7 @@ export default function KnowledgeManager({
         <h2 className="mb-1 font-heading text-lg font-semibold text-foreground">Lägg till material</h2>
         <p className="mb-4 text-xs text-foreground-subtle">
           PDF, Word, PowerPoint, Excel, text, Markdown, CSV eller bild
-          (PNG/JPG/WebP, max 25 MB). Bilder läses av AI-bildigenkänning (Pixtral, EU)
+          (PNG/JPG/WebP, max 25 MB). Bilder läses av AI-bildigenkänning (Mistral)
           som transkriberar text och beskriver diagram/matriser.
           Ladda <strong>inte</strong> upp personuppgifter — innehållet blir sökbart för AI:n.
           Personnummer saneras automatiskt.

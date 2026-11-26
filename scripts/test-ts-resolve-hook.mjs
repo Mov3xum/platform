@@ -10,6 +10,12 @@
  * Inget app-beteende påverkas — hooken laddas BARA av testkommandot.
  */
 export async function resolve(specifier, context, next) {
+  // `server-only` kastar utanför en React Server-miljö. I testkörningen ersätts
+  // paketet med en tom modul så att serverklienter (t.ex. lib/ai/mistral.ts)
+  // kan testas med en fejkad `fetch`. Gäller bara `yarn test`.
+  if (specifier === 'server-only') {
+    return { url: 'data:text/javascript,', shortCircuit: true };
+  }
   const isRelative = specifier.startsWith('./') || specifier.startsWith('../');
   const hasExt = /\.[a-z0-9]+$/i.test(specifier);
   if (!isRelative || hasExt) {

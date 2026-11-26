@@ -1,7 +1,7 @@
 import 'server-only';
 import { getSuperuserPb } from '@/lib/integrations/credentials';
 import { executeAgentRun } from '@/lib/scheduling/runner';
-import { DEFAULT_MODEL, isAllowedModel } from '@/lib/ai/models';
+import { DEFAULT_MODEL, resolveSelectableModel } from '@/lib/ai/models';
 import { canRunTool } from '@/lib/rbac';
 import type { Tool, ToolModel, Role } from '@platform/shared';
 
@@ -105,9 +105,7 @@ export async function runTriggeredTool(
       error: 'Endast AI-verktyg med systemprompt och modell kan triggas.'
     };
   }
-  const selectedModel: ToolModel = isAllowedModel(tool.model)
-    ? (tool.model as ToolModel)
-    : DEFAULT_MODEL;
+  const selectedModel: ToolModel = resolveSelectableModel(tool.model) ?? DEFAULT_MODEL;
   const verifyRubric =
     typeof tool.verify_rubric === 'string' ? tool.verify_rubric.trim() : '';
 

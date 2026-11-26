@@ -1,6 +1,7 @@
 import 'server-only';
 import type { CompassTranslationEntry } from '@platform/shared';
 import { callMistral, MistralError } from './mistral';
+import { QUALITY_MODEL_CHAIN } from './models';
 
 /**
  * Maskinöversättning svenska → engelska av en Startupkompass-moduls
@@ -13,7 +14,7 @@ import { callMistral, MistralError } from './mistral';
  * maskinöversatt (art. 50).
  */
 
-const MODEL_CHAIN = ['mistral-medium-latest', 'mistral-large-latest', 'mistral-small-latest'];
+const MODEL_CHAIN: string[] = [...QUALITY_MODEL_CHAIN];
 /** Texter per anrop — håller svaret inom max_tokens. */
 const BATCH_SIZE = 40;
 const BATCH_CHAR_BUDGET = 14_000;

@@ -12,15 +12,20 @@
  * mönster som fuzzy.ts/redaction.ts/rank.ts.
  */
 
-import { isAllowedModel, modelSupportsVision } from './models';
+import {
+  MODEL_LARGE,
+  MODEL_SMALL,
+  modelSupportsVision,
+  resolveSelectableModel
+} from './models';
 
-const SMALL = 'mistral-small-latest';
-const MEDIUM = 'mistral-medium-latest';
-const LARGE = 'mistral-large-latest';
-// Vision-kedja när bilder bifogas: båda är registrerade (lib/ai/models.ts),
-// multimodala och stödjer function calling. Medium först (billigare, bra på
-// skärmdumpar + verktyg), Pixtral Large som reserv vid kapacitetstak.
-const VISION_CHAIN = [MEDIUM, 'pixtral-large-latest'];
+const SMALL = MODEL_SMALL;
+const LARGE = MODEL_LARGE;
+// Bild-turer: båda modellerna i registret läser bilder och stödjer function
+// calling (Mistral Large 4, Small 4). Large först — skärmdumpar och skannade
+// underlag är sällan "enkla uppslag" — Small som reserv vid kapacitetstak.
+// (Medium 3.5 och Pixtral Large är avvecklade av Mistral, 2026-11.)
+const VISION_CHAIN = [LARGE, SMALL];
 
 export type ComplexityTier = 'low' | 'medium' | 'high';
 
@@ -31,7 +36,7 @@ export interface RouteSignals {
   hasAgent?: boolean;
   /** Antal turer i historiken (lång tråd → mer kontext att resonera kring). */
   historyTurns?: number;
-  /** Filer bifogade i turen → minst Medium (Small läser långa dokument dåligt). */
+  /** Filer bifogade i turen → Large (Small läser långa dokument sämre). */
   hasAttachments?: boolean;
 }
 
@@ -95,7 +100,7 @@ function countSignals(text: string, signals: string[]): number {
 /**
  * Klassar en chatt-frågas komplexitet utifrån den senaste användartexten +
  * signaler. Heuristik (ingen extra LLM-runda → ingen latens). Avsiktligt
- * försiktig uppåt: hellre medium än large om det är tveksamt.
+ * försiktig uppåt: hellre medium än high om det är tveksamt.
  */
 export function classifyComplexity(message: string, signals: RouteSignals = {}): ComplexityTier {
   const text = (message || '').toLowerCase();
@@ -112,19 +117,20 @@ export function classifyComplexity(message: string, signals: RouteSignals = {}):
 }
 
 /**
- * Modell-kedjan för en tier. Startar på rätt nivå men behåller uppåt-fallback
- * vid 429 (kapacitetstak) och en sista small-utväg så chatten aldrig dör bara
- * för att de större modellerna är överbelastade.
+ * Modell-kedjan för en tier. Två modeller sedan 2026-11: Small 4 för enkla
+ * uppslag, Large 4 för allt som kräver resonemang över verktygsresultat
+ * (medel OCH hög — Large 4 kostar mindre än den avvecklade Medium 3.5 gjorde).
+ * Den andra modellen ligger kvar som reserv vid kapacitetstak (429) så
+ * chatten aldrig dör för att en modell är överbelastad.
  */
 export function modelChainForTier(tier: ComplexityTier): string[] {
   switch (tier) {
     case 'high':
-      return [LARGE, MEDIUM, SMALL];
     case 'medium':
-      return [MEDIUM, LARGE, SMALL];
+      return [LARGE, SMALL];
     case 'low':
     default:
-      return [SMALL, MEDIUM, LARGE];
+      return [SMALL, LARGE];
   }
 }
 
@@ -147,7 +153,8 @@ export interface RouteInput extends RouteSignals {
  * användaren först, annars klassa komplexitet → tier-kedja.
  */
 export function routeChatModels(input: RouteInput = {}): string[] {
-  const preferred = isAllowedModel(input.preferredModel) ? input.preferredModel : undefined;
+  // Ett avvecklat id (sparat modellval från före 2026-11) tolkas som sin ersättare.
+  const preferred = resolveSelectableModel(input.preferredModel);
   if (input.hasImages) {
     // En vald vision-kapabel modell respekteras; annars standard-vision-kedjan.
     // (En vald modell UTAN vision avvisas uppströms med tydligt fel, § 9.9 —

@@ -33,20 +33,22 @@ test('classifyComplexity: vald agent eller djup tråd → minst medium', () => {
   assert.equal(classifyComplexity('hej', { historyTurns: 10 }), 'medium');
 });
 
-test('modelChainForTier: rätt startmodell per tier, faller uppåt + small sist', () => {
-  assert.equal(modelChainForTier('low')[0], 'mistral-small-latest');
-  assert.equal(modelChainForTier('medium')[0], 'mistral-medium-latest');
-  assert.equal(modelChainForTier('high')[0], 'mistral-large-latest');
-  // Alla kedjor innehåller small som sista utväg (resiliens vid 429).
+test('modelChainForTier: Small för enkla uppslag, Large för medel och hög', () => {
+  assert.deepEqual(modelChainForTier('low'), ['mistral-small-latest', 'mistral-large-latest']);
+  assert.deepEqual(modelChainForTier('medium'), ['mistral-large-latest', 'mistral-small-latest']);
+  assert.deepEqual(modelChainForTier('high'), ['mistral-large-latest', 'mistral-small-latest']);
+});
+
+test('modelChainForTier: bara registrerade modeller — inga avvecklade id:n', () => {
   for (const t of ['low', 'medium', 'high'] as const) {
-    assert.ok(modelChainForTier(t).includes('mistral-small-latest'));
+    for (const m of modelChainForTier(t)) assert.ok(isAllowedModel(m), `${m} saknas i modellregistret`);
   }
 });
 
 test('routeChatModels: bilder → vision-kedja oavsett text', () => {
-  assert.deepEqual(routeChatModels({ hasImages: true, message: 'analysera allt' }), [
-    'mistral-medium-latest',
-    'pixtral-large-latest'
+  assert.deepEqual(routeChatModels({ hasImages: true, message: 'hej' }), [
+    'mistral-large-latest',
+    'mistral-small-latest'
   ]);
 });
 
@@ -57,12 +59,13 @@ test('routeChatModels: vision-kedjan består bara av registrerade vision-modelle
   }
 });
 
-test('routeChatModels: bifogade filer → minst Medium även för en kort fråga', () => {
-  assert.equal(routeChatModels({ message: 'hej', hasAttachments: true })[0], 'mistral-medium-latest');
+test('routeChatModels: bifogade filer → Large även för en kort fråga', () => {
+  assert.equal(routeChatModels({ message: 'hej', hasAttachments: true })[0], 'mistral-large-latest');
 });
 
 test('routeChatModels: textfråga route:ar på komplexitet', () => {
   assert.equal(routeChatModels({ message: 'hej' })[0], 'mistral-small-latest');
+  assert.equal(routeChatModels({ message: 'hur många bolag finns det' })[0], 'mistral-large-latest');
   assert.equal(routeChatModels({ message: 'analysera portföljen' })[0], 'mistral-large-latest');
 });
 
@@ -71,9 +74,7 @@ test('routeChatModels: uttryckligt modellval blir startpunkt med kedjan som fall
     message: 'analysera portföljens risker',
     preferredModel: 'mistral-small-latest'
   });
-  assert.equal(chain[0], 'mistral-small-latest');
-  // Tier-kedjan (large → medium → small) behålls som fallback utan dubbletter.
-  assert.deepEqual(chain, ['mistral-small-latest', 'mistral-large-latest', 'mistral-medium-latest']);
+  assert.deepEqual(chain, ['mistral-small-latest', 'mistral-large-latest']);
 });
 
 test('routeChatModels: okänt modell-id ignoreras → automatiskt val', () => {
@@ -83,13 +84,20 @@ test('routeChatModels: okänt modell-id ignoreras → automatiskt val', () => {
   );
 });
 
-test('routeChatModels: bilder + vald vision-modell → den valda först', () => {
-  const chain = routeChatModels({ hasImages: true, preferredModel: 'pixtral-large-latest' });
-  assert.deepEqual(chain, ['pixtral-large-latest', 'mistral-medium-latest']);
-  // Vald modell utan vision-stöd får inte tyst bli vision-kedjan här (avvisas
-  // uppströms) — men routern faller ändå säkert till standard-vision.
-  assert.deepEqual(routeChatModels({ hasImages: true, preferredModel: 'mistral-large-latest' }), [
-    'mistral-medium-latest',
-    'pixtral-large-latest'
+test('routeChatModels: avvecklat modellval (sparat före 2026-11) tolkas som ersättaren', () => {
+  assert.deepEqual(routeChatModels({ message: 'hej', preferredModel: 'mistral-medium-latest' }), [
+    'mistral-large-latest',
+    'mistral-small-latest'
+  ]);
+  assert.deepEqual(routeChatModels({ hasImages: true, preferredModel: 'pixtral-large-latest' }), [
+    'mistral-large-latest',
+    'mistral-small-latest'
+  ]);
+});
+
+test('routeChatModels: bilder + vald modell → den valda först', () => {
+  assert.deepEqual(routeChatModels({ hasImages: true, preferredModel: 'mistral-small-latest' }), [
+    'mistral-small-latest',
+    'mistral-large-latest'
   ]);
 });

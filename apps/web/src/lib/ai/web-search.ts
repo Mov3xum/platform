@@ -1,5 +1,6 @@
 import 'server-only';
 import { MistralError, callMistralConversation } from './mistral';
+import { QUALITY_MODEL_CHAIN } from './models';
 import { formatWebSearchForModel, sanitizeWebQuery } from './web-search-parse';
 import type { WebSearchSourceRef } from '@platform/shared';
 
@@ -27,7 +28,9 @@ import type { WebSearchSourceRef } from '@platform/shared';
  * - Källorna (titel + URL) returneras för visning under svaret (art. 13).
  */
 
-export const WEB_SEARCH_MODELS = ['mistral-medium-latest', 'mistral-large-latest'];
+// Large 4 först; Small 4 (som också listar connectors i Mistrals katalog) tar
+// över vid kapacitetstak eller utfall. Medium 3.5 är avvecklad av Mistral.
+export const WEB_SEARCH_MODELS: string[] = [...QUALITY_MODEL_CHAIN];
 
 export interface WebSearchResult {
   /** Text till modellen (sammanfattning + numrerad källlista, märkt som data). */
@@ -103,7 +106,8 @@ export async function runWebSearch(input: WebSearchInput): Promise<WebSearchResu
           { role: 'system', content: buildInstructions(today) },
           { role: 'user', content: userPrompt }
         ],
-        { builtins: [webSearchToolType()], temperature: 0.2, maxTokens: 1500 }
+        // Sammanfatta sökträffar med källor: lägsta resonemangsnivån räcker.
+        { builtins: [webSearchToolType()], temperature: 0.2, maxTokens: 1500, reasoningEffort: 'low' }
       );
       const references = res.references ?? [];
       return {

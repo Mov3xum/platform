@@ -1,6 +1,7 @@
 import 'server-only';
 import type PocketBase from 'pocketbase';
 import { MistralError, callMistral, type MistralMessage } from './mistral';
+import { QUALITY_MODEL_CHAIN } from './models';
 import { logAiUsage } from './usage';
 import { assertWithinAiBudget, AiBudgetExceededError } from './budget.server';
 
@@ -21,8 +22,8 @@ import { assertWithinAiBudget, AiBudgetExceededError } from './budget.server';
  * namn sätter coachen själv i granskningen.
  */
 
-// Modellkedja: medium klarar långa transkript bra; small som kapacitetsfallback.
-const PROTOCOL_MODELS = ['mistral-medium-latest', 'mistral-small-latest'];
+// Modellkedja: Large 4 klarar långa transkript bra; Small 4 som kapacitetsfallback.
+const PROTOCOL_MODELS: string[] = [...QUALITY_MODEL_CHAIN];
 
 // En chunk hålls under ~15k tokens in (svenska ≈ 4 tecken/token) så prompten
 // ryms med god marginal; svaret är cappat av MAX_TOKENS=4000 i mistral.ts.

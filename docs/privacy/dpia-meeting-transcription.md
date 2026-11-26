@@ -88,3 +88,36 @@ Utan flaggan skickas ingen sådan parameter och inget ändras mot § 1–5.
 ljudet sparas till mötets slut → bryter § 1 "ljud lagras aldrig" och kräver
 ett nytt DPIA-beslut). Självhostade Whisper-servrar (§ 1, valfri provider)
 saknar diarisering — då lagras inga turer alls.
+
+## 7. Tillägg 2026-11-26 — Voxtral 3 (Public Preview) och endpointens region
+
+**Vad som ändrats:** standardmodellen för transkribering är Voxtral 3
+(`voxtral-small-transcribe-3`, reserv `voxtral-mini-transcribe-3`), eftersom
+föregående generation (Voxtral Transcribe 2) inte stöder svenska och är
+avvecklad av Mistral (stängs 2027-04-30). Samma biträde (Mistral AI), samma
+flöde, inga nya fält.
+
+**Två förhållanden som § 1 inte räknade med** (källa: docs.mistral.ai →
+Model lifecycle policy, Zero data retention, Regional inference; lästa
+2026-11-26):
+
+| Förhållande | Innebörd | Status |
+| --- | --- | --- |
+| Voxtral 3 är i **Public Preview** | Mistral anger att Public Preview-modeller "don't support data collection opt-out" och "don't support Zero Data Retention". Raden "ej hos Mistral — DPA, ingen träning" i § 1 kan inte hävdas för ljud som skickas till dessa modeller | **Öppen — beslut krävs av maintainer före produktion** |
+| `api.mistral.ai` är den **globala** endpointen | Mistral åtar sig ingen bestämd plats för inferensen på den adressen; EU/EFTA garanteras bara på `api.eu.mistral.ai` (10 % påslag, modellutbudet ska kontrolleras) | **Öppen** — se CLAUDE.md § 9.2 "Endpoint och region" |
+
+**Alternativ för mötesljud** (tredje parts röster, samtycke via grinden):
+
+1. Acceptera tills Voxtral 3 når General Availability — kräver att
+   samtyckestexten (`MEETING_CONSENT_TEXT`) och panelens fottext inte lovar
+   mer än Mistrals villkor ger, och att beslutet antecknas här.
+2. Kör en svensktränad modell (KB-Whisper) via `MOVEXUM_STT_BASE_URL` —
+   självhostad på UpCloud (ingen ny tredjepart) eller hos Berget AI (svenskt
+   bolag, Stockholm; nytt biträde → DPA och leverantörsbedömning först).
+3. Fråga Mistral skriftligt vilka villkor som gäller för kontot (DPA,
+   träning, lagringstid) för Public Preview-modellerna.
+
+Tills ett beslut är antecknat ska mötesläget i **produktion** betraktas som
+inte färdiggranskat mot § 10.2 i CLAUDE.md. Riskklassen (begränsad) ändras
+inte av detta.
+

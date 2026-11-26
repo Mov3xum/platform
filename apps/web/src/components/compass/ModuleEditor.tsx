@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Icon } from '@/components/proto';
 import { updateModuleAction } from '@/lib/actions/compass';
+import { MODEL_LARGE, resolveSelectableModel } from '@/lib/ai/models';
 import { QuestionsManager, type QuestionsManagerHandle } from './QuestionsManager';
 import { ResultBucketsEditor } from './ResultBucketsEditor';
 import { HeroMediaUploader } from './HeroMediaUploader';
@@ -500,7 +501,7 @@ export function ModuleEditor({
                 AI-modell
                 <select
                   name="model"
-                  defaultValue={mod.model || 'mistral-large-latest'}
+                  defaultValue={resolveSelectableModel(mod.model) ?? MODEL_LARGE}
                   className="mx-input"
                   style={{ marginTop: 4 }}
                 >

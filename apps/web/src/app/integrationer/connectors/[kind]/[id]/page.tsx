@@ -8,7 +8,7 @@ import { AI_OUTPUT_WARNING_TEXT } from '@/lib/ai/ui-text';
 import { ConnectorChatForm } from './ConnectorChatForm';
 import { getBuiltin } from '@/lib/ai/builtins';
 import { listActiveConnectors } from '@/lib/ai/connectors';
-import { isAllowedModel, defaultModelForConnectors } from '@/lib/ai/models';
+import { resolveSelectableModel, defaultModelForConnectors } from '@/lib/ai/models';
 import type { ToolModel, ToolRunMessage } from '@platform/shared';
 
 interface ConnectorRun {
@@ -87,9 +87,8 @@ export default async function ConnectorChatPage({
     }
   }
 
-  const defaultModel: ToolModel = isAllowedModel(run?.model)
-    ? (run!.model as ToolModel)
-    : defaultModelForConnectors();
+  const defaultModel: ToolModel =
+    resolveSelectableModel(run?.model) ?? defaultModelForConnectors();
 
   const messages: ToolRunMessage[] = run?.messages ?? [];
 

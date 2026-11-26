@@ -36,7 +36,7 @@ import {
 } from '@/lib/actions/chat-threads';
 import { getFileDownloadUrlAction } from '@/lib/actions/files';
 import { actionErrorMessage } from '@/lib/action-error';
-import { isAllowedModel } from '@/lib/ai/models';
+import { resolveSelectableModel } from '@/lib/ai/models';
 import type { Role } from '@platform/shared';
 
 interface Props {
@@ -58,7 +58,8 @@ const MODEL_STORAGE_KEY = 'movexum-chat-model';
 function readStoredModel(): string {
   try {
     const v = window.localStorage.getItem(MODEL_STORAGE_KEY) || '';
-    return isAllowedModel(v) ? v : '';
+    // Ett avvecklat id (sparat före 2026-11) blir sin ersättare.
+    return resolveSelectableModel(v) ?? '';
   } catch {
     return '';
   }
@@ -246,7 +247,7 @@ export default function ChattWorkspace({ greeting, agents, connectors, activitie
   }, []);
 
   function changeModel(next: string) {
-    const clean = isAllowedModel(next) ? next : '';
+    const clean = resolveSelectableModel(next) ?? '';
     setModel(clean);
     try {
       if (clean) window.localStorage.setItem(MODEL_STORAGE_KEY, clean);

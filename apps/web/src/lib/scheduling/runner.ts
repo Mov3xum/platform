@@ -15,7 +15,7 @@ import {
 } from '@/lib/ai/context';
 import { buildAgentSystemPrompt, buildKnowledgeContext } from '@/lib/ai/agent-prompt';
 import { fetchWebContext, type WebFetchResult } from '@/lib/ai/web';
-import { DEFAULT_MODEL, isAllowedModel } from '@/lib/ai/models';
+import { DEFAULT_MODEL, resolveSelectableModel } from '@/lib/ai/models';
 import { canRunTool } from '@/lib/rbac';
 import { recordActivity } from '@/lib/actions/record-activity';
 import { logAiUsage } from '@/lib/ai/usage';
@@ -181,9 +181,7 @@ export async function runScheduledTool(
     );
   }
 
-  const selectedModel: ToolModel = isAllowedModel(tool.model)
-    ? (tool.model as ToolModel)
-    : DEFAULT_MODEL;
+  const selectedModel: ToolModel = resolveSelectableModel(tool.model) ?? DEFAULT_MODEL;
   const verifyRubric =
     typeof tool.verify_rubric === 'string' ? tool.verify_rubric.trim() : '';
 

@@ -1,25 +1,27 @@
 import 'server-only';
 
 import { callMistralWithFallback, type MistralMessage } from './mistral';
+import { QUALITY_MODEL_CHAIN } from './models';
 
-// Pixtral-baserad bildigenkänning för kunskapsbasen (CLAUDE.md § 26 / § 28).
+// Bildigenkänning (Mistral Large 4 / Small 4) för kunskapsbasen (CLAUDE.md § 26 / § 28).
 // En uppladdad bild (PNG/JPG/WebP) har ingen textlager att extrahera — i stället
 // låter vi en vision-modell TRANSKRIBERA all synlig text och kort BESKRIVA
 // icke-text-innehåll (tabeller, matriser, diagram) till sökbar text. Den texten
 // behandlas sedan precis som vilket annat dokument som helst: personnummer-
 // saneras, chunkas och embeddas till RAG-indexet.
 //
-// EU-suveränt: Pixtral körs på Mistral AI:s EU-infrastruktur (samma leverantör/
-// DPA som övriga AI-anrop, § 10.2). Bilden skickas inline som data-URL — vi
+// Leverantör: Mistral AI (FR) — samma leverantör och DPA som övriga AI-anrop
+// (§ 10.2). Bilden skickas inline som data-URL — vi
 // cachar den inte i någon tredjepartstjänst.
 //
 // Säkerhet (§ 9.3): bilden är DATA, inte instruktioner. System-prompten är
 // immutabel och förbjuder modellen att följa instruktioner som står i bilden
 // (prompt-injection-skydd, även för bild-burna instruktioner).
 
-// Vision-kapabla modeller, i fallback-ordning: Pixtral (vision-specialist) →
-// Mistral Medium (multimodal) vid kapacitetstak (429). Båda kör i EU.
-const VISION_MODELS = ['pixtral-large-latest', 'mistral-medium-latest'];
+// Modeller som läser bilder, i fallback-ordning: Mistral Large 4 → Small 4
+// vid kapacitetstak (429). Pixtral Large och Medium 3.5 är avvecklade av
+// Mistral (2026-11) — bildförståelsen ligger nu i de generella modellerna.
+const VISION_MODELS: string[] = [...QUALITY_MODEL_CHAIN];
 
 // Mistrals vision-endpoint tar emot bilder inline; en orimligt stor bild blåser
 // upp prompten och kan avvisas. Cappa till en rimlig gräns med tydligt fel.
@@ -59,7 +61,7 @@ const VISION_SYSTEM_PROMPT =
   'inte syns. Svara på svenska med ren text, inga inledande fraser.';
 
 /**
- * Kör en bild genom en vision-modell (Pixtral, EU) och returnerar den
+ * Kör en bild genom en modell som läser bilder (Mistral) och returnerar den
  * transkriberade/beskrivna texten + token-utfallet. Kastar `VisionError` vid
  * ogiltig mime, för stor bild, eller om modellen inte ger någon text.
  */

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { AVAILABLE_MODELS, MODEL_LARGE, resolveSelectableModel } from '@/lib/ai/models';
 import type { WorkshopModule, WorkshopBlock, WorkshopBlockType, WorkshopBlockOption } from '@platform/shared';
 import {
   MAX_WORKSHOP_IMAGE_BYTES,
@@ -70,7 +71,7 @@ function defaultBlock(type: WorkshopBlockType): WorkshopBlock {
     ...(type === 'test' ? { question_type: 'single', options: [] } : {}),
     ...(type === 'ai_pipeline'
       ? {
-          pipeline_model: 'mistral-medium-latest',
+          pipeline_model: MODEL_LARGE,
           pipeline_output_key: uid('output'),
           pipeline_system_prompt: '',
           pipeline_requires_key: ''
@@ -632,21 +633,17 @@ export function WorkshopBlockBuilder({ initialModules }: WorkshopBlockBuilderPro
                           <div>
                             <label className={labelClass}>Modell</label>
                             <select
-                              value={block.pipeline_model ?? 'mistral-medium-latest'}
+                              value={resolveSelectableModel(block.pipeline_model) ?? MODEL_LARGE}
                               onChange={(e) =>
                                 updateBlock(mod.id, block.id, { pipeline_model: e.target.value })
                               }
                               className="mt-1 rounded-xl border border-default bg-surface px-2 py-1.5 text-sm text-foreground focus:border-brand focus:outline-none"
                             >
-                              <option value="mistral-small-latest">
-                                Mistral Small — snabb, billig
-                              </option>
-                              <option value="mistral-medium-latest">
-                                Mistral Medium — rekommenderad
-                              </option>
-                              <option value="mistral-large-latest">
-                                Mistral Large — strategiska beslut
-                              </option>
+                              {AVAILABLE_MODELS.map((m) => (
+                                <option key={m.id} value={m.id}>
+                                  {m.label} — {m.blurb.toLowerCase()}
+                                </option>
+                              ))}
                             </select>
                           </div>
                           <div>

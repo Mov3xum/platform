@@ -228,7 +228,7 @@ export async function prepareAttachmentsForModel(
     }
     if (isImageMime(mime) && !opts.allowVision) {
       throw new AttachmentError(
-        'Vald modell saknar stöd för bilder. Byt till Mistral Medium eller Pixtral Large.'
+        'Vald modell saknar stöd för bilder. Välj en modell som läser bilder.'
       );
     }
 

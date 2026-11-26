@@ -16,15 +16,16 @@ import { ShareModule } from '@/components/compass/ShareModule';
 import { FollowUpSurveys } from '@/components/surveys/FollowUpSurveys';
 import { ConfirmSubmitButton } from '@/components/ConfirmSubmitButton';
 import { ModuleEditor } from '@/components/compass/ModuleEditor';
+import { AVAILABLE_MODELS } from '@/lib/ai/models';
 import { moduleHeroImageUrl, moduleHeroVideoUrl } from '@/lib/compass/media';
 
 export const dynamic = 'force-dynamic';
 
-const MODEL_OPTIONS = [
-  { value: 'mistral-large-latest', label: 'Mistral Large (rikast)' },
-  { value: 'mistral-medium-latest', label: 'Mistral Medium' },
-  { value: 'mistral-small-latest', label: 'Mistral Small (snabb/billig)' }
-];
+// Ur modellregistret (lib/ai/models.ts) — Medium är avvecklad av Mistral.
+const MODEL_OPTIONS = AVAILABLE_MODELS.map((m) => ({
+  value: m.id as string,
+  label: `${m.label} — ${m.blurb.toLowerCase()}`
+}));
 
 export default async function EditModulePage({
   params
