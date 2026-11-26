@@ -72,6 +72,31 @@ jobs:
           echo "=== Alla services (one-click) ==="
           get /api/v1/services | summarize
 
+          # Pågående/köade byggen — ett bygge som står kvar som in_progress
+          # efter en Coolify-omstart blockerar nästa deploy (produktion
+          # 2026-11-25: 30 min in_progress, sedan timeout i workflowen).
+          echo ""
+          echo "=== Pågående deployer (GET /api/v1/deployments) ==="
+          get /api/v1/deployments | node -e '
+            let raw = "";
+            process.stdin.on("data", (d) => (raw += d));
+            process.stdin.on("end", () => {
+              let data;
+              try { data = JSON.parse(raw); } catch { console.log("(icke-JSON-svar)", raw.slice(0, 200)); return; }
+              const list = Array.isArray(data) ? data : [data];
+              if (!list.length) { console.log("(inga pågående deployer)"); return; }
+              for (const d of list) {
+                console.log(JSON.stringify({
+                  deployment_uuid: d.deployment_uuid,
+                  application_name: d.application_name,
+                  status: d.status,
+                  created_at: d.created_at,
+                  updated_at: d.updated_at
+                }));
+              }
+            });
+          '
+
           echo ""
           echo "=== Resursen bakom COOLIFY_APP_UUID_STAGING ==="
           if [ -n "${UUID_STAGING:-}" ]; then

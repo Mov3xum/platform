@@ -147,6 +147,31 @@ som skapas i en senare migration. Påverkar inte instanser med data, men
 blockerar disaster recovery från noll; kräver en egen fix (migrationer är
 oföränderliga — felet måste lösas utan att redigera applicerade filer).
 
+## Produktion 2026-11-25 — bygget blev aldrig klart (run 45606848091)
+
+Första produktionsdeployen efter att `deploy-production.yml` börjat bygga om
+stacken (commit 6e75ab29, 11:41 UTC):
+
+- Coolify köade bygget `bvedwjtf0roxc5c1iq0qmjya` och rapporterade
+  `in_progress` i 30 minuter. Samma bygge tar ~6 minuter på staging.
+- 11:57:54–12:01:43 UTC svarade Coolifys status-API **HTTP 500** på 16
+  kontroller i rad (~4 min), därefter `in_progress` igen till timeouten
+  (1800 s). Workflowen avbröt före `setup-via-api` och `verify-baseline`.
+- **Inte fastställt:** om bygget hängde sig när Coolify svarade 500
+  (omstart eller resursbrist på servern medan imagen byggdes med
+  `--no-cache`) eller bara var långsamt. Det avgörs i Coolify →
+  Deployments och med `docker logs coolify`, `free -m`, `dmesg` på servern.
+- Följd: produktions-PB är varken ombyggd, regel-synkad eller verifierad mot
+  `main`; ett bygge som står kvar som In progress blockerar nästa deploy
+  tills det avbryts.
+
+Åtgärd i repot: `coolify-deploy.sh` skriver vid timeout/failed ut slutet av
+byggloggen (dolda poster utelämnas, lösenords-/nyckelvärden maskas), hur
+länge loggen stått still och om Coolify svarade 5xx under bygget.
+"Diagnose Coolify resources" listar pågående deployer. Serveråtgärden är
+densamma som för staging (compose-resursen ovan): då byggs bara PB-imagen
+på servern och web hämtas färdigbyggd från GHCR.
+
 ## Lärdomar
 
 - Merga aldrig en PR med rött typecheck till `staging` — deployen är samma

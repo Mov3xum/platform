@@ -28,7 +28,11 @@
 #                            (incident 2026-11-19: "tenant-vakten är inte
 #                            aktiv" för att verify körde mot PB-containern
 #                            FÖRE ombygget med repots hooks).
-#   COOLIFY_WAIT_TIMEOUT     Max väntan i sekunder. Default 1800.
+#   COOLIFY_WAIT_TIMEOUT     Max väntan i sekunder. Default 1800. Vid timeout
+#                            (och vid failed) skrivs slutet av byggloggen ut,
+#                            hur länge loggen stått still och om Coolify
+#                            svarade 5xx under bygget — så loggen visar om
+#                            bygget är långsamt eller hängt.
 #   COOLIFY_WAIT_INTERVAL    Sekunder mellan statuskontroller. Default 15.
 #
 # Utfall:
@@ -214,16 +218,24 @@ extract_deployment_resource() {
   ' "$body_file"
 }
 
-# Pocketbase-raderna ur Coolify-byggloggen (deployment.logs) — avgör UTAN
-# SSH om pocketbase-tjänsten faktiskt byggdes/återskapades i deployen.
-# Skriver "__NOLOGS__" när API-svaret saknar logg, "__NOPB__" när loggen
-# finns men inte nämner pocketbase (= stacken byggde aldrig PB-tjänsten).
-extract_deployment_pb_log() {
+# Coolify-byggloggen (deployment.logs) ur ett status-svar. Tre lägen:
+#   pb    pocketbase-raderna — avgör UTAN SSH om pocketbase-tjänsten faktiskt
+#         byggdes/återskapades. "__NOLOGS__" när svaret saknar logg,
+#         "__NOPB__" när loggen finns men inte nämner pocketbase.
+#   tail  de sista raderna — visar VAR ett hängt/misslyckat bygge står
+#         (incident 2026-11-25, produktion: 30 min "in_progress" utan ledtråd).
+#         Dolda poster (hidden=true, Coolifys interna kommandon) tas inte med
+#         och värden efter *PASSWORD/SECRET/TOKEN/KEY* maskas (A.8.24).
+#         "__NOLOGS__" när svaret saknar logg.
+#   size  loggens längd i tecken — används för att se om bygget rör sig.
+deployment_log() {
+  local mode="$1" file="${2:-$body_file}"
   node -e '
     const fs = require("fs");
+    const [file, mode] = process.argv.slice(1);
     let raw = "";
-    try { raw = fs.readFileSync(process.argv[1], "utf8"); } catch {}
-    let text = "";
+    try { raw = fs.readFileSync(file, "utf8"); } catch {}
+    let entries = [];
     try {
       const data = JSON.parse(raw);
       const d = data?.deployment ?? data;
@@ -231,16 +243,34 @@ extract_deployment_pb_log() {
       if (typeof logs === "string") {
         try {
           const arr = JSON.parse(logs);
-          if (Array.isArray(arr)) {
-            text = arr.map((e) => [e?.command, e?.output].filter(Boolean).join("\n")).join("\n");
-          } else {
-            text = logs;
-          }
-        } catch { text = logs; }
-      } else if (Array.isArray(logs)) {
-        text = logs.map((e) => [e?.command, e?.output].filter(Boolean).join("\n")).join("\n");
+          logs = Array.isArray(arr) ? arr : logs;
+        } catch {}
       }
+      if (Array.isArray(logs)) entries = logs;
+      else if (typeof logs === "string") entries = [{ output: logs }];
     } catch {}
+    const textOf = (list) =>
+      list.map((e) => [e?.command, e?.output].filter((v) => typeof v === "string" && v).join("\n")).join("\n");
+    if (mode === "size") {
+      process.stdout.write(String(textOf(entries).length));
+      process.exit(0);
+    }
+    if (mode === "tail") {
+      const visible = entries.filter((e) => e?.hidden !== true);
+      const redact = (l) =>
+        l
+          .replace(/((?:[A-Za-z0-9_]*(?:PASSWORD|SECRET|TOKEN|KEY|CREDENTIAL)[A-Za-z0-9_]*)\s*[=:]\s*)("[^"]*"|\x27[^\x27]*\x27|\S+)/gi, "$1***")
+          .replace(/(Bearer\s+)\S+/gi, "$1***");
+      const lines = textOf(visible)
+        .split(/\r?\n/)
+        .map((l) => l.trimEnd())
+        .filter(Boolean)
+        .slice(-15)
+        .map((l) => redact(l).slice(0, 240));
+      process.stdout.write(lines.length ? lines.join("\n") : "__NOLOGS__");
+      process.exit(0);
+    }
+    const text = textOf(entries);
     if (!text.trim()) { process.stdout.write("__NOLOGS__"); process.exit(0); }
     const lines = text
       .split(/\r?\n/)
@@ -248,7 +278,24 @@ extract_deployment_pb_log() {
       .slice(0, 40)
       .map((l) => l.slice(0, 300));
     process.stdout.write(lines.length ? lines.join("\n") : "__NOPB__");
-  ' "$body_file"
+  ' "$file" "$mode"
+}
+
+# Skriver ut slutet av byggloggen ur det senaste lyckade status-svaret.
+print_build_log_tail() {
+  local uuid="$1" file="$2" tail_text
+  if [ ! -s "$file" ]; then
+    log "(ingen bygglogg hann läsas för $uuid — öppna Deployments i Coolify)"
+    return 0
+  fi
+  tail_text="$(deployment_log tail "$file")"
+  if [ "$tail_text" = "__NOLOGS__" ]; then
+    log "(status-svaret för $uuid innehöll ingen bygglogg — öppna Deployments i Coolify)"
+    return 0
+  fi
+  log "— sista raderna ur Coolify-byggloggen ($uuid) —"
+  printf '%s\n' "$tail_text"
+  log "— slut på utdrag —"
 }
 
 # wait_for_deployments "<uuid> [uuid...]"
@@ -271,9 +318,14 @@ wait_for_deployments() {
   fi
   local deadline=$(( $(date +%s) + wait_timeout ))
   local uuid status_value resource_name resource_logged pb_log
+  local last_ok_file="$tmpdir/last-status" poll_errors log_size last_log_size last_progress_at now idle
   for uuid in $uuids; do
     log "Väntar på att Coolify-bygget $uuid blir klart (timeout ${wait_timeout}s)..."
     resource_logged="false"
+    poll_errors=0
+    last_log_size=-1
+    last_progress_at="$(date +%s)"
+    : > "$last_ok_file"
     while :; do
       if request GET "$poll_base/api/v1/deployments/$uuid"; then
         case "$http_code" in
@@ -286,10 +338,18 @@ wait_for_deployments() {
               resource_logged="true"
             fi
             status_value="$(extract_deployment_status)"
+            # Spara svaret + notera om byggloggen växt sedan förra kollen —
+            # vid timeout avgör det om bygget är LÅNGSAMT eller HÄNGT.
+            cp "$body_file" "$last_ok_file"
+            log_size="$(deployment_log size)"
+            if [ "$log_size" != "$last_log_size" ]; then
+              last_log_size="$log_size"
+              last_progress_at="$(date +%s)"
+            fi
             case "$status_value" in
               finished)
                 log "✓ Coolify-bygget $uuid är klart."
-                pb_log="$(extract_deployment_pb_log)"
+                pb_log="$(deployment_log pb)"
                 case "$pb_log" in
                   __NOLOGS__)
                     log "(byggloggen kunde inte läsas ur API-svaret — kontrollera pocketbase-tjänsten i Coolify-UI:t)"
@@ -307,6 +367,7 @@ wait_for_deployments() {
                 ;;
               failed|cancelled*)
                 gh_error "Coolify-bygget $uuid misslyckades (status: $status_value). Kontrollera bygg-loggen i Coolify (Deployments) — schema-sync/verify avbryts så de inte kör mot den gamla containern."
+                print_build_log_tail "$uuid" "$last_ok_file"
                 return 1
                 ;;
               *)
@@ -319,14 +380,29 @@ wait_for_deployments() {
             break
             ;;
           *)
+            poll_errors=$((poll_errors + 1))
             log "Statuskoll för $uuid svarade HTTP $http_code — försöker igen om ${wait_interval}s..."
             ;;
         esac
       else
+        poll_errors=$((poll_errors + 1))
         log "Statuskoll för $uuid: kunde inte nå Coolify (${curl_error:-okänt fel}) — försöker igen om ${wait_interval}s..."
       fi
-      if [ "$(date +%s)" -ge "$deadline" ]; then
+      now="$(date +%s)"
+      if [ "$now" -ge "$deadline" ]; then
         gh_error "Coolify-bygget $uuid blev inte klart inom ${wait_timeout}s. Efterföljande schema-sync/verify skulle köra mot den GAMLA containern — avbryter. Kontrollera bygget i Coolify och kör om workflowen när det är klart."
+        idle=$((now - last_progress_at))
+        if [ "$last_log_size" -ge 0 ]; then
+          log "Byggloggen har inte fått någon ny rad på ${idle}s (${last_log_size} tecken totalt)."
+        fi
+        if [ "$poll_errors" -gt 0 ]; then
+          gh_warning "Coolify svarade inte normalt på $poll_errors statuskontroller under bygget — instansen startade om eller var överbelastad (t.ex. minnesbrist medan imagen byggdes på samma server). Ett bygge som pågick då blir ofta kvar som in_progress utan att någonsin avslutas."
+        fi
+        print_build_log_tail "$uuid" "$last_ok_file"
+        log "Gör så här:"
+        log "  1. Coolify → resursen → Deployments: står $uuid kvar som In progress, avbryt den (Cancel) — den blockerar nästa deploy i kön."
+        log "  2. På servern: free -m && df -h; docker logs coolify --tail 200; dmesg | grep -i 'out of memory'"
+        log "  3. Kör om workflowen när ingen deploy pågår."
         return 1
       fi
       sleep "$wait_interval"
