@@ -6967,18 +6967,20 @@ all IO och skickar färdig data:
    2026-09) — stor tabulär siffra i Sora, etikett i kapitäler, hint och
    delta — varje figur är en länk till sin vy. En räkning som felade visas
    som "–", aldrig som 0.
-2. **Kalendern** (full bredd) — en **tidslinje** (`HomeTimelineStrip`) med
-   valbart fönster **7 · 14 dagar · Månad** (`?dagar=7|14|30`,
+2. **Portföljkartan + kalendern** (samma 8/4-spalter som raden under; på
+   mobil ligger kalendern först). **Portföljkartan** (§ 37.7) tar
+   huvudspalten. **Kalendern** är kompakt (`HomeAgendaCompact`, 2026-11 —
+   ersätter den fullbreda bandtidslinjen `HomeTimelineStrip`): en liten
+   dagsruta per dag, sju i rad (en vecka = en rad, 14 dagar två, månaden
+   fem) med idag som fylld brand-cirkel, helger tonade och prickar för vad
+   som händer (lila = event, brand = årshjul), och under den en lista dag
+   för dag ("Idag", "fr 27", "Pågår" för en period som redan börjat, med
+   "t.o.m. 5 dec"). Högst 6 rader (7 dagar) eller 8, resten bakom "N till i
+   årshjulet". Valbart fönster **7 d · 14 d · Månad** (`?dagar=7|14|30`,
    `parseHomeWindowDays` i `@platform/shared` home.ts; **default 7 dagar**;
-   fliken bevaras i länkarna). Dagslinjal (idag som fylld brand-cirkel, helger
-   tonade, månadsetikett vid skifte; kolumnbredd efter fönster, månaden
-   scrollar i sidled) med årshjulets poster och events som **band** över
-   sina dagar — perioder långa, endagsposter korta; överlappande band packas
-   i körfält av den rena, enhetstestade `buildHomeTimeline`, som även räknar
-   ut hur långt en etikett får flyta ut över lediga dagar (`labelTo`) — hela
-   etikettytan ritas som en ljus box (texten hamnar aldrig utanför en ruta)
-   och postens faktiska dagar med fylligare ton inuti. Events i lila,
-   årshjulet i brand-ton. Fönstret kan korsa årsskiftet → `page.tsx` läser
+   fliken bevaras i länkarna). Underlaget är oförändrat den rena,
+   enhetstestade `buildHomeTimeline`. Fönstret kan korsa årsskiftet →
+   `page.tsx` läser
    båda åren vid behov. **Klick på en årshjulspost** öppnar den i sin helhet:
    länken är `/arshjul?item=<id>` och `AnnualWheelView` (`openItemId`) sätter
    år + månadsfokus, markerar raden och öppnar redigeringsdialogen för staff
@@ -7066,9 +7068,10 @@ blir synlig igen, så nyckeltal, agenda och omvärld hålls färska utan omladdn
 | `apps/web/src/lib/company-news.ts` (+ `.test.ts`) | Ren, enhetstestad urvalsregel för Bolagsnytt (`COMPANY_NEWS_FILTER`, `isCompanyNewsActivity`) |
 | `apps/web/src/lib/ai/web.ts` | `fetchWebFeedItems` — strukturerade RSS-poster med in-process-cache (30 min) |
 | `apps/web/src/app/hem/page.tsx` | Sidan (server; alla källor parallellt via `Promise.allSettled`) |
-| `apps/web/src/components/home/HomeFrontPage.tsx` | Layouten (server): masthead + siffer-rad, tidslinje med fönsterval, spalter — ren presentation av data från `page.tsx` |
+| `apps/web/src/components/home/HomeFrontPage.tsx` | Layouten (server): masthead + siffer-rad, portföljkartan med kompakt kalender bredvid, spalter — ren presentation av data från `page.tsx` |
 | `backend/pocketbase-schema/migrations/1700000146_extend_annual_wheel_categories_show_on_home.js` | `annual_wheel_categories.show_on_home` (visas kategorin i kalendern på Översikt?) |
-| `apps/web/src/components/home/HomeTimeline.tsx` | Tidslinje 7/14/30 dagar (dagslinjal + band i körfält, djuplänk `/arshjul?item=`) |
+| `apps/web/src/components/home/HomeAgendaCompact.tsx` | Kompakt kalender 7/14/30 dagar (dagsrutor med prickar + lista dag för dag, djuplänk `/arshjul?item=`) |
+| `packages/shared/src/portfolio-map.ts` (+ `.test.ts`), `apps/web/src/lib/portfolio-map.server.ts`, `apps/web/src/components/home/PortfolioMap.tsx` | Portföljkartan (§ 37.7): ren logik + layout, läsväg, diagram |
 | `apps/web/src/components/home/CompanyNews.tsx` | Bolagsnytt som vertikal tidslinje |
 | `apps/web/src/components/home/OrgPostList.tsx` | Inläggslistan (client): toppnyhet + notiser i spalter / numrerad handbok; redigerare, fäst/redigera/ta bort — används i alla tre flikarna (`kinds` begränsar typvalet per flik) |
 | `apps/web/src/components/home/PostComposer.tsx` | Redigeraren (client, § 37.6): verktygsrad, kortkommandon, emoji-väljare, media-uppladdning (knapp/dra-och-släpp/klistra in), förhandsgranskning |
@@ -7286,6 +7289,48 @@ renderarens delmängd:
 - **Riskklass (EU AI Act):** n/a — ren redigerings-/presentationsfunktion,
   ingen AI-inferens. Emoji-/mediadata når aldrig AI-kontexten annat än som
   brödtext i `org_posts.body` (redan läsbar via `query_collection`, § 37.5).
+
+### 37.7 Portföljkartan — IRL mot program och tid sedan inskrivning (2026-11)
+
+Överst på Översikt ligger en karta där **varje bolag i ett program är en
+punkt**: **IRL lodrätt** (1–9), **programmen som band vågrätt** (Lead · Boost
+Chamber · Incubation · Prescale · Acceleration; Inflöde ritas bara när det har
+bolag) och — inom varje band — **tiden sedan bolaget skrevs in i programmet**
+(0 till `maxMonths`, samma skala i alla band så de går att jämföra). Nere
+till höger i ett band = länge i programmet med låg mognad; uppe till vänster
+= snabb utveckling. Streckad linje = medianen per program.
+
+- **Vilka bolag:** bara bolag i ett program (`isOnPortfolioMap`: fasen är en
+  av de sex ovan OCH status är inte `alumni`/`rejected`/`paused`). Alumner
+  och pausade visas aldrig. Filtret ligger både i PB-frågan och i den rena
+  funktionen.
+- **IRL** är bolagets KTH IRL-snitt (`irlAverageByStartup`, samma rad som
+  bolagskortets radar, § 52.2). Saknas en bedömning används bolagskortets
+  `irl_level` och punkten ritas ihålig ("Utan IRL-bedömning"). Saknas båda
+  ritas bolaget inte — det räknas och sägs under kartan (0 är aldrig en nivå).
+- **Inskrivning** = senaste raden i `startup_phase_history` för bolagets
+  NUVARANDE fas; saknas den används `intagsdatum`, sist datumet bolaget lades
+  in i systemet (sägs i tooltipen och under kartan). Tidsaxeln är minst 12
+  och högst 48 månader, i steg om 6; ett bolag som varit inne längre ligger
+  vid bandets högerkant och tooltipen visar den verkliga tiden.
+- **Mina bolag** (den inloggade är coach eller ägare) är fyllda i brand,
+  övriga nedtonade; har användaren inga egna bolag är alla i brand. Några av
+  de egna bolagen får namnet utskrivet där det får plats utan att täcka något.
+- **Interaktion:** varje punkt är en länk till bolagskortet (tangentbord +
+  skärmläsare: namn, program, IRL, tid); hovring/fokus visar namn, program,
+  IRL och inskrivning. På smala skärmar scrollar kartan i sidled.
+- **Kod:** `packages/shared/src/portfolio-map.ts` (ren, enhetstestad:
+  `buildPortfolioMap` = urval + värden, `layoutPortfolioMap` = pixlar med
+  deterministisk isärflyttning så två punkter aldrig ligger ovanpå varandra),
+  `lib/portfolio-map.server.ts` (läsväg med användarens token, RLS § 21;
+  bolagen krävs, IRL-bedömningar och fashistorik är fail-soft med notering;
+  kapning sägs, § 33.4) och `components/home/PortfolioMap.tsx` (klient: mäter
+  bredden, ritar SVG med semantiska tokens så mörkt läge följer med).
+- **Åtkomst:** visas för den som når modulen `startups`; `/hem` är redan
+  staff/observer. Inga nya fält, kollektioner eller datavägar; bolag, inte
+  personer (ingen PII); ingen AI-inferens → riskklass n/a.
+
+---
 
 ## 38. Svensk tid i kalender & events (Europe/Stockholm)
 

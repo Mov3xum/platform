@@ -3,7 +3,8 @@ import type { ReactNode } from 'react';
 import { PageShell } from '@/components/PageShell';
 import { Icon } from '@/components/proto/Icon';
 import { OrgPostList, type BoardPost } from '@/components/home/OrgPostList';
-import { HomeTimelineStrip } from '@/components/home/HomeTimeline';
+import { HomeAgendaCompact } from '@/components/home/HomeAgendaCompact';
+import { PortfolioMap } from '@/components/home/PortfolioMap';
 import { CompanyNews } from '@/components/home/CompanyNews';
 import { HomeBoardTabs, type HomeTabDef } from '@/components/home/HomeBoardTabs';
 import { OmvarldFeed, type OmvarldSourceStatus } from '@/components/home/OmvarldFeed';
@@ -19,6 +20,7 @@ import {
   type HomeAgendaItem,
   type HomeWindowDays,
   type OmvarldItem,
+  type PortfolioMapData,
   type OrgPostTab,
   type Role
 } from '@platform/shared';
@@ -28,9 +30,10 @@ import {
  * RLS-filtrerad data (page.tsx äger all IO). Satt som en redaktionell
  * förstasida i stället för en dashboard: inga kort eller boxar, och samma
  * typskala som chatten (§ 37.1). Nyckeltalen är en boxlös siffer-rad under
- * hälsningen, agendan en tidslinje i full bredd (7/14/30 dagar), avdelningarna
- * (Anslagstavla · Internutbildningar) Sora-rubriker i rad, och i
- * sidospalten ligger Bolagsnytt och Omvärld som två likadana tidslinjelistor.
+ * hälsningen. Därunder portföljkartan (§ 37.7) med en kompakt kalender
+ * bredvid (7/14/30 dagar), avdelningarna (Anslagstavla · Internutbildningar)
+ * som Sora-rubriker i rad, och i sidospalten Bolagsnytt och Omvärld som två
+ * likadana tidslinjelistor.
  * Ingen dataväg, ingen AI-inferens.
  */
 
@@ -48,6 +51,11 @@ export interface HomeFrontPageProps {
   /** Agendaposter (redan filtrerade på kategori-synlighet) — fönstret klipps här. */
   agendaItems: HomeAgendaItem[];
   windowDays: HomeWindowDays;
+  /**
+   * Portföljkartan (§ 37.7). `null` = användaren når inte bolagen (kartan
+   * visas inte); `error` = bolagen kunde inte läsas (sägs, aldrig en tom karta).
+   */
+  portfolio: { data: PortfolioMapData; notices: string[] } | { error: string } | null;
   tabs: HomeTabDef[];
   initialTab: OrgPostTab;
   byTab: Record<OrgPostTab, BoardPost[]>;
@@ -148,6 +156,7 @@ export function HomeFrontPage({
   counts,
   agendaItems,
   windowDays,
+  portfolio,
   tabs,
   initialTab,
   byTab,
@@ -204,20 +213,53 @@ export function HomeFrontPage({
             </div>
           </header>
 
-          {/* ── Tidslinje ────────────────────────────────────────────────── */}
-          <section className="mt-8 border-t border-default pt-5">
-            <div className="mb-3 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
-              <div className="min-w-0">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-brand">Kalender</div>
-                <h2 className="mt-0.5 font-heading text-[16px] font-semibold tracking-tight text-foreground">
-                  {homeWindowLabel(windowDays)}
-                </h2>
-                <p className="mt-0.5 text-[12px] text-foreground-subtle">
-                  Årshjulet och eventkalendern på en linje — lila är events, blått är verksamhetsårshjulet
-                </p>
-              </div>
-              <div className="flex items-center gap-4 pb-1 text-[12px]">
-                <span className="flex items-center gap-2" role="group" aria-label="Kalenderfönster">
+          {/* ── Portföljkartan + kompakt kalender ────────────────────────── */}
+          <div className="mt-8 grid grid-cols-1 gap-x-12 gap-y-8 border-t border-default pt-5 xl:grid-cols-12">
+            {portfolio && (
+              <section className="order-2 min-w-0 xl:order-1 xl:col-span-8">
+                <SectionHead
+                  eyebrow="Portföljen"
+                  title="Portföljkartan"
+                  description={
+                    'data' in portfolio
+                      ? `${portfolio.data.total} bolag i program — IRL lodrätt, program och tid sedan inskrivning vågrätt`
+                      : undefined
+                  }
+                  href="/startups"
+                  linkLabel="Alla bolag"
+                />
+                {'data' in portfolio ? (
+                  <>
+                    <PortfolioMap data={portfolio.data} />
+                    {portfolio.notices.length > 0 && (
+                      <ul className="mt-2 space-y-0.5 text-[11.5px] text-foreground-subtle">
+                        {portfolio.notices.map((n) => (
+                          <li key={n}>{n}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </>
+                ) : (
+                  <p className="rounded-lg bg-movexum-pastell-orange px-3 py-2 text-[12.5px] text-movexum-morkorange dark:bg-movexum-morkorange/40 dark:text-movexum-pastell-orange">
+                    {portfolio.error}
+                  </p>
+                )}
+              </section>
+            )}
+
+            <section
+              className={`order-1 min-w-0 xl:order-2 ${
+                portfolio ? 'xl:col-span-4 xl:border-l xl:border-default xl:pl-10' : 'xl:col-span-12 xl:max-w-[34rem]'
+              }`}
+            >
+              <div className="mb-3 flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+                <div className="min-w-0">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-brand">Kalender</div>
+                  <h2 className="mt-0.5 font-heading text-[16px] font-semibold tracking-tight text-foreground">
+                    {homeWindowLabel(windowDays)}
+                  </h2>
+                </div>
+                <span className="flex items-center gap-3 pb-1 text-[12px]" role="group" aria-label="Kalenderfönster">
                   {HOME_WINDOW_OPTIONS.map((d) => {
                     const on = d === windowDays;
                     return (
@@ -231,10 +273,23 @@ export function HomeFrontPage({
                             : 'text-foreground-subtle hover:text-foreground'
                         }`}
                       >
-                        {d === 30 ? 'Månad' : `${d} dagar`}
+                        {d === 30 ? 'Månad' : `${d} d`}
                       </Link>
                     );
                   })}
+                </span>
+              </div>
+              <HomeAgendaCompact timeline={timeline} maxItems={windowDays === 7 ? 6 : 8} />
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[11.5px] text-foreground-subtle">
+                <span className="flex items-center gap-3">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-movexum-lila dark:bg-movexum-ljuslila" />
+                    Event
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-brand" />
+                    Årshjul
+                  </span>
                 </span>
                 <Link
                   href="/arshjul"
@@ -244,9 +299,8 @@ export function HomeFrontPage({
                   <Icon name="arrow-up-right" size={11} />
                 </Link>
               </div>
-            </div>
-            <HomeTimelineStrip timeline={timeline} />
-          </section>
+            </section>
+          </div>
 
           <div className="mt-8 grid grid-cols-1 gap-x-12 gap-y-8 border-t border-default pt-6 xl:grid-cols-12">
             {/* ── Från Movexum (huvudspalt) ─────────────────────────────── */}
