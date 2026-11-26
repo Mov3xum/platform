@@ -9,6 +9,13 @@ on:
 permissions:
   contents: read
 
+# Serialisera staging-deployer: två snabba merges racear annars varandra —
+# den ena körningens verify-baseline ser den andras regeländringar live
+# (incident 2026-11-19, tre merges inom en timme → alla föll olika).
+concurrency:
+  group: coolify-staging
+  cancel-in-progress: false
+
 jobs:
   # Compile the web image on GitHub's runners and push it to GHCR. Coolify
   # then pulls this prebuilt image instead of compiling on the UpCloud host.
@@ -131,6 +138,9 @@ jobs:
           COOLIFY_DEPLOY_WEBHOOK: ${{ secrets.COOLIFY_DEPLOY_WEBHOOK_STAGING }}
           COOLIFY_TARGET_LABEL: staging
           COOLIFY_UUID_SECRET_NAME: COOLIFY_APP_UUID_STAGING
+          # Vänta tills stacken faktiskt byggts klart — PB-bootstrap/verify
+          # nedan ska köra mot den NYA containern, inte den gamla.
+          COOLIFY_WAIT: 'true'
         run: bash .github/scripts/coolify-deploy.sh
 
       - name: Bootstrap PocketBase schema for staging

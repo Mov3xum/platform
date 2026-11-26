@@ -681,19 +681,19 @@ function parseSaveIntent(v: unknown): ModuleSaveIntent {
   return v === 'publish' || v === 'unpublish' ? v : 'save';
 }
 
-function moduleEditorPath(slug: string, params: Record<string, string>): string {
-  const qs = new URLSearchParams(params).toString();
-  return `/inflode/admin/modules/${slug}${qs ? `?${qs}` : ''}`;
-}
-
 /**
  * Sparar modulformuläret (alla steg postas i ETT anrop, § 23.7) och
- * redirectar tillbaka till editorn med `?ok=` eller `?error=` så att
- * användaren alltid får ett kvitto — tidigare returnerade actionen tyst
- * (ingen redirect, ingen banner) och fel kastades rakt in i den globala
- * felvyn, vilket upplevdes som att "Spara & klart" inte gjorde någonting.
+ * RETURNERAR utfallet — ingen redirect. Editorn står kvar på samma steg och
+ * visar en "Sparat"-ruta. (Tidigare redirectade actionen till `?ok=`, vilket
+ * monterade om editorn och kastade användaren tillbaka till steg 1.)
+ * Behörighets-/indatafel kastas som förut; fel i själva sparningen
+ * returneras med sitt PII-fria meddelande.
  */
-export async function updateModuleAction(formData: FormData) {
+export type ModuleSaveResult =
+  | { ok: true; result: 'saved' | 'published' | 'unpublished' }
+  | { ok: false; error: string };
+
+export async function updateModuleAction(formData: FormData): Promise<ModuleSaveResult> {
   const user = await requireUser();
   if (!hasRole(user.roles, [...MANAGE_ROLES])) {
     throw new Error('Forbidden');
@@ -717,15 +717,11 @@ export async function updateModuleAction(formData: FormData) {
   revalidatePath('/inflode/admin/modules');
   revalidatePath(`/inflode/admin/modules/${existing.slug}`);
 
-  // redirect() kastar — måste ligga UTANFÖR try/catch.
-  if (errorMessage) {
-    redirect(moduleEditorPath(existing.slug, { error: errorMessage.slice(0, 300) }));
-  }
-  redirect(
-    moduleEditorPath(existing.slug, {
-      ok: intent === 'publish' ? 'published' : intent === 'unpublish' ? 'unpublished' : 'saved'
-    })
-  );
+  if (errorMessage) return { ok: false, error: errorMessage.slice(0, 300) };
+  return {
+    ok: true,
+    result: intent === 'publish' ? 'published' : intent === 'unpublish' ? 'unpublished' : 'saved'
+  };
 }
 
 async function applyModuleUpdate(
@@ -1211,7 +1207,7 @@ function resolveChoices(formData: FormData, inputType: string): ParsedChoice[] |
   return choicesRaw ? parseQuestionChoices(choicesRaw) : undefined;
 }
 
-/** Temarubriken ovanför frågan (§ 23.15): en rad, högst 80 tecken. */
+/** Temarubriken ovanför frågan (§ 23.16): en rad, högst 80 tecken. */
 function cleanQuestionTopic(raw: FormDataEntryValue | null): string {
   return String(raw || '')
     .replace(/\s+/g, ' ')
@@ -1225,7 +1221,7 @@ function assertTopicStored(saved: unknown, topic: string) {
   const stored = (saved as { topic?: unknown } | null)?.topic;
   if (stored !== topic) {
     throw new Error(
-      'frågan sparades, men temarubriken kunde inte sparas — fältet saknas i databasen (kör migration 1700000219).'
+      'frågan sparades, men temarubriken kunde inte sparas — fältet saknas i databasen (kör migration 1700000225).'
     );
   }
 }

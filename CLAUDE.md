@@ -1020,6 +1020,7 @@ omsättning.
 | `create_funding_project` / `create_support_check_type` / `create_support_check_application` (chatt-verktyg, § 46) | n/a | Deterministiska utkast via skrivlagret (checktyp inaktiv, ansökan `draft`); inskick, bedömning, finansiering och beslut är agent-nekade |
 | Impact Navigator (`lib/ai/impact-analysis.ts`, § 56) | begränsad | Hållbarhetsanalys av BOLAG (väsentlighet, tillräcklighet, slutanalys, uppdatering) via Mistral; människan startar varje steg, granskar väsentligheten och slutanalysen; ingen autopublicering |
 | Export Lab (`lib/ai/export-analysis.ts`, § 58) | begränsad | Internationaliseringsanalys av BOLAG (exportprofil & marknadsurval, informationsgap, exportplan, uppdatering) via Mistral, byggd på namngivna forskningsramverk och bolagets KTH IRL; människan startar varje steg, granskar marknaderna och planen; ingen autopublicering; regelverk/tull/kultur ska verifieras |
+| SPARK:s AI-lager (`lib/ai/spark-ai.ts`, § 61.7) | begränsad | Förslag på TRL och acceleratorkategori för en LÖSNING (aldrig en person), utkast till introduktionstext och innehållslikhet som extra signal i matchningen; allt på en människas klick, förslagen sparas bredvid — aldrig i — Movexums bedömning, ingenting skickas eller publiceras automatiskt |
 | `edu_irl_levels` | minimal | Generellt utbildningsmaterial |
 | `template_pitch_deck` | n/a | Statisk mall, ingen AI-inferens |
 
@@ -3915,6 +3916,28 @@ fråga via egna server actions); `ResultBucketsEditor`s dolda fält associeras
 via `form`-attributet. "Skapa modul"-sidan är avsiktligt minimal (namn + typ) —
 allt annat byggs i stegen.
 
+**Editorns sparflöde och läsbarhet (2026-11-25).** Tre fel i samma yta:
+(1) **"Nästa" på steg 4 publicerade modulen.** Fotens "Nästa"-knapp
+(`type="button"`) och "Publicera" (`type="submit"`) renderades på samma plats
+utan `key`, så React återanvände DOM-noden och bytte typ MITT I klicket —
+webbläsaren skickade då formuläret med `intent=publish`. Knapparna har nu
+egna `key`; ge alltid knappar som byter mellan `button` och `submit` på samma
+plats en `key`. Publicering sker bara via Publicera på sista steget.
+(2) **Spara kastade tillbaka till steg 1.** `updateModuleAction` redirectade
+till `?ok=`, vilket monterade om editorn. Actionen RETURNERAR nu
+`ModuleSaveResult` (ingen redirect); editorn står kvar på steget och visar en
+"Sparat"-ruta (`.mx-savetoast`, försvinner efter 3,5 s; fel står kvar tills de
+stängs). Kryssrutorna Aktiv/Publicerad är kontrollerade och följer
+Publicera/Avpublicera, annars skulle nästa Spara ångra publiceringen.
+(3) **Fält och rubriker flöt ihop.** Varje steg är indelat i sektioner med
+egen rubrik (`Section`, `.mx-modsec`), etiketterna är läsbara (13 px, inte
+10 px versaler) och fälten har tydligare ram — allt scopat under
+`.mx-modedit` i `prototype.css`. **Frågor och resultatprofiler är hopfällda
+som standard** (`.mx-qcard`: nummer, frågetext, typ, antal alternativ,
+"Obligatorisk", "Ej sparad"); klick öppnar, en nyss tillagd fråga öppnas
+direkt, "Öppna alla/Fäll ihop alla" finns. Svarsalternativen är en tabell med
+kolumnrubriker (värde, svarstext, poäng per profil). Ingen ny dataväg.
+
 **Omslagsmedia (bild + video).** `compass_modules.hero_image` (migration
 1700000122) kompletteras av **`hero_video`** (migration **1700000141**, filfält
 200 MB, video-mimes). Uppladdning sker DIREKT vid filval via route-handlern
@@ -4468,13 +4491,48 @@ resultatprofilen besökaren får.
   leadet. Flödet är inte kört mot Mistral från byggmiljön — testa i
   förhandsgranskningen (`/inflode/m/<slug>`) innan publicering.
 
-### 23.15 Temarubrik ovanför frågan (2026-11-25)
+### 23.15 Publika sidans sidhuvud, samtycke i slutet & sparning i modul-admin (2026-11-25)
+
+- **Sidhuvud:** liten logotyp i sidans övre vänstra hörn (`mx-compass-topbar-page`,
+  utanför innehållskolumnen) + språkväxlaren till höger, i alla mallar.
+  **Målgruppen (`target_audience`) är intern** — den visas inte längre på
+  `/m/<slug>` och ingår inte i `toPublicModule()`.
+- **Samtyckestexten visas där besökaren slutför, inte som grind på första
+  sidan** (beslut av maintainer). `ConsentNotice` renderar "När du slutför
+  bekräftar du att du har tagit del av hur vi hanterar dina uppgifter: …" +
+  modulens `consent_note` vid sista steget i formulär/quiz, i chattens
+  avslutssteg och under chattens skrivfält (chatten lagrar per tur).
+  Första sidan visas bara när modulen har en startsida (§ 23.11).
+  **Följd för § 23.10 (dataminimering):** när modulen har en samtyckestext
+  skickar formulär/quiz INGA svar i `/progress` före inskick — bara steg
+  och antal ("2 av 5 frågor besvarade"), så ett pågående/avbrutet lead är
+  PII-fritt tills besökaren sett texten och slutfört. Servern kräver
+  oförändrat `consent:true` på inskicken.
+- **Typografi:** hela `.mx-compass-landing` (även `/u/`, `/s/`, `/e/`) —
+  rubriker Sora Bold (700), allt övrigt Nunito Sans.
+- **Layout:** *Heltäckande* är vänsterställd tvåkolumn på desktop (rubrik
+  till vänster, flödet till höger) i stället för en smal centrerad kolumn.
+  På mobil (≤ 640 px) ligger flödet inline på sidan utan svävande kort
+  (hårlinje + full bredd); *Heltäckande* blir ett ark kant i kant som
+  fyller skärmen, *Färgpanel* behåller sitt kort (överlappar panelen).
+- **Modul-admin — "det hoppar tillbaka":** `updateModuleAction` redirectade
+  till `?ok=…`, vilket byter sidans segmentnyckel och monterade om hela
+  editorn (steget hoppade till Grunder, osparade frågor försvann). Den
+  **returnerar nu kvittot** och editorn visar bannern själv. **Spara och
+  stegbyte sparar alla ändrade frågor** (`QuestionsManagerHandle.saveDirty`;
+  varje frågekort registrerar sin sparfunktion och märks "osparade
+  ändringar") — tidigare sparades bara den fråga vars egen knapp man tryckte
+  på. En tömd hjälptext sparas nu (skickades som `undefined` och låg kvar).
+  Redirecta aldrig en server action tillbaka till samma sida med ny query
+  för att visa ett kvitto — returnera det.
+
+### 23.16 Temarubrik ovanför frågan (2026-11-25)
 
 Varje fråga kan få en liten rubrik ovanför frågetexten, t.ex.
 "Marknadspotential", så besökaren förstår vilket tema frågan hör till.
 
 - **Fält:** `compass_questions.topic` (text ≤ 80, valfri; migration
-  **1700000219**, speglad i `setup-via-api.mjs`, asserterad i
+  **1700000225**, speglad i `setup-via-api.mjs`, asserterad i
   `verify-baseline.mjs` `REQUIRED_APP_FIELDS`). Tomt ⇒ ingen rubrik.
 - **Sätts** i modul-admin steg 3 ("Temarubrik ovanför frågan", både ny fråga
   och redigering) eller av chatten (`add_compass_question`, parametern
@@ -11320,3 +11378,349 @@ till Howspace renderas bara när de är https under `howspace.com`
 (`rel="noopener noreferrer"`). Migrationer 1700000213–214 är nya,
 oföränderliga filnummer; ingen schemaändring → ingen spegling i
 `setup-via-api.mjs`/`verify-baseline.mjs`.
+
+---
+
+## 60. Diarium, informationshanteringsplan & arkivförteckning (2026-11)
+
+`/diarium` (modul `diarium`, titel **Diarium & arkiv**, "System"-railen;
+Movexum-personal + observer) är plattformens svar på arkivlagen och OSL
+5 kap.: handlingar registreras **automatiskt när de blir allmänna**, planen
+säger hur varje handlingstyp ska hanteras, och förteckningen räknas ur de
+två. Fem flikar (`?vy=`): **Diarium** · **Plan** · **Förteckning** ·
+**Utlämnanden** · **Granskning**.
+
+**Förutsättning som inte är kod:** om Movexum omfattas (ägarnas rättsligt
+bestämmande inflytande, OSL 2 kap. 3 §), vem som är arkivmyndighet och vilka
+lagrum/gallringsfrister som gäller ska bekräftas av jurist och arkivmyndighet.
+Standardplanen är därför **förslag** — varje rad bär `confirmed`, och
+granskningen varnar tills raderna bekräftats och en version fastställts.
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/records-register.ts` (+ `.test.ts`) | REN: vokabulär, `DEFAULT_RECORD_TYPES` (Movexums förslag till plan), validering, diarienummer (`formatCaseNumber` `2026/0042`, handling `2026/0042-3`), `registerEntryHashPayload`, `disposalDueDate`, `buildArchiveInventory`, arkivbeskrivningens avsnitt, `runRegisterAudit` |
+| `backend/pocketbase-schema/migrations/1700000219_create_records_register.js` | `record_types`, `register_cases`, `register_entries`, `register_disclosures`, `archive_profiles`, `archive_versions` |
+| `apps/web/src/lib/core/write/register.ts` | Skrivlagret: `registerRecord`/`registerRecordSafe` (automatiskt), manuell registrering, sekretessmarkering, makulering, ärendestatus, utlämnandelogg, plan, arkivbeskrivning, fastställd version, `verifyRegisterIntegrity` |
+| `apps/web/src/lib/register/sources.ts` | Byggare per källa (samma för inkoppling OCH efterregistrering), `SOURCE_FILTERS`, `backfillRegister` |
+| `apps/web/src/lib/register/data.ts` | Läsvägen (användarens token) + granskningens underlag |
+| `apps/web/src/lib/actions/register.ts`, `app/diarium/**`, `app/api/diarium/export/route.ts` | Actions, sidor, CSV-export |
+
+**Bindande regler:**
+
+- **Bara servern skriver.** Alla sex kollektionernas create/update/delete-
+  regler är `null`; skrivlagret prövar rollen och skriver med den cachade
+  superusern. Ingen användartoken kan skapa, ändra eller ta bort en
+  diariepost (verifierat mot PB 0.23.4; `MUST_BE_IMMUTABLE` +
+  `MUST_BE_SERVER_CREATE_ONLY` i `verify-baseline.mjs`). Utan
+  `POCKETBASE_SUPERUSER_*` på web-appen registreras ingenting — granskningens
+  första punkt säger det.
+- **Var en handling blir allmän** (inkopplingarna — lägg nya här, aldrig som
+  egen skrivväg): slutförd lead (`finalizeLead`, inte förhandsgranskningar) →
+  `lead_incoming`; inskickad/kompletterad stödcheck → `support_check_application`
+  / `_completion`; beslut om stödcheck → `support_check_decision`; fullt
+  signerat avtal → `agreement_signed`; upplagd upphandling →
+  `procurement_opened`; klarmarkerad Bedömning excellens → `screening_final`.
+  Anropen går via `registerRecordSafe`: de kastar aldrig och fäller aldrig
+  huvudmutationen. Det som missas syns som saknat i **Granskning →
+  Täckning per källa** och tas igen med **Efterregistrera saknade**
+  (handlingens datum = originalets, registreringsdatum = i dag, märkt
+  "Efterregistrerad").
+- **Planen styr.** `registerRecord` registrerar bara typer som är aktiva med
+  hantering `register`. En typ som kan innehålla sekretess måste registreras
+  (OSL 5 kap. 1 § — validatorn vägrar annat). Planen materialiseras per
+  tenant första gången, bara efter en LYCKAD tom läsning.
+- **Nummerserien är obruten.** Ärendenummer delas ut under
+  `withDistributedLock('register:<tenant>')`; de unika indexen
+  `(tenant, year, seq)` och `(tenant, register_case, seq)` är den hårda
+  gränsen. Idempotens: `(tenant, source_collection, source_id, source_event)`.
+  Inget raderas — en felregistrering **makuleras** (posten och numret finns
+  kvar med orsak).
+- **Kontrollsumma.** Varje handling får SHA-256 över typ, rubrik, riktning,
+  datum, källa, handlingens egen hash (avtalets PDF, ansökans revision) och
+  `snapshot`. "Kontrollera kontrollsummor" räknar om ur lagrad post och
+  namnger avvikelser. Sekretessmarkering och makulering ingår inte i summan
+  (de ändras av ledningen och auditeras i `agent_actions`).
+- **Sekretess är en markering, inte ett beslut.** Typen sätter förvalet;
+  prövningen görs när någon begär ut handlingen och loggas under
+  **Utlämnanden** (utfall, lagrum vid avslag/maskning). Den som begär ut har
+  rätt att vara anonym — loggen frågar aldrig efter vem.
+- **Gallringsfristen** räknas från att ärendet avslutats (`disposalDueDate`).
+  Plattformen gallrar INTE källposter automatiskt utifrån planen ännu —
+  granskningen listar bara vad som passerat fristen.
+- **Förteckningen**: arkivförteckningen räknas live (process → handlingstyp:
+  antal, tidsspann, förvaring, bevara/gallra); arkivbeskrivningen har sju
+  avsnitt som ledningen håller aktuella; **Fastställ ny version** fryser
+  plan + förteckning + beskrivning med datum, vem och kontrollsumma
+  (`archive_versions`, oföränderlig). Granskningen varnar när något ändrats
+  sedan senaste version eller när den är äldre än ett år.
+- **Roller:** läsa = modulen; registrera manuellt = admin/incubator_lead/coach;
+  förvalta (plan, sekretess, makulering, ärendestatus, utlämnande, version,
+  efterregistrering) = admin/incubator_lead. Agenten har inga verktyg här.
+- **GDPR § 5:** rubrik och motpart bär bolags-/organisationsnamn — en lead
+  från en privatperson får motparten "Enskild person" (namnet finns i leadet,
+  dit ärendet länkar). `snapshot` bär id:n, status och belopp. Fritext
+  personnummer-saneras. `register_entries` och `register_disclosures` är
+  **denylistade för AI**; plan, ärenden och förteckning är läsbara.
+  `startup` har ingen cascade — diariet överlever att ett bolagskort tas bort.
+- **Riskklass (EU AI Act):** n/a — ingen AI-inferens.
+- **Inte byggt:** koppling till Platina/e-arkiv (CSV-exporten är underlaget
+  tills formatet är bestämt), automatisk gallring enligt planen, bilagor på
+  manuellt registrerade handlingar, registrering av expedierade
+  e-postkampanjer och kompletteringsbegäran. Migration 1700000220 backfillar
+  modulen i sparade sidmenyer (§ 36.3).
+
+---
+
+## 61. SPARK — energimatchning: adaptivt formulär, register, matchning & TRL (2026-11)
+
+`/spark` (modul `spark`, titel **SPARK – energimatchning**, "Portfölj"-railen;
+admin/incubator_lead/coach, observer läser, **partner** registrerar och
+sprider) är den regionala behovs- och innovationsdatabasen inom energi för
+projektet SPARK (ERUF, AP 1–6). En aktör registreras **en gång** och kan ha
+flera behov, flera lösningar och testmiljöer — rollen (behovsägare,
+innovationsaktör, testmiljö/pilotkund) följer av vad som registrerats, den är
+ingen etikett. **Allt går via Movexum:** partner och företag skickar in,
+Movexum för in i registret, matchar och frågar båda parter innan de
+presenteras för varandra. Företag ser aldrig varandra i systemet.
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/spark.ts` (+ `.test.ts`) | Kategorier (12 energiområden, 16 stödbehov, 6 utvecklingsstadier, **TRL 1–9**), det ADAPTIVA formuläret (`SPARK_INTERVIEW_SECTIONS`, `visibleSparkSections`, `normalizeSparkInterview`), svar → poster (`deriveSparkRecords`), anonym presentation, acceleratorkategorier, projektindikatorer |
+| `packages/shared/src/spark-matching.ts` | Förklarbar matchning: `scoreNeedSolution`, `rankSolutionsForNeed`, `rankNeedsForSolution`, `rankTestbedsForSolution`, `sparkAreaBalance` (luckorna) |
+| `packages/shared/src/spark-import.ts` | Import från Excel/CSV: kolumner, rubrik-/värdetolkning, mall |
+| `backend/pocketbase-schema/migrations/1700000221_create_spark_matching.js` | `spark_actors`, `spark_interviews`, `spark_needs`, `spark_solutions`, `spark_testbeds`, `spark_matches` |
+| `…/1700000222_backfill_enabled_modules_spark.js`, `…/1700000223_extend_users_organization.js` | Modulen i sparade sidmenyer (§ 36.3); `users.organization` |
+| `apps/web/src/lib/core/write/spark.ts` | Skrivlagret: spara/skicka in intervju, föra in i registret, import, aktör, status, TRL-bedömning, matchningar |
+| `apps/web/src/lib/spark/{data,public.server}.ts` | Läsvägen (RLS) + kurerad vy över anmälningar via en delningslänk; den publika anmälan |
+| `apps/web/src/lib/actions/spark.ts`, `app/spark/**`, `components/spark/**` | Actions, sidor, formuläret (`InterviewForm`), kontroller |
+| `app/energi/[tenant]/page.tsx`, `app/api/public/energi/[tenant]/route.ts` | Publik sida + anmälan |
+| `packages/shared/src/spark-ai.ts`, `lib/ai/spark-ai.ts`, `lib/core/write/spark-ai.ts` | AI-lagret (§ 61.7) |
+| `packages/shared/src/kth-trl.ts`, `components/spark/TrlReference.tsx` | TRL-kriterierna ur KTH Innovation Readiness Level (§ 61.5) |
+
+### 61.1 Det adaptiva formuläret (en definition, tre användningar)
+
+Första steget (**Kom igång**) frågar bara efter företagets namn och **vad som
+stämmer in**: *har ett behov*, *har en lösning* — ett eller båda — och som
+tillägg *kan vara testmiljö eller pilotkund*. Avsnitten räknas ur rollerna
+(`visibleSparkSections`): alltid *Kom igång · Om företaget (A) · Kontakt och
+delning (F)*; behovsägare får *Behov och utmaningar (B)* och *Test och
+samverkan (C)*; innovationsaktör får *Lösningar (D)* och *Stöd framåt (E)*;
+testmiljö får *C*. Enskilda frågor visas på villkor (`showIf`: beskriv
+testmiljön bara om en finns, kontaktperson bara om företaget får kontaktas).
+Behov och lösningar är upprepbara poster (högst 5) med stabilt `_id`.
+Frågorna följer intervjuguiden (A1–F5) och bär dess koder.
+
+**Kort väg och hel intervju (2026-11) — formuläret ska inte vara övermäktigt.**
+Hela guiden är drygt 60 frågor för ett företag med både behov och lösning.
+Därför har formuläret två djup (`SparkFormDepth`, `sparkFormSteps`):
+- **Kort väg (`quick`) — förval på den publika sidan.** Bara **kärnfrågorna**
+  (`SparkField.core`) visas; resten ligger hopfällt under *Berätta mer*
+  (valfritt, per avsnitt och per behov/lösning — `sparkDeepFields`; redan
+  besvarad fördjupning visas öppen, `sparkDeepAnswered`). Avsnitt i samma
+  grupp (`SparkSection.group`) blir ETT steg: *Behov och test* (B + C) och
+  *Lösning och stöd* (D + E). Behovsägare eller lösningsägare får fyra steg,
+  den som är båda får fem. `sparkFormEstimate` visar ungefärlig tid (räknad
+  på kärnfrågorna). Långa vallistor (`SparkField.preview`) visar de första
+  alternativen och resten bakom "N till".
+- **Hela intervjuguiden (`full`) — förval för Movexum och partner.** Ett steg
+  per avsnitt i guidens ordning, alla frågor synliga med guidens koder.
+  Intervjuaren växlar djup med reglaget *Kärnfrågor / Hela intervjuguiden*.
+- **Regler som testet låser:** varje obligatorisk fråga är en kärnfråga (annars
+  kunde den korta vägen inte skickas in), en villkorad kärnfråga hänger på en
+  kärnfråga, och en komplett kort anmälan går igenom `normalizeSparkInterview`
+  utan en enda fördjupningsfråga. Djupet är ren presentation — servern
+  validerar samma svar oavsett väg, och inga svar kastas när djupet byts.
+- **TRL är fördjupning** i företagets formulär: företaget svarar på den enkla
+  mognadsskalan (sex steg, kärnfråga), TRL 1–9 med KTH-kriterierna (§ 61.5)
+  ligger under *Berätta mer om lösningen* och i hela intervjuguiden. Movexum
+  bedömer TRL själv inför acceleratorn.
+- **Utseende (`InterviewForm.tsx`):** stegrad med en stapel per steg, ett
+  behov/en lösning i taget (övriga hopfällda till en rad), en tom första post
+  så man kan skriva direkt, en åtgärdsrad som följer med i nederkant, hopp till
+  frågan som saknar svar, och en sammanställning före inskick.
+
+`normalizeSparkInterview` är EN regel för klient och server: svar för avsnitt
+som inte gäller kastas (byter man roll följer inga gamla svar med), okända
+fält/värden släpps, text kapas, personnummer maskas, org-nr normaliseras.
+`submit` kräver de obligatoriska frågorna; ett utkast får vara ofullständigt.
+Samma komponent (`SparkInterviewForm`) används av Movexum (`staff`), partner
+(`partner`) och den publika sidan (`public`).
+
+### 61.2 Vägar in — och grinden
+
+`spark_interviews` är intaget: råa svar (json) + status `draft → submitted →
+applied`, källa `staff | partner | import | self`.
+
+- **Movexum** intervjuar i `/spark/intervjuer/ny`; "Spara och för in i
+  registret" för in direkt.
+- **Partner** (Högskolan, kommuner — användare med rollen `partner`) ser bara
+  sina EGNA intervjuer, sparar utkast och skickar in. De ser aldrig registret.
+  Inskick ger notisen `spark_interview_submitted` till ledningen.
+- **Import** (`/spark/import`): mall (CSV som öppnas i Excel) med samma frågor
+  och fasta svarskategorier; förhandsgranskning → bekräfta. Varje rad blir ett
+  intervjusvar som går samma väg. Movexums import förs in direkt, en partners
+  väntar på Movexum. Okända värden varnas per kolumn och rad (aldrig värden).
+- **Företagets egen anmälan** på `/energi/<tenant-slug>` (publik, rate-limit
+  8/10 min och IP, samtycke krävs, tenant ur sluggen, superuser — § 23.2-
+  mönstret). Landar som inskickad.
+
+**Föra in i registret** (`applySparkInterview`, bara Movexum): aktören hittas
+på intervjuns koppling → org-nr → exakt namn (olika org-nr = olika företag),
+annars skapas den. Tomma svar skriver aldrig över befintliga värden; rollerna
+unioneras; ett nej till kontakt tar bort kontaktuppgifterna. Behov, lösningar
+och testmiljöer upsertas på `(interview, source_key)` så en ändrad intervju
+kan föras in igen utan dubbletter. Poster som tagits bort ur intervjun lämnas
+kvar i registret (de kan ha matchningar) — stäng dem med status.
+
+### 61.3 Dela med kommuner (`/spark/dela`)
+
+Varje partner och medarbetare har en egen länk `/energi/<slug>?via=<användar-
+id>` med QR-kod (genereras lokalt) och en färdig text att skicka vidare.
+`via` godtas bara för en partner/personal i samma tenant; företaget ser "Du
+har fått länken av <organisation>" (`users.organization`, självservice på
+delningssidan; annars visningsnamnet) och anmälan stämplas `referred_by`.
+Partnern ser **att** ett företag anmält sig via länken (namn, datum, status —
+`listSparkReferrals`, kurerad superuser-vy) men **aldrig svaren**; företaget
+får veta det i samtyckestexten.
+
+### 61.4 Matchning — förklarbar, människan beslutar
+
+`scoreNeedSolution` ger poäng med skäl i klartext: gemensamt energiområde
+(4 p, högst tre; "Annat" räknas inte), lösningens målbransch = behovsägarens
+bransch (3), mognad mot tidshorisont (−1 till +2), behovet saknar lösning på
+marknaden (1), lösningen söker pilotkund och behovsägaren vill vara det (2),
+hög prioritet (1), samma kommun (1). Föreslås aldrig: samma aktör, någon part
+har sagt nej till matchning, arkiverad aktör, eller varken område eller bransch
+stämmer. `sparkAreaBalance` visar behov utan lösning och lösning utan behov
+per energiområde (översikten). Ingen AI-inferens.
+
+En matchning (`spark_matches`: behov × lösning × testmiljö, minst två parter
+från olika aktörer) skapas som **förslag** av Movexum och följs upp med
+status, nästa steg, anteckningar och resultat. Två spärrar i skrivlagret:
+(1) parterna kan inte bli *introducerade* förrän båda sidor **tackat ja**
+(`need_consent`/`solution_consent`); (2) en pilot med **företagsindividuell
+stödinsats** (`support_kind = de_minimis`, AP 3/AP 5) kan inte starta förrän
+stödet är bekräftat registrerat (`support_confirmed`). Kartläggning och
+matchning är systeminsatser (AP 1, 2, 4). Aktörskortet visar hur parten får
+presenteras för motparten utifrån delningsnivån (anonymt: bransch, kommun,
+storlek).
+
+### 61.5 TRL och kategorisering inför acceleratorn (`/spark/accelerator`)
+
+Lösningar bär **TRL 1–9** (Movexums formuleringar, `SPARK_TRL`): företagets
+egen uppgift ur formuläret (`trl`, en fördjupningsfråga — § 61.1) och Movexums bedömning (`trl_assessed`, som
+gäller när den finns — `effectiveSparkTrl`). **Varje nivå prövas mot KTH:s
+utförliga kriterier** (`packages/shared/src/kth-trl.ts`: `KTH_TRL_LEVELS` med
+kort formulering + kriterier per nivå, `KTH_TRL_TERMS` med begreppen
+laboratoriemiljö / relevant miljö / operationell miljö / faktisk drift /
+prototyp / komplett teknik) — TRL-axeln ur KTH Innovation Readiness Level™ i
+Movexums översättning. EN text, tre användningar: formuläret visar den valda
+nivåns kriterier ("Nivån är nådd när …", `SparkOption.detail`), Movexums
+bedömning visar vald nivå + vad nästa kräver (`TrlCriteria`), acceleratorsidan
+har hela skalan som uppslag (`TrlReference`) och AI-förslaget (§ 61.7) får
+samma kriterier i prompten (`kthTrlPromptLines`). Regeln är KTH:s: en nivå är
+nådd först när kriterierna är uppfyllda, annars gäller nivån under. Nivåernas
+namn och korta text är fortsatt Movexums (TRL-bladet). Materialet är
+© KTH Innovation under CC BY-NC-SA — **källan (`KTH_TRL_SOURCE`) ska visas
+där kriterierna visas**, texten ändras bara mot en ny utgåva från KTH, och
+bara TRL-axeln används i SPARK (CRL och övriga axlar hör till bolagskortets
+IRL, § 52.2). Movexum kategoriserar varje
+lösning: *Kandidat till acceleratorn · Tidig — följ upp · Marknadsredo · Inte
+aktuell*. `suggestSparkAcceleratorCategory` ger ett FÖRSLAG ur TRL (1–3 tidig,
+4–7 kandidat, 8–9 marknadsredo) — gränserna är en arbetshypotes som justeras
+i `spark.ts`; människan bekräftar. **Bara innovationsaktörer utanför
+portföljen bedöms** (`sparkAcceleratorEligible`): inte behovsägare, och inte
+aktörer kopplade till ett bolagskort (`spark_actors.startup`) — portföljbolag
+bedöms med KTH IRL (§ 52.2). CRL används inte här.
+
+### 61.6 Regler och regelefterlevnad
+
+- **RLS (§ 21.3):** registret och matchningarna list/view staff/observer
+  (`MUST_BE_STAFF_OR_OBSERVER`); intervjuer dessutom den som skapade dem.
+  createRules pinnar tenant + skapare (inga roll-checks), intervjuer kan bara
+  skapas som utkast/inskickade utan registerfält; update = Movexum-personal,
+  eller ägaren av en ännu inte införd intervju med registerfälten låsta;
+  flyttlås på tenant (§ 21.8). Rollen prövas i skrivlagret
+  (`canManageSpark` = admin/incubator_lead/coach; partner bara egna
+  intervjuer). Bolagsmedlemmar når ingenting.
+- **GDPR § 5:** organisationer, inte privatpersoner. Kontaktpersonens namn,
+  roll, e-post och telefon lagras på aktören bara när företaget sagt ja till
+  kontakt (berättigat intresse: matchning inom projektet). Fritext
+  personnummer-saneras. `spark_interviews` (råa svar) är **denylistad för AI**;
+  registret är läsbart med fältmaskning (e-post, telefon, org-nr). Audit i
+  `agent_actions` bär företagsnamn, antal och status — aldrig kontaktpersoner
+  eller fritext. cascade tenant → aktör → behov/lösningar/testmiljöer →
+  matchningar.
+- **EU AI Act:** ingen AI-inferens → riskklass n/a. Agenten har inga verktyg
+  (`writable-fields.ts`: deny).
+- **Mätning (§ 41):** `spark_actors`, `spark_open_needs`,
+  `spark_active_matches`; projektets indikatorer ur ansökan (10 behovsägare,
+  20 företag med stöd, 30 användare, 5 forskarsamverkan) räknas på distinkta
+  aktörer i `computeSparkIndicators` och visas på översikten.
+- **Speglat** i `setup-via-api.mjs` (defs + `FORCE_CREATE_RULES` +
+  `users.organization`), asserterat i `verify-baseline.mjs` (must-exist,
+  staff/observer, AI-denylist).
+- **Innan Högskolans intervjudata tas in** ska avtalet mellan projekten vara
+  klart: svar på företagsnivå, att företagen informerats om användningen i
+  SPARK, och hur indikatorutfall fördelas (ingen dubbelrapportering).
+- **Inte byggt:** intervju ur mötesinspelning, personlig länk där
+  företaget själv uppdaterar sin profil, koppling av stödinsatsen till
+  stödcheckar/de minimis (§ 46/§ 20 kräver i dag ett bolagskort — för
+  stödmottagare utanför portföljen bekräftas stödet med kryssruta och
+  referens), kontaktpersoner i kontaktboken (§ 45), uppslag i bolagsregistret
+  vid org-nr och chattverktyg.
+
+### 61.7 AI-lagret — likhet, TRL-förslag och introduktionsutkast (2026-11)
+
+Tre AI-stöd ovanpå registret, alla **på en människas klick** och bara för
+Movexum (admin/incubator_lead/coach). Agenten har inga verktyg här.
+
+| Fil | Syfte |
+|-----|-------|
+| `packages/shared/src/spark-ai.ts` (+ `.test.ts`) | REN: embeddingtext, kontrollsumma, cosinus, relativa likhetssignaler (`sparkSemanticLevels`/`sparkSemanticFor`), strikt tolkning av AI-svar (`parseSparkAssessmentSuggestion`), rensning av utkast |
+| `apps/web/src/lib/ai/spark-ai.ts` | Två isolerade Mistral-körningar: `suggestSolutionAssessment`, `draftIntroduction` (medium → small, inga verktyg) |
+| `apps/web/src/lib/spark/ai.server.ts` | `indexSparkEmbeddings` / `loadSparkVectors` mot `spark_embeddings` |
+| `apps/web/src/lib/core/write/spark-ai.ts` | Grind (roll, kostnadstak § 9.6, usage-logg, audit): `suggestSparkAssessment(s)`, `draftSparkIntroduction`, `reindexSparkEmbeddings` |
+| `backend/pocketbase-schema/migrations/1700000224_spark_ai_layer.js` | `spark_embeddings` + `spark_solutions.ai_*` |
+
+- **Innehållslikhet i matchningen.** Varje öppet behov och aktiv lösning får
+  en embedding (`mistral-embed`, EU) av sin verksamhetstext — rubrik,
+  beskrivning, energiområden; **aldrig aktörens namn eller kontakt**.
+  `text_hash` gör att bara ändrade texter läses in igen; indexet uppdateras
+  best-effort när en intervju förs in och kan läsas in från Matchning.
+  Likheten är en EXTRA signal i `scoreNeedSolution`: *viss* likhet +2, *tydlig*
+  +3, och bara en tydlig likhet får föreslå ett par som saknar gemensamt
+  energiområde och bransch — då med en varning. Skälen märks "AI:".
+  **Tröskeln är relativ** (standardavvikelser över kandidaternas medel, minst
+  fem kandidater, plus en absolut marginal och ett golv) eftersom
+  embeddingmodellers likhetstal ligger högt och tätt. Trösklarna
+  (`SPARK_SEMANTIC_*`) är en arbetshypotes som **inte är kalibrerad mot
+  verkliga data** — stäm av mot de första riktiga matchningarna.
+- **Förslag på TRL och kategori.** AI läser lösningens beskrivning, företagets
+  egen uppgift och hinder, och föreslår TRL 1–9 + kategori med en motivering
+  och en säkerhet. Prompten kräver den högsta nivå underlaget *belägger* och
+  `trl: null` när det inte räcker. Skalan i prompten är KTH:s kriterier per
+  nivå med begreppsdefinitionerna (§ 61.5) — samma text som människan
+  bedömer mot — och motiveringen ska säga vilka kriterier som beläggs och
+  vilket som saknas för nivån över. Förslaget sparas i `spark_solutions.ai_*`
+  — **bredvid, aldrig i** `trl_assessed`/`accelerator_category`, som alltid
+  sätts av en människa. Formuläret förifylls från förslaget tills Movexum
+  sparat sin egen bedömning; avviker ni syns båda. Enstaka eller upp till 20
+  obedömda per körning. Bara innovationsaktörer utanför portföljen (§ 61.5).
+- **Utkast till introduktion.** Ett kort utkast till frågan om en part vill bli
+  presenterad. Motparten beskrivs enligt sin **delningsnivå**: med namn bara
+  vid `named`, annars anonymt (bransch, kommun, storlek) och då utan
+  lösningens namn i underlaget; vid `none` skrivs inget utkast (deterministisk
+  spärr före AI-anropet). Texten lämnas i en ruta att läsa, ändra och kopiera
+  — **ingenting skickas från plattformen** och utkastet sparas inte.
+- **Regelefterlevnad.** Riskklass **begränsad** (§ 10.1): bedömer lösningar
+  och företag, aldrig individer; förslagen är beslutsstöd och varje AI-yta
+  bär raden "Genererat av AI – verifiera" + leverantör (§ 9.7). Underlaget är
+  data, inte instruktioner (§ 9.3); svaren tolkas strikt (okänd kategori eller
+  TRL utanför 1–9 ⇒ inget förslag). Tokens loggas i `ai_usage_events`
+  (surface `suggestions`) och månadstaket prövas före varje körning.
+  `spark_embeddings` är denylistad för AI-chatten. Audit bär lösningens namn,
+  föreslagen nivå och modell — aldrig underlaget eller utkastets text.
+- **Inte verifierat:** AI-anropen är inte körda mot Mistral från byggmiljön.
+  Prompterna, tolkningen och likhetslogiken är enhetstestade; kvaliteten på
+  förslagen ska bedömas på riktiga lösningar innan de används brett.

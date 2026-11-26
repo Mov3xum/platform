@@ -154,6 +154,7 @@ export function middleware(req: NextRequest) {
     // session via HMAC-cookie, ingen användarsession).
     pathname === '/s' ||
     pathname.startsWith('/s/') ||
+    pathname.startsWith('/energi/') ||
     pathname.startsWith('/api/public/') ||
     PWA_PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));
 

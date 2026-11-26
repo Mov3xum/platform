@@ -27,11 +27,12 @@ interface Props {
 
 const PUBLIC_API_BASE = '/api/public/m';
 
-// Publik (oinloggad) körning av en Startupkompass-modul. Visar först
-// modulens STARTSIDA (beskrivning + syfte, § 23.11) och/eller en
-// samtyckesgrind före all datainsamling (GDPR art. 7) — på EN sida med EN
-// knapp när båda finns — och dispatchar sedan till rätt flöde. Skickar
-// consent=true till de publika API-routarna.
+// Publik (oinloggad) körning av en Startupkompass-modul. Har modulen en
+// STARTSIDA (beskrivning + syfte, § 23.11) visas den först; annars börjar
+// flödet direkt. Samtyckestexten (GDPR art. 7) visas där besökaren slutför
+// (`ConsentNotice`) — inte som en grind på första sidan (2026-11). Inskicken
+// skickar consent=true till de publika API-routarna; före dess bokförs bara
+// hur långt besökaren kommit, aldrig svaren (se `consentNote` i flödena).
 export function PublicModuleRunner({ locale = 'sv', ...props }: Props) {
   return (
     <CompassLocaleProvider locale={locale}>
@@ -42,51 +43,35 @@ export function PublicModuleRunner({ locale = 'sv', ...props }: Props) {
 
 function Runner({ module, questions, nextModule, subject }: Omit<Props, 'locale'>) {
   const { t } = useCompassLocale();
-  const hasConsentGate = Boolean(module.consent_note);
   const hasStartPage = hasCompassStartPage(module);
-  const [started, setStarted] = useState(!hasConsentGate && !hasStartPage);
+  const [started, setStarted] = useState(!hasStartPage);
+  const consentNote = module.consent_note;
 
   if (!started) {
-    const startBlocks = hasStartPage ? parseCompassStartPageBlocks(module.start_page_body) : [];
+    const startBlocks = parseCompassStartPageBlocks(module.start_page_body);
     return (
       <div className="mx-consent mx-startpage">
-        <div className="mx-mono mx-t-xs mx-t-up mx-muted">{t.beforeWeStart}</div>
-        <h2 className="mx-disp" style={{ fontSize: 24, fontWeight: 700, margin: 0, color: 'var(--mx-ink)' }}>
-          {hasStartPage ? module.start_page_title?.trim() || t.startPageTitle : t.dataHandling}
+        <h2 className="mx-disp" style={{ fontSize: 24, margin: 0, color: 'var(--mx-ink)' }}>
+          {module.start_page_title?.trim() || t.startPageTitle}
         </h2>
-        {hasStartPage && (
-          <div className="mx-startpage-body">
-            {startBlocks.map((block, i) => {
-              if (block.kind === 'heading') return <h3 key={i}>{block.text}</h3>;
-              if (block.kind === 'list') {
-                return (
-                  <ul key={i}>
-                    {block.items.map((item, j) => (
-                      <li key={j}>{item}</li>
-                    ))}
-                  </ul>
-                );
-              }
-              return <p key={i}>{block.text}</p>;
-            })}
-          </div>
-        )}
-        {hasConsentGate && (
-          <div className={hasStartPage ? 'mx-startpage-consent' : undefined}>
-            {hasStartPage && (
-              <div className="mx-mono mx-t-xs mx-t-up mx-muted" style={{ marginBottom: 6 }}>
-                {t.dataHandling}
-              </div>
-            )}
-            <p className="mx-t-13 mx-muted" style={{ lineHeight: 1.65, maxWidth: 560, margin: 0 }}>
-              {module.consent_note}
-            </p>
-          </div>
-        )}
+        <div className="mx-startpage-body">
+          {startBlocks.map((block, i) => {
+            if (block.kind === 'heading') return <h3 key={i}>{block.text}</h3>;
+            if (block.kind === 'list') {
+              return (
+                <ul key={i}>
+                  {block.items.map((item, j) => (
+                    <li key={j}>{item}</li>
+                  ))}
+                </ul>
+              );
+            }
+            return <p key={i}>{block.text}</p>;
+          })}
+        </div>
         <div className="mx-consent-cta">
-          <span className="mx-chip mx-mono">{t.flowLabel[module.flow_type]}</span>
           <button type="button" className="mx-btn mx-primary mx-lg" onClick={() => setStarted(true)}>
-            {hasConsentGate ? t.startUnderstand : t.start} <span aria-hidden>→</span>
+            {t.start} <span aria-hidden>→</span>
           </button>
         </div>
       </div>
@@ -107,6 +92,7 @@ function Runner({ module, questions, nextModule, subject }: Omit<Props, 'locale'
             avatarInitial={(module.name || 'M').slice(0, 1).toUpperCase()}
             maxExchanges={module.max_exchanges || 0}
             consent
+            consentNote={consentNote}
             closing={
               module.collects_lead
                 ? {
@@ -134,6 +120,7 @@ function Runner({ module, questions, nextModule, subject }: Omit<Props, 'locale'
         questions={questions}
         apiBase={PUBLIC_API_BASE}
         consent
+        consentNote={consentNote}
         contactSection={module.contact_section}
         successMessage={module.success_message}
         nextModule={nextModule}
@@ -149,6 +136,7 @@ function Runner({ module, questions, nextModule, subject }: Omit<Props, 'locale'
       questions={questions}
       apiBase={PUBLIC_API_BASE}
       consent
+      consentNote={consentNote}
       contactSection={module.contact_section}
       successMessage={module.success_message}
       redirectUrl={module.redirect_url}

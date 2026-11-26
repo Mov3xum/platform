@@ -12,6 +12,7 @@ import { QuestionInput, readAttribution } from './QuestionInput';
 import { NextModuleCta } from './NextModuleCta';
 import { ContactPreferencePicker } from './ContactPreferencePicker';
 import { ContactSection } from './ContactSection';
+import { ConsentNotice } from './ConsentNotice';
 import { useFlowProgress } from './useFlowProgress';
 import { useCompassLocale } from './locale';
 import { resolveNextQuestionIndex } from '@/lib/compass/question-flow';
@@ -22,6 +23,8 @@ interface Props {
   /** Default = inloggad admin-preview. Publika sidan skickar /api/public/m. */
   apiBase?: string;
   consent?: boolean;
+  /** Modulens samtyckestext — visas vid sista steget (se ModuleWizard). */
+  consentNote?: string;
   /** Avsnittet "Dina uppgifter" (§ 23.11) — modulens konfiguration. */
   contactSection: ContactSectionConfig;
   successMessage?: string;
@@ -48,6 +51,7 @@ export function ModuleQuiz({
   questions,
   apiBase = '/api/inflode/m',
   consent,
+  consentNote,
   contactSection,
   successMessage,
   nextModule,
@@ -249,7 +253,7 @@ export function ModuleQuiz({
       }
       setError(null);
       const nextStep = resolveNextQuestionIndex(questions, step, value);
-      progressTracker.report(answers, step + 1, total);
+      progressTracker.report(consentNote ? {} : answers, step + 1, total);
       if (nextStep >= total && !hasContact) {
         await finish();
         return;
@@ -317,6 +321,14 @@ export function ModuleQuiz({
           </div>
         </div>
       )}
+
+      {(onContactStep ||
+        (!hasContact &&
+          resolveNextQuestionIndex(
+            questions,
+            step,
+            questions[step] ? answers[questions[step].key] : undefined
+          ) >= total)) && <ConsentNotice note={consentNote} />}
 
       {error && (
         <div

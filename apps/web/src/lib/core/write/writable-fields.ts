@@ -570,6 +570,17 @@ const CREATE_POLICIES: Record<
     user: { kind: 'roles', roles: STAFF_FULL },
     agent: { kind: 'deny', reason: 'Studentprofiler hanteras av studenten själv eller Movexum-personal.' }
   },
+  // SPARK – energimatchning (§ 61). Intervjuer registreras av Movexum och av
+  // partner (Högskolan, kommuner — bara sina egna, verifieras i skrivlagret);
+  // registret och matchningarna av Movexum. Agenten har inga verktyg här.
+  spark_interviews: {
+    user: { kind: 'roles', roles: ['admin', 'incubator_lead', 'coach', 'partner'] },
+    agent: { kind: 'deny', reason: 'Intervjuer i SPARK registreras av en människa.' }
+  },
+  spark_matches: {
+    user: { kind: 'roles', roles: STAFF_AND_COACH },
+    agent: { kind: 'deny', reason: 'Matchningar i SPARK skapas av Movexum-personal — parterna tillfrågas av en människa.' }
+  },
   // Bedömning excellens (§ 51.6) — begäran om komplettering skickas av
   // controllern (admin/incubator_lead/coach, finkontroll i skrivlagret);
   // agenten har inget verktyg (människa-i-loopen).

@@ -1,6 +1,6 @@
 /// <reference path="../pb_data/types.d.ts" />
 
-// Startupkompassen — liten temarubrik ovanför frågan (CLAUDE.md § 23.15,
+// Startupkompassen — liten temarubrik ovanför frågan (CLAUDE.md § 23.16,
 // 2026-11). `compass_questions.topic` (text ≤ 80, valfri), t.ex.
 // "Marknadspotential": visas som en liten rubrik ovanför frågan i formulär,
 // quiz och chattens avslutssteg så besökaren förstår vilket tema frågan hör

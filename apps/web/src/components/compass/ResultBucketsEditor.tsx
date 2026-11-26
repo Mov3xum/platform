@@ -40,16 +40,34 @@ export function ResultBucketsEditor({
     return JSON.stringify(cleaned);
   }, [buckets]);
 
+  // Sparade profiler är hopfällda (bara titeln syns); nya öppnas direkt.
+  const [openIdx, setOpenIdx] = useState<Set<number>>(() => new Set());
+  function toggle(i: number) {
+    setOpenIdx((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  }
+
   function update(i: number, patch: Partial<ResultBucket>) {
     setBuckets((prev) => prev.map((b, idx) => (idx === i ? { ...b, ...patch } : b)));
   }
 
   function add() {
+    setOpenIdx((prev) => new Set(prev).add(buckets.length));
     setBuckets((prev) => [...prev, { key: '', title: '', body: '', tips: [] }]);
   }
 
   function remove(i: number) {
     setBuckets((prev) => prev.filter((_, idx) => idx !== i));
+    // Index efter den borttagna flyttas ett steg upp.
+    setOpenIdx((prev) => {
+      const next = new Set<number>();
+      for (const n of prev) if (n !== i) next.add(n > i ? n - 1 : n);
+      return next;
+    });
   }
 
   return (
@@ -57,31 +75,30 @@ export function ResultBucketsEditor({
       {/* Dolt fält som följer med modulformuläret. */}
       <input type="hidden" name="result_buckets" value={json} form={formId} />
 
-      <div className="mx-label" style={{ marginBottom: 0 }}>
-        Resultatprofiler
-      </div>
-      <div className="mx-muted mx-t-12" style={{ marginTop: -4 }}>
-        En profil per möjligt resultat (t.ex. grön/gul/röd). Profilen med flest
-        poäng visas för besökaren.
-      </div>
-
       {buckets.length === 0 ? (
         <div className="mx-muted mx-t-12">Inga profiler än.</div>
       ) : (
-        <div style={{ display: 'grid', gap: 10 }}>
-          {buckets.map((b, i) => (
-            <div
-              key={i}
-              style={{
-                padding: 10,
-                borderRadius: 10,
-                background: 'var(--mx-paper-2)',
-                border: '1px solid var(--mx-line-soft)',
-                display: 'grid',
-                gap: 8
-              }}
-            >
-              <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr auto', gap: 8 }}>
+        <div style={{ display: 'grid', gap: 8 }}>
+          {buckets.map((b, i) => {
+            const open = openIdx.has(i);
+            return (
+            <div key={i} className={`mx-qcard ${open ? 'is-open' : ''}`}>
+              <div className="mx-qcard-head">
+                <button
+                  type="button"
+                  className="mx-qcard-toggle"
+                  aria-expanded={open}
+                  onClick={() => toggle(i)}
+                >
+                  <span className="mx-qcard-num">{i + 1}</span>
+                  <span className="mx-qcard-title">{b.title.trim() || '(profil utan titel)'}</span>
+                  {b.key.trim() && <span className="mx-chip">{b.key.trim()}</span>}
+                  <Icon name={open ? 'chevdown' : 'chevron'} size={14} />
+                </button>
+              </div>
+              {open && (
+              <div className="mx-qcard-body">
+              <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr auto', gap: 12 }}>
                 <label className="mx-label">
                   Nyckel
                   <input
@@ -109,7 +126,7 @@ export function ResultBucketsEditor({
                   className="mx-btn mx-sm"
                   onClick={() => remove(i)}
                   title="Ta bort profil"
-                  style={{ color: '#4b2718', alignSelf: 'end' }}
+                  style={{ color: 'var(--movexum-morkorange)', alignSelf: 'end' }}
                 >
                   <Icon name="trash" size={11} />
                 </button>
@@ -174,8 +191,11 @@ export function ResultBucketsEditor({
                   äldre uppsättning. Det behålls; nya poäng sätts enklast per svarsalternativ.
                 </div>
               )}
+              </div>
+              )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

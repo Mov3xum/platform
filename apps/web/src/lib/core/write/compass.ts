@@ -351,7 +351,7 @@ export interface AddCompassQuestionParams {
   inputType?: string;
   key?: string;
   helpText?: string;
-  /** Liten temarubrik ovanför frågan (§ 23.15). */
+  /** Liten temarubrik ovanför frågan (§ 23.16). */
   topic?: string;
   required?: boolean | string;
   /** Endast för choice/multi_choice. Etiketter eller {label, value, score, buckets}. */

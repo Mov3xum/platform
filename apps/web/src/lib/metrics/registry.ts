@@ -216,6 +216,26 @@ const COMPUTERS: Record<MetricKey, Computer> = {
     return value('talent_matches', n);
   },
 
+  // SPARK – energimatchning (§ 61): räknare ur registret, läses med användarens token.
+  async spark_actors(ctx) {
+    const n = await countWhere(ctx.pb, 'spark_actors', ctx.pb.filter('tenant = {:t} && status = "active"', { t: ctx.tenant }));
+    return value('spark_actors', n);
+  },
+
+  async spark_open_needs(ctx) {
+    const n = await countWhere(ctx.pb, 'spark_needs', ctx.pb.filter('tenant = {:t} && (status = "open" || status = "matched")', { t: ctx.tenant }));
+    return value('spark_open_needs', n);
+  },
+
+  async spark_active_matches(ctx) {
+    const n = await countWhere(
+      ctx.pb,
+      'spark_matches',
+      ctx.pb.filter('tenant = {:t} && status != "suggested" && status != "declined"', { t: ctx.tenant })
+    );
+    return value('spark_active_matches', n);
+  },
+
   async talent_needs_published(ctx) {
     const n = await countWhere(ctx.pb, 'talent_needs', ctx.pb.filter('tenant = {:t} && status = "published"', { t: ctx.tenant }));
     return value('talent_needs_published', n);

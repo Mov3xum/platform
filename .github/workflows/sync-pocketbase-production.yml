@@ -18,6 +18,15 @@ on:
   workflow_call:
   workflow_dispatch:
 
+# Serialisera mot produktionsdeployen BARA när denna workflow körs fristående
+# (workflow_dispatch). Vid workflow_call ÄRVS anroparens grupp — samma grupp
+# här deadlockar då anropet (se sync-pocketbase.yml / incident 2026-11-25).
+# `github.workflow` är anroparens namn vid workflow_call; håll strängen i
+# synk med `name:` överst.
+concurrency:
+  group: ${{ github.workflow == 'Sync PocketBase schema (production)' && 'coolify-production' || format('coolify-production-call-{0}', github.run_id) }}
+  cancel-in-progress: false
+
 jobs:
   redeploy-stack:
     name: Trigger Coolify stack redeploy (production)
@@ -36,6 +45,11 @@ jobs:
           COOLIFY_TARGET_LABEL: production stack
           COOLIFY_UUID_SECRET_NAME: COOLIFY_APP_UUID_PRODUCTION
           COOLIFY_FORCE: 'true'
+          # Vänta tills ombygget är KLART: api-sync + verify-baseline nedan
+          # kör annars mot den gamla PB-containern (utan nya hooks/migrations)
+          # medan Coolify fortfarande bygger — incident 2026-11-19
+          # ("tenant-vakten är inte aktiv").
+          COOLIFY_WAIT: 'true'
           COOLIFY_MISSING_UUID_IS_WARNING: 'true'
         run: bash .github/scripts/coolify-deploy.sh
 

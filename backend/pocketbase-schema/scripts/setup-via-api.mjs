@@ -848,7 +848,9 @@ await patchUsersCollection([
   { name: 'competence_tags', type: 'json', required: false, maxSize: 8000 },
   { name: 'development_interests', type: 'json', required: false, maxSize: 2000 },
   // Migration 1700000179: när kompetensprofilen senast sparades (inaktuell-påminnelse).
-  { name: 'competence_updated_at', type: 'date', required: false }
+  { name: 'competence_updated_at', type: 'date', required: false },
+  // Migration 1700000223 (§ 61): organisationen användaren företräder (SPARK:s delningslänk).
+  { name: 'organization', type: 'text', required: false, max: 120 }
 ]);
 
 // Migration 1700000179 (§ 29.7): missions.needed_tags på befintliga installs.
@@ -4821,6 +4823,182 @@ await ensureCollection({
   deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_LEAD_EACH} || @request.auth.id = created_by)`
 });
 
+// Migration 1700000219 (§ 60): diarium, informationshanteringsplan och
+// arkivförteckning. ALLA skrivregler null — bara servern skriver (superuser
+// efter rollkontroll i lib/core/write/register.ts). Läsning staff/observer.
+{
+  const READ = `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`;
+  const rules = { listRule: READ, viewRule: READ, createRule: null, updateRule: null, deleteRule: null };
+  const created = { name: 'created', type: 'autodate', onCreate: true, onUpdate: false };
+  const updated = { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true };
+  const tenant = { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 };
+  const user = (name) => ({ name, type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 });
+  const text = (name, max, required) => ({ name, type: 'text', required: Boolean(required), max });
+
+  await ensureCollection({
+    id: 'record_types_collection',
+    name: 'record_types',
+    type: 'base',
+    fields: [
+      created,
+      updated,
+      tenant,
+      text('key', 40, true),
+      text('label', 120, true),
+      text('process', 80, true),
+      { name: 'direction', type: 'select', required: true, maxSelect: 1, values: ['incoming', 'outgoing', 'created'] },
+      text('trigger', 300),
+      { name: 'handling', type: 'select', required: true, maxSelect: 1, values: ['register', 'ordered', 'minor'] },
+      { name: 'secrecy_possible', type: 'bool', required: false },
+      text('secrecy_basis', 300),
+      { name: 'retention', type: 'select', required: true, maxSelect: 1, values: ['preserve', 'dispose'] },
+      { name: 'retention_months', type: 'number', required: false, min: 0, max: 1200, onlyInt: true },
+      text('legal_basis', 400),
+      text('storage', 200),
+      text('source_collection', 60),
+      { name: 'sort_order', type: 'number', required: false, onlyInt: true },
+      { name: 'active', type: 'bool', required: false },
+      { name: 'confirmed', type: 'bool', required: false },
+      { name: 'confirmed_at', type: 'date', required: false },
+      user('confirmed_by'),
+      user('updated_by')
+    ],
+    indexes: ['CREATE UNIQUE INDEX idx_record_types_tenant_key ON record_types (tenant, key)'],
+    ...rules
+  });
+
+  await ensureCollection({
+    id: 'register_cases_collection',
+    name: 'register_cases',
+    type: 'base',
+    fields: [
+      created,
+      updated,
+      tenant,
+      { name: 'year', type: 'number', required: true, min: 2000, max: 2200, onlyInt: true },
+      { name: 'seq', type: 'number', required: true, min: 1, onlyInt: true },
+      text('number', 20, true),
+      text('title', 200, true),
+      text('type_key', 40),
+      text('process', 80),
+      text('counterpart', 160),
+      text('source_collection', 60),
+      text('source_id', 40),
+      { name: 'startup', type: 'relation', required: false, collectionId: 'startups_collection', cascadeDelete: false, minSelect: 0, maxSelect: 1 },
+      { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['open', 'closed'] },
+      { name: 'opened_at', type: 'date', required: false },
+      { name: 'closed_at', type: 'date', required: false },
+      user('closed_by'),
+      user('created_by')
+    ],
+    indexes: [
+      'CREATE UNIQUE INDEX idx_register_cases_number ON register_cases (tenant, year, seq)',
+      "CREATE UNIQUE INDEX idx_register_cases_source ON register_cases (tenant, source_collection, source_id) WHERE source_id != ''",
+      'CREATE INDEX idx_register_cases_startup ON register_cases (startup)'
+    ],
+    ...rules
+  });
+  // Relationer mellan de nya kollektionerna pekar på målets FAKTISKA id
+  // (slås upp på namnet, § 30.4 p. 1).
+  const registerCasesId = (await pb.collections.getOne('register_cases')).id;
+
+  await ensureCollection({
+    id: 'register_entries_collection',
+    name: 'register_entries',
+    type: 'base',
+    fields: [
+      created,
+      updated,
+      tenant,
+      { name: 'register_case', type: 'relation', required: true, collectionId: registerCasesId, cascadeDelete: true, minSelect: 1, maxSelect: 1 },
+      { name: 'seq', type: 'number', required: true, min: 1, onlyInt: true },
+      text('designation', 30, true),
+      text('type_key', 40, true),
+      text('type_label', 120),
+      { name: 'direction', type: 'select', required: true, maxSelect: 1, values: ['incoming', 'outgoing', 'created'] },
+      text('title', 200, true),
+      text('counterpart', 160),
+      { name: 'document_date', type: 'date', required: false },
+      { name: 'registered_at', type: 'date', required: true },
+      text('source_collection', 60),
+      text('source_id', 40),
+      text('source_event', 60),
+      text('document_hash', 80),
+      text('content_hash', 80, true),
+      { name: 'snapshot', type: 'json', required: false, maxSize: 100000 },
+      { name: 'secrecy', type: 'bool', required: false },
+      text('secrecy_basis', 300),
+      { name: 'retention', type: 'select', required: false, maxSelect: 1, values: ['preserve', 'dispose'] },
+      { name: 'retention_months', type: 'number', required: false, min: 0, max: 1200, onlyInt: true },
+      { name: 'via', type: 'select', required: true, maxSelect: 1, values: ['auto', 'manual', 'backfill'] },
+      user('registered_by'),
+      text('note', 500),
+      { name: 'voided_at', type: 'date', required: false },
+      user('voided_by'),
+      text('void_reason', 300)
+    ],
+    indexes: [
+      'CREATE UNIQUE INDEX idx_register_entries_seq ON register_entries (tenant, register_case, seq)',
+      "CREATE UNIQUE INDEX idx_register_entries_source ON register_entries (tenant, source_collection, source_id, source_event) WHERE source_id != ''",
+      'CREATE INDEX idx_register_entries_registered ON register_entries (tenant, registered_at)',
+      'CREATE INDEX idx_register_entries_type ON register_entries (tenant, type_key)'
+    ],
+    ...rules
+  });
+  const registerEntriesId = (await pb.collections.getOne('register_entries')).id;
+
+  await ensureCollection({
+    id: 'register_disclosures_collection',
+    name: 'register_disclosures',
+    type: 'base',
+    fields: [
+      created,
+      updated,
+      tenant,
+      { name: 'register_case', type: 'relation', required: false, collectionId: registerCasesId, cascadeDelete: true, minSelect: 0, maxSelect: 1 },
+      { name: 'entry', type: 'relation', required: false, collectionId: registerEntriesId, cascadeDelete: true, minSelect: 0, maxSelect: 1 },
+      { name: 'requested_at', type: 'date', required: true },
+      text('request_summary', 400, true),
+      { name: 'outcome', type: 'select', required: true, maxSelect: 1, values: ['released', 'partial', 'denied'] },
+      text('secrecy_basis', 300),
+      text('note', 600),
+      user('handled_by')
+    ],
+    indexes: ['CREATE INDEX idx_register_disclosures_tenant ON register_disclosures (tenant, requested_at)'],
+    ...rules
+  });
+
+  await ensureCollection({
+    id: 'archive_profiles_collection',
+    name: 'archive_profiles',
+    type: 'base',
+    fields: [created, updated, tenant, { name: 'sections', type: 'json', required: false, maxSize: 100000 }, user('updated_by')],
+    indexes: ['CREATE UNIQUE INDEX idx_archive_profiles_tenant ON archive_profiles (tenant)'],
+    ...rules
+  });
+
+  await ensureCollection({
+    id: 'archive_versions_collection',
+    name: 'archive_versions',
+    type: 'base',
+    fields: [
+      created,
+      updated,
+      tenant,
+      { name: 'version', type: 'number', required: true, min: 1, onlyInt: true },
+      { name: 'established_at', type: 'date', required: true },
+      user('established_by'),
+      text('note', 400),
+      { name: 'plan', type: 'json', required: false, maxSize: 500000 },
+      { name: 'inventory', type: 'json', required: false, maxSize: 500000 },
+      { name: 'description', type: 'json', required: false, maxSize: 100000 },
+      text('content_hash', 80, true)
+    ],
+    indexes: ['CREATE UNIQUE INDEX idx_archive_versions_tenant_version ON archive_versions (tenant, version)'],
+    ...rules
+  });
+}
+
 // Migration 1700000206 (§ 56): Impact Navigator — hållbarhetsanalysen per
 // bolag (ersätter den fristående appen). Company → startups
 // (patch ovan), Note → notes, resten sex nya kollektioner. list/view
@@ -5317,6 +5495,176 @@ await ensureCollection({
     createRule: null,
     updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_EACH} || (${LINKED_MEMBER} && ${unset(['need', 'student', 'startup', 'tenant', 'initiated_by', 'message'])}))`,
     deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+  });
+}
+
+// Migration 1700000221 (§ 61): SPARK – energimatchning. Aktörsregister,
+// intervjuer (det adaptiva formuläret), behov, lösningar (med TRL och
+// acceleratorkategori), testmiljöer och matchningar. Registret läses av
+// Movexum-personal + observer; intervjuer dessutom av den som skapade dem
+// (partnern). Kategorier är text/json (validerade i packages/shared/src/
+// spark.ts); statusfälten MÅSTE spegla konstanterna där. Flyttlåset på
+// tenant läggs av ensureCollection (withMoveLocks).
+{
+  const READ = `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_OBSERVER_EACH}`;
+  const OWN = 'created_by = @request.auth.id';
+  const PINNED_CREATE = `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`;
+  const unset = (fields) => fields.map((f) => `@request.body.${f}:isset = false`).join(' && ');
+  const REGISTRY_RULES = {
+    listRule: READ,
+    viewRule: READ,
+    createRule: PINNED_CREATE,
+    updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
+    deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_OR_LEAD_EACH}`
+  };
+  const autodate = [
+    { name: 'created', type: 'autodate', onCreate: true, onUpdate: false },
+    { name: 'updated', type: 'autodate', onCreate: true, onUpdate: true }
+  ];
+  const tenant = { name: 'tenant', type: 'relation', required: true, collectionId: 'tenants_collection', cascadeDelete: true, minSelect: 1, maxSelect: 1 };
+  const user = (name) => ({ name, type: 'relation', required: false, collectionId: usersId, cascadeDelete: false, minSelect: 0, maxSelect: 1 });
+  const rel = (name, collectionId, opts = {}) => ({ name, type: 'relation', required: Boolean(opts.required), collectionId, cascadeDelete: Boolean(opts.cascade), minSelect: opts.required ? 1 : 0, maxSelect: 1 });
+  const text = (name, max, required = false) => ({ name, type: 'text', required, max });
+  const json = (name, maxSize = 4000) => ({ name, type: 'json', required: false, maxSize });
+  const select = (name, values, required = false) => ({ name, type: 'select', required, maxSelect: 1, values });
+  const bool = (name) => ({ name, type: 'bool', required: false });
+  const date = (name) => ({ name, type: 'date', required: false });
+
+  await ensureCollection({
+    id: 'spark_actors_collection',
+    name: 'spark_actors',
+    type: 'base',
+    fields: [
+      ...autodate, tenant,
+      text('name', 200, true), text('org_nr', 20), text('actor_type', 40), text('sector', 40), text('business', 500),
+      text('kommun', 40), text('size', 20), json('roles', 500), text('energy_importance', 20), text('energy_work', 20),
+      text('development_areas', 3000), text('pilot_interest', 20), text('academia_interest', 20), text('need_matching', 20),
+      text('solution_matching', 20), json('support_needs', 2000), text('program_interest', 20), bool('info_ok'), bool('events_ok'),
+      bool('contact_ok'), text('sharing', 20), text('contact_name', 120), text('contact_role', 120), text('contact_email', 200),
+      text('contact_phone', 40), text('website', 300), text('notes', 3000), rel('startup', 'startups_collection'),
+      select('status', ['active', 'archived'], true), user('created_by')
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_spark_actors_tenant_orgnr ON spark_actors (tenant, org_nr) WHERE org_nr != ''",
+      'CREATE INDEX idx_spark_actors_tenant_status ON spark_actors (tenant, status)'
+    ],
+    ...REGISTRY_RULES
+  });
+  const sparkActorsId = (await pb.collections.getOne('spark_actors')).id;
+  const READ_OWN = `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_OBSERVER_EACH} || ${OWN})`;
+  await ensureCollection({
+    id: 'spark_interviews_collection',
+    name: 'spark_interviews',
+    type: 'base',
+    fields: [
+      ...autodate, tenant,
+      text('company_name', 200, true), text('org_nr', 20), json('roles', 500), json('answers', 300000),
+      select('status', ['draft', 'submitted', 'applied'], true), select('source', ['staff', 'partner', 'import', 'self'], true),
+      text('interviewer_org', 160), date('interviewed_at'), rel('actor', sparkActorsId), user('referred_by'), date('consent_at'),
+      date('submitted_at'), date('applied_at'), user('applied_by'), user('created_by')
+    ],
+    indexes: [
+      'CREATE INDEX idx_spark_interviews_tenant_status ON spark_interviews (tenant, status)',
+      'CREATE INDEX idx_spark_interviews_created_by ON spark_interviews (created_by)',
+      'CREATE INDEX idx_spark_interviews_referred_by ON spark_interviews (referred_by)'
+    ],
+    listRule: READ_OWN,
+    viewRule: READ_OWN,
+    createRule:
+      `${PINNED_CREATE} && (@request.body.status:isset = false || @request.body.status = "draft" || @request.body.status = "submitted")` +
+      ` && ${unset(['applied_at', 'applied_by', 'actor', 'referred_by'])}`,
+    updateRule:
+      `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_EACH} || (${OWN} && status != "applied" && @request.body.status != "applied"` +
+      ` && ${unset(['applied_at', 'applied_by', 'actor', 'referred_by', 'created_by', 'source'])}))`,
+    deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && (${STAFF_OR_LEAD_EACH} || (${OWN} && status = "draft"))`
+  });
+  const sparkInterviewsId = (await pb.collections.getOne('spark_interviews')).id;
+  const child = () => [...autodate, tenant, rel('actor', sparkActorsId, { required: true, cascade: true }), rel('interview', sparkInterviewsId), text('source_key', 40)];
+  const childIndexes = (name) => [
+    `CREATE INDEX idx_${name}_tenant_status ON ${name} (tenant, status)`,
+    `CREATE INDEX idx_${name}_actor ON ${name} (actor)`,
+    `CREATE UNIQUE INDEX idx_${name}_source ON ${name} (interview, source_key) WHERE interview != '' AND source_key != ''`
+  ];
+  await ensureCollection({
+    id: 'spark_needs_collection',
+    name: 'spark_needs',
+    type: 'base',
+    fields: [
+      ...child(), text('title', 160, true), text('description', 4000), json('areas'), text('process_note', 1000), text('unmet', 20),
+      json('consequences'), text('priority', 20), text('horizon', 20), text('tried', 2000),
+      select('status', ['open', 'matched', 'solved', 'closed'], true), user('created_by')
+    ],
+    indexes: childIndexes('spark_needs'),
+    ...REGISTRY_RULES
+  });
+  await ensureCollection({
+    id: 'spark_solutions_collection',
+    name: 'spark_solutions',
+    type: 'base',
+    fields: [
+      ...child(), text('name', 160, true), text('description', 4000), text('problem', 2000), json('areas'), json('target_sectors'),
+      json('contributions'),
+      { name: 'maturity', type: 'number', required: false, min: 0, max: 6, onlyInt: true },
+      { name: 'trl', type: 'number', required: false, min: 0, max: 9, onlyInt: true },
+      { name: 'trl_assessed', type: 'number', required: false, min: 0, max: 9, onlyInt: true },
+      text('accelerator_category', 30), text('accelerator_note', 1000), user('assessed_by'), date('assessed_at'), text('verified', 20),
+      // Migration 1700000224 (§ 61.7): AI:ns förslag — skilt från Movexums bedömning.
+      { name: 'ai_trl', type: 'number', required: false, min: 0, max: 9, onlyInt: true }, text('ai_category', 30), text('ai_rationale', 1000),
+      { name: 'ai_confidence', type: 'number', required: false, min: 0, max: 1 }, text('ai_model', 60), date('ai_suggested_at'),
+      json('needs'), text('barriers', 2000), text('expansion', 1000), select('status', ['active', 'paused', 'closed'], true), user('created_by')
+    ],
+    indexes: childIndexes('spark_solutions'),
+    ...REGISTRY_RULES
+  });
+  await ensureCollection({
+    id: 'spark_testbeds_collection',
+    name: 'spark_testbeds',
+    type: 'base',
+    fields: [
+      ...child(), select('kind', ['test_environment', 'pilot_customer'], true), text('description', 3000), json('areas'),
+      text('conditions', 2000), select('status', ['available', 'paused', 'closed'], true), user('created_by')
+    ],
+    indexes: childIndexes('spark_testbeds'),
+    ...REGISTRY_RULES
+  });
+  const needsId = (await pb.collections.getOne('spark_needs')).id;
+  const solutionsId = (await pb.collections.getOne('spark_solutions')).id;
+  const testbedsId = (await pb.collections.getOne('spark_testbeds')).id;
+  await ensureCollection({
+    id: 'spark_matches_collection',
+    name: 'spark_matches',
+    type: 'base',
+    fields: [
+      ...autodate, tenant, rel('need', needsId, { cascade: true }), rel('solution', solutionsId, { cascade: true }), rel('testbed', testbedsId, { cascade: true }),
+      select('status', ['suggested', 'introduced', 'dialogue', 'pilot_planned', 'pilot_running', 'completed', 'declined'], true),
+      select('need_consent', ['pending', 'yes', 'no']), select('solution_consent', ['pending', 'yes', 'no']), user('owner'),
+      text('next_step', 300), date('next_step_due'), text('notes', 3000), text('outcome', 2000),
+      { name: 'score', type: 'number', required: false }, json('reasons', 4000), select('support_kind', ['none', 'de_minimis']),
+      bool('support_confirmed'), text('support_note', 500), text('work_package', 20), date('status_changed_at'), user('created_by')
+    ],
+    indexes: [
+      'CREATE INDEX idx_spark_matches_tenant_status ON spark_matches (tenant, status)',
+      'CREATE INDEX idx_spark_matches_need ON spark_matches (need)',
+      'CREATE INDEX idx_spark_matches_solution ON spark_matches (solution)',
+      'CREATE UNIQUE INDEX idx_spark_matches_pair ON spark_matches (need, solution, testbed)'
+    ],
+    ...REGISTRY_RULES
+  });
+  // Migration 1700000224 (§ 61.7): embeddings för innehållslikhet i matchningen.
+  await ensureCollection({
+    id: 'spark_embeddings_collection',
+    name: 'spark_embeddings',
+    type: 'base',
+    fields: [
+      ...autodate, tenant, select('kind', ['need', 'solution'], true), text('record_id', 15, true), text('text_hash', 16), text('model', 60),
+      json('embedding', 80000), user('created_by')
+    ],
+    indexes: ['CREATE UNIQUE INDEX idx_spark_embeddings_record ON spark_embeddings (tenant, kind, record_id)'],
+    listRule: READ,
+    viewRule: READ,
+    createRule: PINNED_CREATE,
+    updateRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`,
+    deleteRule: `${ANY_AUTH} && ${TENANT_DIRECT} && ${STAFF_EACH}`
   });
 }
 
@@ -6510,6 +6858,18 @@ const FORCE_CREATE_RULES = {
     `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id` +
     ' && (@request.body.status:isset = false || @request.body.status = "draft" || @request.body.status = "pending_review")' +
     ' && @request.body.published_at:isset = false && @request.body.reviewed_by:isset = false && @request.body.review_note:isset = false',
+  // SPARK – energimatchning (§ 61, migration 1700000221) — pinnad tenant + skapare;
+  // intervjuer kan bara skapas som utkast/inskickade utan registerfält.
+  spark_actors: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  spark_needs: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  spark_solutions: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  spark_testbeds: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  spark_matches: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  spark_embeddings: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
+  spark_interviews:
+    `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id` +
+    ' && (@request.body.status:isset = false || @request.body.status = "draft" || @request.body.status = "submitted")' +
+    ' && @request.body.applied_at:isset = false && @request.body.applied_by:isset = false && @request.body.actor:isset = false && @request.body.referred_by:isset = false',
   // Ärenden i Bedömning excellens (§ 51.10, migration 1700000200).
   screening_cases: `${ANY_AUTH} && @request.body.tenant = @request.auth.tenant && @request.body.created_by = @request.auth.id`,
   // Hållbarhetsanalysen (§ 56, migration 1700000206).

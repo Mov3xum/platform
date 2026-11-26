@@ -31,7 +31,10 @@ export const METRIC_KEYS = [
   'my_open_tasks',
   'women_led_share',
   'talent_matches',
-  'talent_needs_published'
+  'talent_needs_published',
+  'spark_actors',
+  'spark_open_needs',
+  'spark_active_matches'
 ] as const;
 export type MetricKey = (typeof METRIC_KEYS)[number];
 
@@ -169,6 +172,36 @@ export const METRIC_DEFINITIONS: Record<MetricKey, MetricDefinition> = {
     sensitivity: 'none',
     scope: 'tenant',
     periodic: true
+  },
+  spark_actors: {
+    key: 'spark_actors',
+    label: 'Aktörer i SPARK',
+    description: 'Organisationer i energimatchningens aktörsregister (behovsägare, innovationsaktörer, testmiljöer) — § 61.',
+    unit: 'count',
+    higherIsBetter: true,
+    sensitivity: 'none',
+    scope: 'tenant',
+    periodic: false
+  },
+  spark_open_needs: {
+    key: 'spark_open_needs',
+    label: 'Öppna energibehov',
+    description: 'Behov i SPARK som är öppna eller i matchning.',
+    unit: 'count',
+    higherIsBetter: true,
+    sensitivity: 'none',
+    scope: 'tenant',
+    periodic: false
+  },
+  spark_active_matches: {
+    key: 'spark_active_matches',
+    label: 'Aktiva matchningar i SPARK',
+    description: 'Matchningar där parterna har presenterats för varandra (introducerad, dialog, pilot eller genomförd).',
+    unit: 'count',
+    higherIsBetter: true,
+    sensitivity: 'none',
+    scope: 'tenant',
+    periodic: false
   },
   talent_needs_published: {
     key: 'talent_needs_published',
