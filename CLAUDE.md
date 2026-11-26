@@ -11457,15 +11457,45 @@ presenteras för varandra. Företag ser aldrig varandra i systemet.
 
 ### 61.1 Det adaptiva formuläret (en definition, tre användningar)
 
-Första steget frågar efter företaget och **vad som stämmer in** (en eller
-flera roller). Avsnitten räknas ur rollerna (`visibleSparkSections`):
-alltid *Företaget · Verksamhet och energi (A) · Fortsatt kontakt (F)*;
-behovsägare får *Energiutmaningar (B)* och *Testmiljöer & samverkan (C)*;
-innovationsaktör får *Lösningar (D)* och *Stödbehov (E)*; testmiljö får *C*.
-Enskilda frågor visas på villkor (`showIf`: beskriv testmiljön bara om en
-finns, kontaktperson bara om företaget får kontaktas). Behov och lösningar är
-upprepbara poster (högst 5) med stabilt `_id`. Frågorna följer intervjuguiden
-(A1–F5) och bär dess koder.
+Första steget (**Kom igång**) frågar bara efter företagets namn och **vad som
+stämmer in**: *har ett behov*, *har en lösning* — ett eller båda — och som
+tillägg *kan vara testmiljö eller pilotkund*. Avsnitten räknas ur rollerna
+(`visibleSparkSections`): alltid *Kom igång · Om företaget (A) · Kontakt och
+delning (F)*; behovsägare får *Behov och utmaningar (B)* och *Test och
+samverkan (C)*; innovationsaktör får *Lösningar (D)* och *Stöd framåt (E)*;
+testmiljö får *C*. Enskilda frågor visas på villkor (`showIf`: beskriv
+testmiljön bara om en finns, kontaktperson bara om företaget får kontaktas).
+Behov och lösningar är upprepbara poster (högst 5) med stabilt `_id`.
+Frågorna följer intervjuguiden (A1–F5) och bär dess koder.
+
+**Kort väg och hel intervju (2026-11) — formuläret ska inte vara övermäktigt.**
+Hela guiden är drygt 60 frågor för ett företag med både behov och lösning.
+Därför har formuläret två djup (`SparkFormDepth`, `sparkFormSteps`):
+- **Kort väg (`quick`) — förval på den publika sidan.** Bara **kärnfrågorna**
+  (`SparkField.core`) visas; resten ligger hopfällt under *Berätta mer*
+  (valfritt, per avsnitt och per behov/lösning — `sparkDeepFields`; redan
+  besvarad fördjupning visas öppen, `sparkDeepAnswered`). Avsnitt i samma
+  grupp (`SparkSection.group`) blir ETT steg: *Behov och test* (B + C) och
+  *Lösning och stöd* (D + E). Behovsägare eller lösningsägare får fyra steg,
+  den som är båda får fem. `sparkFormEstimate` visar ungefärlig tid (räknad
+  på kärnfrågorna). Långa vallistor (`SparkField.preview`) visar de första
+  alternativen och resten bakom "N till".
+- **Hela intervjuguiden (`full`) — förval för Movexum och partner.** Ett steg
+  per avsnitt i guidens ordning, alla frågor synliga med guidens koder.
+  Intervjuaren växlar djup med reglaget *Kärnfrågor / Hela intervjuguiden*.
+- **Regler som testet låser:** varje obligatorisk fråga är en kärnfråga (annars
+  kunde den korta vägen inte skickas in), en villkorad kärnfråga hänger på en
+  kärnfråga, och en komplett kort anmälan går igenom `normalizeSparkInterview`
+  utan en enda fördjupningsfråga. Djupet är ren presentation — servern
+  validerar samma svar oavsett väg, och inga svar kastas när djupet byts.
+- **TRL är fördjupning** i företagets formulär: företaget svarar på den enkla
+  mognadsskalan (sex steg, kärnfråga), TRL 1–9 med KTH-kriterierna (§ 61.5)
+  ligger under *Berätta mer om lösningen* och i hela intervjuguiden. Movexum
+  bedömer TRL själv inför acceleratorn.
+- **Utseende (`InterviewForm.tsx`):** stegrad med en stapel per steg, ett
+  behov/en lösning i taget (övriga hopfällda till en rad), en tom första post
+  så man kan skriva direkt, en åtgärdsrad som följer med i nederkant, hopp till
+  frågan som saknar svar, och en sammanställning före inskick.
 
 `normalizeSparkInterview` är EN regel för klient och server: svar för avsnitt
 som inte gäller kastas (byter man roll följer inga gamla svar med), okända
@@ -11536,7 +11566,7 @@ storlek).
 ### 61.5 TRL och kategorisering inför acceleratorn (`/spark/accelerator`)
 
 Lösningar bär **TRL 1–9** (Movexums formuleringar, `SPARK_TRL`): företagets
-egen uppgift ur formuläret (`trl`) och Movexums bedömning (`trl_assessed`, som
+egen uppgift ur formuläret (`trl`, en fördjupningsfråga — § 61.1) och Movexums bedömning (`trl_assessed`, som
 gäller när den finns — `effectiveSparkTrl`). **Varje nivå prövas mot KTH:s
 utförliga kriterier** (`packages/shared/src/kth-trl.ts`: `KTH_TRL_LEVELS` med
 kort formulering + kriterier per nivå, `KTH_TRL_TERMS` med begreppen

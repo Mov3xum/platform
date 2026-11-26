@@ -71,7 +71,7 @@ export function SparkPublicLanding({ tenantName, endpoint, via, referrerLabel }:
               >
                 Berätta om ert företag <Icon name="arrow" size={14} />
               </a>
-              <span className="text-sm opacity-75">Cirka tio minuter</span>
+              <span className="text-sm opacity-75">Fem till tio minuter — frågorna anpassas efter er</span>
             </div>
           </div>
         </div>
@@ -110,7 +110,7 @@ export function SparkPublicLanding({ tenantName, endpoint, via, referrerLabel }:
 
       <section id="anmalan" className="mx-auto max-w-3xl scroll-mt-6 px-5 py-12 sm:py-16">
         <h2 className="font-heading text-2xl font-semibold">Berätta om ert företag</h2>
-        <p className="mb-6 mt-2 text-sm text-foreground-muted">Börja med vad som stämmer in på er. Det går bra att hoppa över frågor ni inte kan svara på.</p>
+        <p className="mb-6 mt-2 text-sm text-foreground-muted">Välj om ni har ett behov, en lösning eller båda. Ni får bara de frågor som gäller er, och bara det viktigaste är obligatoriskt.</p>
         <SparkInterviewForm mode="public" initialAnswers={emptySparkAnswers()} publicEndpoint={endpoint} via={via} referrerLabel={referrerLabel} />
       </section>
 

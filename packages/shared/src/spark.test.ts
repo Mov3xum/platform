@@ -13,6 +13,10 @@ import {
   normalizeSparkOrgNr,
   sparkAcceleratorEligible,
   sparkAnonymousActorLabel,
+  sparkDeepAnswered,
+  sparkDeepFields,
+  sparkFormEstimate,
+  sparkFormSteps,
   sparkShareableName,
   suggestSparkAcceleratorCategory,
   visibleSparkSections
@@ -68,6 +72,61 @@ test('avsnitten formas efter rollerna som anges i början', () => {
   assert.deepEqual(idsFor(['need_owner', 'innovator']), ['start', 'a', 'b', 'c', 'd', 'e', 'f']);
 });
 
+test('den korta vägen: stegen slås ihop efter roll och bara kärnfrågorna krävs', () => {
+  const quick = (roles: Parameters<typeof sparkFormSteps>[0]) => sparkFormSteps(roles, 'quick').map((s) => s.sections.map((x) => x.id).join('+'));
+  // Behov + test och lösning + stöd blir varsitt steg — fem steg även för den som har båda.
+  assert.deepEqual(quick(['need_owner']), ['start', 'a', 'b+c', 'f']);
+  assert.deepEqual(quick(['innovator']), ['start', 'a', 'd+e', 'f']);
+  assert.deepEqual(quick(['need_owner', 'innovator']), ['start', 'a', 'b+c', 'd+e', 'f']);
+  assert.deepEqual(quick(['testbed']), ['start', 'a', 'c', 'f']);
+  assert.deepEqual(quick([]), ['start', 'a', 'f']);
+  // Ett ensamt avsnitt behåller sin egen rubrik, ett sammanslaget får gruppens.
+  assert.equal(sparkFormSteps(['testbed'], 'quick')[2].title, 'Test och samverkan');
+  assert.equal(sparkFormSteps(['need_owner'], 'quick')[2].title, 'Behov och test');
+  // Hela intervjuguiden: ett steg per avsnitt, i guidens ordning.
+  assert.deepEqual(sparkFormSteps(['need_owner', 'innovator'], 'full').map((s) => s.id), ['start', 'a', 'b', 'c', 'd', 'e', 'f']);
+
+  // Varje obligatorisk fråga är en kärnfråga — annars kunde den korta vägen inte skickas in.
+  for (const s of SPARK_INTERVIEW_SECTIONS) {
+    for (const f of [...s.fields, ...(s.repeat?.fields ?? [])]) {
+      if (f.required) assert.ok(f.core, `${s.id}.${f.key} är obligatorisk men ingen kärnfråga`);
+      // En villkorad kärnfråga måste hänga på en kärnfråga, annars syns den aldrig.
+      if (f.core && f.showIf) {
+        const parent = [...s.fields, ...(s.repeat?.fields ?? [])].find((x) => x.key === f.showIf!.field);
+        assert.ok(parent?.core, `${s.id}.${f.key} hänger på en fråga utanför den korta vägen`);
+      }
+    }
+  }
+  // TRL är fördjupning: företaget svarar på den enkla mognadsskalan, Movexum bedömer TRL.
+  const solutionFields = SPARK_INTERVIEW_SECTIONS.find((s) => s.id === 'd')!.repeat!.fields;
+  assert.ok(solutionFields.find((f) => f.key === 'maturity')?.core);
+  assert.ok(!solutionFields.find((f) => f.key === 'trl')?.core);
+  assert.ok(sparkDeepFields(solutionFields).some((f) => f.key === 'trl'));
+  assert.equal(sparkDeepAnswered(solutionFields, { name: 'X' }), false);
+  assert.equal(sparkDeepAnswered(solutionFields, { name: 'X', trl: '5' }), true);
+
+  // En komplett kort anmälan går att skicka in utan en enda fördjupningsfråga.
+  const short = normalizeSparkInterview(
+    {
+      roles: ['need_owner', 'innovator'],
+      company: {
+        name: 'Exempel AB', actor_type: 'industri', sector: 'tillverkning', kommun: 'sandviken',
+        need_matching: 'yes', pilot_interest: 'maybe', has_testbed: 'no', solution_matching: 'yes', contact_ok: 'no', sharing: 'anonymous'
+      },
+      needs: [{ title: 'Effekttoppar', description: 'Toppar vid uppstart.', areas: ['flexibilitet_effektstyrning'] }],
+      solutions: [{ name: 'Styrning', description: 'Styr laster.', areas: ['flexibilitet_effektstyrning'], maturity: '4' }]
+    },
+    { submit: true }
+  );
+  assert.ok(short.ok, short.ok ? '' : short.issue.message);
+
+  // Tidsuppskattningen växer med rollerna men håller sig till några minuter.
+  const one = sparkFormEstimate(['need_owner']);
+  const both = sparkFormEstimate(['need_owner', 'innovator']);
+  assert.ok(both.questions > one.questions);
+  assert.ok(one.minutes >= 2 && both.minutes <= 12, `${one.minutes}/${both.minutes}`);
+});
+
 test('svar för avsnitt som inte gäller kastas, okända värden släpps', () => {
   const r = normalizeSparkInterview({
     roles: ['need_owner', 'hittepa'],
@@ -101,7 +160,9 @@ test('ett utkast får vara ofullständigt, inskick kräver de obligatoriska svar
   assert.ok(draft.ok);
   const submit = normalizeSparkInterview({ roles: ['need_owner'], company: { name: 'Exempel AB' } }, { submit: true });
   assert.ok(!submit.ok);
-  assert.equal(submit.issue.section, 'start');
+  // Typ av aktör hör till "Om företaget" (avsnitt a) sedan första steget bara frågar efter namn och roll.
+  assert.equal(submit.issue.section, 'a');
+  assert.equal(submit.issue.field, 'actor_type');
   const noNeed = normalizeSparkInterview({ roles: ['need_owner'], company: { ...base, need_matching: 'yes', pilot_interest: 'no', has_testbed: 'no' } }, { submit: true });
   assert.ok(!noNeed.ok);
   assert.equal(noNeed.issue.field, 'needs');

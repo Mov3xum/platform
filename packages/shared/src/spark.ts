@@ -431,11 +431,19 @@ export interface SparkField {
   options?: readonly SparkOption[];
   /** Källhänvisning under alternativens kriterier (`SparkOption.detail`). */
   source?: string;
+  /** Flervalsfråga med lång lista: så många alternativ visas innan "visa fler". */
+  preview?: number;
   /** Krävs när intervjun skickas in (aldrig för ett utkast). */
   required?: boolean;
   max?: number;
   /** Visas bara när ett annat fält i samma avsnitt/post har något av värdena. */
   showIf?: { field: string; in: readonly string[] };
+  /**
+   * Kärnfråga: ingår i den korta vägen. Övriga frågor är fördjupning — de
+   * finns kvar men är hopfällda tills den som svarar väljer att öppna dem.
+   * Varje obligatorisk fråga MÅSTE vara en kärnfråga (låst av test).
+   */
+  core?: boolean;
 }
 
 export interface SparkRepeat {
@@ -449,10 +457,14 @@ export interface SparkRepeat {
 
 export type SparkSectionId = 'start' | 'a' | 'b' | 'c' | 'd' | 'e' | 'f';
 
+/** Stegen i den korta vägen. Avsnitt med samma grupp blir ETT steg. */
+export type SparkStepGroup = 'start' | 'company' | 'need' | 'solution' | 'contact';
+
 export interface SparkSection {
   id: SparkSectionId;
   title: string;
   intro: string;
+  group: SparkStepGroup;
   /** Avsnittet visas när företaget har NÅGON av rollerna. Utelämnat ⇒ alltid. */
   roles?: readonly SparkRole[];
   fields: readonly SparkField[];
@@ -466,23 +478,23 @@ const L = 3000;
 export const SPARK_INTERVIEW_SECTIONS: readonly SparkSection[] = [
   {
     id: 'start',
-    title: 'Företaget',
-    intro: 'Börja med vilket företag det gäller och vad som stämmer in på det. Resten av frågorna anpassas efter svaren.',
-    fields: [
-      { key: 'name', label: 'Företagets namn', type: 'text', required: true, max: 200 },
-      { key: 'org_nr', label: 'Organisationsnummer', help: 'Tio siffror. Gör att företaget bara registreras en gång.', type: 'text', max: 20 },
-      { key: 'actor_type', label: 'Typ av aktör', type: 'single', options: SPARK_ACTOR_TYPES, required: true }
-    ]
+    title: 'Kom igång',
+    intro: 'Berätta vad som stämmer in, så visar vi bara de frågor som är relevanta.',
+    group: 'start',
+    fields: [{ key: 'name', label: 'Företagets namn', type: 'text', required: true, max: 200, core: true }]
   },
   {
     id: 'a',
-    title: 'Verksamhet och energi',
-    intro: 'Grundläggande uppgifter om företaget och vilken roll energi spelar i verksamheten.',
+    title: 'Om företaget',
+    intro: 'Några snabba uppgifter så att vi kan hitta rätt motpart.',
+    group: 'company',
     fields: [
-      { key: 'sector', code: 'A1', label: 'Vilken bransch tillhör företaget?', type: 'single', options: SPARK_SECTORS, required: true },
+      { key: 'actor_type', label: 'Typ av aktör', type: 'single', options: SPARK_ACTOR_TYPES, required: true, core: true },
+      { key: 'org_nr', label: 'Organisationsnummer', help: 'Tio siffror. Gör att företaget bara registreras en gång.', type: 'text', max: 20, core: true },
+      { key: 'sector', code: 'A1', label: 'Vilken bransch tillhör företaget?', type: 'single', options: SPARK_SECTORS, required: true, core: true },
       { key: 'business', code: 'A1', label: 'Vad är företagets huvudsakliga verksamhet?', type: 'text', max: 500 },
-      { key: 'kommun', code: 'A2', label: 'Var bedriver företaget sin verksamhet?', type: 'single', options: KOMMUNER, required: true },
-      { key: 'size', code: 'A3', label: 'Hur många anställda har företaget?', type: 'single', options: SPARK_SIZES },
+      { key: 'kommun', code: 'A2', label: 'Var bedriver företaget sin verksamhet?', type: 'single', options: KOMMUNER, required: true, core: true },
+      { key: 'size', code: 'A3', label: 'Hur många anställda har företaget?', type: 'single', options: SPARK_SIZES, core: true },
       { key: 'energy_importance', code: 'A4', label: 'Vilken betydelse har energi för verksamheten och konkurrenskraften?', type: 'single', options: SPARK_ENERGY_IMPORTANCE },
       { key: 'energy_work', code: 'A5', label: 'Arbetar företaget aktivt med energiomställning, energieffektivisering eller energirelaterade lösningar?', type: 'single', options: YES_PARTLY_NO },
       { key: 'development_areas', code: 'A6', label: 'Vilka är de viktigaste utvecklingsområdena kopplat till energi de kommande tre till fem åren?', type: 'longtext', max: L }
@@ -490,8 +502,9 @@ export const SPARK_INTERVIEW_SECTIONS: readonly SparkSection[] = [
   },
   {
     id: 'b',
-    title: 'Energiutmaningar och behov',
-    intro: 'Beskriv varje utmaning för sig, så kan den matchas mot rätt lösning. Lägg till fler om företaget har flera.',
+    title: 'Behov och utmaningar',
+    intro: 'Beskriv utmaningen kort — det räcker med några meningar. Har ni flera lägger ni till dem en i taget.',
+    group: 'need',
     roles: ['need_owner'],
     repeat: {
       key: 'needs',
@@ -500,34 +513,35 @@ export const SPARK_INTERVIEW_SECTIONS: readonly SparkSection[] = [
       addLabel: 'Lägg till ett behov',
       titleField: 'title',
       fields: [
-        { key: 'title', code: 'B1', label: 'Utmaningen i en mening', help: 'Till exempel "Höga effekttoppar i produktionen".', type: 'text', required: true, max: 160 },
-        { key: 'description', code: 'B1', label: 'Beskriv utmaningen', type: 'longtext', required: true, max: 4000 },
-        { key: 'areas', code: 'B1', label: 'Vilka energiområden gäller det?', type: 'multi', options: SPARK_ENERGY_AREAS, required: true },
+        { key: 'title', code: 'B1', label: 'Utmaningen i en mening', help: 'Till exempel "Höga effekttoppar i produktionen".', type: 'text', required: true, max: 160, core: true },
+        { key: 'description', code: 'B1', label: 'Beskriv utmaningen', type: 'longtext', required: true, max: 4000, core: true },
+        { key: 'areas', code: 'B1', label: 'Vilka energiområden gäller det?', type: 'multi', options: SPARK_ENERGY_AREAS, required: true, core: true },
         { key: 'where', code: 'B2', label: 'Vilka processer, produkter eller delar av verksamheten berörs?', type: 'text', max: 1000 },
         { key: 'unmet', code: 'B3', label: 'Saknas det tillfredsställande lösningar på marknaden i dag?', type: 'single', options: YES_NO_UNKNOWN },
         { key: 'consequences', code: 'B4', label: 'Vilka konsekvenser får utmaningen?', type: 'multi', options: SPARK_CONSEQUENCES },
-        { key: 'priority', code: 'B6', label: 'Hur prioriterad är utmaningen?', type: 'single', options: SPARK_PRIORITIES },
-        { key: 'horizon', code: 'B6', label: 'När behöver den vara löst?', type: 'single', options: SPARK_HORIZONS },
+        { key: 'priority', code: 'B6', label: 'Hur prioriterad är utmaningen?', type: 'single', options: SPARK_PRIORITIES, core: true },
+        { key: 'horizon', code: 'B6', label: 'När behöver den vara löst?', type: 'single', options: SPARK_HORIZONS, core: true },
         { key: 'tried', code: 'B7', label: 'Har ni sökt efter eller testat lösningar tidigare? Vad fungerade och vad fungerade inte?', type: 'longtext', max: 2000 }
       ]
     },
     fields: [
       { key: 'need_barriers', code: 'B5', label: 'Vilka är de största hindren för att genomföra en energiomställning i företaget?', type: 'longtext', max: L },
-      { key: 'need_matching', code: 'B8', label: 'Vill företaget få sina utmaningar matchade mot lösningar från startups, andra företag eller forskningsaktörer?', type: 'single', options: YES_NO, required: true }
+      { key: 'need_matching', code: 'B8', label: 'Vill företaget få sina utmaningar matchade mot lösningar från startups, andra företag eller forskningsaktörer?', type: 'single', options: YES_NO, required: true, core: true }
     ]
   },
   {
     id: 'c',
-    title: 'Testmiljöer, pilotkund och samverkan',
-    intro: 'Vilka möjligheter finns att testa nya lösningar hos företaget, och vad krävs för att det ska fungera?',
+    title: 'Test och samverkan',
+    intro: 'Kan nya lösningar testas hos er? Det avgör vilka innovationer vi kan föreslå.',
+    group: 'need',
     roles: ['need_owner', 'testbed'],
     fields: [
       { key: 'collab_before', code: 'C1', label: 'Har företaget tidigare samarbetat med startups eller andra innovativa företag för att utveckla eller testa lösningar?', type: 'single', options: YES_NO },
       { key: 'collab_before_note', label: 'Vad gällde samarbetet och hur gick det?', type: 'longtext', max: 2000, showIf: { field: 'collab_before', in: ['yes'] } },
-      { key: 'pilot_interest', code: 'C2', label: 'Är företaget intresserat av att vara pilotkund för nya energirelaterade innovationer?', type: 'single', options: YES_MAYBE_NO, required: true },
-      { key: 'has_testbed', code: 'C3', label: 'Finns anläggningar, produktionsmiljöer, utrustning eller infrastruktur som kan användas för test och demonstration?', type: 'single', options: YES_NO, required: true },
-      { key: 'testbed_description', label: 'Beskriv miljön eller utrustningen', type: 'longtext', required: true, max: L, showIf: { field: 'has_testbed', in: ['yes'] } },
-      { key: 'testbed_areas', label: 'Vilka energiområden passar miljön för?', type: 'multi', options: SPARK_ENERGY_AREAS, showIf: { field: 'has_testbed', in: ['yes'] } },
+      { key: 'pilot_interest', code: 'C2', label: 'Är företaget intresserat av att vara pilotkund för nya energirelaterade innovationer?', type: 'single', options: YES_MAYBE_NO, required: true, core: true },
+      { key: 'has_testbed', code: 'C3', label: 'Finns anläggningar, produktionsmiljöer, utrustning eller infrastruktur som kan användas för test och demonstration?', type: 'single', options: YES_NO, required: true, core: true },
+      { key: 'testbed_description', label: 'Beskriv miljön eller utrustningen', type: 'longtext', required: true, max: L, showIf: { field: 'has_testbed', in: ['yes'] }, core: true },
+      { key: 'testbed_areas', label: 'Vilka energiområden passar miljön för?', type: 'multi', options: SPARK_ENERGY_AREAS, showIf: { field: 'has_testbed', in: ['yes'] }, core: true },
       { key: 'test_conditions', code: 'C4', label: 'Vilka förutsättningar behöver vara uppfyllda för att testa en extern innovation i verksamheten?', type: 'longtext', max: 2000 },
       { key: 'collab_barriers', code: 'C5', label: 'Vilka hinder finns för samverkan med startups och mindre innovativa företag?', type: 'longtext', max: 2000 },
       { key: 'collab_support', code: 'C6', label: 'Vilket stöd skulle göra det lättare att hitta, utvärdera och testa nya innovationer?', type: 'longtext', max: 2000 },
@@ -536,8 +550,9 @@ export const SPARK_INTERVIEW_SECTIONS: readonly SparkSection[] = [
   },
   {
     id: 'd',
-    title: 'Innovationer och lösningar',
-    intro: 'Beskriv varje lösning för sig. Lägg till fler om företaget har flera produkter, tjänster eller metoder.',
+    title: 'Lösningar',
+    intro: 'Beskriv lösningen kort. Har ni flera produkter, tjänster eller metoder lägger ni till dem en i taget.',
+    group: 'solution',
     roles: ['innovator'],
     repeat: {
       key: 'solutions',
@@ -546,13 +561,13 @@ export const SPARK_INTERVIEW_SECTIONS: readonly SparkSection[] = [
       addLabel: 'Lägg till en lösning',
       titleField: 'name',
       fields: [
-        { key: 'name', code: 'D1', label: 'Lösningens namn eller en kort rubrik', type: 'text', required: true, max: 160 },
-        { key: 'description', code: 'D1', label: 'Beskriv produkten, tjänsten, tekniken eller metoden', type: 'longtext', required: true, max: 4000 },
+        { key: 'name', code: 'D1', label: 'Lösningens namn eller en kort rubrik', type: 'text', required: true, max: 160, core: true },
+        { key: 'description', code: 'D1', label: 'Beskriv produkten, tjänsten, tekniken eller metoden', type: 'longtext', required: true, max: 4000, core: true },
         { key: 'problem', code: 'D2', label: 'Vilket problem eller behov löser den?', type: 'longtext', max: 2000 },
-        { key: 'areas', label: 'Vilka energiområden gäller lösningen?', type: 'multi', options: SPARK_ENERGY_AREAS, required: true },
-        { key: 'target_sectors', code: 'D3', label: 'Vilka branscher eller verksamheter kan ha nytta av lösningen?', type: 'multi', options: SPARK_SECTORS },
+        { key: 'areas', label: 'Vilka energiområden gäller lösningen?', type: 'multi', options: SPARK_ENERGY_AREAS, required: true, core: true },
+        { key: 'target_sectors', code: 'D3', label: 'Vilka branscher eller verksamheter kan ha nytta av lösningen?', type: 'multi', options: SPARK_SECTORS, preview: 6, core: true },
         { key: 'contributions', code: 'D4', label: 'Hur bidrar lösningen till energiomställningen?', type: 'multi', options: SPARK_CONTRIBUTIONS },
-        { key: 'maturity', code: 'D5', label: 'Hur långt har lösningen kommit?', type: 'single', options: SPARK_MATURITY, required: true },
+        { key: 'maturity', code: 'D5', label: 'Hur långt har lösningen kommit?', type: 'single', options: SPARK_MATURITY, required: true, core: true },
         {
           key: 'trl',
           label: 'Teknikens mognad (TRL)',
@@ -562,45 +577,47 @@ export const SPARK_INTERVIEW_SECTIONS: readonly SparkSection[] = [
           source: SPARK_TRL_SOURCE
         },
         { key: 'verified', code: 'D6', label: 'Är lösningen testad eller verifierad i en verklig användarmiljö?', type: 'single', options: YES_PARTLY_NO },
-        { key: 'needs', code: 'D7', label: 'Vad behövs för att ta nästa steg?', type: 'multi', options: SPARK_SOLUTION_NEEDS },
+        { key: 'needs', code: 'D7', label: 'Vad behövs för att ta nästa steg?', type: 'multi', options: SPARK_SOLUTION_NEEDS, core: true },
         { key: 'barriers', code: 'D8', label: 'Vilka är de största hindren för att kommersialisera eller skala upp?', type: 'longtext', max: 2000 },
         { key: 'expansion', code: 'D9', label: 'Kan lösningen användas i andra branscher eller på nya marknader?', type: 'text', max: 1000 }
       ]
     },
     fields: [
-      { key: 'solution_matching', code: 'D10', label: 'Vill företaget matchas mot behov hos industri, energibolag eller offentliga aktörer?', type: 'single', options: YES_NO, required: true }
+      { key: 'solution_matching', code: 'D10', label: 'Vill företaget matchas mot behov hos industri, energibolag eller offentliga aktörer?', type: 'single', options: YES_NO, required: true, core: true }
     ]
   },
   {
     id: 'e',
-    title: 'Stödbehov',
-    intro: 'Vad behöver företaget för att utveckla sina energirelaterade innovationer vidare? Svaren formar acceleratorprogrammet.',
+    title: 'Stöd framåt',
+    intro: 'Vad behövs för att ta lösningen vidare? Svaren formar acceleratorprogrammet.',
+    group: 'solution',
     roles: ['innovator'],
     fields: [
-      { key: 'support_needs', code: 'E2', label: 'Vilka typer av stöd skulle vara mest värdefulla?', type: 'multi', options: SPARK_SUPPORT_NEEDS },
+      { key: 'support_needs', code: 'E2', label: 'Vilka typer av stöd skulle vara mest värdefulla?', type: 'multi', options: SPARK_SUPPORT_NEEDS, preview: 8, core: true },
       { key: 'missing_competence', code: 'E1', label: 'Vilka kompetenser eller resurser saknas?', type: 'longtext', max: 2000 },
       { key: 'funding_difficulty', code: 'E3', label: 'Är det svårt att hitta finansiering för utveckling, verifiering och kommersialisering?', type: 'single', options: YES_PARTLY_NO },
       { key: 'sustainability_support', code: 'E4', label: 'Behövs stöd för att visa lösningens miljömässiga, ekonomiska och sociala effekter?', type: 'single', options: YES_NO },
       { key: 'team_needs', code: 'E5', label: 'Behövs nya kompetenser, teamutveckling eller strategiska samarbetspartners?', type: 'text', max: 1000 },
       { key: 'international', code: 'E6', label: 'Finns ambitioner att nå en nationell eller internationell marknad, och vilka hinder finns?', type: 'text', max: 1000 },
       { key: 'support_access', code: 'E7', label: 'Hur upplevs tillgången till innovations- och företagsstöd inom energi i dag? Saknas något?', type: 'longtext', max: 2000 },
-      { key: 'program_interest', code: 'E8', label: 'Är ett riktat utvecklingsprogram inom energiinnovation intressant?', type: 'single', options: YES_MAYBE_NO },
+      { key: 'program_interest', code: 'E8', label: 'Är ett riktat utvecklingsprogram inom energiinnovation intressant?', type: 'single', options: YES_MAYBE_NO, core: true },
       { key: 'program_content', label: 'Vad behöver ett sådant program innehålla för att skapa värde?', type: 'longtext', max: 2000, showIf: { field: 'program_interest', in: ['yes', 'maybe'] } }
     ]
   },
   {
     id: 'f',
-    title: 'Fortsatt kontakt',
-    intro: 'Hur vill företaget vara med framåt, och vad får delas med en möjlig samarbetspartner? Movexum frågar alltid innan två parter presenteras för varandra.',
+    title: 'Kontakt och delning',
+    intro: 'Hur vi får höra av oss, och vad som får delas. Movexum frågar alltid innan två parter presenteras för varandra.',
+    group: 'contact',
     fields: [
-      { key: 'contact_ok', code: 'F3', label: 'Får Movexum kontakta företaget för en fördjupad dialog?', type: 'single', options: YES_NO, required: true },
-      { key: 'contact_name', code: 'F5', label: 'Kontaktperson', type: 'text', max: 120, showIf: { field: 'contact_ok', in: ['yes'] } },
-      { key: 'contact_role', label: 'Roll i företaget', type: 'text', max: 120, showIf: { field: 'contact_ok', in: ['yes'] } },
-      { key: 'contact_email', label: 'E-post', type: 'email', max: 200, showIf: { field: 'contact_ok', in: ['yes'] } },
-      { key: 'contact_phone', label: 'Telefon', type: 'phone', max: 40, showIf: { field: 'contact_ok', in: ['yes'] } },
-      { key: 'sharing', code: 'F4', label: 'Vad får delas om företagets behov eller lösningar inför en matchning?', type: 'single', options: SPARK_SHARING_LEVELS, required: true },
-      { key: 'info_ok', code: 'F1', label: 'Vill företaget få information om kommande aktiviteter inom SPARK?', type: 'single', options: YES_NO },
-      { key: 'events_ok', code: 'F2', label: 'Vill företaget delta i nätverksträffar, workshops eller matchningsaktiviteter?', type: 'single', options: YES_NO },
+      { key: 'contact_ok', code: 'F3', label: 'Får Movexum kontakta företaget för en fördjupad dialog?', type: 'single', options: YES_NO, required: true, core: true },
+      { key: 'contact_name', code: 'F5', label: 'Kontaktperson', type: 'text', max: 120, showIf: { field: 'contact_ok', in: ['yes'] }, core: true },
+      { key: 'contact_role', label: 'Roll i företaget', type: 'text', max: 120, showIf: { field: 'contact_ok', in: ['yes'] }, core: true },
+      { key: 'contact_email', label: 'E-post', type: 'email', max: 200, showIf: { field: 'contact_ok', in: ['yes'] }, core: true },
+      { key: 'contact_phone', label: 'Telefon', type: 'phone', max: 40, showIf: { field: 'contact_ok', in: ['yes'] }, core: true },
+      { key: 'sharing', code: 'F4', label: 'Vad får delas om företagets behov eller lösningar inför en matchning?', type: 'single', options: SPARK_SHARING_LEVELS, required: true, core: true },
+      { key: 'info_ok', code: 'F1', label: 'Vill företaget få information om kommande aktiviteter inom SPARK?', type: 'single', options: YES_NO, core: true },
+      { key: 'events_ok', code: 'F2', label: 'Vill företaget delta i nätverksträffar, workshops eller matchningsaktiviteter?', type: 'single', options: YES_NO, core: true },
       { key: 'other', label: 'Något mer som är bra att veta?', type: 'longtext', max: 2000 }
     ]
   }
@@ -623,6 +640,72 @@ export function emptySparkAnswers(): SparkInterviewAnswers {
 /** Avsnitten som gäller för de valda rollerna — i intervjuns ordning. */
 export function visibleSparkSections(roles: readonly SparkRole[]): SparkSection[] {
   return SPARK_INTERVIEW_SECTIONS.filter((s) => !s.roles || s.roles.some((r) => roles.includes(r)));
+}
+
+export type SparkFormDepth = 'quick' | 'full';
+
+export interface SparkFormStep {
+  id: string;
+  title: string;
+  intro: string;
+  sections: SparkSection[];
+}
+
+const STEP_GROUP_TITLES: Record<SparkStepGroup, { title: string; intro: string }> = {
+  start: { title: 'Kom igång', intro: '' },
+  company: { title: 'Om företaget', intro: '' },
+  need: { title: 'Behov och test', intro: 'Beskriv utmaningen kort och om nya lösningar kan testas hos er.' },
+  solution: { title: 'Lösning och stöd', intro: 'Beskriv lösningen kort och vad som behövs för att ta den vidare.' },
+  contact: { title: 'Kontakt och delning', intro: '' }
+};
+
+/**
+ * Formulärets steg för de valda rollerna.
+ *  - `quick` (den korta vägen): avsnitt i samma grupp blir ETT steg — behov +
+ *    test, lösning + stöd — så den som har både behov och lösning får fem
+ *    steg i stället för sju, och bara kärnfrågorna visas.
+ *  - `full` (hela intervjuguiden): ett steg per avsnitt, i guidens ordning.
+ */
+export function sparkFormSteps(roles: readonly SparkRole[], depth: SparkFormDepth): SparkFormStep[] {
+  const sections = visibleSparkSections(roles);
+  if (depth === 'full') return sections.map((s) => ({ id: s.id, title: s.title, intro: s.intro, sections: [s] }));
+  const steps: SparkFormStep[] = [];
+  for (const s of sections) {
+    const last = steps[steps.length - 1];
+    if (last && last.sections[0].group === s.group) {
+      last.sections.push(s);
+      last.id = s.group;
+      last.title = STEP_GROUP_TITLES[s.group].title;
+      last.intro = STEP_GROUP_TITLES[s.group].intro;
+    } else {
+      steps.push({ id: s.id, title: s.title, intro: s.intro, sections: [s] });
+    }
+  }
+  return steps;
+}
+
+/** Frågorna i ett avsnitt/en post som inte är kärnfrågor (fördjupningen). */
+export function sparkDeepFields(fields: readonly SparkField[]): SparkField[] {
+  return fields.filter((f) => !f.core);
+}
+
+/** Har fördjupningen redan svar? Då visas den öppen (t.ex. ett sparat utkast). */
+export function sparkDeepAnswered(fields: readonly SparkField[], scope: SparkRecord): boolean {
+  return sparkDeepFields(fields).some((f) => hasValue(scope[f.key]));
+}
+
+/**
+ * Ungefärlig tid för den korta vägen, i minuter — räknad på kärnfrågorna för
+ * de valda rollerna (en post per behov/lösning, villkorade följdfrågor
+ * oräknade). En uppskattning som visas för den som ska svara, inget löfte.
+ */
+export function sparkFormEstimate(roles: readonly SparkRole[]): { questions: number; minutes: number } {
+  let questions = 1; // rollvalet
+  for (const s of visibleSparkSections(roles)) {
+    questions += s.fields.filter((f) => f.core && !f.showIf).length;
+    if (s.repeat) questions += s.repeat.fields.filter((f) => f.core && !f.showIf).length;
+  }
+  return { questions, minutes: Math.max(2, Math.round((questions * 20) / 60)) };
 }
 
 export function sparkFieldVisible(field: SparkField, scope: SparkRecord): boolean {
@@ -742,7 +825,7 @@ export function normalizeSparkInterview(raw: unknown, opts: { submit?: boolean }
     return bad({ section: 'start', field: 'name', message: 'Ange företagets namn.' });
   }
   if (typeof company.org_nr === 'string' && company.org_nr && !normalizeSparkOrgNr(company.org_nr)) {
-    return bad({ section: 'start', field: 'org_nr', message: 'Organisationsnumret ska ha tio siffror.' });
+    return bad({ section: 'a', field: 'org_nr', message: 'Organisationsnumret ska ha tio siffror.' });
   }
   if (typeof company.contact_email === 'string' && company.contact_email && !EMAIL_RE.test(company.contact_email)) {
     return bad({ section: 'f', field: 'contact_email', message: 'E-postadressen ser inte rätt ut.' });
